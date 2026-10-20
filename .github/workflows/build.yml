@@ -1,6 +1,5 @@
 name: Build unsigned IPA
 on:
-  push:
   workflow_dispatch:
 jobs:
   build:
