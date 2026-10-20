@@ -1,0 +1,50 @@
+name: ScreenTranslator
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "18.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  ScreenTranslator:
+    type: application
+    platform: iOS
+    sources: [App, Shared]
+    dependencies:
+      - target: BroadcastExtension
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleDisplayName: Screen Translator
+        UILaunchScreen: {}
+        UIBackgroundModes: [audio]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+    entitlements:
+      path: App/App.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.example.screentranslator]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.screentranslator
+  BroadcastExtension:
+    type: app-extension
+    platform: iOS
+    sources: [BroadcastExtension, Shared]
+    info:
+      path: BroadcastExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Translator Capture
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.broadcast-services-upload
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SampleHandler
+          RPBroadcastProcessMode: RPBroadcastProcessModeSampleBuffer
+    entitlements:
+      path: BroadcastExtension/Extension.entitlements
+      properties:
+        com.apple.security.application-groups: [group.com.example.screentranslator]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.screentranslator.broadcast
