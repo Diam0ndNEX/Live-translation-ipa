@@ -1,10 +1,10 @@
-// Screen Translator – App – v0.2.0
+// Screen Translator – App – v0.3.0
 import AVKit
 import UIKit
 import SwiftUI
 
 /// Draws translated text into frames and feeds them to a system Picture-in-Picture window.
-final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegate {
+final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegate, AVPictureInPictureControllerDelegate {
     let displayLayer = AVSampleBufferDisplayLayer()
     private var pip: AVPictureInPictureController?
     private var size = CGSize(width: 720, height: 360)
@@ -12,6 +12,9 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
     private var heartbeat: Timer?
     private var lastOriginal = "", lastTranslated = "Waiting for screen text…"
     private var lastShowOriginal = true
+    var onStatus: ((String) -> Void)?
+    var onActiveChange: ((Bool) -> Void)?
+    var isActive: Bool { pip?.isPictureInPictureActive ?? false }
 
     override init() {
         super.init()
@@ -29,6 +32,7 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
         let source = AVPictureInPictureController.ContentSource(sampleBufferDisplayLayer: displayLayer,
                                                                 playbackDelegate: self)
         pip = AVPictureInPictureController(contentSource: source)
+        pip?.delegate = self
         pip?.requiresLinearPlayback = true
         pip?.canStartPictureInPictureAutomaticallyFromInline = true
 
@@ -42,6 +46,9 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
 
     @discardableResult
     func start() -> Bool {
+        guard AVPictureInPictureController.isPictureInPictureSupported() else {
+            onStatus?("PiP isn't supported on this device"); return false
+        }
         guard let pip, pip.isPictureInPicturePossible else { return false }
         pip.startPictureInPicture()
         return true
@@ -131,6 +138,14 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
             arr.first?[kCMSampleAttachmentKey_DisplayImmediately] = true
         }
         return sb
+    }
+
+    // MARK: AVPictureInPictureControllerDelegate
+    func pictureInPictureControllerDidStartPictureInPicture(_ c: AVPictureInPictureController) { onActiveChange?(true) }
+    func pictureInPictureControllerDidStopPictureInPicture(_ c: AVPictureInPictureController) { onActiveChange?(false) }
+    func pictureInPictureController(_ c: AVPictureInPictureController,
+                                    failedToStartPictureInPictureWithError error: Error) {
+        onStatus?("PiP failed: \(error.localizedDescription)")
     }
 
     // MARK: AVPictureInPictureSampleBufferPlaybackDelegate
