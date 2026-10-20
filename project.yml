@@ -6,8 +6,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.0"
-    CURRENT_PROJECT_VERSION: "1"
+    MARKETING_VERSION: "0.2.0"
+    CURRENT_PROJECT_VERSION: "2"
 targets:
   ScreenTranslator:
     type: application
@@ -22,10 +22,6 @@ targets:
         UILaunchScreen: {}
         UIBackgroundModes: [audio]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
-    entitlements:
-      path: App/App.entitlements
-      properties:
-        com.apple.security.application-groups: [group.com.example.screentranslator]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.screentranslator
@@ -41,10 +37,6 @@ targets:
           NSExtensionPointIdentifier: com.apple.broadcast-services-upload
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SampleHandler
           RPBroadcastProcessMode: RPBroadcastProcessModeSampleBuffer
-    entitlements:
-      path: BroadcastExtension/Extension.entitlements
-      properties:
-        com.apple.security.application-groups: [group.com.example.screentranslator]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.screentranslator.broadcast
