@@ -1,4 +1,4 @@
-// Screen Translator – App – v0.3.0
+// Screen Translator – App – v0.4.0
 import SwiftUI
 import Translation
 import NaturalLanguage
@@ -17,13 +17,13 @@ enum OCRArea: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .smart: "Smart"; case .full: "Full screen"; case .bottom: "Bottom third"
+        case .smart: "Smart (auto)"; case .full: "Full screen"; case .bottom: "Bottom third"
         case .top: "Top half"; case .middle: "Middle band"
         }
     }
     func range(mode: TranslateMode) -> ClosedRange<Double> {   // y: 0 = bottom, 1 = top
         switch self {
-        case .smart: return mode == .movie ? 0...0.45 : 0...1
+        case .smart: return 0.04...0.92
         case .full: return 0...1
         case .bottom: return 0...0.33
         case .top: return 0.5...1
@@ -74,6 +74,7 @@ final class TranslatorEngine: ObservableObject {
     @Published var ocrCount = 0
     @Published var extensionVersion = "–"
     @Published var pipActive = false
+    @Published var lastRaw = ""
     // Translation session plumbing
     @Published var legacyConfig: TranslationSession.Configuration?
     @Published var downloadConfig: TranslationSession.Configuration?
@@ -141,17 +142,27 @@ final class TranslatorEngine: ObservableObject {
 
     // MARK: Packets from the extension
     private func handle(_ p: Packet) {
+        let wasAlive = captureAlive
         lastPacketDate = Date()
         captureAlive = true
         frames = p.frames
         extensionVersion = p.version
+        // Capture just started: make sure the floating window is up too.
+        if !wasAlive, !pip.isActive, UIApplication.shared.applicationState == .active { startPiP() }
         guard p.kind == "ocr" else { return }
         ocrCount += 1
+        lastRaw = String(p.lines.map(\.t).joined(separator: " ").prefix(160))
 
         let range = area.range(mode: mode)
-        let lines = p.lines.filter { range.contains($0.y) }.map(\.t).filter { !isTargetLanguage($0) }
+        var cand = p.lines.filter { range.contains($0.y) }
+        // Smart: keep the dominant (biggest) text, ignore small UI/watermark text
+        if area == .smart, let maxH = cand.map(\.h).max() {
+            cand = cand.filter { $0.h >= maxH * 0.55 }
+        }
+        let lines = cand.map(\.t).filter { !isTargetLanguage($0) }
         guard !lines.isEmpty else { return }
-        let text = lines.joined(separator: mode == .movie ? " " : "\n")
+        let text = lines.joined(separator: mode == .movie ? " " : "
+")
         enqueue(text)
     }
 
@@ -186,7 +197,16 @@ final class TranslatorEngine: ObservableObject {
         if sourceCode == "auto" {
             let rec = NLLanguageRecognizer()
             rec.processString(text)
-            guard let dom = rec.dominantLanguage else { status = "Couldn't detect the language"; return }
+            // Prefer a language whose pack is installed when the detector is torn between candidates
+            let installed = Set(languages.filter { langStatus[$0.code] == .installed }.map {
+                $0.code == "zh" ? NLLanguage.simplifiedChinese : NLLanguage(rawValue: $0.code)
+            })
+            var dom = rec.dominantLanguage
+            if let best = rec.languageHypotheses(withMaximum: 5)
+                .filter({ installed.contains($0.key) }).max(by: { $0.value < $1.value }), best.value > 0.15 {
+                dom = best.key
+            }
+            guard let dom else { status = "Couldn't detect the language"; return }
             source = Locale.Language(identifier: dom.rawValue)
         } else {
             source = Locale.Language(identifier: sourceCode)
