@@ -162,7 +162,6 @@ final class TranslatorEngine: ObservableObject {
         let lines = cand.map(\.t).filter { !isTargetLanguage($0) }
         guard !lines.isEmpty else { return }
         let text = lines.joined(separator: mode == .movie ? " " : "\n")
-")
         enqueue(text)
     }
 
