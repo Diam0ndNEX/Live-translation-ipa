@@ -1,4 +1,4 @@
-// Screen Translator – App – v0.2.0
+// Screen Translator – App – v0.3.0
 import SwiftUI
 import Translation
 import NaturalLanguage
@@ -73,6 +73,7 @@ final class TranslatorEngine: ObservableObject {
     @Published var frames = 0
     @Published var ocrCount = 0
     @Published var extensionVersion = "–"
+    @Published var pipActive = false
     // Translation session plumbing
     @Published var legacyConfig: TranslationSession.Configuration?
     @Published var downloadConfig: TranslationSession.Configuration?
@@ -105,18 +106,36 @@ final class TranslatorEngine: ObservableObject {
             }
         }
         pip.setSize(windowSize.size)
+        pip.onStatus = { [weak self] s in Task { @MainActor in self?.status = s } }
+        pip.onActiveChange = { [weak self] a in Task { @MainActor in self?.pipActive = a } }
     }
 
     // MARK: PiP
-    func startPiP() {
+    /// Starts the PiP window (retrying while iOS gets ready), then calls `done`.
+    func startPiP(then done: @escaping () -> Void = {}) {
         let s = AVAudioSession.sharedInstance()
         try? s.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
         try? s.setActive(true)
         pip.setSize(windowSize.size)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in
-            guard let self else { return }
-            if !self.pip.start() { self.status = "PiP not ready – tap Start again" }
+        attemptPiP(0, done)
+    }
+    private func attemptPiP(_ n: Int, _ done: @escaping () -> Void) {
+        if pip.isActive { done(); return }
+        if pip.start() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { done() }
+            return
         }
+        if n >= 8 {
+            status = "PiP couldn't start – stay on the Home tab and tap Start again"
+            done(); return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.attemptPiP(n + 1, done) }
+    }
+    func swapLanguages() {
+        guard sourceCode != "auto" else { status = "Pick a source language to swap"; return }
+        let s = sourceCode
+        sourceCode = targetCode
+        targetCode = s
     }
     func applyWindowSize() { pip.setSize(windowSize.size) }
 
