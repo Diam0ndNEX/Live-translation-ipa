@@ -1,3 +1,4 @@
+// Screen Translator – App – v0.2.0
 import AVKit
 import UIKit
 import SwiftUI
@@ -6,9 +7,11 @@ import SwiftUI
 final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegate {
     let displayLayer = AVSampleBufferDisplayLayer()
     private var pip: AVPictureInPictureController?
-    private let size = CGSize(width: 720, height: 360)
+    private var size = CGSize(width: 720, height: 360)
     private var lastFrame: CGImage?
     private var heartbeat: Timer?
+    private var lastOriginal = "", lastTranslated = "Waiting for screen text…"
+    private var lastShowOriginal = true
 
     override init() {
         super.init()
@@ -29,7 +32,7 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
         pip?.requiresLinearPlayback = true
         pip?.canStartPictureInPictureAutomaticallyFromInline = true
 
-        render(original: "", translated: "Waiting for screen text…")
+        render(original: "", translated: lastTranslated, showOriginal: false)
         // PiP needs a steady stream of frames or it shows a spinner / stalls.
         heartbeat = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             guard let self, let f = self.lastFrame else { return }
@@ -37,31 +40,58 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
         }
     }
 
-    func start() { if let pip, pip.isPictureInPicturePossible { pip.startPictureInPicture() } }
+    @discardableResult
+    func start() -> Bool {
+        guard let pip, pip.isPictureInPicturePossible else { return false }
+        pip.startPictureInPicture()
+        return true
+    }
     func stop() { pip?.stopPictureInPicture() }
 
+    func setSize(_ s: CGSize) {
+        guard s != size else { return }
+        size = s
+        render(original: lastOriginal, translated: lastTranslated, showOriginal: lastShowOriginal)
+    }
+
     // MARK: Rendering
-    func render(original: String, translated: String) {
+    func render(original: String, translated: String, showOriginal: Bool) {
+        lastOriginal = original; lastTranslated = translated; lastShowOriginal = showOriginal
         let fmt = UIGraphicsImageRendererFormat()
         fmt.scale = 1; fmt.opaque = true
         let img = UIGraphicsImageRenderer(size: size, format: fmt).image { ctx in
             UIColor(white: 0.05, alpha: 1).setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
             let w = size.width - 48
-            NSAttributedString(string: original, attributes: [
-                .font: UIFont.systemFont(ofSize: 20), .foregroundColor: UIColor.lightGray
-            ]).draw(with: CGRect(x: 24, y: 16, width: w, height: 90),
-                    options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], context: nil)
-            let n = translated.count
-            let fs: CGFloat = n > 160 ? 24 : (n > 80 ? 30 : 38)
-            NSAttributedString(string: translated, attributes: [
-                .font: UIFont.systemFont(ofSize: fs, weight: .bold), .foregroundColor: UIColor.white
-            ]).draw(with: CGRect(x: 24, y: 120, width: w, height: 224),
-                    options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], context: nil)
+            var y: CGFloat = 16
+            if showOriginal && !original.isEmpty {
+                let r = CGRect(x: 24, y: y, width: w, height: size.height * 0.27)
+                let f = fittingFont(original, rect: r, weight: .regular, hi: 22, lo: 12)
+                NSAttributedString(string: original, attributes: [.font: f, .foregroundColor: UIColor.lightGray])
+                    .draw(with: r, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], context: nil)
+                y = r.maxY + 10
+            }
+            let r2 = CGRect(x: 24, y: y, width: w, height: size.height - y - 16)
+            let f2 = fittingFont(translated, rect: r2, weight: .bold, hi: 44, lo: 16)
+            NSAttributedString(string: translated, attributes: [.font: f2, .foregroundColor: UIColor.white])
+                .draw(with: r2, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], context: nil)
         }
         guard let cg = img.cgImage else { return }
         lastFrame = cg
         enqueue(cg)
+    }
+
+    private func fittingFont(_ text: String, rect: CGRect, weight: UIFont.Weight, hi: CGFloat, lo: CGFloat) -> UIFont {
+        var fs = hi
+        while fs > lo {
+            let f = UIFont.systemFont(ofSize: fs, weight: weight)
+            let b = (text as NSString).boundingRect(with: CGSize(width: rect.width, height: .greatestFiniteMagnitude),
+                                                    options: .usesLineFragmentOrigin,
+                                                    attributes: [.font: f], context: nil)
+            if b.height <= rect.height { return f }
+            fs -= 2
+        }
+        return UIFont.systemFont(ofSize: lo, weight: weight)
     }
 
     private func enqueue(_ cg: CGImage) {
