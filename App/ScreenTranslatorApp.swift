@@ -1,4 +1,4 @@
-// Screen Translator – App UI – v0.3.0
+// Screen Translator – App UI – v0.4.0
 import SwiftUI
 import ReplayKit
 import Translation
@@ -47,23 +47,51 @@ struct RootView: View {
 }
 
 // MARK: - Broadcast picker
-final class PickerHolder {
-    var view: RPSystemBroadcastPickerView?
-    func trigger() {
-        view?.subviews.compactMap { $0 as? UIButton }.first?.sendActions(for: .allTouchEvents)
+/// Picker whose inner button fills the whole view, so a real tap anywhere opens the capture sheet.
+final class FillPicker: RPSystemBroadcastPickerView {
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        subviews.forEach { $0.frame = bounds }
     }
 }
 
 struct BroadcastPicker: UIViewRepresentable {
-    let holder: PickerHolder
-    func makeUIView(context: Context) -> RPSystemBroadcastPickerView {
-        let v = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
+    var onTap: () -> Void = {}
+
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
+    func makeUIView(context: Context) -> FillPicker {
+        let v = FillPicker(frame: CGRect(x: 0, y: 0, width: 200, height: 54))
         v.preferredExtension = Self.extensionID()
         v.showsMicrophoneButton = false
-        holder.view = v
+        context.coordinator.onTap = onTap
+        context.coordinator.attach(to: v)
         return v
     }
-    func updateUIView(_ uiView: RPSystemBroadcastPickerView, context: Context) {}
+    func updateUIView(_ v: FillPicker, context: Context) {
+        context.coordinator.onTap = onTap
+        context.coordinator.attach(to: v)
+    }
+
+    /// Also listens to the picker's real button, so one genuine tap starts both PiP and capture.
+    final class Coordinator: NSObject {
+        var onTap: () -> Void = {}
+        private weak var attached: UIControl?
+
+        func attach(to v: UIView) {
+            guard let c = Self.findControl(in: v), c !== attached else { return }
+            c.addTarget(self, action: #selector(tapped), for: .touchUpInside)
+            attached = c
+        }
+        @objc private func tapped() { onTap() }
+        private static func findControl(in v: UIView) -> UIControl? {
+            for s in v.subviews {
+                if let c = s as? UIControl { return c }
+                if let c = findControl(in: s) { return c }
+            }
+            return nil
+        }
+    }
 
     /// Finds the bundled .appex so it works even if a sideloader renames bundle IDs.
     static func extensionID() -> String? {
@@ -130,7 +158,6 @@ struct HomeView: View {
     @AppStorage("area") private var area = OCRArea.smart.rawValue
     @AppStorage("winSize") private var winSize = WindowSize.normal.rawValue
     @AppStorage("showOriginal") private var showOriginal = true
-    @State private var holder = PickerHolder()
 
     private var previewRatio: CGFloat {
         let s = (WindowSize(rawValue: winSize) ?? .normal).size
@@ -228,22 +255,25 @@ struct HomeView: View {
 
     private var startButton: some View {
         VStack(spacing: 8) {
-            Button {
-                engine.startPiP { holder.trigger() }
-            } label: {
+            ZStack {
                 Label("Start", systemImage: "play.fill")
                     .font(.headline)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 16)
-                    .background(Theme.gradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                     .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Theme.gradient)
+                // The real system picker sits invisibly on top: one tap opens capture, and PiP starts with it.
+                BroadcastPicker(onTap: { engine.startPiP() })
+                    .opacity(0.02)
             }
+            .frame(height: 54)
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+
             if engine.pipActive {
                 Button("Close floating window") { engine.pip.stop() }
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.red)
             } else {
-                Text("Opens the floating window, then the capture sheet – choose Translator Capture.")
+                Text("Tap Start, then choose Translator Capture → Start Broadcast.")
                     .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
         }
@@ -261,12 +291,12 @@ struct HomeView: View {
                     }
                 }
                 Spacer()
-                VStack(spacing: 0) {
-                    BroadcastPicker(holder: holder).frame(width: 40, height: 40)
-                    Text("Manual").font(.system(size: 9)).foregroundStyle(.secondary)
-                }
             }
             Text(engine.status).font(.footnote).foregroundStyle(.secondary)
+            if !engine.lastRaw.isEmpty {
+                Text("OCR sees: \(engine.lastRaw)")
+                    .font(.caption).foregroundStyle(.secondary).lineLimit(3)
+            }
             if engine.extensionVersion != "–" && engine.extensionVersion != AppVersion.version {
                 Text("⚠️ Capture extension is v\(engine.extensionVersion), app is v\(AppVersion.version). Reinstall the IPA.")
                     .font(.footnote).foregroundStyle(.orange)
