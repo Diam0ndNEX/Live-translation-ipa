@@ -1,4 +1,4 @@
-// Screen Translator – App UI – v0.2.0
+// Screen Translator – App UI – v0.3.0
 import SwiftUI
 import ReplayKit
 import Translation
@@ -6,6 +6,23 @@ import Translation
 @main
 struct ScreenTranslatorApp: App {
     var body: some Scene { WindowGroup { RootView() } }
+}
+
+// MARK: - Theme
+enum Theme {
+    static let bg = Color(red: 0.04, green: 0.05, blue: 0.09)
+    static let card = Color.white.opacity(0.07)
+    static let gradient = LinearGradient(
+        colors: [Color(red: 0.25, green: 0.52, blue: 1), Color(red: 0.45, green: 0.42, blue: 0.98)],
+        startPoint: .leading, endPoint: .trailing)
+}
+
+extension View {
+    func card() -> some View {
+        self.padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
 }
 
 // MARK: - Root
@@ -21,6 +38,7 @@ struct RootView: View {
         }
         .environmentObject(engine)
         .preferredColorScheme(.dark)
+        .tint(Color(red: 0.35, green: 0.55, blue: 1))
         .translationTask(engine.legacyConfig) { session in await engine.runLegacy(session) }
         .translationTask(engine.downloadConfig) { session in await engine.runDownload(session) }
         .task { await engine.loadLanguages() }
@@ -39,7 +57,7 @@ final class PickerHolder {
 struct BroadcastPicker: UIViewRepresentable {
     let holder: PickerHolder
     func makeUIView(context: Context) -> RPSystemBroadcastPickerView {
-        let v = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 44, height: 44))
+        let v = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 40, height: 40))
         v.preferredExtension = Self.extensionID()
         v.showsMicrophoneButton = false
         holder.view = v
@@ -59,15 +77,7 @@ struct BroadcastPicker: UIViewRepresentable {
     }
 }
 
-// MARK: - Helpers
-extension View {
-    func card() -> some View {
-        self.padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
-    }
-}
-
+// MARK: - Components
 struct LangMenu: View {
     @Binding var code: String
     let items: [LangItem]
@@ -81,16 +91,35 @@ struct LangMenu: View {
             if allowAuto { Button("Auto-detect") { code = "auto" } }
             ForEach(items) { i in Button(i.name) { code = i.code } }
         } label: {
-            HStack {
-                Text(label).lineLimit(1).minimumScaleFactor(0.7)
-                Spacer(minLength: 4)
-                Image(systemName: "chevron.down").font(.caption)
+            HStack(spacing: 4) {
+                Text(label).font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.7)
+                Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .bold)).opacity(0.6)
             }
-            .padding(12)
+            .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+            .padding(.vertical, 14)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
-        .foregroundStyle(.white)
+    }
+}
+
+struct SettingRow<Content: View>: View {
+    let icon: String
+    let tint: Color
+    let title: String
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(tint)
+                .frame(width: 32, height: 32)
+                .background(tint.opacity(0.18), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            Text(title).font(.subheadline)
+            Spacer(minLength: 8)
+            content()
+        }
     }
 }
 
@@ -103,132 +132,204 @@ struct HomeView: View {
     @AppStorage("showOriginal") private var showOriginal = true
     @State private var holder = PickerHolder()
 
+    private var previewRatio: CGFloat {
+        let s = (WindowSize(rawValue: winSize) ?? .normal).size
+        return s.width / s.height
+    }
+
     var body: some View {
         ScrollView {
-            VStack(spacing: 14) {
-                VStack(spacing: 2) {
-                    Text("Screen Translator").font(.title2.bold())
-                    Text(AppVersion.full).font(.caption)
-                }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
-                .background(LinearGradient(colors: [.blue, .indigo], startPoint: .leading, endPoint: .trailing),
-                            in: RoundedRectangle(cornerRadius: 18))
-
-                HStack(spacing: 10) {
-                    LangMenu(code: $engine.sourceCode, items: engine.languages, allowAuto: true)
-                    Image(systemName: "arrow.right").foregroundStyle(.secondary)
-                    LangMenu(code: $engine.targetCode, items: engine.languages)
-                }
-
-                VStack(spacing: 8) {
-                    Text(engine.translated.isEmpty ? "Translations appear here and in the PiP window" : engine.translated)
-                        .font(.headline)
-                        .foregroundStyle(engine.translated.isEmpty ? .secondary : Color.cyan)
-                        .multilineTextAlignment(.center)
-                        .frame(maxWidth: .infinity, minHeight: 90)
-                }
-                .card()
-
-                VStack(spacing: 4) {
-                    Picker("Translate mode", selection: $mode) {
-                        ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) }
-                    }
-                    Divider()
-                    Picker("OCR area", selection: $area) {
-                        ForEach(OCRArea.allCases) { Text($0.title).tag($0.rawValue) }
-                    }
-                    Divider()
-                    Picker("Window size", selection: $winSize) {
-                        ForEach(WindowSize.allCases) { Text($0.title).tag($0.rawValue) }
-                    }
-                    .onChange(of: winSize) { _, _ in engine.applyWindowSize() }
-                    Divider()
-                    Toggle("Show original text", isOn: $showOriginal)
-                }
-                .card()
-
-                HStack(spacing: 10) {
-                    Button {
-                        engine.startPiP()
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { holder.trigger() }
-                    } label: {
-                        Label("Start", systemImage: "play.fill").frame(maxWidth: .infinity).padding()
-                            .background(LinearGradient(colors: [.blue, .indigo], startPoint: .leading, endPoint: .trailing),
-                                        in: RoundedRectangle(cornerRadius: 14))
-                    }
-                    Button { engine.pip.stop() } label: {
-                        Label("Stop PiP", systemImage: "stop.fill").padding()
-                            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 14))
-                    }
-                }
-                .foregroundStyle(.white)
-                .font(.headline)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Diagnostics").font(.caption.bold()).foregroundStyle(.secondary)
-                    HStack {
-                        Circle().fill(engine.captureAlive ? Color.green : Color.red).frame(width: 10, height: 10)
-                        Text(engine.captureAlive
-                             ? "Capture connected · \(engine.frames) frames · \(engine.ocrCount) text updates"
-                             : "Capture not connected")
-                            .font(.footnote)
-                    }
-                    Text(engine.status).font(.footnote).foregroundStyle(.secondary)
-                    if engine.extensionVersion != "–" && engine.extensionVersion != AppVersion.version {
-                        Text("⚠️ Capture extension is v\(engine.extensionVersion) but app is v\(AppVersion.version). Reinstall the IPA.")
-                            .font(.footnote).foregroundStyle(.orange)
-                    }
-                    HStack {
-                        Button("Test translation") { engine.runTest() }
-                            .buttonStyle(.bordered)
-                        Spacer()
-                        Text("Manual capture:").font(.footnote).foregroundStyle(.secondary)
-                        BroadcastPicker(holder: holder).frame(width: 44, height: 44)
-                    }
-                }
-                .card()
+            VStack(spacing: 16) {
+                header
+                languageBar
+                preview
+                settings
+                startButton
+                statusCard
             }
-            .padding()
+            .padding(.horizontal, 16)
+            .padding(.bottom, 24)
         }
-        .background(Color.black.ignoresSafeArea())
+        .scrollIndicators(.hidden)
+        .background(Theme.bg.ignoresSafeArea())
+    }
+
+    private var header: some View {
+        HStack(alignment: .center) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Screen Translator").font(.title.bold())
+                Text("Offline · \(AppVersion.full)").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            HStack(spacing: 6) {
+                Circle().fill(engine.captureAlive ? Color.green : Color.gray).frame(width: 8, height: 8)
+                Text(engine.captureAlive ? "Capturing" : "Idle").font(.caption.weight(.semibold))
+            }
+            .padding(.horizontal, 10).padding(.vertical, 6)
+            .background(Theme.card, in: Capsule())
+        }
+        .padding(.top, 8)
+    }
+
+    private var languageBar: some View {
+        HStack(spacing: 8) {
+            LangMenu(code: $engine.sourceCode, items: engine.languages, allowAuto: true)
+            Button { engine.swapLanguages() } label: {
+                Image(systemName: "arrow.left.arrow.right")
+                    .font(.system(size: 14, weight: .semibold))
+                    .frame(width: 40, height: 40)
+                    .background(Theme.card, in: Circle())
+            }
+            .foregroundStyle(.white)
+            LangMenu(code: $engine.targetCode, items: engine.languages)
+        }
+    }
+
+    /// Doubles as a live preview AND keeps the PiP layer on screen (required for PiP to start).
+    private var preview: some View {
+        VStack(spacing: 6) {
+            PiPPreview(layer: engine.pip.displayLayer)
+                .aspectRatio(previewRatio, contentMode: .fit)
+                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .stroke(Color.white.opacity(0.08)))
+            Text("Live preview of the floating window").font(.caption2).foregroundStyle(.secondary)
+        }
+    }
+
+    private var settings: some View {
+        VStack(spacing: 12) {
+            SettingRow(icon: "film", tint: .blue, title: "Mode") {
+                Picker("", selection: $mode) {
+                    ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) }
+                }.pickerStyle(.menu).labelsHidden().tint(.secondary)
+            }
+            Divider().overlay(Color.white.opacity(0.06))
+            SettingRow(icon: "viewfinder", tint: .purple, title: "OCR area") {
+                Picker("", selection: $area) {
+                    ForEach(OCRArea.allCases) { Text($0.title).tag($0.rawValue) }
+                }.pickerStyle(.menu).labelsHidden().tint(.secondary)
+            }
+            Divider().overlay(Color.white.opacity(0.06))
+            SettingRow(icon: "rectangle.expand.vertical", tint: .orange, title: "Window size") {
+                Picker("", selection: $winSize) {
+                    ForEach(WindowSize.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                .pickerStyle(.menu).labelsHidden().tint(.secondary)
+                .onChange(of: winSize) { _, _ in engine.applyWindowSize() }
+            }
+            Divider().overlay(Color.white.opacity(0.06))
+            SettingRow(icon: "text.quote", tint: .teal, title: "Show original text") {
+                Toggle("", isOn: $showOriginal).labelsHidden()
+            }
+        }
+        .card()
+    }
+
+    private var startButton: some View {
+        VStack(spacing: 8) {
+            Button {
+                engine.startPiP { holder.trigger() }
+            } label: {
+                Label("Start", systemImage: "play.fill")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 16)
+                    .background(Theme.gradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .foregroundStyle(.white)
+            }
+            if engine.pipActive {
+                Button("Close floating window") { engine.pip.stop() }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.red)
+            } else {
+                Text("Opens the floating window, then the capture sheet – choose Translator Capture.")
+                    .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
+            }
+        }
+    }
+
+    private var statusCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(engine.captureAlive ? "Capture connected" : "Capture not connected")
+                        .font(.subheadline.weight(.semibold))
+                    if engine.captureAlive {
+                        Text("\(engine.frames) frames · \(engine.ocrCount) text updates")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                Spacer()
+                VStack(spacing: 0) {
+                    BroadcastPicker(holder: holder).frame(width: 40, height: 40)
+                    Text("Manual").font(.system(size: 9)).foregroundStyle(.secondary)
+                }
+            }
+            Text(engine.status).font(.footnote).foregroundStyle(.secondary)
+            if engine.extensionVersion != "–" && engine.extensionVersion != AppVersion.version {
+                Text("⚠️ Capture extension is v\(engine.extensionVersion), app is v\(AppVersion.version). Reinstall the IPA.")
+                    .font(.footnote).foregroundStyle(.orange)
+            }
+            Button { engine.runTest() } label: {
+                Label("Test translation", systemImage: "checkmark.seal")
+                    .font(.footnote.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .card()
     }
 }
 
 // MARK: - Languages
 struct LanguagesView: View {
     @EnvironmentObject var engine: TranslatorEngine
+    @State private var query = ""
+
+    private var filtered: [LangItem] {
+        engine.languages.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
+    }
+    private var ready: [LangItem] { filtered.filter { engine.langStatus[$0.code] == .installed } }
+    private var available: [LangItem] { filtered.filter { engine.langStatus[$0.code] == .supported } }
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    Text("Offline translation needs a language pack for each language. Tap the download icon next to a language – iOS shows its own download prompt. Status is checked against your target language (\(engine.targetCode)).")
+                    Text("Translation runs fully on your phone using Apple's language packs. Packs are stored by iOS (not in this app). Status is shown for translating into your target language.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                Section("Languages") {
-                    ForEach(engine.languages) { l in
-                        HStack {
-                            Text(l.name)
-                            Spacer()
-                            switch engine.langStatus[l.code] {
-                            case .installed:
-                                Label("Ready", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
-                                    .labelStyle(.iconOnly)
-                            case .supported:
-                                Button { engine.download(l.code) } label: {
-                                    Image(systemName: "arrow.down.circle")
-                                }.buttonStyle(.borderless)
-                            case .unsupported:
-                                Text(l.code == engine.targetCode ? "target" : "–").foregroundStyle(.secondary)
-                            default:
-                                ProgressView()
+                if engine.langStatus.isEmpty {
+                    HStack { Spacer(); ProgressView(); Spacer() }
+                }
+                if !ready.isEmpty {
+                    Section("Ready · works offline") {
+                        ForEach(ready) { l in
+                            HStack {
+                                Text(l.name)
+                                Spacer()
+                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                            }
+                        }
+                    }
+                }
+                if !available.isEmpty {
+                    Section("Available to download") {
+                        ForEach(available) { l in
+                            HStack {
+                                Text(l.name)
+                                Spacer()
+                                Button("Get") { engine.download(l.code) }
+                                    .buttonStyle(.bordered).controlSize(.small)
                             }
                         }
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.bg.ignoresSafeArea())
+            .searchable(text: $query, prompt: "Search languages")
             .navigationTitle("Languages")
             .toolbar { Button("Refresh") { Task { await engine.refreshStatus() } } }
         }
@@ -244,7 +345,8 @@ struct SettingsView: View {
             List {
                 Section("Version") {
                     LabeledContent("App", value: AppVersion.full)
-                    LabeledContent("Capture extension", value: engine.extensionVersion == "–" ? "not seen yet" : "v\(engine.extensionVersion)")
+                    LabeledContent("Capture extension",
+                                   value: engine.extensionVersion == "–" ? "not seen yet" : "v\(engine.extensionVersion)")
                 }
                 Section("Changelog") {
                     ForEach(AppVersion.changelog, id: \.0) { v in
@@ -254,8 +356,8 @@ struct SettingsView: View {
                         }
                     }
                 }
-                Section("Help") {
-                    Text("1. Languages tab → download source and target packs.\n2. Home → Start. Allow PiP, then Start Broadcast.\n3. Switch to your app. Use Test translation if nothing shows.")
+                Section("How to use") {
+                    Text("1. Languages tab → download your source and target packs.\n2. Home → Start. Allow the floating window, then Start Broadcast.\n3. Switch to your app. If nothing shows, use Test translation.")
                         .font(.footnote)
                 }
                 Section {
@@ -267,6 +369,8 @@ struct SettingsView: View {
                     }
                 }
             }
+            .scrollContentBackground(.hidden)
+            .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Settings")
         }
     }
