@@ -1,12 +1,13 @@
-// Screen Translator – Shared – v0.2.0
+// Screen Translator – Shared – v0.3.0
 import Foundation
 
 enum AppVersion {
-    static let version = "0.2.0"
-    static let build = 2
+    static let version = "0.3.0"
+    static let build = 3
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("0.3.0", "Fixed PiP not starting (preview must stay on screen), PiP start retries + error messages, redesigned UI, language swap button, languages grouped by ready/available."),
         ("0.2.0", "No more App Group (fixes 'nothing happens' when sideloaded). Source/target language pickers, language pack downloads, modes, OCR area, window size, diagnostics, test button."),
         ("0.1.0", "First version.")
     ]
@@ -27,4 +28,3 @@ struct Packet: Codable {
     var frames: Int
     var lines: [OCRLine]
 }
-
