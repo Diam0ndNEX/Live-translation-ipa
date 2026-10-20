@@ -3,6 +3,7 @@ import SwiftUI
 import Translation
 import NaturalLanguage
 import AVFoundation
+import Network
 
 enum TranslateMode: String, CaseIterable, Identifiable {
     case movie, game, comic
@@ -277,4 +278,41 @@ final class TranslatorEngine: ObservableObject {
         ("tr","Turkish"),("hi","Hindi"),("id","Indonesian"),("nl","Dutch"),("pl","Polish"),
         ("th","Thai"),("vi","Vietnamese"),("uk","Ukrainian")
     ].map { LangItem(code: $0.0, name: $0.1) }
+}
+
+// MARK: - Loopback server (merged from LoopbackServer.swift)
+/// Receives OCR packets from the broadcast extension over 127.0.0.1 (UDP).
+final class LoopbackServer {
+    private var listener: NWListener?
+    private let queue = DispatchQueue(label: "loopback.server")
+    var onPacket: ((Packet) -> Void)?
+
+    func start() {
+        stop()
+        guard let port = NWEndpoint.Port(rawValue: Loopback.port),
+              let l = try? NWListener(using: .udp, on: port) else { return }
+        l.newConnectionHandler = { [weak self] c in
+            guard let self else { return }
+            c.start(queue: self.queue)
+            self.receive(on: c)
+        }
+        l.stateUpdateHandler = { [weak self] state in
+            if case .failed = state {
+                self?.queue.asyncAfter(deadline: .now() + 1) { self?.start() }
+            }
+        }
+        l.start(queue: queue)
+        listener = l
+    }
+
+    func stop() { listener?.cancel(); listener = nil }
+
+    private func receive(on c: NWConnection) {
+        c.receiveMessage { [weak self] data, _, _, error in
+            if let data, let p = try? JSONDecoder().decode(Packet.self, from: data) {
+                DispatchQueue.main.async { self?.onPacket?(p) }
+            }
+            if error == nil { self?.receive(on: c) }
+        }
+    }
 }
