@@ -1,19 +1,30 @@
+// Screen Translator – Shared – v0.2.0
 import Foundation
 
-// ⚠️ Replace "com.example" everywhere (here + project.yml) with your own prefix.
-enum Shared {
-    static let appGroup = "group.com.example.screentranslator"
-    static let extensionBundleID = "com.example.screentranslator.broadcast"
-    static let notifyName = "com.example.screentranslator.newText"
-
-    static var fileURL: URL? {
-        FileManager.default
-            .containerURL(forSecurityApplicationGroupIdentifier: appGroup)?
-            .appendingPathComponent("latest.json")
-    }
+enum AppVersion {
+    static let version = "0.2.0"
+    static let build = 2
+    static var full: String { "v\(version) (build \(build))" }
+    // Newest first. Add a line here each time you bump the version.
+    static let changelog: [(String, String)] = [
+        ("0.2.0", "No more App Group (fixes 'nothing happens' when sideloaded). Source/target language pickers, language pack downloads, modes, OCR area, window size, diagnostics, test button."),
+        ("0.1.0", "First version.")
+    ]
 }
 
-struct OCRPayload: Codable {
-    var text: String
-    var stamp: Double
+enum Loopback { static let port: UInt16 = 48721 }
+
+struct OCRLine: Codable {
+    var t: String      // text
+    var x: Double      // normalized mid X
+    var y: Double      // normalized mid Y (0 = bottom, 1 = top)
+    var h: Double      // normalized height
 }
+
+struct Packet: Codable {
+    var kind: String   // "ping" or "ocr"
+    var version: String
+    var frames: Int
+    var lines: [OCRLine]
+}
+
