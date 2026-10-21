@@ -1,4 +1,4 @@
-// Screen Translator – App – v0.6.0
+// ScreenLingo – App – v0.7.0
 import SwiftUI
 import Translation
 import NaturalLanguage
@@ -70,6 +70,12 @@ struct HistoryItem: Identifiable {
     var date = Date()
 }
 
+private struct StoredHistoryItem: Codable {
+    let original: String
+    let translated: String
+    let date: Date
+}
+
 @MainActor
 final class TranslatorEngine: ObservableObject {
     // Settings
@@ -99,7 +105,9 @@ final class TranslatorEngine: ObservableObject {
     @Published var ocrMs: Double = 0
     @Published var translateMs: Double = 0
     @Published var extFreeMB: Double = 0
-    @Published var history: [HistoryItem] = []
+    @Published var history: [HistoryItem] = [] {
+        didSet { saveHistory() }
+    }
     // Translation session plumbing
     @Published var legacyConfig: TranslationSession.Configuration?
     @Published var downloadConfig: TranslationSession.Configuration?
@@ -113,6 +121,7 @@ final class TranslatorEngine: ObservableObject {
     private var showing = false
     private var pendingTexts: [String] = []
     private var legacyContinuation: CheckedContinuation<[String]?, Never>?
+    private var legacyRequestID = UUID()
     private let speech = AVSpeechSynthesizer()
     private var lastPacketDate = Date.distantPast
     private var cache: [String: String] = [:]
@@ -142,6 +151,7 @@ final class TranslatorEngine: ObservableObject {
     init() {
         sourceCode = UserDefaults.standard.string(forKey: "source") ?? "auto"
         targetCode = UserDefaults.standard.string(forKey: "target") ?? "en"
+        history = Self.loadHistory()
         server.onPacket = { [weak self] p in Task { @MainActor in self?.handle(p) } }
         server.start()
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -157,6 +167,26 @@ final class TranslatorEngine: ObservableObject {
         pip.setSize(windowSize.size)
         pip.onStatus = { [weak self] s in Task { @MainActor in self?.status = s } }
         pip.onActiveChange = { [weak self] a in Task { @MainActor in self?.pipActive = a } }
+    }
+
+
+    private static let historyKey = "screenlingo.history.v1"
+
+    private static func loadHistory() -> [HistoryItem] {
+        guard let data = UserDefaults.standard.data(forKey: historyKey),
+              let stored = try? JSONDecoder().decode([StoredHistoryItem].self, from: data) else { return [] }
+        return stored.prefix(100).map { item in
+            let value = HistoryItem(original: item.original, translated: item.translated, date: item.date)
+            return value
+        }
+    }
+
+    private func saveHistory() {
+        let stored = history.prefix(100).map {
+            StoredHistoryItem(original: $0.original, translated: $0.translated, date: $0.date)
+        }
+        guard let data = try? JSONEncoder().encode(Array(stored)) else { return }
+        UserDefaults.standard.set(data, forKey: Self.historyKey)
     }
 
     // MARK: Settings → capture extension
@@ -560,7 +590,9 @@ final class TranslatorEngine: ObservableObject {
 
     // iOS 18 path (needs the hosted .translationTask view in RootView)
     private func translateLegacy(_ texts: [String], source: Locale.Language, target: Locale.Language) async -> [String]? {
-        await withCheckedContinuation { (cont: CheckedContinuation<[String]?, Never>) in
+        let requestID = UUID()
+        return await withCheckedContinuation { (cont: CheckedContinuation<[String]?, Never>) in
+            legacyRequestID = requestID
             legacyContinuation = cont
             pendingTexts = texts
             if var c = legacyConfig, c.source == source, c.target == target {
@@ -568,15 +600,21 @@ final class TranslatorEngine: ObservableObject {
             } else {
                 legacyConfig = .init(source: source, target: target)
             }
-            Task { try? await Task.sleep(for: .seconds(10)); finishLegacy(nil) }
+            Task {
+                try? await Task.sleep(for: .seconds(10))
+                guard self.legacyRequestID == requestID else { return }
+                self.finishLegacy(nil)
+            }
         }
     }
     func runLegacy(_ session: TranslationSession) async {
         finishLegacy(await runBatch(session, pendingTexts))
     }
     private func finishLegacy(_ r: [String]?) {
-        legacyContinuation?.resume(returning: r)
+        guard let continuation = legacyContinuation else { return }
         legacyContinuation = nil
+        legacyRequestID = UUID()
+        continuation.resume(returning: r)
     }
 
     // MARK: Languages / downloads
