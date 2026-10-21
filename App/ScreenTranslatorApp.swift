@@ -227,19 +227,31 @@ struct HomeView: View {
         VStack(spacing: 12) {
             SettingRow(icon: "film", tint: .blue, title: "Mode") {
                 Picker("", selection: $mode) {
-                    ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) }
+                    ForEach(TranslateMode.allCases) { item in
+                            let title: String = item.title
+                            let value: String = item.rawValue
+                            Text(title).tag(value)
+                        }
                 }.pickerStyle(.menu).labelsHidden().tint(.secondary)
             }
             Divider().overlay(Color.white.opacity(0.06))
             SettingRow(icon: "viewfinder", tint: .purple, title: "OCR area") {
                 Picker("", selection: $area) {
-                    ForEach(OCRArea.allCases) { Text($0.title).tag($0.rawValue) }
+                    ForEach(OCRArea.allCases) { item in
+                            let title: String = item.title
+                            let value: String = item.rawValue
+                            Text(title).tag(value)
+                        }
                 }.pickerStyle(.menu).labelsHidden().tint(.secondary)
             }
             Divider().overlay(Color.white.opacity(0.06))
             SettingRow(icon: "rectangle.expand.vertical", tint: .orange, title: "Window size") {
                 Picker("", selection: $winSize) {
-                    ForEach(WindowSize.allCases) { Text($0.title).tag($0.rawValue) }
+                    ForEach(WindowSize.allCases) { item in
+                            let title: String = item.title
+                            let value: String = item.rawValue
+                            Text(title).tag(value)
+                        }
                 }
                 .pickerStyle(.menu).labelsHidden().tint(.secondary)
                 .onChange(of: winSize) { _, _ in engine.applyWindowSize() }
@@ -247,7 +259,11 @@ struct HomeView: View {
             Divider().overlay(Color.white.opacity(0.06))
             SettingRow(icon: "speedometer", tint: .green, title: "Speed") {
                 Picker("", selection: $speed) {
-                    ForEach(SpeedPreset.allCases) { Text($0.title).tag($0.rawValue) }
+                    ForEach(SpeedPreset.allCases) { item in
+                            let title: String = item.title
+                            let value: String = item.rawValue
+                            Text(title).tag(value)
+                        }
                 }.pickerStyle(.menu).labelsHidden().tint(.secondary)
             }
             Divider().overlay(Color.white.opacity(0.06))
@@ -414,13 +430,25 @@ struct SettingsView: View {
                 }
                 Section {
                     Picker("Translation mode", selection: $mode) {
-                        ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) }
+                        ForEach(TranslateMode.allCases) { item in
+                            let title: String = item.title
+                            let value: String = item.rawValue
+                            Text(title).tag(value)
+                        }
                     }
                     Picker("Text capture area", selection: $area) {
-                        ForEach(OCRArea.allCases) { Text($0.title).tag($0.rawValue) }
+                        ForEach(OCRArea.allCases) { item in
+                            let title: String = item.title
+                            let value: String = item.rawValue
+                            Text(title).tag(value)
+                        }
                     }
                     Picker("Performance profile", selection: $speed) {
-                        ForEach(SpeedPreset.allCases) { Text($0.title).tag($0.rawValue) }
+                        ForEach(SpeedPreset.allCases) { item in
+                            let title: String = item.title
+                            let value: String = item.rawValue
+                            Text(title).tag(value)
+                        }
                     }
                     Text(speedDescription)
                         .font(.footnote).foregroundStyle(.secondary)
@@ -442,7 +470,11 @@ struct SettingsView: View {
                 }
                 Section("Floating window") {
                     Picker("Window size", selection: $winSize) {
-                        ForEach(WindowSize.allCases) { Text($0.title).tag($0.rawValue) }
+                        ForEach(WindowSize.allCases) { item in
+                            let title: String = item.title
+                            let value: String = item.rawValue
+                            Text(title).tag(value)
+                        }
                     }
                     Picker("Appearance", selection: $theme) {
                         ForEach(PiPTheme.allCases) { item in
