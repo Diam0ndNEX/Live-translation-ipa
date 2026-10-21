@@ -397,11 +397,12 @@ final class TranslatorEngine: ObservableObject {
                 anchors.append(y)
             }
         }
+        let rightToLeft = mode == .comic && ud.bool(forKey: "rightToLeftReading")
         return rows.flatMap { row in
             row.enumerated().sorted {
                 let ax = left($0.element), bx = left($1.element)
                 if abs(ax - bx) < 0.000001 { return $0.offset < $1.offset }
-                return ax < bx
+                return rightToLeft ? ax > bx : ax < bx
             }.map { $0.element }
         }
     }
