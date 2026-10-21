@@ -436,6 +436,28 @@ final class TranslatorEngine: ObservableObject {
         pip.render(original: "", translated: "Listening…", showOriginal: false)
     }
 
+    /// Re-run translation on the most recently recognized text without restarting capture.
+    func retranslateLast() {
+        guard !original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            status = "Nothing to re-translate yet"
+            return
+        }
+        lastHandled = ""
+        enqueue([original])
+    }
+
+    /// Clear the current floating-window result while keeping screen capture running.
+    func clearCurrentTranslation() {
+        showing = false
+        lastHandled = ""
+        original = ""
+        translated = ""
+        renderedGrams = placeholderGrams
+        sourceGrams = []
+        pip.render(original: "", translated: "Listening…", showOriginal: false)
+        status = "Output cleared — capture is still running"
+    }
+
     /// Drops lines already in the target language.
     private func isTargetLanguage(_ s: String) -> Bool {
         guard s.count >= 12 else { return false }
