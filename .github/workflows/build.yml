@@ -1,6 +1,9 @@
 name: Build ScreenLingo IPA
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - codex/screenlingo-v0.7.0
 jobs:
   build:
     runs-on: macos-latest
