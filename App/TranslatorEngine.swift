@@ -147,6 +147,8 @@ final class TranslatorEngine: ObservableObject {
                       size: PiPTextSize(rawValue: ud.string(forKey: "textSize") ?? "") ?? .auto)
     }
     private var autoClear: Bool { (ud.object(forKey: "autoClear") as? Bool) ?? true }
+    private var minimumOCRConfidence: Double { ud.object(forKey: "ocrConfidence") as? Double ?? 0.30 }
+    private var languageCorrection: Bool { (ud.object(forKey: "languageCorrection") as? Bool) ?? true }
 
     init() {
         sourceCode = UserDefaults.standard.string(forKey: "source") ?? "auto"
@@ -194,7 +196,8 @@ final class TranslatorEngine: ObservableObject {
     func syncConfig() {
         let r = area.range(mode: mode)
         server.send(Config(lang: sourceCode, y0: r.lowerBound, y1: r.upperBound,
-                           maxEdge: speed.maxEdge, interval: speed.interval, paused: paused))
+                           maxEdge: speed.maxEdge, interval: speed.interval, paused: paused,
+                           minimumConfidence: minimumOCRConfidence, languageCorrection: languageCorrection))
     }
 
     // MARK: PiP
