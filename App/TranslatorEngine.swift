@@ -446,6 +446,13 @@ final class TranslatorEngine: ObservableObject {
         enqueue([original])
     }
 
+    /// Clear cached translations when diagnosing a suspicious or stale result.
+    func clearTranslationCache() {
+        let count = cache.count
+        cache.removeAll()
+        status = "Translation cache cleared (\(count) entries)"
+    }
+
     /// Clear the current floating-window result while keeping screen capture running.
     func clearCurrentTranslation() {
         showing = false
