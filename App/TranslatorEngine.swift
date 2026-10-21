@@ -23,7 +23,11 @@ enum OCRArea: String, CaseIterable, Identifiable {
     }
     func range(mode: TranslateMode) -> ClosedRange<Double> {   // y: 0 = bottom, 1 = top
         switch self {
-        case .smart: return 0.04...0.92
+        // Movie mode defaults to the subtitle band to avoid mixing background signs,
+        // UI labels and unrelated text into the dialogue translation. Other modes
+        // need a wider search area because text can appear anywhere on screen.
+        case .smart:
+            return mode == .movie ? 0.02...0.58 : 0.04...0.92
         case .full: return 0...1
         case .bottom: return 0...0.33
         case .top: return 0.5...1
@@ -275,11 +279,15 @@ final class TranslatorEngine: ObservableObject {
         lastSelectedBlocks = texts.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
         guard !texts.isEmpty else { handleClear(); return }
 
-        // Comic dialogue is often fragmented across several centered speech-bubble
-        // lines. Translating each OCR fragment independently can make the output
-        // read like separate, shuffled clauses. Preserve the full ordered context
-        // in one request for comics; game UI and subtitles remain separate blocks.
-        if mode == .comic {
+        // Translate dialogue as a contextual unit in movie/comic modes. Translating
+        // each OCR box separately loses clause context and makes short fragments
+        // such as "p-" and "pq ele..." independently translated/reordered.
+        // Movie mode uses a single flowing subtitle string; comics keep line breaks
+        // so the translation can infer dialogue layout without losing the order.
+        if mode == .movie {
+            let context = texts.map { String($0.prefix(400)) }.joined(separator: " ")
+            enqueue([String(context.prefix(1800))])
+        } else if mode == .comic {
             let context = texts.map { String($0.prefix(400)) }.joined(separator: "\n")
             enqueue([String(context.prefix(1800))])
         } else {
@@ -608,9 +616,10 @@ final class TranslatorEngine: ObservableObject {
             let id = src.minimalIdentifier
             lastDetectedLanguage = Locale.current.localizedString(forIdentifier: id) ?? id
             srcLangs[id] = src
-            // Keep short dialogue and adjacent clauses together so the translation model
-            // can use context and preserve natural word order (important for manga bubbles).
-            let parts = text.count <= 160 ? [text] : splitSentences(text)
+            // Do not split ordinary multi-sentence dialogue into isolated fragments.
+            // Short fragments lose grammatical context and can be translated in the
+            // wrong order. Only split unusually long OCR dumps to keep requests bounded.
+            let parts = text.count <= 900 ? [text] : splitSentences(text)
             sentences.append(parts)
             var row: [String?] = []
             for (si, part) in parts.enumerated() {
