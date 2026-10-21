@@ -4,7 +4,7 @@ import ReplayKit
 import Translation
 
 @main
-struct ScreenTranslatorApp: App {
+struct ScreenLingoApp: App {
     var body: some Scene { WindowGroup { RootView() } }
 }
 
