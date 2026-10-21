@@ -295,7 +295,7 @@ final class TranslatorEngine: ObservableObject {
         let sorted = lines.enumerated().sorted {
             if abs($0.element.y - $1.element.y) < 0.000001 { return $0.offset < $1.offset }
             return $0.element.y > $1.element.y
-        }.map(\.element)
+        }.map { $0.element }
         var rows: [[OCRLine]] = []
         var anchors: [Double] = []
         for line in sorted {
@@ -312,7 +312,7 @@ final class TranslatorEngine: ObservableObject {
             row.enumerated().sorted {
                 if abs($0.element.x - $1.element.x) < 0.000001 { return $0.offset < $1.offset }
                 return $0.element.x < $1.element.x
-            }.map(\.element)
+            }.map { $0.element }
         }
     }
 
@@ -383,7 +383,7 @@ final class TranslatorEngine: ObservableObject {
             let ay = top($0.element), by = top($1.element)
             if abs(ay - by) < 0.000001 { return $0.offset < $1.offset }
             return ay > by
-        }.map(\.element)
+        }.map { $0.element }
         var rows: [[[OCRLine]]] = []
         var anchors: [Double] = []
         for block in byTop {
@@ -402,7 +402,7 @@ final class TranslatorEngine: ObservableObject {
                 let ax = left($0.element), bx = left($1.element)
                 if abs(ax - bx) < 0.000001 { return $0.offset < $1.offset }
                 return ax < bx
-            }.map(\.element)
+            }.map { $0.element }
         }
     }
 
