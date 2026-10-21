@@ -17,7 +17,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var lastOcrMs: Double = 0
 
     private let cfgLock = NSLock()
-    private var _config = Config(lang: "auto", y0: 0, y1: 1, maxEdge: 1400, interval: 0.25, paused: false)
+    private var _config = Config(lang: "auto", y0: 0, y1: 1, maxEdge: 1400, interval: 0.25, paused: false, minimumConfidence: 0.30, languageCorrection: true)
     private var config: Config {
         get { cfgLock.lock(); defer { cfgLock.unlock() }; return _config }
         set { cfgLock.lock(); _config = newValue; cfgLock.unlock() }
@@ -85,7 +85,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private func makeRequest(_ cfg: Config, span: Double) -> VNRecognizeTextRequest {
         let r = VNRecognizeTextRequest()
         r.recognitionLevel = .accurate
-        r.usesLanguageCorrection = true
+        r.usesLanguageCorrection = cfg.languageCorrection
         r.minimumTextHeight = Float(min(0.1, 0.01 / max(0.1, span)))
         if let langs = visionLanguages(for: cfg.lang) {
             r.automaticallyDetectsLanguage = false
@@ -105,7 +105,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         guard (try? handler.perform([req])) != nil, let results = req.results else { return [] }
 
         var lines = results.compactMap { obs -> OCRLine? in
-            guard let c = obs.topCandidates(1).first, c.confidence >= 0.3, c.string.count >= 2,
+            guard let c = obs.topCandidates(1).first, c.confidence >= cfg.minimumConfidence, c.string.count >= 2,
                   c.string.contains(where: { $0.isLetter || $0.isNumber }) else { return nil }
             let b = obs.boundingBox
             let y = y0 + Double(b.midY) * span
