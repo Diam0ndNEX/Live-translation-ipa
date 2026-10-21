@@ -154,6 +154,8 @@ struct HomeView: View {
     @AppStorage("showOriginal") private var showOriginal = false
     @AppStorage("speed") private var speed = SpeedPreset.balanced.rawValue
     @AppStorage("autoClear") private var autoClear = true
+    @AppStorage("ocrConfidence") private var ocrConfidence = 0.30
+    @AppStorage("languageCorrection") private var languageCorrection = true
 
     private var previewRatio: CGFloat {
         let s = (WindowSize(rawValue: winSize) ?? .normal).size
@@ -420,6 +422,17 @@ struct SettingsView: View {
                     }
                     Text(speedDescription)
                         .font(.footnote).foregroundStyle(.secondary)
+                    Toggle("Language-aware OCR correction", isOn: $languageCorrection)
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Minimum OCR confidence")
+                            Spacer()
+                            Text("\(Int(ocrConfidence * 100))%").monospacedDigit().foregroundStyle(.secondary)
+                        }
+                        Slider(value: $ocrConfidence, in: 0.15...0.75, step: 0.05)
+                        Text("Lower values catch faint or stylized text but may include more mistakes. Higher values are stricter and can miss difficult text.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 } header: {
                     Text("Translation & performance")
                 } footer: {
@@ -476,7 +489,7 @@ struct SettingsView: View {
                 }
                 Section("Reset") {
                     Button("Reset all settings", role: .destructive) {
-                        for key in ["source", "target", "mode", "area", "winSize", "showOriginal", "speed", "autoClear", "theme", "textSize", "speak"] {
+                        for key in ["source", "target", "mode", "area", "winSize", "showOriginal", "speed", "autoClear", "ocrConfidence", "languageCorrection", "theme", "textSize", "speak"] {
                             UserDefaults.standard.removeObject(forKey: key)
                         }
                         engine.sourceCode = "auto"
@@ -506,6 +519,8 @@ struct SettingsView: View {
             .onChange(of: speed) { _, _ in engine.syncConfig() }
             .onChange(of: area) { _, _ in engine.syncConfig() }
             .onChange(of: mode) { _, _ in engine.syncConfig() }
+            .onChange(of: ocrConfidence) { _, _ in engine.syncConfig() }
+            .onChange(of: languageCorrection) { _, _ in engine.syncConfig() }
         }
     }
 
