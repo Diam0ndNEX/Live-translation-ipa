@@ -551,11 +551,19 @@ struct SettingsView: View {
 
     private var diagnosticsSection: some View {
             Section("Live diagnostics") {
-                LabeledContent("Frames", value: "\(engine.frames)")
-                LabeledContent("OCR updates", value: "\(engine.ocrCount)")
-                LabeledContent("OCR time", value: "\(Int(engine.ocrMs)) ms")
-                LabeledContent("Translation time", value: "\(Int(engine.translateMs)) ms")
-                LabeledContent("Extension memory free", value: "\(Int(engine.extFreeMB)) MB")
+                LabeledContent("Capture", value: engine.captureAlive ? "Connected" : "No packets")
+                LabeledContent("Extension version", value: engine.extensionVersion)
+                LabeledContent("Frames seen", value: "\(engine.frames)")
+                LabeledContent("OCR passes", value: "\(engine.ocrCount)")
+                LabeledContent("OCR latency", value: "\(Int(engine.ocrMs)) ms")
+                LabeledContent("Translation latency", value: "\(Int(engine.translateMs)) ms")
+                LabeledContent("Free extension memory", value: "\(Int(engine.extFreeMB)) MB")
+                LabeledContent("Last packet age", value: engine.lastPacketAge < 0 ? "Never" : String(format: "%.1f s", engine.lastPacketAge))
+                LabeledContent("Detected source", value: engine.lastDetectedLanguage)
+                LabeledContent("Translation cache hits", value: "\(engine.cacheHits)")
+                LabeledContent("Translation failures", value: "\(engine.translationFailures)")
+                LabeledContent("Last translation error", value: engine.lastTranslationError)
+                LabeledContent("Current status", value: engine.status)
                 if !engine.lastRaw.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Last OCR text").font(.caption).foregroundStyle(.secondary)
