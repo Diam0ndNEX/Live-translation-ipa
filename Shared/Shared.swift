@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "0.8.0"
-    static let build = 10
+    static let version = "0.8.1"
+    static let build = 11
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("0.8.1", "Adjustable OCR confidence and language correction, plus the ScreenLingo identity and expanded settings."),
         ("0.8.0", "ScreenLingo bundle identity, advanced controls, live OCR tuning, and safer capture preferences."),
         ("0.7.1", "ScreenLingo branding, version metadata, and icon support."),
         ("0.7.0", "ScreenLingo refresh: persistent translation history, safer iOS 18 translation timeouts, refreshed branding, and clearer copy/clear history actions."),
@@ -48,6 +49,8 @@ struct Config: Codable {
     var maxEdge: Double    // longest image side OCR works at (smaller = faster)
     var interval: Double   // minimum seconds between OCR passes
     var paused: Bool
+    var minimumConfidence: Double
+    var languageCorrection: Bool
 }
 
 enum TextSim {
