@@ -600,6 +600,29 @@ struct SettingsView: View {
                 Button("Refresh language availability") {
                     Task { await engine.refreshStatus() }
                 }
+                Button("Clear translation cache") {
+                    engine.clearTranslationCache()
+                }
+                Button("Copy diagnostic report") {
+                    let report = [
+                        "ScreenLingo \(AppVersion.full)",
+                        "Capture connected: \(engine.captureAlive)",
+                        "Extension version: \(engine.extensionVersion)",
+                        "Frames: \(engine.frames)",
+                        "OCR updates: \(engine.ocrCount)",
+                        "OCR latency: \(engine.ocrMs) ms",
+                        "Translation latency: \(engine.translateMs) ms",
+                        "Free extension memory: \(engine.extFreeMB) MB",
+                        "Detected language: \(engine.lastDetectedLanguage)",
+                        "Translation cache hits: \(engine.cacheHits)",
+                        "Translation failures: \(engine.translationFailures)",
+                        "Last error: \(engine.lastTranslationError)",
+                        "Status: \(engine.status)",
+                        "Last OCR: \(engine.lastRaw)"
+                    ].joined(separator: "\\n")
+                    UIPasteboard.general.string = report
+                    engine.status = "Diagnostic report copied"
+                }
             }
     }
 
