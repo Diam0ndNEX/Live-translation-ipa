@@ -29,6 +29,24 @@ jobs:
           mkdir Payload
           cp -R build/Build/Products/Release-iphoneos/ScreenLingo.app Payload/ScreenLingo.app
           zip -r ScreenLingo.ipa Payload
+      - name: Verify packaged app and extension versions
+        run: |
+          set -euo pipefail
+          APP="Payload/ScreenLingo.app"
+          EXPECTED_VERSION="1.2.0"
+          EXPECTED_BUILD="15"
+          APP_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist")
+          APP_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Info.plist")
+          echo "Main app version: $APP_VERSION ($APP_BUILD)"
+          test "$APP_VERSION" = "$EXPECTED_VERSION"
+          test "$APP_BUILD" = "$EXPECTED_BUILD"
+          EXT=$(find "$APP/PlugIns" -maxdepth 1 -type d -name "*.appex" -print -quit)
+          test -n "$EXT"
+          EXT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$EXT/Info.plist")
+          EXT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$EXT/Info.plist")
+          echo "Capture extension version: $EXT_VERSION ($EXT_BUILD)"
+          test "$EXT_VERSION" = "$EXPECTED_VERSION"
+          test "$EXT_BUILD" = "$EXPECTED_BUILD"
       - uses: actions/upload-artifact@v4
         with:
           name: ScreenLingo-ipa
