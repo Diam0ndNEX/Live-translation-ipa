@@ -402,6 +402,22 @@ struct LanguagesView: View {
 
 // MARK: - Settings
 struct SettingsView: View {
+    private func translationModeOption(_ item: TranslateMode) -> some View {
+        Text(item.title).tag(item.rawValue)
+    }
+
+    private func ocrAreaOption(_ item: OCRArea) -> some View {
+        Text(item.title).tag(item.rawValue)
+    }
+
+    private func windowSizeOption(_ item: WindowSize) -> some View {
+        Text(item.title).tag(item.rawValue)
+    }
+
+    private func themeOption(_ item: PiPTheme) -> some View {
+        Text(item.title).tag(item.rawValue)
+    }
+
     private func speedPresetOption(_ item: SpeedPreset) -> some View {
         Text(item.title).tag(item.rawValue)
     }
@@ -440,16 +456,12 @@ struct SettingsView: View {
                 Section {
                     Picker("Translation mode", selection: $mode) {
                         ForEach(TranslateMode.allCases) { item in
-                            let title: String = item.title
-                            let value: String = item.rawValue
-                            Text(title).tag(value)
+                            translationModeOption(item)
                         }
                     }
                     Picker("Text capture area", selection: $area) {
                         ForEach(OCRArea.allCases) { item in
-                            let title: String = item.title
-                            let value: String = item.rawValue
-                            Text(title).tag(value)
+                            ocrAreaOption(item)
                         }
                     }
                     Picker("Performance profile", selection: $speed) {
@@ -478,16 +490,12 @@ struct SettingsView: View {
                 Section("Floating window") {
                     Picker("Window size", selection: $winSize) {
                         ForEach(WindowSize.allCases) { item in
-                            let title: String = item.title
-                            let value: String = item.rawValue
-                            Text(title).tag(value)
+                            windowSizeOption(item)
                         }
                     }
                     Picker("Appearance", selection: $theme) {
                         ForEach(PiPTheme.allCases) { item in
-                            let title: String = item.title
-                            let value: String = item.rawValue
-                            Text(title).tag(value)
+                            themeOption(item)
                         }
                     }
                     Picker("Text size", selection: $textSize) {
