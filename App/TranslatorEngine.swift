@@ -699,13 +699,22 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func runBatch(_ session: TranslationSession, _ texts: [String]) async -> [String]? {
-        let reqs = texts.enumerated().map { TranslationSession.Request(sourceText: $0.element, clientIdentifier: String($0.offset)) }
-        guard let res = try? await session.translations(from: reqs) else { return nil }
-        var out = [String](repeating: "", count: texts.count)
-        for r in res {
-            if let id = r.clientIdentifier, let i = Int(id), i < out.count { out[i] = r.targetText }
+        guard !texts.isEmpty else { return [] }
+        let reqs = texts.enumerated().map {
+            TranslationSession.Request(sourceText: $0.element, clientIdentifier: String($0.offset))
         }
-        return out
+        guard let res = try? await session.translations(from: reqs), res.count == texts.count else { return nil }
+        var out = [String?](repeating: nil, count: texts.count)
+        for result in res {
+            guard let id = result.clientIdentifier, let index = Int(id),
+                  out.indices.contains(index), out[index] == nil else { return nil }
+            let translated = result.targetText.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !translated.isEmpty else { return nil }
+            out[index] = translated
+        }
+        // Do not let a missing/duplicate client identifier shift or scramble results.
+        guard out.allSatisfy({ $0 != nil }) else { return nil }
+        return out.compactMap { $0 }
     }
 
     /// Conservative warning signal for clearly truncated or empty outputs.
