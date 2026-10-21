@@ -287,7 +287,9 @@ final class TranslatorEngine: ObservableObject {
         let groupedBlocks = makeBlocks(cand)
         let sourceBlocks = groupedBlocks.filter { !isTargetLanguage(blockText($0)) }
         let blocks = selectBlocks(sourceBlocks)
-        let texts = dedupe(blocks.map { blockText($0) }.filter { TextSim.norm($0).count >= 2 && plausiblySource($0) })
+        let texts = dedupe(blocks.map { blockText($0) }.filter {
+            TextSim.norm($0).count >= 2 && isUsefulOCRText($0) && plausiblySource($0)
+        })
         selectedBlockCount = texts.count
         lastSelectedBlocks = texts.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
         // A single empty/noisy OCR pass is not evidence that the dialogue disappeared.
@@ -449,6 +451,16 @@ final class TranslatorEngine: ObservableObject {
             else { out += " " + t }
         }
         return out
+    }
+
+    /// Reject OCR blocks that are mostly counters, coordinates, timestamps, or visual noise.
+    /// Keep short natural fragments such as "Rem:" and "p-" because dialogue is often split.
+    private func isUsefulOCRText(_ text: String) -> Bool {
+        let letters = text.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
+        let digits = text.unicodeScalars.filter { CharacterSet.decimalDigits.contains($0) }.count
+        guard letters >= 2 else { return false }
+        if digits >= 5 && digits > letters { return false }
+        return true
     }
 
     /// With a chosen source language, skips blocks that are clearly written in another language.
