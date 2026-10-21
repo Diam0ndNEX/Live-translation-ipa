@@ -445,10 +445,18 @@ struct SettingsView: View {
                         ForEach(WindowSize.allCases) { Text($0.title).tag($0.rawValue) }
                     }
                     Picker("Appearance", selection: $theme) {
-                        ForEach(PiPTheme.allCases) { Text($0.title).tag($0.rawValue) }
+                        ForEach(PiPTheme.allCases) { item in
+                            let title: String = item.title
+                            let value: String = item.rawValue
+                            Text(title).tag(value)
+                        }
                     }
                     Picker("Text size", selection: $textSize) {
-                        ForEach(PiPTextSize.allCases) { Text($0.title).tag($0.rawValue) }
+                        ForEach(PiPTextSize.allCases) { item in
+                            let title: String = item.title
+                            let value: String = item.rawValue
+                            Text(title).tag(value)
+                        }
                     }
                     Toggle("Show original above translation", isOn: $showOriginal)
                     Toggle("Speak translations aloud", isOn: $speak)
