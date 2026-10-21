@@ -154,10 +154,6 @@ struct HomeView: View {
     @AppStorage("showOriginal") private var showOriginal = false
     @AppStorage("speed") private var speed = SpeedPreset.balanced.rawValue
     @AppStorage("autoClear") private var autoClear = true
-    @AppStorage("ocrConfidence") private var ocrConfidence: Double = 0.30
-    @AppStorage("languageCorrection") private var languageCorrection = true
-    @AppStorage("ocrConfidence") private var ocrConfidence = 0.30
-    @AppStorage("languageCorrection") private var languageCorrection = true
 
     private var previewRatio: CGFloat {
         let s = (WindowSize(rawValue: winSize) ?? .normal).size
@@ -400,6 +396,8 @@ struct SettingsView: View {
     @AppStorage("showOriginal") private var showOriginal = false
     @AppStorage("speed") private var speed = SpeedPreset.balanced.rawValue
     @AppStorage("autoClear") private var autoClear = true
+    @AppStorage("ocrConfidence") private var ocrConfidence: Double = 0.30
+    @AppStorage("languageCorrection") private var languageCorrection = true
 
     var body: some View {
         NavigationStack {
