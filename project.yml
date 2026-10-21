@@ -19,6 +19,8 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: ScreenLingo
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         UILaunchScreen: {}
         UIBackgroundModes: [audio]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
@@ -39,6 +41,8 @@ targets:
       path: BroadcastExtension/Info.plist
       properties:
         CFBundleDisplayName: ScreenLingo Capture
+        CFBundleShortVersionString: "$(MARKETING_VERSION)"
+        CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         NSExtension:
           NSExtensionPointIdentifier: com.apple.broadcast-services-upload
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SampleHandler
