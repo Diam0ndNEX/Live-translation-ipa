@@ -1,4 +1,4 @@
-// Screen Translator – Broadcast extension – v0.6.0
+// Screen Translator – Broadcast extension – v0.7.0
 import ReplayKit
 import Vision
 import ImageIO
@@ -13,6 +13,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var lastPing = Date.distantPast
     private var candidateKey = ""
     private var sentKey = ""
+    private var candidateCount = 0
     private var emptyPasses = 0
     private var lastOcrMs: Double = 0
 
@@ -162,14 +163,15 @@ class SampleHandler: RPBroadcastSampleHandler {
             return
         }
 
-        // Stability: send once the same text was read twice in a row (skips half-faded text).
+        // Stability: send once the same text was read N times in a row (skips half-faded text).
+        let need = max(1, cfg.stability ?? 2)
         let key = lines.map(\.t).joined(separator: " ")
-        if TextSim.similar(key, sentKey) { candidateKey = key; return }
-        if TextSim.similar(key, candidateKey) {
+        if TextSim.similar(key, sentKey) { candidateKey = key; candidateCount = 0; return }
+        if TextSim.similar(key, candidateKey) { candidateCount += 1 } else { candidateKey = key; candidateCount = 1 }
+        if candidateCount >= need {
             sentKey = key
+            candidateCount = 0
             send(kind: "ocr", lines: Array(lines.prefix(60)))
-        } else {
-            candidateKey = key
         }
     }
 
