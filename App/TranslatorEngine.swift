@@ -501,6 +501,19 @@ final class TranslatorEngine: ObservableObject {
         enqueue([original])
     }
 
+    /// Retranslate the latest source text after evicting cached model output.
+    func retranslateLastFresh() {
+        guard !original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            status = "Nothing to retry yet"
+            return
+        }
+        let count = cache.count
+        cache.removeAll()
+        lastHandled = ""
+        status = "Retrying without cached output (cleared \(count) entries)…"
+        enqueue([original])
+    }
+
     /// Clear cached translations when diagnosing a suspicious or stale result.
     func clearTranslationCache() {
         let count = cache.count
