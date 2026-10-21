@@ -105,6 +105,11 @@ final class TranslatorEngine: ObservableObject {
     @Published var ocrMs: Double = 0
     @Published var translateMs: Double = 0
     @Published var extFreeMB: Double = 0
+    @Published var lastPacketAge: Double = 0
+    @Published var lastDetectedLanguage = "—"
+    @Published var cacheHits = 0
+    @Published var translationFailures = 0
+    @Published var lastTranslationError = "None"
     @Published var history: [HistoryItem] = [] {
         didSet { saveHistory() }
     }
@@ -164,6 +169,7 @@ final class TranslatorEngine: ObservableObject {
                     self.status = "Capture stopped – iOS may have closed the capture extension. Tap the broadcast icon again (try Speed: Fast)."
                 }
                 self.captureAlive = alive
+                self.lastPacketAge = self.lastPacketDate == .distantPast ? -1 : Date().timeIntervalSince(self.lastPacketDate)
             }
         }
         pip.setSize(windowSize.size)
@@ -461,7 +467,7 @@ final class TranslatorEngine: ObservableObject {
 
     /// Splits a block into sentences so each is translated on its own (better quality, cacheable).
     private func splitSentences(_ text: String) -> [String] {
-        guard text.count > 24 else { return [text] }
+        guard text.count > 160 else { return [text] }
         let tok = NLTokenizer(unit: .sentence)
         tok.string = text
         var out: [String] = []
@@ -476,6 +482,7 @@ final class TranslatorEngine: ObservableObject {
 
     private func process(_ blocks: [String]) async {
         let t0 = Date()
+        lastTranslationError = "None"
         let target = Locale.Language(identifier: targetCode)
 
         var sentences: [[String]] = []          // per block
@@ -489,13 +496,16 @@ final class TranslatorEngine: ObservableObject {
                 sentences.append([text]); done.append([text]); continue
             }
             let id = src.minimalIdentifier
+            lastDetectedLanguage = Locale.current.localizedString(forIdentifier: id) ?? id
             srcLangs[id] = src
-            let parts = splitSentences(text)
+            // Keep short dialogue and adjacent clauses together so the translation model
+            // can use context and preserve natural word order (important for manga bubbles).
+            let parts = text.count <= 160 ? [text] : splitSentences(text)
             sentences.append(parts)
             var row: [String?] = []
             for (si, part) in parts.enumerated() {
                 if let hit = cache["\(id)>\(targetCode)|\(part)"] {
-                    row.append(hit); translatedAny = true
+                    row.append(hit); translatedAny = true; cacheHits += 1
                 } else {
                     row.append(nil)
                     pending[id, default: []].append((bi, si, part))
@@ -522,7 +532,8 @@ final class TranslatorEngine: ObservableObject {
         if cache.count > 600 { cache.removeAll() }
 
         guard translatedAny else {
-            status = failed ? "Translation failed – download the language packs (Languages tab)"
+            if failed && lastTranslationError == "None" { lastTranslationError = "No translated output returned" }
+            status = failed ? "Translation failed – check diagnostics and language packs"
                             : "Text is already in the target language"
             return
         }
