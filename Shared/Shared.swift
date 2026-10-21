@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "0.7.1"
-    static let build = 9
+    static let version = "0.8.0"
+    static let build = 10
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("0.8.0", "ScreenLingo bundle identity, advanced controls, live OCR tuning, and safer capture preferences."),
         ("0.7.1", "ScreenLingo branding, version metadata, and icon support."),
         ("0.7.0", "ScreenLingo refresh: persistent translation history, safer iOS 18 translation timeouts, refreshed branding, and clearer copy/clear history actions."),
         ("0.6.0", "Fixes mixed-up sentence order: text is grouped into blocks (bubble vs background), each block read in proper order and translated sentence by sentence in one batch. Ignores background text in another language. Floating-window appearance + text size, speak translation aloud."),
