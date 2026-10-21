@@ -282,20 +282,10 @@ final class TranslatorEngine: ObservableObject {
         lastSelectedBlocks = texts.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
         guard !texts.isEmpty else { handleClear(); return }
 
-        // Translate dialogue as a contextual unit in movie/comic modes. Translating
-        // each OCR box separately loses clause context and makes short fragments
-        // such as "p-" and "pq ele..." independently translated/reordered.
-        // Movie mode uses a single flowing subtitle string; comics keep line breaks
-        // so the translation can infer dialogue layout without losing the order.
-        if mode == .movie {
-            let context = texts.map { String($0.prefix(400)) }.joined(separator: " ")
-            enqueue([String(context.prefix(1800))])
-        } else if mode == .comic {
-            let context = texts.map { String($0.prefix(400)) }.joined(separator: "\n")
-            enqueue([String(context.prefix(1800))])
-        } else {
-            enqueue(texts.map { String($0.prefix(400)) })
-        }
+        // Each text block is one spatial region. Keep regions separate so dialogue
+        // from different bubbles/captions is never joined into a single sentence.
+        // The lines inside each region have already been reconstructed in reading order.
+        enqueue(texts.map { String($0.prefix(900)) })
     }
 
     // MARK: Text blocks
@@ -374,9 +364,10 @@ final class TranslatorEngine: ObservableObject {
         let maxH = blocks.map { blockHeight($0) }.max() ?? 0
         var kept = blocks
         if mode == .movie {
-            // Subtitle mode prioritizes the largest, most subtitle-like blocks.
-            kept = blocks.filter { blockHeight($0) >= maxH * 0.62 }
-            if kept.count > 3 { kept = Array(kept.sorted { blockWeight($0) > blockWeight($1) }.prefix(3)) }
+            // Text may occur anywhere. Retain several substantial regions, not just
+            // the largest bottom subtitle, and preserve each region independently.
+            kept = blocks.filter { blockHeight($0) >= maxH * 0.42 }
+            if kept.count > 8 { kept = Array(kept.sorted { blockWeight($0) > blockWeight($1) }.prefix(8)) }
         } else if area == .smart {
             kept = blocks.filter { blockHeight($0) >= maxH * (mode == .comic ? 0.22 : 0.32) }
         }
