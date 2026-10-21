@@ -149,6 +149,7 @@ final class TranslatorEngine: ObservableObject {
     // Self-reading protection: what the PiP window currently shows, and where it is on screen
     private let placeholderGrams = TextSim.grams("Waiting for screen text… Listening…")
     private var renderedGrams = TextSim.grams("Waiting for screen text… Listening…")
+    private var renderedNorm = TextSim.norm("Waiting for screen text… Listening…")
     private var sourceGrams: Set<String> = []
     private var pipRegion: CGRect?
     private var pipRegionStamp = Date.distantPast
@@ -275,7 +276,12 @@ final class TranslatorEngine: ObservableObject {
         let range = area.range(mode: mode)
         var cand = p.lines.filter { range.contains($0.y) }
         cand = removeOwnOutput(cand)
-        // Target-language filtering is performed after grouping OCR lines into regions.
+        // Filter complete, confidently target-language OCR lines before grouping.
+        // This is especially important when ReplayKit sees the English PiP output:
+        // if it gets merged with Portuguese dialogue first, language detection may
+        // classify the entire mixed block as source text and feed our output back in.
+        cand = cand.filter { !isTargetLanguage($0.t) }
+        // Target-language filtering is also performed after grouping OCR lines into regions.
         // Detect language on complete OCR regions, not isolated fragments such as
         // "Rem:" or "p-", which are too short for reliable language identification.
         let groupedBlocks = makeBlocks(cand)
@@ -462,16 +468,22 @@ final class TranslatorEngine: ObservableObject {
         var mine: [OCRLine] = []
         var rest: [OCRLine] = []
         for l in lines {
-            if TextSim.norm(l.t).count >= 3 {
+            let lineNorm = TextSim.norm(l.t)
+            if lineNorm.count >= 3 {
                 let inOutput = TextSim.containment(of: l.t, in: renderedGrams)
                 let inSource = TextSim.containment(of: l.t, in: sourceGrams)
+                // Exact normalized substring matching catches OCR rows that are
+                // wrapped differently from the PiP layout. Fuzzy bigram matching
+                // remains as a fallback for imperfect recognition.
+                let isRenderedFragment = lineNorm.count >= 8 && renderedNorm.contains(lineNorm)
+                let fuzzyRenderedFragment = lineNorm.count >= 8 && inOutput >= 0.42
 
                 // The floating window can be captured by ReplayKit. OCR may split
                 // one rendered sentence into several short lines, so a strict 0.85
                 // containment plus a source/output margin misses our own overlay.
                 // Learn the overlay region from either its translation or (when
                 // enabled) its displayed original, then suppress everything inside it.
-                let matchesTranslation = inOutput >= 0.68
+                let matchesTranslation = isRenderedFragment || fuzzyRenderedFragment || inOutput >= 0.68
                 let matchesDisplayedOriginal = showOriginal && inSource >= 0.72
                 if matchesTranslation || matchesDisplayedOriginal {
                     mine.append(l)
@@ -522,6 +534,7 @@ final class TranslatorEngine: ObservableObject {
         original = ""
         translated = ""
         renderedGrams = placeholderGrams
+        renderedNorm = TextSim.norm("Waiting for screen text… Listening…")
         pip.render(original: "", translated: "Listening…", showOriginal: false)
     }
 
@@ -562,6 +575,7 @@ final class TranslatorEngine: ObservableObject {
         original = ""
         translated = ""
         renderedGrams = placeholderGrams
+        renderedNorm = TextSim.norm("Waiting for screen text… Listening…")
         sourceGrams = []
         pip.render(original: "", translated: "Listening…", showOriginal: false)
         status = "Output cleared — capture is still running"
@@ -767,6 +781,7 @@ final class TranslatorEngine: ObservableObject {
             if speakEnabled { speak(result) }
         }
         renderedGrams = TextSim.grams(result).union(placeholderGrams)
+        renderedNorm = TextSim.norm(result) + TextSim.norm("Waiting for screen text… Listening…")
         sourceGrams = TextSim.grams(text)
         pip.setSize(windowSize.size)
         pip.style = pipStyle
