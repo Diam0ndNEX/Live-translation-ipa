@@ -641,7 +641,12 @@ final class TranslatorEngine: ObservableObject {
             if availability == .supported { status = "Language pack missing – open the Languages tab" }
             guard let out = await translateBatch(items.map { $0.text }, source: src, target: target,
                                                  installed: availability == .installed),
-                  out.count == items.count else { failed = true; continue }
+                  out.count == items.count else {
+                failed = true
+                translationFailures += 1
+                lastTranslationError = "Translation returned no result for \(id) → \(targetCode)"
+                continue
+            }
             translatedAny = true
             for (k, it) in items.enumerated() {
                 done[it.block][it.index] = out[k]
@@ -654,6 +659,13 @@ final class TranslatorEngine: ObservableObject {
             if failed && lastTranslationError == "None" { lastTranslationError = "No translated output returned" }
             status = failed ? "Translation failed – check diagnostics and language packs"
                             : "Text is already in the target language"
+            return
+        }
+        // Never silently present source-language fragments as if they were translated.
+        // If one required batch fails, a mixed original/translated output is more
+        // misleading than keeping the last known-good translation on screen.
+        if failed {
+            status = "Translation incomplete — keeping previous result. Retry or check language packs."
             return
         }
         var outBlocks: [String] = []
