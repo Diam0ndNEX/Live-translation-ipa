@@ -1,4 +1,4 @@
-// Screen Translator – App UI – v0.4.1
+// Screen Translator – App UI – v0.5.0
 import SwiftUI
 import ReplayKit
 import Translation
@@ -34,6 +34,7 @@ struct RootView: View {
         TabView {
             HomeView().tabItem { Label("Home", systemImage: "house.fill") }
             LanguagesView().tabItem { Label("Languages", systemImage: "globe") }
+            HistoryView().tabItem { Label("History", systemImage: "clock") }
             SettingsView().tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
         .environmentObject(engine)
@@ -150,7 +151,9 @@ struct HomeView: View {
     @AppStorage("mode") private var mode = TranslateMode.movie.rawValue
     @AppStorage("area") private var area = OCRArea.smart.rawValue
     @AppStorage("winSize") private var winSize = WindowSize.normal.rawValue
-    @AppStorage("showOriginal") private var showOriginal = true
+    @AppStorage("showOriginal") private var showOriginal = false
+    @AppStorage("speed") private var speed = SpeedPreset.balanced.rawValue
+    @AppStorage("autoClear") private var autoClear = true
 
     private var previewRatio: CGFloat {
         let s = (WindowSize(rawValue: winSize) ?? .normal).size
@@ -171,6 +174,9 @@ struct HomeView: View {
             .padding(.bottom, 24)
         }
         .scrollIndicators(.hidden)
+        .onChange(of: speed) { _, _ in engine.syncConfig() }
+        .onChange(of: area) { _, _ in engine.syncConfig() }
+        .onChange(of: mode) { _, _ in engine.syncConfig() }
         .background(Theme.bg.ignoresSafeArea())
     }
 
@@ -239,8 +245,18 @@ struct HomeView: View {
                 .onChange(of: winSize) { _, _ in engine.applyWindowSize() }
             }
             Divider().overlay(Color.white.opacity(0.06))
+            SettingRow(icon: "speedometer", tint: .green, title: "Speed") {
+                Picker("", selection: $speed) {
+                    ForEach(SpeedPreset.allCases) { Text($0.title).tag($0.rawValue) }
+                }.pickerStyle(.menu).labelsHidden().tint(.secondary)
+            }
+            Divider().overlay(Color.white.opacity(0.06))
             SettingRow(icon: "text.quote", tint: .teal, title: "Show original text") {
                 Toggle("", isOn: $showOriginal).labelsHidden()
+            }
+            Divider().overlay(Color.white.opacity(0.06))
+            SettingRow(icon: "eraser", tint: .pink, title: "Clear when text ends") {
+                Toggle("", isOn: $autoClear).labelsHidden()
             }
         }
         .card()
@@ -290,6 +306,11 @@ struct HomeView: View {
                 Spacer()
             }
             Text(engine.status).font(.footnote).foregroundStyle(.secondary)
+            Toggle("Pause translating", isOn: $engine.paused).font(.footnote)
+            if engine.captureAlive {
+                Text("OCR \(Int(engine.ocrMs)) ms · translate \(Int(engine.translateMs)) ms · extension memory left \(Int(engine.extFreeMB)) MB")
+                    .font(.caption2).foregroundStyle(.secondary)
+            }
             if !engine.lastRaw.isEmpty {
                 Text("OCR sees: \(engine.lastRaw)")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(3)
@@ -389,7 +410,7 @@ struct SettingsView: View {
                 }
                 Section {
                     Button("Reset settings", role: .destructive) {
-                        for k in ["source", "target", "mode", "area", "winSize", "showOriginal"] {
+                        for k in ["source", "target", "mode", "area", "winSize", "showOriginal", "speed", "autoClear"] {
                             UserDefaults.standard.removeObject(forKey: k)
                         }
                         engine.sourceCode = "auto"; engine.targetCode = "en"
@@ -399,6 +420,34 @@ struct SettingsView: View {
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Settings")
+        }
+    }
+}
+
+// MARK: - History
+struct HistoryView: View {
+    @EnvironmentObject var engine: TranslatorEngine
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    Text("Everything that was translated, newest first. Tap a line to copy its translation.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                ForEach(engine.history) { h in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(h.translated).font(.body.weight(.semibold))
+                        Text(h.original).font(.caption).foregroundStyle(.secondary)
+                    }
+                    .contentShape(Rectangle())
+                    .onTapGesture { UIPasteboard.general.string = h.translated }
+                }
+            }
+            .scrollContentBackground(.hidden)
+            .background(Theme.bg.ignoresSafeArea())
+            .navigationTitle("History")
+            .toolbar { Button("Clear") { engine.history.removeAll() } }
         }
     }
 }
