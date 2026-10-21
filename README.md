@@ -1,27 +1,43 @@
 # ScreenLingo
 
-A native iOS screen translator built with SwiftUI, Apple Vision OCR, and Apple's on-device Translation framework.
+ScreenLingo is a native iOS screen translator built with SwiftUI, Apple Vision OCR, and Apple's on-device Translation framework.
 
-## What it does
+## Highlights
 
-- Reads text from screen broadcasts using ReplayKit and Vision OCR.
-- Translates recognized text on-device with supported Apple language packs.
-- Shows translated text in a floating Picture-in-Picture window.
-- Offers source/target language selection, OCR regions, speed presets, and display styles.
-- Keeps a local translation history on the device, with separate copy actions for original and translated text.
+- Live screen text capture through a ReplayKit broadcast extension.
+- On-device OCR and translation with supported Apple language packs.
+- Floating Picture-in-Picture translation window.
+- Dedicated modes for subtitles, games/apps, and comics.
+- Configurable OCR area and Fast / Balanced / Sharp performance profiles.
+- Customizable PiP size, appearance, text size, and optional original-text display.
+- Optional speech output, pause, automatic clearing, and local translation history.
+- Live diagnostics for OCR latency, translation latency, frame counts, and extension memory.
+- Custom ScreenLingo app icon and consistent app/extension version metadata.
+
+## Identity
+
+- Display name: `ScreenLingo`
+- Bundle identifier: `com.diam0ndnex.screenlingo`
+- Broadcast extension identifier: `com.diam0ndnex.screenlingo.broadcast`
+- Version: `0.8.0` (build `10`)
+
+The bundle identifier has changed from the previous placeholder ID. iOS treats it as a different app identity; to replace an older installation cleanly, uninstall the old Screen Translator build first. This may remove its local app data, so export anything important before uninstalling.
 
 ## Build an unsigned IPA
 
-1. Run the **Build unsigned IPA** workflow from the Actions tab.
-2. Download the `ScreenLingo-ipa` artifact after the workflow succeeds.
-3. Sideload the IPA using your preferred iOS sideloading tool.
+1. Open the **Actions** tab.
+2. Run **Build ScreenLingo IPA**.
+3. When it succeeds, download the `ScreenLingo-ipa` artifact.
+4. Sign and install the IPA using your preferred sideloading tool.
 
-The app targets iOS 18 or later. Translation language availability depends on Apple's supported language pairs and installed packs.
+The workflow generates the icon asset from `App/ScreenLingoIcon.svg`, generates the Xcode project with XcodeGen, builds the app and broadcast extension, then packages the unsigned IPA.
 
-## Privacy
+## Privacy and limitations
 
-Screen OCR and translation are handled on-device. Translation history is stored locally in app preferences and is not uploaded by this project.
+OCR and translation are handled on-device using Apple frameworks. Language-pair availability depends on iOS and installed language packs. ScreenLingo cannot guarantee identical accuracy for every font, animation, language pair, or game UI; use Sharp for small text and Fast for lower latency.
+
+Translation history is stored locally in app preferences. This project does not send recognized text to a third-party translation server.
 
 ## Development
 
-The project is generated from `project.yml` using XcodeGen. The app and ReplayKit broadcast extension share packet/config models in `Shared/Shared.swift`.
+The Xcode project is generated from `project.yml`. The app and ReplayKit extension share packet/config models in `Shared/Shared.swift`.
