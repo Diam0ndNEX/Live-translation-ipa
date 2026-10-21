@@ -1,9 +1,45 @@
-// Screen Translator – App – v0.3.0
+// Screen Translator – App – v0.6.0
 import AVKit
 import UIKit
 import SwiftUI
 
 /// Draws translated text into frames and feeds them to a system Picture-in-Picture window.
+enum PiPTheme: String, CaseIterable, Identifiable {
+    case dark, light, yellow
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .dark: "Dark"; case .light: "Light"; case .yellow: "Yellow subtitles" }
+    }
+}
+enum PiPTextSize: String, CaseIterable, Identifiable {
+    case auto, large, huge
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .auto: "Auto"; case .large: "Large"; case .huge: "Huge" }
+    }
+}
+struct PiPStyle {
+    var bg: UIColor
+    var fg: UIColor
+    var secondary: UIColor
+    var hi: CGFloat
+    var lo: CGFloat
+
+    static func make(theme: PiPTheme, size: PiPTextSize) -> PiPStyle {
+        let hi: CGFloat, lo: CGFloat
+        switch size {
+        case .auto: hi = 44; lo = 16
+        case .large: hi = 56; lo = 24
+        case .huge: hi = 72; lo = 32
+        }
+        switch theme {
+        case .dark: return PiPStyle(bg: UIColor(white: 0.05, alpha: 1), fg: .white, secondary: .lightGray, hi: hi, lo: lo)
+        case .light: return PiPStyle(bg: UIColor(white: 0.97, alpha: 1), fg: .black, secondary: .darkGray, hi: hi, lo: lo)
+        case .yellow: return PiPStyle(bg: .black, fg: UIColor(red: 1, green: 0.92, blue: 0.2, alpha: 1), secondary: .lightGray, hi: hi, lo: lo)
+        }
+    }
+}
+
 final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegate, AVPictureInPictureControllerDelegate {
     let displayLayer = AVSampleBufferDisplayLayer()
     private var pip: AVPictureInPictureController?
@@ -12,6 +48,7 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
     private var heartbeat: Timer?
     private var lastOriginal = "", lastTranslated = "Waiting for screen text…"
     private var lastShowOriginal = true
+    var style = PiPStyle.make(theme: .dark, size: .auto)
     var onStatus: ((String) -> Void)?
     var onActiveChange: ((Bool) -> Void)?
     var isActive: Bool { pip?.isPictureInPictureActive ?? false }
@@ -61,26 +98,28 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
         render(original: lastOriginal, translated: lastTranslated, showOriginal: lastShowOriginal)
     }
 
+    func rerender() { render(original: lastOriginal, translated: lastTranslated, showOriginal: lastShowOriginal) }
+
     // MARK: Rendering
     func render(original: String, translated: String, showOriginal: Bool) {
         lastOriginal = original; lastTranslated = translated; lastShowOriginal = showOriginal
         let fmt = UIGraphicsImageRendererFormat()
         fmt.scale = 1; fmt.opaque = true
         let img = UIGraphicsImageRenderer(size: size, format: fmt).image { ctx in
-            UIColor(white: 0.05, alpha: 1).setFill()
+            style.bg.setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
             let w = size.width - 48
             var y: CGFloat = 16
             if showOriginal && !original.isEmpty {
                 let r = CGRect(x: 24, y: y, width: w, height: size.height * 0.27)
                 let f = fittingFont(original, rect: r, weight: .regular, hi: 22, lo: 12)
-                NSAttributedString(string: original, attributes: [.font: f, .foregroundColor: UIColor.lightGray])
+                NSAttributedString(string: original, attributes: [.font: f, .foregroundColor: style.secondary])
                     .draw(with: r, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], context: nil)
                 y = r.maxY + 10
             }
             let r2 = CGRect(x: 24, y: y, width: w, height: size.height - y - 16)
-            let f2 = fittingFont(translated, rect: r2, weight: .bold, hi: 44, lo: 16)
-            NSAttributedString(string: translated, attributes: [.font: f2, .foregroundColor: UIColor.white])
+            let f2 = fittingFont(translated, rect: r2, weight: .bold, hi: style.hi, lo: style.lo)
+            NSAttributedString(string: translated, attributes: [.font: f2, .foregroundColor: style.fg])
                 .draw(with: r2, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], context: nil)
         }
         guard let cg = img.cgImage else { return }
