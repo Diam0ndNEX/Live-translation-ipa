@@ -162,15 +162,26 @@ class SampleHandler: RPBroadcastSampleHandler {
             return
         }
 
-        // Stability: send once the same text was read twice in a row (skips half-faded text).
+        // Low-latency capture: the first readable frame is valuable because subtitles
+        // and dialogue can disappear in 1–2 seconds. Send a new scene/text immediately;
+        // do not wait for a second identical OCR pass. Later frames are deduplicated
+        // against the last delivered text to avoid repeatedly translating the same frame.
         let key = lines.map(\.t).joined(separator: " ")
-        if TextSim.similar(key, sentKey) { candidateKey = key; return }
-        if TextSim.similar(key, candidateKey) {
+        if sentKey.isEmpty {
             sentKey = key
-            send(kind: "ocr", lines: Array(lines.prefix(60)))
-        } else {
             candidateKey = key
+            send(kind: "ocr", lines: Array(lines.prefix(60)))
+            return
         }
+        if TextSim.similar(key, sentKey, 0.88) {
+            candidateKey = key
+            return
+        }
+        // Text changed enough to be a new subtitle/dialogue state. Deliver immediately.
+        // Store the new key before sending so the next video frame cannot duplicate it.
+        candidateKey = key
+        sentKey = key
+        send(kind: "ocr", lines: Array(lines.prefix(60)))
     }
 
     // MARK: Send
