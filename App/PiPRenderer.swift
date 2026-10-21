@@ -1,9 +1,8 @@
-// Screen Translator – App – v0.6.0
+// Screen Translator – App – v0.7.0
 import AVKit
 import UIKit
 import SwiftUI
 
-/// Draws translated text into frames and feeds them to a system Picture-in-Picture window.
 enum PiPTheme: String, CaseIterable, Identifiable {
     case dark, light, yellow
     var id: String { rawValue }
@@ -18,28 +17,41 @@ enum PiPTextSize: String, CaseIterable, Identifiable {
         switch self { case .auto: "Auto"; case .large: "Large"; case .huge: "Huge" }
     }
 }
+enum PiPFont: String, CaseIterable, Identifiable {
+    case standard, rounded, serif, mono
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .standard: "Standard"; case .rounded: "Rounded"; case .serif: "Serif"; case .mono: "Monospaced" }
+    }
+    var design: UIFontDescriptor.SystemDesign {
+        switch self { case .standard: .default; case .rounded: .rounded; case .serif: .serif; case .mono: .monospaced }
+    }
+}
 struct PiPStyle {
     var bg: UIColor
     var fg: UIColor
     var secondary: UIColor
     var hi: CGFloat
     var lo: CGFloat
+    var design: UIFontDescriptor.SystemDesign
 
-    static func make(theme: PiPTheme, size: PiPTextSize) -> PiPStyle {
+    static func make(theme: PiPTheme, size: PiPTextSize, font: PiPFont = .standard) -> PiPStyle {
         let hi: CGFloat, lo: CGFloat
         switch size {
         case .auto: hi = 44; lo = 16
         case .large: hi = 56; lo = 24
         case .huge: hi = 72; lo = 32
         }
+        let d = font.design
         switch theme {
-        case .dark: return PiPStyle(bg: UIColor(white: 0.05, alpha: 1), fg: .white, secondary: .lightGray, hi: hi, lo: lo)
-        case .light: return PiPStyle(bg: UIColor(white: 0.97, alpha: 1), fg: .black, secondary: .darkGray, hi: hi, lo: lo)
-        case .yellow: return PiPStyle(bg: .black, fg: UIColor(red: 1, green: 0.92, blue: 0.2, alpha: 1), secondary: .lightGray, hi: hi, lo: lo)
+        case .dark: return PiPStyle(bg: UIColor(white: 0.05, alpha: 1), fg: .white, secondary: .lightGray, hi: hi, lo: lo, design: d)
+        case .light: return PiPStyle(bg: UIColor(white: 0.97, alpha: 1), fg: .black, secondary: .darkGray, hi: hi, lo: lo, design: d)
+        case .yellow: return PiPStyle(bg: .black, fg: UIColor(red: 1, green: 0.92, blue: 0.2, alpha: 1), secondary: .lightGray, hi: hi, lo: lo, design: d)
         }
     }
 }
 
+/// Draws translated text into frames and feeds them to a system Picture-in-Picture window.
 final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegate, AVPictureInPictureControllerDelegate {
     let displayLayer = AVSampleBufferDisplayLayer()
     private var pip: AVPictureInPictureController?
@@ -130,14 +142,20 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
     private func fittingFont(_ text: String, rect: CGRect, weight: UIFont.Weight, hi: CGFloat, lo: CGFloat) -> UIFont {
         var fs = hi
         while fs > lo {
-            let f = UIFont.systemFont(ofSize: fs, weight: weight)
+            let f = makeFont(fs, weight)
             let b = (text as NSString).boundingRect(with: CGSize(width: rect.width, height: .greatestFiniteMagnitude),
                                                     options: .usesLineFragmentOrigin,
                                                     attributes: [.font: f], context: nil)
             if b.height <= rect.height { return f }
             fs -= 2
         }
-        return UIFont.systemFont(ofSize: lo, weight: weight)
+        return makeFont(lo, weight)
+    }
+
+    private func makeFont(_ size: CGFloat, _ weight: UIFont.Weight) -> UIFont {
+        let base = UIFont.systemFont(ofSize: size, weight: weight)
+        if let d = base.fontDescriptor.withDesign(style.design) { return UIFont(descriptor: d, size: size) }
+        return base
     }
 
     private func enqueue(_ cg: CGImage) {
