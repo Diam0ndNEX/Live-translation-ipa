@@ -448,7 +448,18 @@ final class TranslatorEngine: ObservableObject {
             if TextSim.norm(l.t).count >= 3 {
                 let inOutput = TextSim.containment(of: l.t, in: renderedGrams)
                 let inSource = TextSim.containment(of: l.t, in: sourceGrams)
-                if inOutput >= 0.85 && inOutput > inSource + 0.1 { mine.append(l); continue }
+
+                // The floating window can be captured by ReplayKit. OCR may split
+                // one rendered sentence into several short lines, so a strict 0.85
+                // containment plus a source/output margin misses our own overlay.
+                // Learn the overlay region from either its translation or (when
+                // enabled) its displayed original, then suppress everything inside it.
+                let matchesTranslation = inOutput >= 0.68
+                let matchesDisplayedOriginal = showOriginal && inSource >= 0.72
+                if matchesTranslation || matchesDisplayedOriginal {
+                    mine.append(l)
+                    continue
+                }
             }
             rest.append(l)
         }
@@ -463,6 +474,8 @@ final class TranslatorEngine: ObservableObject {
             pipRegionStamp = Date()
         }
         if let reg = pipRegion, Date().timeIntervalSince(pipRegionStamp) < 15 {
+            // The overlay can contain multiple OCR rows (original + translation).
+            // Once anchored by a text match, suppress every row within its bounds.
             rest.removeAll { reg.contains(CGPoint(x: $0.x, y: $0.y)) }
         }
         return rest
