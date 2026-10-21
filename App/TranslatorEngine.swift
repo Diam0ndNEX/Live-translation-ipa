@@ -132,6 +132,10 @@ final class TranslatorEngine: ObservableObject {
     private var lastHandled = ""
     private var queued: [String]?
     private var busy = false
+    // Require two consecutive OCR passes before replacing the displayed translation.
+    // This filters transient OCR mixtures while adding only one capture interval.
+    private var pendingInput = ""
+    private var pendingInputCount = 0
     private var showing = false
     private var pendingTexts: [String] = []
     private var legacyContinuation: CheckedContinuation<[String]?, Never>?
@@ -280,11 +284,24 @@ final class TranslatorEngine: ObservableObject {
         let texts = dedupe(blocks.map { blockText($0) }.filter { TextSim.norm($0).count >= 2 && plausiblySource($0) })
         selectedBlockCount = texts.count
         lastSelectedBlocks = texts.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
-        guard !texts.isEmpty else { handleClear(); return }
+        // A single empty/noisy OCR pass is not evidence that the dialogue disappeared.
+        // Keep the last good result until the extension explicitly reports a clear frame.
+        guard !texts.isEmpty else { return }
 
-        // Each text block is one spatial region. Keep regions separate so dialogue
-        // from different bubbles/captions is never joined into a single sentence.
-        // The lines inside each region have already been reconstructed in reading order.
+        // Stabilize the selected text over two consecutive OCR passes. The first
+        // usable candidate can be a partial subtitle or a contaminated read of the
+        // floating window; confirming it once prevents rapid output oscillation.
+        let candidate = texts.map { String($0.prefix(900)) }.joined(separator: "\n")
+        if TextSim.similar(candidate, pendingInput, 0.88) {
+            pendingInputCount += 1
+            pendingInput = candidate
+        } else {
+            pendingInput = candidate
+            pendingInputCount = 1
+        }
+        guard pendingInputCount >= 2 else { return }
+
+        // Keep separate spatial regions separate; never merge different bubbles.
         enqueue(texts.map { String($0.prefix(900)) })
     }
 
@@ -490,7 +507,9 @@ final class TranslatorEngine: ObservableObject {
     private func enqueue(_ blocks: [String]) {
         let joined = blocks.joined(separator: "\n")
         guard joined != lastHandled else { return }
-        if TextSim.similar(joined, lastHandled, 0.92) { lastHandled = joined; return }   // tiny OCR jitter
+        // Ignore small OCR jitter without changing the accepted baseline. Updating
+        // lastHandled for a rejected candidate can make later real changes look stale.
+        if TextSim.similar(joined, lastHandled, 0.92) { return }
         lastHandled = joined
         queued = blocks
         if !busy { Task { await drain() } }
