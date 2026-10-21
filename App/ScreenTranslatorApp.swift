@@ -386,6 +386,8 @@ struct LanguagesView: View {
 
 // MARK: - Settings
 struct SettingsView: View {
+    private var confidencePercentage: String { String(Int(ocrConfidence * 100)) + "%" }
+
     @EnvironmentObject var engine: TranslatorEngine
     @AppStorage("theme") private var theme = PiPTheme.dark.rawValue
     @AppStorage("textSize") private var textSize = PiPTextSize.auto.rawValue
@@ -427,7 +429,7 @@ struct SettingsView: View {
                         HStack {
                             Text("Minimum OCR confidence")
                             Spacer()
-                            Text("\(Int(ocrConfidence * 100))%").monospacedDigit().foregroundStyle(.secondary)
+                            Text(confidencePercentage).monospacedDigit().foregroundStyle(.secondary)
                         }
                         Slider(value: $ocrConfidence, in: 0.15...0.75, step: 0.05)
                         Text("Lower values catch faint or stylized text but may include more mistakes. Higher values are stricter and can miss difficult text.")
