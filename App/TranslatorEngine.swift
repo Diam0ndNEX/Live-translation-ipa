@@ -274,7 +274,17 @@ final class TranslatorEngine: ObservableObject {
         selectedBlockCount = texts.count
         lastSelectedBlocks = texts.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
         guard !texts.isEmpty else { handleClear(); return }
-        enqueue(texts.map { String($0.prefix(400)) })
+
+        // Comic dialogue is often fragmented across several centered speech-bubble
+        // lines. Translating each OCR fragment independently can make the output
+        // read like separate, shuffled clauses. Preserve the full ordered context
+        // in one request for comics; game UI and subtitles remain separate blocks.
+        if mode == .comic {
+            let context = texts.map { String($0.prefix(400)) }.joined(separator: "\n")
+            enqueue([String(context.prefix(1800))])
+        } else {
+            enqueue(texts.map { String($0.prefix(400)) })
+        }
     }
 
     // MARK: Text blocks
