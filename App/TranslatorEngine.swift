@@ -23,11 +23,11 @@ enum OCRArea: String, CaseIterable, Identifiable {
     }
     func range(mode: TranslateMode) -> ClosedRange<Double> {   // y: 0 = bottom, 1 = top
         switch self {
-        // Movie mode defaults to the subtitle band to avoid mixing background signs,
-        // UI labels and unrelated text into the dialogue translation. Other modes
-        // need a wider search area because text can appear anywhere on screen.
-        case .smart:
-            return mode == .movie ? 0.02...0.58 : 0.04...0.92
+        // Smart mode must work across the entire frame in every mode: subtitles,
+        // dialogue, signs, captions, and game text can appear anywhere. Keep spatial
+        // restriction as an explicit user choice (Full/Bottom/Top/Middle), never an
+        // implicit Movie-mode filter.
+        case .smart: return 0...1
         case .full: return 0...1
         case .bottom: return 0...0.33
         case .top: return 0.5...1
