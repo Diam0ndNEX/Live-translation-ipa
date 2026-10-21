@@ -467,6 +467,7 @@ struct SettingsView: View {
     @AppStorage("autoClear") private var autoClear = true
     @AppStorage("ocrConfidence") private var ocrConfidence: Double = 0.30
     @AppStorage("languageCorrection") private var languageCorrection = true
+    @AppStorage("rightToLeftReading") private var rightToLeftReading = false
 
     var body: some View {
         NavigationStack {
@@ -525,6 +526,9 @@ struct SettingsView: View {
                 Text(speedDescription)
                     .font(.footnote).foregroundStyle(.secondary)
                 Toggle("Language-aware OCR correction", isOn: $languageCorrection)
+                Toggle("Right-to-left manga reading", isOn: $rightToLeftReading)
+                Text("Use this for Japanese manga layouts that read right-to-left. Leave it off for subtitles, games, and left-to-right comics.")
+                    .font(.caption).foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 8) {
                     HStack {
                         Text("Minimum OCR confidence")
@@ -668,7 +672,7 @@ struct SettingsView: View {
     private var resetSection: some View {
             Section("Reset") {
                 Button("Reset all settings", role: .destructive) {
-                    for key in ["source", "target", "mode", "area", "winSize", "showOriginal", "speed", "autoClear", "ocrConfidence", "languageCorrection", "theme", "textSize", "speak"] {
+                    for key in ["source", "target", "mode", "area", "winSize", "showOriginal", "speed", "autoClear", "ocrConfidence", "languageCorrection", "rightToLeftReading", "theme", "textSize", "speak"] {
                         UserDefaults.standard.removeObject(forKey: key)
                     }
                     engine.sourceCode = "auto"
