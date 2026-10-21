@@ -299,7 +299,7 @@ final class TranslatorEngine: ObservableObject {
                 let gap = last.y - l.y
                 let lineH = max(last.h, l.h)
                 let sizeRatio = min(last.h, l.h) / max(last.h, l.h, 0.0001)
-                let stacked = gap > 0.2 * lineH && gap < 2.2 * lineH && overlap > 0.25 * min(lw, w2)
+                let stacked = gap > 0.2 * lineH && gap < 3.0 * lineH && overlap > 0.25 * min(lw, w2)
                 let sameRow = abs(gap) <= 0.35 * lineH && xGap < 0.06
                 if sizeRatio > 0.5 && (stacked || sameRow) {
                     blocks[i].append(l)
@@ -326,17 +326,29 @@ final class TranslatorEngine: ObservableObject {
         let maxH = blocks.map { blockHeight($0) }.max() ?? 0
         var kept = blocks
         if mode == .movie {
-            kept = blocks.filter { blockHeight($0) >= maxH * 0.7 }
-            if kept.count > 2 { kept = Array(kept.sorted { blockWeight($0) > blockWeight($1) }.prefix(2)) }
+            // Subtitle mode prioritizes the largest, most subtitle-like blocks.
+            kept = blocks.filter { blockHeight($0) >= maxH * 0.62 }
+            if kept.count > 3 { kept = Array(kept.sorted { blockWeight($0) > blockWeight($1) }.prefix(3)) }
         } else if area == .smart {
-            kept = blocks.filter { blockHeight($0) >= maxH * 0.4 }
+            kept = blocks.filter { blockHeight($0) >= maxH * (mode == .comic ? 0.22 : 0.32) }
         }
-        kept = Array(kept.sorted { blockWeight($0) > blockWeight($1) }.prefix(6))
+        // Comic/game mode must not throw away small dialogue bubbles just because
+        // they are smaller than a title or a background sign.
+        let limit = mode == .comic ? 14 : (mode == .game ? 10 : 3)
+        if kept.count > limit {
+            kept = Array(kept.sorted { blockWeight($0) > blockWeight($1) }.prefix(limit))
+        }
         func top(_ b: [OCRLine]) -> Double { b.map { $0.y + $0.h / 2 }.max() ?? 0 }
         func left(_ b: [OCRLine]) -> Double { b.map { $0.x - ($0.w ?? 0) / 2 }.min() ?? 0 }
+        // Once relevant blocks are selected, always output them in reading order,
+        // never by visual size/importance. This prevents unrelated dialogue being
+        // reordered around a large caption.
         return kept.sorted { a, b in
-            let ra = Int((1 - top(a)) * 14), rb = Int((1 - top(b)) * 14)
-            return ra != rb ? ra < rb : left(a) < left(b)
+            let ay = top(a), by = top(b)
+            if abs(ay - by) > max(blockHeight(a), blockHeight(b)) * 0.75 {
+                return ay > by
+            }
+            return left(a) < left(b)
         }
     }
 
