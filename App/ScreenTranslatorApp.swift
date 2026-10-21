@@ -402,6 +402,10 @@ struct LanguagesView: View {
 
 // MARK: - Settings
 struct SettingsView: View {
+    private func speedPresetOption(_ item: SpeedPreset) -> some View {
+        Text(item.title).tag(item.rawValue)
+    }
+
     private func textSizeOption(_ item: PiPTextSize) -> some View {
         Text(item.title).tag(item.rawValue)
     }
@@ -450,9 +454,7 @@ struct SettingsView: View {
                     }
                     Picker("Performance profile", selection: $speed) {
                         ForEach(SpeedPreset.allCases) { item in
-                            let title: String = item.title
-                            let value: String = item.rawValue
-                            Text(title).tag(value)
+                            speedPresetOption(item)
                         }
                     }
                     Text(speedDescription)
