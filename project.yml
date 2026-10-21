@@ -1,13 +1,13 @@
-name: ScreenTranslator
+name: ScreenLingo
 options:
-  bundleIdPrefix: com.example
+  bundleIdPrefix: com.diam0ndnex
   deploymentTarget:
     iOS: "18.0"
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.7.1"
-    CURRENT_PROJECT_VERSION: "9"
+    MARKETING_VERSION: "0.8.0"
+    CURRENT_PROJECT_VERSION: "10"
 targets:
   ScreenTranslator:
     type: application
@@ -24,7 +24,8 @@ targets:
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.screentranslator
+        PRODUCT_BUNDLE_IDENTIFIER: com.diam0ndnex.screenlingo
+        PRODUCT_NAME: ScreenLingo
   BroadcastExtension:
     type: app-extension
     platform: iOS
@@ -32,11 +33,12 @@ targets:
     info:
       path: BroadcastExtension/Info.plist
       properties:
-        CFBundleDisplayName: Translator Capture
+        CFBundleDisplayName: ScreenLingo Capture
         NSExtension:
           NSExtensionPointIdentifier: com.apple.broadcast-services-upload
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SampleHandler
           RPBroadcastProcessMode: RPBroadcastProcessModeSampleBuffer
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.screentranslator.broadcast
+        PRODUCT_BUNDLE_IDENTIFIER: com.diam0ndnex.screenlingo.broadcast
+        PRODUCT_NAME: ScreenLingoCapture
