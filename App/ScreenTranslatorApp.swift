@@ -1,4 +1,4 @@
-// Screen Translator – App UI – v0.4.0
+// Screen Translator – App UI – v0.4.1
 import SwiftUI
 import ReplayKit
 import Translation
@@ -47,28 +47,21 @@ struct RootView: View {
 }
 
 // MARK: - Broadcast picker
-/// Picker whose inner button fills the whole view, so a real tap anywhere opens the capture sheet.
-final class FillPicker: RPSystemBroadcastPickerView {
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        subviews.forEach { $0.frame = bounds }
-    }
-}
-
 struct BroadcastPicker: UIViewRepresentable {
     var onTap: () -> Void = {}
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
-    func makeUIView(context: Context) -> FillPicker {
-        let v = FillPicker(frame: CGRect(x: 0, y: 0, width: 200, height: 54))
+    func makeUIView(context: Context) -> RPSystemBroadcastPickerView {
+        let v = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 60, height: 60))
         v.preferredExtension = Self.extensionID()
         v.showsMicrophoneButton = false
+        v.tintColor = .white
         context.coordinator.onTap = onTap
         context.coordinator.attach(to: v)
         return v
     }
-    func updateUIView(_ v: FillPicker, context: Context) {
+    func updateUIView(_ v: RPSystemBroadcastPickerView, context: Context) {
         context.coordinator.onTap = onTap
         context.coordinator.attach(to: v)
     }
@@ -254,26 +247,30 @@ struct HomeView: View {
     }
 
     private var startButton: some View {
-        VStack(spacing: 8) {
-            ZStack {
-                Label("Start", systemImage: "play.fill")
-                    .font(.headline)
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                Button { engine.startPiP() } label: {
+                    VStack(spacing: 6) {
+                        Image(systemName: "rectangle.on.rectangle").font(.title2)
+                        Text("Floating window").font(.footnote.weight(.semibold))
+                    }
                     .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Theme.gradient)
-                // The real system picker sits invisibly on top: one tap opens capture, and PiP starts with it.
-                BroadcastPicker(onTap: { engine.startPiP() })
-                    .opacity(0.02)
+                    .frame(maxWidth: .infinity, minHeight: 96)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
+                VStack(spacing: 2) {
+                    BroadcastPicker(onTap: { engine.startPiP() }).frame(width: 60, height: 60)
+                    Text("Start capture").font(.footnote.weight(.semibold)).foregroundStyle(.white)
+                }
+                .frame(maxWidth: .infinity, minHeight: 96)
+                .background(Theme.gradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
-            .frame(height: 54)
-            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-
             if engine.pipActive {
                 Button("Close floating window") { engine.pip.stop() }
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.red)
             } else {
-                Text("Tap Start, then choose Translator Capture → Start Broadcast.")
+                Text("Tap the broadcast icon, choose Translator Capture, then Start Broadcast. The floating window opens with it.")
                     .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
             }
         }
