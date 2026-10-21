@@ -31,539 +31,16 @@ struct RootView: View {
     @Environment(\.scenePhase) private var phase
 
     var body: some View {
-        TabView {
-            HomeView().tabItem { Label("Home", systemImage: "house.fill") }
-            LanguagesView().tabItem { Label("Languages", systemImage: "globe") }
-            HistoryView().tabItem { Label("History", systemImage: "clock") }
-            SettingsView().tabItem { Label("Settings", systemImage: "gearshape.fill") }
-        }
-        .environmentObject(engine)
-        .preferredColorScheme(.dark)
-        .tint(Color(red: 0.12, green: 0.82, blue: 0.72))
-        .translationTask(engine.legacyConfig) { session in await engine.runLegacy(session) }
-        .translationTask(engine.downloadConfig) { session in await engine.runDownload(session) }
-        .task { await engine.loadLanguages() }
-        .onChange(of: phase) { _, p in if p == .active { engine.server.start() } }
-    }
-}
-
-// MARK: - Broadcast picker
-struct BroadcastPicker: UIViewRepresentable {
-    var onTap: () -> Void = {}
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    func makeUIView(context: Context) -> RPSystemBroadcastPickerView {
-        let v = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 60, height: 60))
-        v.preferredExtension = Self.extensionID()
-        v.showsMicrophoneButton = false
-        v.tintColor = .white
-        context.coordinator.onTap = onTap
-        context.coordinator.attach(to: v)
-        return v
-    }
-    func updateUIView(_ v: RPSystemBroadcastPickerView, context: Context) {
-        context.coordinator.onTap = onTap
-        context.coordinator.attach(to: v)
-    }
-
-    /// Also listens to the picker's real button, so one genuine tap starts both PiP and capture.
-    final class Coordinator: NSObject {
-        var onTap: () -> Void = {}
-        private weak var attached: UIControl?
-
-        func attach(to v: UIView) {
-            guard let c = Self.findControl(in: v), c !== attached else { return }
-            c.addTarget(self, action: #selector(tapped), for: .touchUpInside)
-            attached = c
-        }
-        @objc private func tapped() { onTap() }
-        private static func findControl(in v: UIView) -> UIControl? {
-            for s in v.subviews {
-                if let c = s as? UIControl { return c }
-                if let c = findControl(in: s) { return c }
-            }
-            return nil
-        }
-    }
-
-    /// Finds the bundled .appex so it works even if a sideloader renames bundle IDs.
-    static func extensionID() -> String? {
-        guard let dir = Bundle.main.builtInPlugInsURL,
-              let items = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)
-        else { return nil }
-        for u in items where u.pathExtension == "appex" {
-            if let id = Bundle(url: u)?.bundleIdentifier { return id }
-        }
-        return nil
-    }
-}
-
-// MARK: - Components
-struct LangMenu: View {
-    @Binding var code: String
-    let items: [LangItem]
-    var allowAuto = false
-
-    var label: String {
-        code == "auto" ? "Auto-detect" : (items.first { $0.code == code }?.name ?? code)
-    }
-    var body: some View {
-        Menu {
-            if allowAuto { Button("Auto-detect") { code = "auto" } }
-            ForEach(items) { i in Button(i.name) { code = i.code } }
-        } label: {
-            HStack(spacing: 4) {
-                Text(label).font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.7)
-                Image(systemName: "chevron.up.chevron.down").font(.system(size: 10, weight: .bold)).opacity(0.6)
-            }
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
-    }
-}
-
-struct SettingRow<Content: View>: View {
-    let icon: String
-    let tint: Color
-    let title: String
-    @ViewBuilder var content: () -> Content
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 32, height: 32)
-                .background(tint.opacity(0.18), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-            Text(title).font(.subheadline)
-            Spacer(minLength: 8)
-            content()
-        }
-    }
-}
-
-// MARK: - Home
-struct HomeView: View {
-    @EnvironmentObject var engine: TranslatorEngine
-    @AppStorage("mode") private var mode = TranslateMode.movie.rawValue
-    @AppStorage("area") private var area = OCRArea.smart.rawValue
-    @AppStorage("winSize") private var winSize = WindowSize.normal.rawValue
-    @AppStorage("showOriginal") private var showOriginal = false
-    @AppStorage("speed") private var speed = SpeedPreset.balanced.rawValue
-    @AppStorage("autoClear") private var autoClear = true
-
-    private var previewRatio: CGFloat {
-        let s = (WindowSize(rawValue: winSize) ?? .normal).size
-        return s.width / s.height
-    }
-
-    var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                header
-                languageBar
-                preview
-                settings
-                startButton
-                statusCard
-            }
-            .padding(.horizontal, 16)
-            .padding(.bottom, 24)
-        }
-        .scrollIndicators(.hidden)
-        .onChange(of: speed) { _, _ in engine.syncConfig() }
-        .onChange(of: area) { _, _ in engine.syncConfig() }
-        .onChange(of: mode) { _, _ in engine.syncConfig() }
-        .background(Theme.bg.ignoresSafeArea())
-    }
-
-    private var header: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("ScreenLingo").font(.title.bold())
-                Text("Offline · \(AppVersion.full)").font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            HStack(spacing: 6) {
-                Circle().fill(engine.captureAlive ? Color.green : Color.gray).frame(width: 8, height: 8)
-                Text(engine.captureAlive ? "Capturing" : "Idle").font(.caption.weight(.semibold))
-            }
-            .padding(.horizontal, 10).padding(.vertical, 6)
-            .background(Theme.card, in: Capsule())
-        }
-        .padding(.top, 8)
-    }
-
-    private var languageBar: some View {
-        HStack(spacing: 8) {
-            LangMenu(code: $engine.sourceCode, items: engine.languages, allowAuto: true)
-            Button { engine.swapLanguages() } label: {
-                Image(systemName: "arrow.left.arrow.right")
-                    .font(.system(size: 14, weight: .semibold))
-                    .frame(width: 40, height: 40)
-                    .background(Theme.card, in: Circle())
-            }
-            .foregroundStyle(.white)
-            LangMenu(code: $engine.targetCode, items: engine.languages)
-        }
-    }
-
-    /// Doubles as a live preview AND keeps the PiP layer on screen (required for PiP to start).
-    private var preview: some View {
-        VStack(spacing: 6) {
-            PiPPreview(layer: engine.pip.displayLayer)
-                .aspectRatio(previewRatio, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.white.opacity(0.08)))
-            Text("Live preview of the floating window").font(.caption2).foregroundStyle(.secondary)
-        }
-    }
-
-    private var settings: some View {
-        VStack(spacing: 12) {
-            SettingRow(icon: "film", tint: .blue, title: "Mode") {
-                Picker("", selection: $mode) {
-                    ForEach(TranslateMode.allCases) { item in
-                            let title: String = item.title
-                            let value: String = item.rawValue
-                            Text(title).tag(value)
-                        }
-                }.pickerStyle(.menu).labelsHidden().tint(.secondary)
-            }
-            Divider().overlay(Color.white.opacity(0.06))
-            SettingRow(icon: "viewfinder", tint: .purple, title: "OCR area") {
-                Picker("", selection: $area) {
-                    ForEach(OCRArea.allCases) { item in
-                            let title: String = item.title
-                            let value: String = item.rawValue
-                            Text(title).tag(value)
-                        }
-                }.pickerStyle(.menu).labelsHidden().tint(.secondary)
-            }
-            Divider().overlay(Color.white.opacity(0.06))
-            SettingRow(icon: "rectangle.expand.vertical", tint: .orange, title: "Window size") {
-                Picker("", selection: $winSize) {
-                    ForEach(WindowSize.allCases) { item in
-                            let title: String = item.title
-                            let value: String = item.rawValue
-                            Text(title).tag(value)
-                        }
-                }
-                .pickerStyle(.menu).labelsHidden().tint(.secondary)
-                .onChange(of: winSize) { _, _ in engine.applyWindowSize() }
-            }
-            Divider().overlay(Color.white.opacity(0.06))
-            SettingRow(icon: "speedometer", tint: .green, title: "Speed") {
-                Picker("", selection: $speed) {
-                    ForEach(SpeedPreset.allCases) { item in
-                            let title: String = item.title
-                            let value: String = item.rawValue
-                            Text(title).tag(value)
-                        }
-                }.pickerStyle(.menu).labelsHidden().tint(.secondary)
-            }
-            Divider().overlay(Color.white.opacity(0.06))
-            SettingRow(icon: "text.quote", tint: .teal, title: "Show original text") {
-                Toggle("", isOn: $showOriginal).labelsHidden()
-            }
-            Divider().overlay(Color.white.opacity(0.06))
-            SettingRow(icon: "eraser", tint: .pink, title: "Clear when text ends") {
-                Toggle("", isOn: $autoClear).labelsHidden()
-            }
-        }
-        .card()
-    }
-
-    private var startButton: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 12) {
-                Button { engine.startPiP() } label: {
-                    VStack(spacing: 6) {
-                        Image(systemName: "rectangle.on.rectangle").font(.title2)
-                        Text("Floating window").font(.footnote.weight(.semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, minHeight: 96)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                }
-                VStack(spacing: 2) {
-                    BroadcastPicker(onTap: { engine.startPiP() }).frame(width: 60, height: 60)
-                    Text("Start capture").font(.footnote.weight(.semibold)).foregroundStyle(.white)
-                }
-                .frame(maxWidth: .infinity, minHeight: 96)
-                .background(Theme.gradient, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            }
-            if engine.pipActive {
-                Button("Close floating window") { engine.pip.stop() }
-                    .font(.footnote.weight(.semibold))
-                    .foregroundStyle(.red)
-            } else {
-                Text("Tap the broadcast icon, choose Translator Capture, then Start Broadcast. The floating window opens with it.")
-                    .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            }
-        }
-    }
-
-    private var statusCard: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(engine.captureAlive ? "Capture connected" : "Capture not connected")
-                        .font(.subheadline.weight(.semibold))
-                    if engine.captureAlive {
-                        Text("\(engine.frames) frames · \(engine.ocrCount) text updates")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-                Spacer()
-            }
-            Text(engine.status).font(.footnote).foregroundStyle(.secondary)
-            Toggle("Pause translating", isOn: $engine.paused).font(.footnote)
-            if engine.captureAlive {
-                Text("OCR \(Int(engine.ocrMs)) ms · translate \(Int(engine.translateMs)) ms · extension memory left \(Int(engine.extFreeMB)) MB")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-            if !engine.lastRaw.isEmpty {
-                Text("OCR sees: \(engine.lastRaw)")
-                    .font(.caption).foregroundStyle(.secondary).lineLimit(3)
-            }
-            if engine.extensionVersion != "–" && engine.extensionVersion != AppVersion.version {
-                Text("⚠️ Capture extension is v\(engine.extensionVersion), app is v\(AppVersion.version). Reinstall the IPA.")
-                    .font(.footnote).foregroundStyle(.orange)
-            }
-            Button { engine.runTest() } label: {
-                Label("Test translation", systemImage: "checkmark.seal")
-                    .font(.footnote.weight(.semibold))
-            }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-        }
-        .card()
-    }
-}
-
-// MARK: - Languages
-struct LanguagesView: View {
-    @EnvironmentObject var engine: TranslatorEngine
-    @State private var query = ""
-
-    private var filtered: [LangItem] {
-        engine.languages.filter { query.isEmpty || $0.name.localizedCaseInsensitiveContains(query) }
-    }
-    private var ready: [LangItem] { filtered.filter { engine.langStatus[$0.code] == .installed } }
-    private var available: [LangItem] { filtered.filter { engine.langStatus[$0.code] == .supported } }
-
-    var body: some View {
         NavigationStack {
             List {
-                Section {
-                    Text("Translation runs fully on your phone using Apple's language packs. Packs are stored by iOS (not in this app). Status is shown for translating into your target language.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-                if engine.langStatus.isEmpty {
-                    HStack { Spacer(); ProgressView(); Spacer() }
-                }
-                if !ready.isEmpty {
-                    Section("Ready · works offline") {
-                        ForEach(ready) { l in
-                            HStack {
-                                Text(l.name)
-                                Spacer()
-                                Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                            }
-                        }
-                    }
-                }
-                if !available.isEmpty {
-                    Section("Available to download") {
-                        ForEach(available) { l in
-                            HStack {
-                                Text(l.name)
-                                Spacer()
-                                Button("Get") { engine.download(l.code) }
-                                    .buttonStyle(.bordered).controlSize(.small)
-                            }
-                        }
-                    }
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background(Theme.bg.ignoresSafeArea())
-            .searchable(text: $query, prompt: "Search languages")
-            .navigationTitle("Languages")
-            .toolbar { Button("Refresh") { Task { await engine.refreshStatus() } } }
-        }
-    }
-}
-
-// MARK: - Settings
-struct SettingsView: View {
-    private func translationModeOption(_ item: TranslateMode) -> some View {
-        Text(item.title).tag(item.rawValue)
-    }
-
-    private func ocrAreaOption(_ item: OCRArea) -> some View {
-        Text(item.title).tag(item.rawValue)
-    }
-
-    private func windowSizeOption(_ item: WindowSize) -> some View {
-        Text(item.title).tag(item.rawValue)
-    }
-
-    private func themeOption(_ item: PiPTheme) -> some View {
-        Text(item.title).tag(item.rawValue)
-    }
-
-    private func speedPresetOption(_ item: SpeedPreset) -> some View {
-        Text(item.title).tag(item.rawValue)
-    }
-
-    private func textSizeOption(_ item: PiPTextSize) -> some View {
-        Text(item.title).tag(item.rawValue)
-    }
-
-
-    private var confidencePercentage: String { String(Int(ocrConfidence * 100)) + "%" }
-
-    @EnvironmentObject var engine: TranslatorEngine
-    @AppStorage("theme") private var theme = PiPTheme.dark.rawValue
-    @AppStorage("textSize") private var textSize = PiPTextSize.auto.rawValue
-    @AppStorage("speak") private var speak = false
-    @AppStorage("mode") private var mode = TranslateMode.movie.rawValue
-    @AppStorage("area") private var area = OCRArea.smart.rawValue
-    @AppStorage("winSize") private var winSize = WindowSize.normal.rawValue
-    @AppStorage("showOriginal") private var showOriginal = false
-    @AppStorage("speed") private var speed = SpeedPreset.balanced.rawValue
-    @AppStorage("autoClear") private var autoClear = true
-    @AppStorage("ocrConfidence") private var ocrConfidence: Double = 0.30
-    @AppStorage("languageCorrection") private var languageCorrection = true
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section("App & build") {
-                    LabeledContent("App", value: "ScreenLingo")
-                    LabeledContent("Version", value: AppVersion.full)
-                    LabeledContent("Bundle ID", value: "com.diam0ndnex.screenlingo")
-                    LabeledContent("Capture extension",
-                                   value: engine.extensionVersion == "–" ? "Not connected" : "v\(engine.extensionVersion)")
-                    LabeledContent("Capture", value: engine.captureAlive ? "Connected" : "Idle")
-                }
-                Section {
-                    Picker("Translation mode", selection: $mode) {
-                        ForEach(TranslateMode.allCases) { item in
-                            translationModeOption(item)
-                        }
-                    }
-                    Picker("Text capture area", selection: $area) {
-                        ForEach(OCRArea.allCases) { item in
-                            ocrAreaOption(item)
-                        }
-                    }
-                    Picker("Performance profile", selection: $speed) {
-                        ForEach(SpeedPreset.allCases) { item in
-                            speedPresetOption(item)
-                        }
-                    }
-                    Text(speedDescription)
-                        .font(.footnote).foregroundStyle(.secondary)
-                    Toggle("Language-aware OCR correction", isOn: $languageCorrection)
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("Minimum OCR confidence")
-                            Spacer()
-                            Text(confidencePercentage).monospacedDigit().foregroundStyle(.secondary)
-                        }
-                        Slider(value: $ocrConfidence, in: 0.15...0.75, step: 0.05)
-                        Text("Lower values catch faint or stylized text but may include more mistakes. Higher values are stricter and can miss difficult text.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                } header: {
-                    Text("Translation & performance")
-                } footer: {
-                    Text("Fast reduces OCR work for lower latency. Sharp processes larger frames for small text but may use more memory and battery.")
-                }
-                Section("Floating window") {
-                    Picker("Window size", selection: $winSize) {
-                        ForEach(WindowSize.allCases) { item in
-                            windowSizeOption(item)
-                        }
-                    }
-                    Picker("Appearance", selection: $theme) {
-                        ForEach(PiPTheme.allCases) { item in
-                            themeOption(item)
-                        }
-                    }
-                    Picker("Text size", selection: $textSize) {
-                        ForEach(PiPTextSize.allCases) { item in
-                            textSizeOption(item)
-                        }
-                    }
-                    Toggle("Show original above translation", isOn: $showOriginal)
-                    Toggle("Speak translations aloud", isOn: $speak)
-                }
-                Section("Automation") {
-                    Toggle("Clear when text disappears", isOn: $autoClear)
-                    Toggle("Pause translation", isOn: $engine.paused)
-                } footer: {
-                    Text("Pause keeps the broadcast connected but stops new translation work. Your selected options are saved on this device.")
-                }
-                Section("Live diagnostics") {
-                    LabeledContent("Frames", value: "\(engine.frames)")
-                    LabeledContent("OCR updates", value: "\(engine.ocrCount)")
-                    LabeledContent("OCR time", value: "\(Int(engine.ocrMs)) ms")
-                    LabeledContent("Translation time", value: "\(Int(engine.translateMs)) ms")
-                    LabeledContent("Extension memory free", value: "\(Int(engine.extFreeMB)) MB")
-                    if !engine.lastRaw.isEmpty {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Last OCR text").font(.caption).foregroundStyle(.secondary)
-                            Text(engine.lastRaw).font(.footnote).textSelection(.enabled)
-                        }
-                    }
-                    Button("Run translation test") { engine.runTest() }
-                    Button("Refresh language availability") {
-                        Task { await engine.refreshStatus() }
-                    }
-                }
-                Section("Changelog") {
-                    ForEach(AppVersion.changelog, id: \.0) { v in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("v\(v.0)").bold()
-                            Text(v.1).font(.footnote).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                Section("Privacy") {
-                    Label("On-device translation", systemImage: "iphone")
-                    Text("ScreenLingo uses Apple's on-device Translation framework and stores translation history in local app preferences. This project does not upload your recognized text to a translation server.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
-                Section("Reset") {
-                    Button("Reset all settings", role: .destructive) {
-                        for key in ["source", "target", "mode", "area", "winSize", "showOriginal", "speed", "autoClear", "ocrConfidence", "languageCorrection", "theme", "textSize", "speak"] {
-                            UserDefaults.standard.removeObject(forKey: key)
-                        }
-                        engine.sourceCode = "auto"
-                        engine.targetCode = "en"
-                        mode = TranslateMode.movie.rawValue
-                        area = OCRArea.smart.rawValue
-                        winSize = WindowSize.normal.rawValue
-                        showOriginal = false
-                        speed = SpeedPreset.balanced.rawValue
-                        autoClear = true
-                        theme = PiPTheme.dark.rawValue
-                        textSize = PiPTextSize.auto.rawValue
-                        speak = false
-                        engine.paused = false
-                        engine.syncConfig()
-                        engine.applyWindowSize()
-                        engine.applyStyle()
-                    }
-                }
+                appBuildSection
+                translationPerformanceSection
+                floatingWindowSection
+                automationSection
+                diagnosticsSection
+                changelogSection
+                privacySection
+                resetSection
             }
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
@@ -579,6 +56,148 @@ struct SettingsView: View {
         }
     }
 
+    private var appBuildSection: some View {
+            Section("App & build") {
+                LabeledContent("App", value: "ScreenLingo")
+                LabeledContent("Version", value: AppVersion.full)
+                LabeledContent("Bundle ID", value: "com.diam0ndnex.screenlingo")
+                LabeledContent("Capture extension",
+                               value: engine.extensionVersion == "–" ? "Not connected" : "v\(engine.extensionVersion)")
+                LabeledContent("Capture", value: engine.captureAlive ? "Connected" : "Idle")
+            }
+    }
+
+    private var translationPerformanceSection: some View {
+            Section {
+                Picker("Translation mode", selection: $mode) {
+                    ForEach(TranslateMode.allCases) { item in
+                        translationModeOption(item)
+                    }
+                }
+                Picker("Text capture area", selection: $area) {
+                    ForEach(OCRArea.allCases) { item in
+                        ocrAreaOption(item)
+                    }
+                }
+                Picker("Performance profile", selection: $speed) {
+                    ForEach(SpeedPreset.allCases) { item in
+                        speedPresetOption(item)
+                    }
+                }
+                Text(speedDescription)
+                    .font(.footnote).foregroundStyle(.secondary)
+                Toggle("Language-aware OCR correction", isOn: $languageCorrection)
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Minimum OCR confidence")
+                        Spacer()
+                        Text(confidencePercentage).monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    Slider(value: $ocrConfidence, in: 0.15...0.75, step: 0.05)
+                    Text("Lower values catch faint or stylized text but may include more mistakes. Higher values are stricter and can miss difficult text.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Translation & performance")
+            } footer: {
+                Text("Fast reduces OCR work for lower latency. Sharp processes larger frames for small text but may use more memory and battery.")
+            }
+    }
+
+    private var floatingWindowSection: some View {
+            Section("Floating window") {
+                Picker("Window size", selection: $winSize) {
+                    ForEach(WindowSize.allCases) { item in
+                        windowSizeOption(item)
+                    }
+                }
+                Picker("Appearance", selection: $theme) {
+                    ForEach(PiPTheme.allCases) { item in
+                        themeOption(item)
+                    }
+                }
+                Picker("Text size", selection: $textSize) {
+                    ForEach(PiPTextSize.allCases) { item in
+                        textSizeOption(item)
+                    }
+                }
+                Toggle("Show original above translation", isOn: $showOriginal)
+                Toggle("Speak translations aloud", isOn: $speak)
+            }
+    }
+
+    private var automationSection: some View {
+            Section("Automation") {
+                Toggle("Clear when text disappears", isOn: $autoClear)
+                Toggle("Pause translation", isOn: $engine.paused)
+            } footer: {
+                Text("Pause keeps the broadcast connected but stops new translation work. Your selected options are saved on this device.")
+            }
+    }
+
+    private var diagnosticsSection: some View {
+            Section("Live diagnostics") {
+                LabeledContent("Frames", value: "\(engine.frames)")
+                LabeledContent("OCR updates", value: "\(engine.ocrCount)")
+                LabeledContent("OCR time", value: "\(Int(engine.ocrMs)) ms")
+                LabeledContent("Translation time", value: "\(Int(engine.translateMs)) ms")
+                LabeledContent("Extension memory free", value: "\(Int(engine.extFreeMB)) MB")
+                if !engine.lastRaw.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Last OCR text").font(.caption).foregroundStyle(.secondary)
+                        Text(engine.lastRaw).font(.footnote).textSelection(.enabled)
+                    }
+                }
+                Button("Run translation test") { engine.runTest() }
+                Button("Refresh language availability") {
+                    Task { await engine.refreshStatus() }
+                }
+            }
+    }
+
+    private var changelogSection: some View {
+            Section("Changelog") {
+                ForEach(AppVersion.changelog, id: \.0) { v in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("v\(v.0)").bold()
+                        Text(v.1).font(.footnote).foregroundStyle(.secondary)
+                    }
+                }
+            }
+    }
+
+    private var privacySection: some View {
+            Section("Privacy") {
+                Label("On-device translation", systemImage: "iphone")
+                Text("ScreenLingo uses Apple's on-device Translation framework and stores translation history in local app preferences. This project does not upload your recognized text to a translation server.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+    }
+
+    private var resetSection: some View {
+            Section("Reset") {
+                Button("Reset all settings", role: .destructive) {
+                    for key in ["source", "target", "mode", "area", "winSize", "showOriginal", "speed", "autoClear", "ocrConfidence", "languageCorrection", "theme", "textSize", "speak"] {
+                        UserDefaults.standard.removeObject(forKey: key)
+                    }
+                    engine.sourceCode = "auto"
+                    engine.targetCode = "en"
+                    mode = TranslateMode.movie.rawValue
+                    area = OCRArea.smart.rawValue
+                    winSize = WindowSize.normal.rawValue
+                    showOriginal = false
+                    speed = SpeedPreset.balanced.rawValue
+                    autoClear = true
+                    theme = PiPTheme.dark.rawValue
+                    textSize = PiPTextSize.auto.rawValue
+                    speak = false
+                    engine.paused = false
+                    engine.syncConfig()
+                    engine.applyWindowSize()
+                    engine.applyStyle()
+                }
+            }
+    }
     private var speedDescription: String {
         switch SpeedPreset(rawValue: speed) ?? .balanced {
         case .fast: "Lowest latency and lighter CPU use; best for fast dialogue."
