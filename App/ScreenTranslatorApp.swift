@@ -462,7 +462,7 @@ struct SettingsView: View {
                     }
                 }
                 Section("Changelog") {
-                    ForEach(AppVersion.changelog, id: \\.0) { v in
+                    ForEach(AppVersion.changelog, id: \.0) { v in
                         VStack(alignment: .leading, spacing: 2) {
                             Text("v\(v.0)").bold()
                             Text(v.1).font(.footnote).foregroundStyle(.secondary)
