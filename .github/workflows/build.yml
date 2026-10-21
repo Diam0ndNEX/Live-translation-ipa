@@ -9,6 +9,12 @@ jobs:
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
+      - name: Generate app icon
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+          pip install pillow
+          python scripts/make_icon.py App/Assets.xcassets
       - run: brew install xcodegen && xcodegen generate
       - name: Build
         run: |
