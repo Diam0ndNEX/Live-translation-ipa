@@ -18,7 +18,7 @@ jobs:
       - name: Package IPA
         run: |
           mkdir Payload
-          cp -R build/Build/Products/Release-iphoneos/ScreenTranslator.app Payload/
+          cp -R build/Build/Products/Release-iphoneos/ScreenTranslator.app Payload/ScreenLingo.app
           zip -r ScreenLingo.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
