@@ -581,6 +581,9 @@ struct SettingsView: View {
                 LabeledContent("Extension version", value: engine.extensionVersion)
                 LabeledContent("Frames seen", value: "\(engine.frames)")
                 LabeledContent("OCR passes", value: "\(engine.ocrCount)")
+                LabeledContent("Raw OCR lines", value: "\(engine.lastOCRLineCount)")
+                LabeledContent("Selected text blocks", value: "\(engine.selectedBlockCount)")
+                LabeledContent("Output check", value: engine.lastOutputQuality)
                 LabeledContent("OCR latency", value: "\(Int(engine.ocrMs)) ms")
                 LabeledContent("Translation latency", value: "\(Int(engine.translateMs)) ms")
                 LabeledContent("Free extension memory", value: "\(Int(engine.extFreeMB)) MB")
@@ -592,8 +595,20 @@ struct SettingsView: View {
                 LabeledContent("Current status", value: engine.status)
                 if !engine.lastRaw.isEmpty {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("Last OCR text").font(.caption).foregroundStyle(.secondary)
+                        Text("Last raw OCR text").font(.caption).foregroundStyle(.secondary)
                         Text(engine.lastRaw).font(.footnote).textSelection(.enabled)
+                    }
+                }
+                if !engine.lastSelectedBlocks.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Selected blocks in translation order").font(.caption).foregroundStyle(.secondary)
+                        Text(engine.lastSelectedBlocks).font(.footnote).textSelection(.enabled)
+                    }
+                }
+                if !engine.lastTranslationInput.isEmpty {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Last translation input").font(.caption).foregroundStyle(.secondary)
+                        Text(engine.lastTranslationInput).font(.footnote).textSelection(.enabled)
                     }
                 }
                 Button("Run translation test") { engine.runTest() }
@@ -617,6 +632,11 @@ struct SettingsView: View {
                         "Translation cache hits: \(engine.cacheHits)",
                         "Translation failures: \(engine.translationFailures)",
                         "Last error: \(engine.lastTranslationError)",
+                        "Output quality: \(engine.lastOutputQuality)",
+                        "Raw OCR lines: \(engine.lastOCRLineCount)",
+                        "Selected blocks: \(engine.selectedBlockCount)",
+                        "Selected block order:\n\(engine.lastSelectedBlocks)",
+                        "Translation input:\n\(engine.lastTranslationInput)",
                         "Status: \(engine.status)",
                         "Last OCR: \(engine.lastRaw)"
                     ].joined(separator: "\\n")
