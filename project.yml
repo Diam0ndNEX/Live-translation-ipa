@@ -6,8 +6,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.6.0"
-    CURRENT_PROJECT_VERSION: "7"
+    MARKETING_VERSION: "0.7.0"
+    CURRENT_PROJECT_VERSION: "8"
 targets:
   ScreenTranslator:
     type: application
@@ -19,12 +19,15 @@ targets:
       path: App/Info.plist
       properties:
         CFBundleDisplayName: Screen Translator
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         UILaunchScreen: {}
         UIBackgroundModes: [audio]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.example.screentranslator
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
   BroadcastExtension:
     type: app-extension
     platform: iOS
@@ -33,6 +36,8 @@ targets:
       path: BroadcastExtension/Info.plist
       properties:
         CFBundleDisplayName: Translator Capture
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
           NSExtensionPointIdentifier: com.apple.broadcast-services-upload
           NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).SampleHandler
