@@ -1,4 +1,4 @@
-// Screen Translator – App – v0.4.1
+// Screen Translator – App – v0.5.0
 import SwiftUI
 import Translation
 import NaturalLanguage
@@ -43,6 +43,19 @@ enum WindowSize: String, CaseIterable, Identifiable {
         }
     }
 }
+enum SpeedPreset: String, CaseIterable, Identifiable {
+    case fast, balanced, sharp
+    var id: String { rawValue }
+    var title: String {
+        switch self { case .fast: "Fast"; case .balanced: "Balanced"; case .sharp: "Sharp (small text)" }
+    }
+    var maxEdge: Double {
+        switch self { case .fast: 1000; case .balanced: 1400; case .sharp: 2000 }
+    }
+    var interval: Double {
+        switch self { case .fast: 0.12; case .balanced: 0.22; case .sharp: 0.4 }
+    }
+}
 
 struct LangItem: Identifiable, Hashable {
     let code: String
@@ -50,18 +63,26 @@ struct LangItem: Identifiable, Hashable {
     var id: String { code }
 }
 
+struct HistoryItem: Identifiable {
+    let id = UUID()
+    let original: String
+    let translated: String
+    var date = Date()
+}
+
 @MainActor
 final class TranslatorEngine: ObservableObject {
     // Settings
     @Published var sourceCode: String {
-        didSet { UserDefaults.standard.set(sourceCode, forKey: "source"); lastHandled = "" }
+        didSet { UserDefaults.standard.set(sourceCode, forKey: "source"); lastHandled = ""; syncConfig() }
     }
     @Published var targetCode: String {
         didSet {
-            UserDefaults.standard.set(targetCode, forKey: "target"); lastHandled = ""
+            UserDefaults.standard.set(targetCode, forKey: "target"); lastHandled = ""; directSession = nil
             Task { await refreshStatus() }
         }
     }
+    @Published var paused = false { didSet { syncConfig() } }
     // Languages
     @Published var languages: [LangItem] = TranslatorEngine.fallbackLanguages
     @Published var langStatus: [String: LanguageAvailability.Status] = [:]
@@ -75,6 +96,10 @@ final class TranslatorEngine: ObservableObject {
     @Published var extensionVersion = "–"
     @Published var pipActive = false
     @Published var lastRaw = ""
+    @Published var ocrMs: Double = 0
+    @Published var translateMs: Double = 0
+    @Published var extFreeMB: Double = 0
+    @Published var history: [HistoryItem] = []
     // Translation session plumbing
     @Published var legacyConfig: TranslationSession.Configuration?
     @Published var downloadConfig: TranslationSession.Configuration?
@@ -85,15 +110,28 @@ final class TranslatorEngine: ObservableObject {
     private var lastHandled = ""
     private var queued: String?
     private var busy = false
+    private var showing = false
     private var pendingText = ""
     private var legacyContinuation: CheckedContinuation<String?, Never>?
     private var lastPacketDate = Date.distantPast
+    private var cache: [String: String] = [:]
+    private var directSession: TranslationSession?
+    private var directKey = ""
+
+    // Self-reading protection: what the PiP window currently shows, and where it is on screen
+    private let placeholderGrams = TextSim.grams("Waiting for screen text… Listening…")
+    private var renderedGrams = TextSim.grams("Waiting for screen text… Listening…")
+    private var sourceGrams: Set<String> = []
+    private var pipRegion: CGRect?
+    private var pipRegionStamp = Date.distantPast
 
     private var ud: UserDefaults { .standard }
     private var mode: TranslateMode { TranslateMode(rawValue: ud.string(forKey: "mode") ?? "") ?? .movie }
     private var area: OCRArea { OCRArea(rawValue: ud.string(forKey: "area") ?? "") ?? .smart }
     private var windowSize: WindowSize { WindowSize(rawValue: ud.string(forKey: "winSize") ?? "") ?? .normal }
-    private var showOriginal: Bool { (ud.object(forKey: "showOriginal") as? Bool) ?? true }
+    private var speed: SpeedPreset { SpeedPreset(rawValue: ud.string(forKey: "speed") ?? "") ?? .balanced }
+    private var showOriginal: Bool { (ud.object(forKey: "showOriginal") as? Bool) ?? false }
+    private var autoClear: Bool { (ud.object(forKey: "autoClear") as? Bool) ?? true }
 
     init() {
         sourceCode = UserDefaults.standard.string(forKey: "source") ?? "auto"
@@ -103,12 +141,24 @@ final class TranslatorEngine: ObservableObject {
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                self.captureAlive = Date().timeIntervalSince(self.lastPacketDate) < 5
+                let alive = Date().timeIntervalSince(self.lastPacketDate) < 5
+                if self.captureAlive && !alive {
+                    self.status = "Capture stopped – iOS may have closed the capture extension. Tap the broadcast icon again (try Speed: Fast)."
+                }
+                self.captureAlive = alive
             }
         }
         pip.setSize(windowSize.size)
         pip.onStatus = { [weak self] s in Task { @MainActor in self?.status = s } }
         pip.onActiveChange = { [weak self] a in Task { @MainActor in self?.pipActive = a } }
+    }
+
+    // MARK: Settings → capture extension
+    /// Sends OCR area, source-language hint and speed to the extension.
+    func syncConfig() {
+        let r = area.range(mode: mode)
+        server.send(Config(lang: sourceCode, y0: r.lowerBound, y1: r.upperBound,
+                           maxEdge: speed.maxEdge, interval: speed.interval, paused: paused))
     }
 
     // MARK: PiP
@@ -147,32 +197,87 @@ final class TranslatorEngine: ObservableObject {
         captureAlive = true
         frames = p.frames
         extensionVersion = p.version
-        // Capture just started: make sure the floating window is up too.
-        if !wasAlive, !pip.isActive, UIApplication.shared.applicationState == .active { startPiP() }
+        if let t = p.ocrMs { ocrMs = t }
+        if let m = p.memFreeMB { extFreeMB = m }
+
+        if !wasAlive {
+            syncConfig()
+            // Capture just started: make sure the floating window is up too.
+            if !pip.isActive, UIApplication.shared.applicationState == .active { startPiP() }
+        }
+        if p.kind == "ping" { syncConfig(); return }       // keeps the extension's settings fresh
+        if paused { return }
+        if p.kind == "clear" { handleClear(); return }
         guard p.kind == "ocr" else { return }
         ocrCount += 1
         lastRaw = String(p.lines.map(\.t).joined(separator: " ").prefix(160))
 
         let range = area.range(mode: mode)
         var cand = p.lines.filter { range.contains($0.y) }
+        cand = removeOwnOutput(cand)
         // Smart: keep the dominant (biggest) text, ignore small UI/watermark text
         if area == .smart, let maxH = cand.map(\.h).max() {
             cand = cand.filter { $0.h >= maxH * 0.55 }
         }
-        let lines = cand.map(\.t).filter { !isTargetLanguage($0) }
-        guard !lines.isEmpty else { return }
-        let text = lines.joined(separator: mode == .movie ? " " : "\n")
+        let texts = dedupe(cand.map(\.t).filter { !isTargetLanguage($0) })
+        guard !texts.isEmpty else { handleClear(); return }
+        let text = String(texts.joined(separator: mode == .movie ? " " : "\n").prefix(500))
         enqueue(text)
+    }
+
+    /// Removes lines that are the floating window's own text, and learns where that window sits.
+    private func removeOwnOutput(_ lines: [OCRLine]) -> [OCRLine] {
+        var mine: [OCRLine] = []
+        var rest: [OCRLine] = []
+        for l in lines {
+            if TextSim.norm(l.t).count >= 3 {
+                let inOutput = TextSim.containment(of: l.t, in: renderedGrams)
+                let inSource = TextSim.containment(of: l.t, in: sourceGrams)
+                if inOutput >= 0.85 && inOutput > inSource + 0.1 { mine.append(l); continue }
+            }
+            rest.append(l)
+        }
+        if !mine.isEmpty {
+            var r = CGRect.null
+            for l in mine {
+                let w = l.w ?? 0.25
+                r = r.union(CGRect(x: l.x - w / 2, y: l.y - l.h / 2, width: w, height: l.h))
+            }
+            // The original text can sit above the translation, so reach further up when it is shown
+            pipRegion = r.insetBy(dx: -0.04, dy: showOriginal ? -0.18 : -0.06)
+            pipRegionStamp = Date()
+        }
+        if let reg = pipRegion, Date().timeIntervalSince(pipRegionStamp) < 15 {
+            rest.removeAll { reg.contains(CGPoint(x: $0.x, y: $0.y)) }
+        }
+        return rest
+    }
+
+    private func dedupe(_ lines: [String]) -> [String] {
+        var out: [String] = []
+        for l in lines where !out.contains(where: { TextSim.similar($0, l, 0.9) }) { out.append(l) }
+        return out
     }
 
     private func enqueue(_ text: String) {
         guard text != lastHandled else { return }
+        if TextSim.similar(text, lastHandled, 0.92) { lastHandled = text; return }   // tiny OCR jitter
         lastHandled = text
         queued = text
         if !busy { Task { await drain() } }
     }
 
-    /// Drops lines already in the target language (also stops feedback if the PiP window is captured).
+    private func handleClear() {
+        guard autoClear, showing else { return }
+        showing = false
+        lastHandled = ""
+        original = ""
+        translated = ""
+        renderedGrams = placeholderGrams
+        pip.render(original: "", translated: "Listening…", showOriginal: false)
+    }
+
+    /// Drops lines already in the target language.
     private func isTargetLanguage(_ s: String) -> Bool {
         guard s.count >= 12 else { return false }
         let r = NLLanguageRecognizer()
@@ -186,12 +291,17 @@ final class TranslatorEngine: ObservableObject {
     private func drain() async {
         busy = true
         defer { busy = false }
+        // Always translate only the newest text; anything older is already out of date.
         while let t = queued { queued = nil; await process(t) }
     }
 
     // MARK: Translation
     private func process(_ text: String) async {
+        let t0 = Date()
         let target = Locale.Language(identifier: targetCode)
+        let cacheKey = "\(sourceCode)>\(targetCode)|\(text)"
+        if let hit = cache[cacheKey] { show(text, hit); return }
+
         let source: Locale.Language
         if sourceCode == "auto" {
             let rec = NLLanguageRecognizer()
@@ -212,15 +322,25 @@ final class TranslatorEngine: ObservableObject {
         }
         if source.languageCode == target.languageCode { status = "Text is already in the target language"; return }
 
-        let availability = await LanguageAvailability().status(from: source, to: target)
+        let availability: LanguageAvailability.Status
+        if sourceCode != "auto", let s = langStatus[sourceCode] {
+            availability = s
+        } else {
+            availability = await LanguageAvailability().status(from: source, to: target)
+        }
         if availability == .unsupported {
             status = "\(source.minimalIdentifier) → \(targetCode) isn't supported"; return
         }
 
         var result: String?
         if #available(iOS 26.0, *), availability == .installed {
-            let session = TranslationSession(installedSource: source, target: target)
-            result = try? await session.translate(text).targetText
+            let k = "\(source.minimalIdentifier)>\(targetCode)"
+            if directSession == nil || directKey != k {
+                directSession = TranslationSession(installedSource: source, target: target)
+                directKey = k
+            }
+            result = try? await directSession?.translate(text).targetText
+            if result == nil { directSession = nil }
         } else {
             if availability == .supported { status = "Language pack missing – open the Languages tab" }
             result = await translateLegacy(text, source: source, target: target)
@@ -228,9 +348,23 @@ final class TranslatorEngine: ObservableObject {
         guard let result else {
             status = "Translation failed – download the language packs (Languages tab)"; return
         }
+        translateMs = Date().timeIntervalSince(t0) * 1000
+        if cache.count > 300 { cache.removeAll() }
+        cache[cacheKey] = result
+        status = "\(source.minimalIdentifier) → \(targetCode) ✓"
+        show(text, result)
+    }
+
+    private func show(_ text: String, _ result: String) {
         original = text
         translated = result
-        status = "\(source.minimalIdentifier) → \(targetCode) ✓"
+        showing = true
+        if history.first?.original != text {
+            history.insert(HistoryItem(original: text, translated: result), at: 0)
+            if history.count > 100 { history.removeLast() }
+        }
+        renderedGrams = TextSim.grams(result).union(placeholderGrams)
+        sourceGrams = TextSim.grams(text)
         pip.setSize(windowSize.size)
         pip.render(original: text, translated: result, showOriginal: showOriginal)
     }
@@ -318,10 +452,10 @@ final class TranslatorEngine: ObservableObject {
     ].map { LangItem(code: $0.0, name: $0.1) }
 }
 
-// MARK: - Loopback server (merged from LoopbackServer.swift)
-/// Receives OCR packets from the broadcast extension over 127.0.0.1 (UDP).
+// MARK: - Loopback server (extension ⇄ app, UDP on 127.0.0.1)
 final class LoopbackServer {
     private var listener: NWListener?
+    private var peer: NWConnection?
     private let queue = DispatchQueue(label: "loopback.server")
     var onPacket: ((Packet) -> Void)?
 
@@ -332,6 +466,7 @@ final class LoopbackServer {
         l.newConnectionHandler = { [weak self] c in
             guard let self else { return }
             c.start(queue: self.queue)
+            self.peer = c
             self.receive(on: c)
         }
         l.stateUpdateHandler = { [weak self] state in
@@ -344,6 +479,14 @@ final class LoopbackServer {
     }
 
     func stop() { listener?.cancel(); listener = nil }
+
+    /// Sends settings back to the capture extension.
+    func send(_ cfg: Config) {
+        guard let data = try? JSONEncoder().encode(cfg) else { return }
+        queue.async { [weak self] in
+            self?.peer?.send(content: data, completion: .contentProcessed { _ in })
+        }
+    }
 
     private func receive(on c: NWConnection) {
         c.receiveMessage { [weak self] data, _, _, error in
