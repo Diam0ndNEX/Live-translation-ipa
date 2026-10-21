@@ -1,4 +1,4 @@
-// Screen Translator – Broadcast extension – v0.6.0
+// ScreenLingo – Broadcast extension – v0.7.0
 import ReplayKit
 import Vision
 import ImageIO
