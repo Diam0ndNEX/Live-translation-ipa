@@ -322,6 +322,32 @@ struct HomeView: View {
                 Spacer()
             }
             Text(engine.status).font(.footnote).foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                Button {
+                    UIPasteboard.general.string = engine.translated
+                    engine.status = "Translation copied"
+                } label: {
+                    Label("Copy result", systemImage: "doc.on.doc")
+                }
+                .buttonStyle(.bordered)
+                .disabled(engine.translated.isEmpty)
+                Button {
+                    engine.retranslateLast()
+                } label: {
+                    Label("Re-translate", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .disabled(engine.original.isEmpty)
+                Button {
+                    engine.clearCurrentTranslation()
+                } label: {
+                    Label("Clear", systemImage: "xmark.circle")
+                }
+                .buttonStyle(.bordered)
+                .disabled(engine.translated.isEmpty)
+            }
+            .font(.caption)
+            .labelStyle(.titleAndIcon)
             Toggle("Pause translating", isOn: $engine.paused).font(.footnote)
             if engine.captureAlive {
                 Text("OCR \(Int(engine.ocrMs)) ms · translate \(Int(engine.translateMs)) ms · extension memory left \(Int(engine.extFreeMB)) MB")
@@ -632,15 +658,35 @@ struct SettingsView: View {
 // MARK: - History
 struct HistoryView: View {
     @EnvironmentObject var engine: TranslatorEngine
+    @State private var query = ""
+    @State private var showingClearConfirmation = false
+
+    private var filteredHistory: [HistoryItem] {
+        guard !query.isEmpty else { return engine.history }
+        return engine.history.filter {
+            $0.original.localizedCaseInsensitiveContains(query) ||
+            $0.translated.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private var exportText: String {
+        engine.history.map {
+            "[\($0.date.formatted(date: .abbreviated, time: .shortened))]\nOriginal: \($0.original)\nTranslation: \($0.translated)"
+        }.joined(separator: "\n\n──────────\n\n")
+    }
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    Text("Saved on this device. Tap a translation to copy it, or use the row actions to copy either version.")
+                    Text("Saved locally on this device. Search by source or translation, copy either version, or export the full history.")
                         .font(.footnote).foregroundStyle(.secondary)
+                    if !engine.history.isEmpty {
+                        Text("\(filteredHistory.count) of \(engine.history.count) entries")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
-                ForEach(engine.history) { h in
+                ForEach(filteredHistory) { h in
                     VStack(alignment: .leading, spacing: 8) {
                         Text(h.translated).font(.body.weight(.semibold)).textSelection(.enabled)
                         Text(h.original).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
@@ -649,15 +695,11 @@ struct HistoryView: View {
                             Spacer()
                             Button {
                                 UIPasteboard.general.string = h.translated
-                            } label: {
-                                Label("Translation", systemImage: "doc.on.doc")
-                            }
+                            } label: { Label("Translation", systemImage: "doc.on.doc") }
                             .buttonStyle(.borderless)
                             Button {
                                 UIPasteboard.general.string = h.original
-                            } label: {
-                                Label("Original", systemImage: "text.quote")
-                            }
+                            } label: { Label("Original", systemImage: "text.quote") }
                             .buttonStyle(.borderless)
                         }
                         .font(.caption)
@@ -667,18 +709,31 @@ struct HistoryView: View {
             }
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
+            .searchable(text: $query, prompt: "Search original or translation")
             .navigationTitle("History")
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Clear", role: .destructive) { engine.history.removeAll() }
-                        .disabled(engine.history.isEmpty)
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    if !engine.history.isEmpty {
+                        ShareLink(item: exportText) {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        Button("Clear", role: .destructive) { showingClearConfirmation = true }
+                    }
                 }
+            }
+            .confirmationDialog("Delete all translation history?", isPresented: $showingClearConfirmation, titleVisibility: .visible) {
+                Button("Delete all history", role: .destructive) { engine.history.removeAll() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This cannot be undone.")
             }
             .overlay {
                 if engine.history.isEmpty {
                     ContentUnavailableView("No translations yet",
                                            systemImage: "text.bubble",
                                            description: Text("Start screen capture and your recent translations will appear here."))
+                } else if filteredHistory.isEmpty {
+                    ContentUnavailableView.search(text: query)
                 }
             }
         }
