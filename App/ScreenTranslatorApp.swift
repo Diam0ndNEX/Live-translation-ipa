@@ -332,6 +332,20 @@ struct HomeView: View {
                 .buttonStyle(.bordered)
                 .disabled(engine.translated.isEmpty)
                 Button {
+                    UIPasteboard.general.string = engine.original
+                    engine.status = "Original text copied"
+                } label: {
+                    Label("Copy original", systemImage: "text.quote")
+                }
+                .buttonStyle(.bordered)
+                .disabled(engine.original.isEmpty)
+                if !engine.translated.isEmpty {
+                    ShareLink(item: engine.translated) {
+                        Label("Share", systemImage: "square.and.arrow.up")
+                    }
+                    .buttonStyle(.bordered)
+                }
+                Button {
                     engine.retranslateLast()
                 } label: {
                     Label("Re-translate", systemImage: "arrow.clockwise")
