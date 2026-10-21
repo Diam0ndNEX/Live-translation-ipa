@@ -6,8 +6,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "0.6.0"
-    CURRENT_PROJECT_VERSION: "7"
+    MARKETING_VERSION: "0.7.1"
+    CURRENT_PROJECT_VERSION: "9"
 targets:
   ScreenTranslator:
     type: application
@@ -18,7 +18,7 @@ targets:
     info:
       path: App/Info.plist
       properties:
-        CFBundleDisplayName: Screen Translator
+        CFBundleDisplayName: ScreenLingo
         UILaunchScreen: {}
         UIBackgroundModes: [audio]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
