@@ -1,4 +1,4 @@
-name: Build unsigned IPA
+name: Build ScreenLingo IPA
 on:
   workflow_dispatch:
 jobs:
@@ -19,8 +19,8 @@ jobs:
         run: |
           mkdir Payload
           cp -R build/Build/Products/Release-iphoneos/ScreenTranslator.app Payload/
-          zip -r ScreenTranslator.ipa Payload
+          zip -r ScreenLingo.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
-          name: ScreenTranslator-ipa
-          path: ScreenTranslator.ipa
+          name: ScreenLingo-ipa
+          path: ScreenLingo.ipa
