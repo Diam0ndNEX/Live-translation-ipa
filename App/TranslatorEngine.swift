@@ -102,6 +102,11 @@ final class TranslatorEngine: ObservableObject {
     @Published var extensionVersion = "–"
     @Published var pipActive = false
     @Published var lastRaw = ""
+    @Published var lastSelectedBlocks = ""
+    @Published var lastTranslationInput = ""
+    @Published var lastOutputQuality = "Not evaluated"
+    @Published var selectedBlockCount = 0
+    @Published var lastOCRLineCount = 0
     @Published var ocrMs: Double = 0
     @Published var translateMs: Double = 0
     @Published var extFreeMB: Double = 0
@@ -256,7 +261,8 @@ final class TranslatorEngine: ObservableObject {
         if p.kind == "clear" { handleClear(); return }
         guard p.kind == "ocr" else { return }
         ocrCount += 1
-        lastRaw = String(p.lines.map(\.t).joined(separator: " ").prefix(160))
+        lastRaw = String(p.lines.map(\.t).joined(separator: " ").prefix(500))
+        lastOCRLineCount = p.lines.count
 
         let range = area.range(mode: mode)
         var cand = p.lines.filter { range.contains($0.y) }
@@ -265,6 +271,8 @@ final class TranslatorEngine: ObservableObject {
         // Group lines into text blocks (speech bubble, caption, background text…), read each in order
         let blocks = selectBlocks(makeBlocks(cand))
         let texts = dedupe(blocks.map { blockText($0) }.filter { TextSim.norm($0).count >= 2 && plausiblySource($0) })
+        selectedBlockCount = texts.count
+        lastSelectedBlocks = texts.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
         guard !texts.isEmpty else { handleClear(); return }
         enqueue(texts.map { String($0.prefix(400)) })
     }
@@ -560,6 +568,7 @@ final class TranslatorEngine: ObservableObject {
     private func process(_ blocks: [String]) async {
         let t0 = Date()
         lastTranslationError = "None"
+        lastTranslationInput = blocks.joined(separator: "\n")
         let target = Locale.Language(identifier: targetCode)
 
         var sentences: [[String]] = []          // per block
@@ -621,8 +630,10 @@ final class TranslatorEngine: ObservableObject {
             outBlocks.append(parts.joined(separator: " "))
         }
         translateMs = Date().timeIntervalSince(t0) * 1000
+        let finalOutput = outBlocks.joined(separator: "\n")
+        lastOutputQuality = Self.outputQuality(source: blocks.joined(separator: " "), output: finalOutput)
         status = "\(srcLangs.keys.sorted().joined(separator: "+")) → \(targetCode) ✓"
-        show(blocks.joined(separator: "\n"), outBlocks.joined(separator: "\n"))
+        show(blocks.joined(separator: "\n"), finalOutput)
     }
 
     /// Translates many sentences in one call.
@@ -650,6 +661,20 @@ final class TranslatorEngine: ObservableObject {
             if let id = r.clientIdentifier, let i = Int(id), i < out.count { out[i] = r.targetText }
         }
         return out
+    }
+
+    /// Conservative warning signal for clearly truncated or empty outputs.
+    /// This is diagnostic only: translated word order legitimately differs by language.
+    private static func outputQuality(source: String, output: String) -> String {
+        let src = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        let dst = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !src.isEmpty, !dst.isEmpty else { return "Suspicious: empty text" }
+        let srcWords = src.split(whereSeparator: { $0.isWhitespace }).count
+        let dstWords = dst.split(whereSeparator: { $0.isWhitespace }).count
+        if dst.count < 3 { return "Suspicious: very short output" }
+        if srcWords >= 6 && dstWords <= 2 { return "Review: output may be truncated" }
+        if dst.count > max(1200, src.count * 8) { return "Review: output unusually long" }
+        return "No obvious truncation detected"
     }
 
     private func show(_ text: String, _ result: String) {
