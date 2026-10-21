@@ -9,16 +9,22 @@ jobs:
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
-      - run: brew install xcodegen && xcodegen generate
+      - run: brew install xcodegen librsvg
+      - name: Generate app icon and project
+        run: |
+          mkdir -p App/Assets.xcassets/AppIcon.appiconset
+          rsvg-convert -w 1024 -h 1024 App/ScreenLingoIcon.svg -o App/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+          printf '%s\n' '{"images":[{"filename":"AppIcon.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}' > App/Assets.xcassets/AppIcon.appiconset/Contents.json
+          xcodegen generate
       - name: Build
         run: |
-          xcodebuild -project ScreenTranslator.xcodeproj -scheme ScreenTranslator \
+          xcodebuild -project ScreenLingo.xcodeproj -scheme ScreenLingo \
             -configuration Release -sdk iphoneos -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
       - name: Package IPA
         run: |
           mkdir Payload
-          cp -R build/Build/Products/Release-iphoneos/ScreenTranslator.app Payload/ScreenLingo.app
+          cp -R build/Build/Products/Release-iphoneos/ScreenLingo.app Payload/ScreenLingo.app
           zip -r ScreenLingo.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
