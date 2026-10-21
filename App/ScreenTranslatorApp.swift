@@ -1,4 +1,4 @@
-// Screen Translator – App UI – v0.6.0
+// ScreenLingo – App UI – v0.7.0
 import SwiftUI
 import ReplayKit
 import Translation
@@ -10,10 +10,10 @@ struct ScreenTranslatorApp: App {
 
 // MARK: - Theme
 enum Theme {
-    static let bg = Color(red: 0.04, green: 0.05, blue: 0.09)
+    static let bg = Color(red: 0.025, green: 0.035, blue: 0.065)
     static let card = Color.white.opacity(0.07)
     static let gradient = LinearGradient(
-        colors: [Color(red: 0.25, green: 0.52, blue: 1), Color(red: 0.45, green: 0.42, blue: 0.98)],
+        colors: [Color(red: 0.12, green: 0.82, blue: 0.72), Color(red: 0.22, green: 0.48, blue: 1)],
         startPoint: .leading, endPoint: .trailing)
 }
 
@@ -39,7 +39,7 @@ struct RootView: View {
         }
         .environmentObject(engine)
         .preferredColorScheme(.dark)
-        .tint(Color(red: 0.35, green: 0.55, blue: 1))
+        .tint(Color(red: 0.12, green: 0.82, blue: 0.72))
         .translationTask(engine.legacyConfig) { session in await engine.runLegacy(session) }
         .translationTask(engine.downloadConfig) { session in await engine.runDownload(session) }
         .task { await engine.loadLanguages() }
@@ -183,7 +183,7 @@ struct HomeView: View {
     private var header: some View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Screen Translator").font(.title.bold())
+                Text("ScreenLingo").font(.title.bold())
                 Text("Offline · \(AppVersion.full)").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -446,22 +446,50 @@ struct HistoryView: View {
         NavigationStack {
             List {
                 Section {
-                    Text("Everything that was translated, newest first. Tap a line to copy its translation.")
+                    Text("Saved on this device. Tap a translation to copy it, or use the row actions to copy either version.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 ForEach(engine.history) { h in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(h.translated).font(.body.weight(.semibold))
-                        Text(h.original).font(.caption).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text(h.translated).font(.body.weight(.semibold)).textSelection(.enabled)
+                        Text(h.original).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                        HStack {
+                            Text(h.date, style: .date).font(.caption2).foregroundStyle(.tertiary)
+                            Spacer()
+                            Button {
+                                UIPasteboard.general.string = h.translated
+                            } label: {
+                                Label("Translation", systemImage: "doc.on.doc")
+                            }
+                            .buttonStyle(.borderless)
+                            Button {
+                                UIPasteboard.general.string = h.original
+                            } label: {
+                                Label("Original", systemImage: "text.quote")
+                            }
+                            .buttonStyle(.borderless)
+                        }
+                        .font(.caption)
                     }
-                    .contentShape(Rectangle())
-                    .onTapGesture { UIPasteboard.general.string = h.translated }
+                    .padding(.vertical, 4)
                 }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("History")
-            .toolbar { Button("Clear") { engine.history.removeAll() } }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Clear", role: .destructive) { engine.history.removeAll() }
+                        .disabled(engine.history.isEmpty)
+                }
+            }
+            .overlay {
+                if engine.history.isEmpty {
+                    ContentUnavailableView("No translations yet",
+                                           systemImage: "text.bubble",
+                                           description: Text("Start screen capture and your recent translations will appear here."))
+                }
+            }
         }
     }
 }
