@@ -1,4 +1,4 @@
-// Screen Translator – App – v0.6.0
+// Screen Translator – App – v0.7.0
 import SwiftUI
 import Translation
 import NaturalLanguage
@@ -13,12 +13,12 @@ enum TranslateMode: String, CaseIterable, Identifiable {
     }
 }
 enum OCRArea: String, CaseIterable, Identifiable {
-    case smart, full, bottom, top, middle
+    case smart, full, bottom, top, middle, custom
     var id: String { rawValue }
     var title: String {
         switch self {
         case .smart: "Smart (auto)"; case .full: "Full screen"; case .bottom: "Bottom third"
-        case .top: "Top half"; case .middle: "Middle band"
+        case .top: "Top half"; case .middle: "Middle band"; case .custom: "Custom…"
         }
     }
     func range(mode: TranslateMode) -> ClosedRange<Double> {   // y: 0 = bottom, 1 = top
@@ -28,6 +28,12 @@ enum OCRArea: String, CaseIterable, Identifiable {
         case .bottom: return 0...0.33
         case .top: return 0.5...1
         case .middle: return 0.3...0.7
+        case .custom:
+            let a = (UserDefaults.standard.object(forKey: "customY0") as? Double) ?? 0
+            let b = (UserDefaults.standard.object(forKey: "customY1") as? Double) ?? 0.5
+            let lo = min(max(a, 0), 0.9)
+            let hi = max(min(b, 1), lo + 0.1)
+            return lo...hi
         }
     }
 }
@@ -135,9 +141,30 @@ final class TranslatorEngine: ObservableObject {
     private var speakEnabled: Bool { (ud.object(forKey: "speak") as? Bool) ?? false }
     private var pipStyle: PiPStyle {
         PiPStyle.make(theme: PiPTheme(rawValue: ud.string(forKey: "theme") ?? "") ?? .dark,
-                      size: PiPTextSize(rawValue: ud.string(forKey: "textSize") ?? "") ?? .auto)
+                      size: PiPTextSize(rawValue: ud.string(forKey: "textSize") ?? "") ?? .auto,
+                      font: PiPFont(rawValue: ud.string(forKey: "pipFont") ?? "") ?? .standard)
     }
     private var autoClear: Bool { (ud.object(forKey: "autoClear") as? Bool) ?? true }
+    private var autoOpenPiP: Bool { (ud.object(forKey: "autoOpenPiP") as? Bool) ?? true }
+    private var clearHold: Double { (ud.object(forKey: "clearHold") as? Double) ?? 1.0 }
+    private var stability: Int { (ud.object(forKey: "stability") as? Int) ?? 2 }
+    private var minTextH: Double { (ud.object(forKey: "minTextH") as? Double) ?? 0 }
+    private var ignoreList: [String] {
+        (ud.string(forKey: "ignoreList") ?? "")
+            .split(whereSeparator: { $0 == "," || $0 == "\n" })
+            .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            .filter { !$0.isEmpty }
+    }
+    private var glossary: [(String, String)] {
+        (ud.string(forKey: "glossary") ?? "").split(separator: "\n").compactMap { line -> (String, String)? in
+            let parts = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2 else { return nil }
+            let from = parts[0].trimmingCharacters(in: .whitespaces)
+            let to = parts[1].trimmingCharacters(in: .whitespaces)
+            return from.isEmpty ? nil : (from, to)
+        }
+    }
+    private var clearTask: Task<Void, Never>?
 
     init() {
         sourceCode = UserDefaults.standard.string(forKey: "source") ?? "auto"
@@ -164,7 +191,8 @@ final class TranslatorEngine: ObservableObject {
     func syncConfig() {
         let r = area.range(mode: mode)
         server.send(Config(lang: sourceCode, y0: r.lowerBound, y1: r.upperBound,
-                           maxEdge: speed.maxEdge, interval: speed.interval, paused: paused))
+                           maxEdge: speed.maxEdge, interval: speed.interval, paused: paused,
+                           stability: stability))
     }
 
     // MARK: PiP
@@ -197,6 +225,18 @@ final class TranslatorEngine: ObservableObject {
     func applyWindowSize() { pip.setSize(windowSize.size) }
     func applyStyle() { pip.style = pipStyle; pip.rerender() }
 
+    /// One-tap bundles of settings for the common situations.
+    func applyPreset(_ name: String) {
+        switch name {
+        case "movie": ud.set("movie", forKey: "mode"); ud.set("smart", forKey: "area"); ud.set("balanced", forKey: "speed")
+        case "game": ud.set("game", forKey: "mode"); ud.set("full", forKey: "area"); ud.set("fast", forKey: "speed")
+        default: ud.set("comic", forKey: "mode"); ud.set("full", forKey: "area"); ud.set("sharp", forKey: "speed")
+        }
+        lastHandled = ""
+        syncConfig()
+        status = "Preset applied: \(name)"
+    }
+
     // MARK: Packets from the extension
     private func handle(_ p: Packet) {
         let wasAlive = captureAlive
@@ -210,7 +250,7 @@ final class TranslatorEngine: ObservableObject {
         if !wasAlive {
             syncConfig()
             // Capture just started: make sure the floating window is up too.
-            if !pip.isActive, UIApplication.shared.applicationState == .active { startPiP() }
+            if autoOpenPiP, !pip.isActive, UIApplication.shared.applicationState == .active { startPiP() }
         }
         if p.kind == "ping" { syncConfig(); return }       // keeps the extension's settings fresh
         if paused { return }
@@ -220,13 +260,19 @@ final class TranslatorEngine: ObservableObject {
         lastRaw = String(p.lines.map(\.t).joined(separator: " ").prefix(160))
 
         let range = area.range(mode: mode)
-        var cand = p.lines.filter { range.contains($0.y) }
+        let minH = minTextH
+        let ignore = ignoreList
+        var cand = p.lines.filter { l in
+            range.contains(l.y) && l.h >= minH && !ignore.contains(where: { l.t.lowercased().contains($0) })
+        }
         cand = removeOwnOutput(cand)
         cand = cand.filter { !isTargetLanguage($0.t) }
         // Group lines into text blocks (speech bubble, caption, background text…), read each in order
         let blocks = selectBlocks(makeBlocks(cand))
         let texts = dedupe(blocks.map { blockText($0) }.filter { TextSim.norm($0).count >= 2 && plausiblySource($0) })
         guard !texts.isEmpty else { handleClear(); return }
+        clearTask?.cancel()
+        clearTask = nil
         enqueue(texts.map { String($0.prefix(400)) })
     }
 
@@ -376,7 +422,19 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func handleClear() {
-        guard autoClear, showing else { return }
+        guard autoClear, showing, clearTask == nil else { return }
+        let hold = clearHold
+        if hold <= 0 { performClear(); return }
+        clearTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(hold))
+            guard !Task.isCancelled else { return }
+            self?.performClear()
+        }
+    }
+
+    private func performClear() {
+        clearTask = nil
+        guard showing else { return }
         showing = false
         lastHandled = ""
         original = ""
@@ -424,6 +482,13 @@ final class TranslatorEngine: ObservableObject {
     private func pairStatus(_ src: Locale.Language, _ target: Locale.Language) async -> LanguageAvailability.Status {
         if sourceCode != "auto", let s = langStatus[sourceCode] { return s }
         return await LanguageAvailability().status(from: src, to: target)
+    }
+
+    /// User glossary ("word=replacement" lines) applied to the finished translation.
+    private func applyGlossary(_ s: String) -> String {
+        var out = s
+        for (from, to) in glossary { out = out.replacingOccurrences(of: from, with: to, options: [.caseInsensitive]) }
+        return out
     }
 
     /// Splits a block into sentences so each is translated on its own (better quality, cacheable).
@@ -499,6 +564,7 @@ final class TranslatorEngine: ObservableObject {
             for (si, v) in row.enumerated() { parts.append(v ?? sentences[bi][si]) }
             outBlocks.append(parts.joined(separator: " "))
         }
+        outBlocks = outBlocks.map { applyGlossary($0) }
         translateMs = Date().timeIntervalSince(t0) * 1000
         status = "\(srcLangs.keys.sorted().joined(separator: "+")) → \(targetCode) ✓"
         show(blocks.joined(separator: "\n"), outBlocks.joined(separator: "\n"))
@@ -532,6 +598,8 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func show(_ text: String, _ result: String) {
+        clearTask?.cancel()
+        clearTask = nil
         original = text
         translated = result
         showing = true
