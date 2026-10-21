@@ -271,7 +271,7 @@ final class TranslatorEngine: ObservableObject {
         let range = area.range(mode: mode)
         var cand = p.lines.filter { range.contains($0.y) }
         cand = removeOwnOutput(cand)
-        cand = cand.filter { !isTargetLanguage($0.t) }
+        // Target-language filtering is performed after grouping OCR lines into regions.
         // Group lines into text blocks (speech bubble, caption, background text…), read each in order
         let blocks = selectBlocks(makeBlocks(cand))
         let texts = dedupe(blocks.map { blockText($0) }.filter { TextSim.norm($0).count >= 2 && plausiblySource($0) })
