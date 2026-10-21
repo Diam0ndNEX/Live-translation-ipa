@@ -405,7 +405,7 @@ struct SettingsView: View {
                     LabeledContent("Version", value: AppVersion.full)
                     LabeledContent("Bundle ID", value: "com.diam0ndnex.screenlingo")
                     LabeledContent("Capture extension",
-                                   value: engine.extensionVersion == "–" ? "Not connected" : "v\\(engine.extensionVersion)")
+                                   value: engine.extensionVersion == "–" ? "Not connected" : "v\(engine.extensionVersion)")
                     LabeledContent("Capture", value: engine.captureAlive ? "Connected" : "Idle")
                 }
                 Section {
@@ -445,11 +445,11 @@ struct SettingsView: View {
                     Text("Pause keeps the broadcast connected but stops new translation work. Your selected options are saved on this device.")
                 }
                 Section("Live diagnostics") {
-                    LabeledContent("Frames", value: "\\(engine.frames)")
-                    LabeledContent("OCR updates", value: "\\(engine.ocrCount)")
-                    LabeledContent("OCR time", value: "\\(Int(engine.ocrMs)) ms")
-                    LabeledContent("Translation time", value: "\\(Int(engine.translateMs)) ms")
-                    LabeledContent("Extension memory free", value: "\\(Int(engine.extFreeMB)) MB")
+                    LabeledContent("Frames", value: "\(engine.frames)")
+                    LabeledContent("OCR updates", value: "\(engine.ocrCount)")
+                    LabeledContent("OCR time", value: "\(Int(engine.ocrMs)) ms")
+                    LabeledContent("Translation time", value: "\(Int(engine.translateMs)) ms")
+                    LabeledContent("Extension memory free", value: "\(Int(engine.extFreeMB)) MB")
                     if !engine.lastRaw.isEmpty {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("Last OCR text").font(.caption).foregroundStyle(.secondary)
@@ -464,7 +464,7 @@ struct SettingsView: View {
                 Section("Changelog") {
                     ForEach(AppVersion.changelog, id: \\.0) { v in
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("v\\(v.0)").bold()
+                            Text("v\(v.0)").bold()
                             Text(v.1).font(.footnote).foregroundStyle(.secondary)
                         }
                     }
