@@ -1,4 +1,4 @@
-// Screen Translator – App UI – v0.6.0
+// Screen Translator – App UI – v0.7.0
 import SwiftUI
 import ReplayKit
 import Translation
@@ -165,9 +165,11 @@ struct HomeView: View {
             VStack(spacing: 16) {
                 header
                 languageBar
+                presetRow
                 preview
                 settings
                 startButton
+                checklist
                 statusCard
             }
             .padding(.horizontal, 16)
@@ -178,6 +180,49 @@ struct HomeView: View {
         .onChange(of: area) { _, _ in engine.syncConfig() }
         .onChange(of: mode) { _, _ in engine.syncConfig() }
         .background(Theme.bg.ignoresSafeArea())
+    }
+
+    private var presetRow: some View {
+        HStack(spacing: 8) {
+            ForEach([("movie", "film", "Movie"), ("game", "gamecontroller", "Game"), ("comic", "book", "Comic")], id: \.0) { item in
+                Button { engine.applyPreset(item.0) } label: {
+                    Label(item.2, systemImage: item.1)
+                        .font(.footnote.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 10)
+                        .background(Theme.card, in: Capsule())
+                }
+                .foregroundStyle(.white)
+            }
+        }
+    }
+
+    private var packReady: Bool {
+        engine.sourceCode == "auto"
+            ? engine.langStatus.values.contains(.installed)
+            : engine.langStatus[engine.sourceCode] == .installed
+    }
+
+    private func checkRow(_ title: String, ok: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: ok ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(ok ? Color.green : Color.secondary)
+            Text(title).font(.footnote)
+            Spacer()
+        }
+    }
+
+    /// Only shown until everything is up and running.
+    @ViewBuilder private var checklist: some View {
+        if !(packReady && engine.pipActive && engine.captureAlive) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Setup").font(.caption.bold()).foregroundStyle(.secondary)
+                checkRow("Language pack downloaded (Languages tab)", ok: packReady)
+                checkRow("Floating window open", ok: engine.pipActive)
+                checkRow("Screen capture running", ok: engine.captureAlive)
+            }
+            .card()
+        }
     }
 
     private var header: some View {
@@ -387,26 +432,113 @@ struct LanguagesView: View {
 // MARK: - Settings
 struct SettingsView: View {
     @EnvironmentObject var engine: TranslatorEngine
+    // Reading
+    @AppStorage("mode") private var mode = TranslateMode.movie.rawValue
+    @AppStorage("area") private var area = OCRArea.smart.rawValue
+    @AppStorage("customY0") private var customY0 = 0.0
+    @AppStorage("customY1") private var customY1 = 0.5
+    @AppStorage("speed") private var speed = SpeedPreset.balanced.rawValue
+    @AppStorage("stability") private var stability = 2
+    @AppStorage("minTextH") private var minTextH = 0.0
+    @AppStorage("ignoreList") private var ignoreList = ""
+    // Floating window
+    @AppStorage("winSize") private var winSize = WindowSize.normal.rawValue
     @AppStorage("theme") private var theme = PiPTheme.dark.rawValue
     @AppStorage("textSize") private var textSize = PiPTextSize.auto.rawValue
+    @AppStorage("pipFont") private var pipFont = PiPFont.standard.rawValue
+    @AppStorage("showOriginal") private var showOriginal = false
+    @AppStorage("autoClear") private var autoClear = true
+    @AppStorage("clearHold") private var clearHold = 1.0
+    @AppStorage("autoOpenPiP") private var autoOpenPiP = true
+    // Speech + glossary
     @AppStorage("speak") private var speak = false
+    @AppStorage("glossary") private var glossary = ""
+
+    private var readingKey: String { "\(mode)|\(area)|\(customY0)|\(customY1)|\(speed)|\(stability)" }
+    private var styleKey: String { "\(theme)|\(textSize)|\(pipFont)" }
 
     var body: some View {
         NavigationStack {
             List {
-                Section("Version") {
-                    LabeledContent("App", value: AppVersion.full)
-                    LabeledContent("Capture extension",
-                                   value: engine.extensionVersion == "–" ? "not seen yet" : "v\(engine.extensionVersion)")
+                Section {
+                    Picker("Mode", selection: $mode) {
+                        ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) }
+                    }
+                    Picker("OCR area", selection: $area) {
+                        ForEach(OCRArea.allCases) { Text($0.title).tag($0.rawValue) }
+                    }
+                    if area == OCRArea.custom.rawValue {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("From \(Int(customY0 * 100))% to \(Int(customY1 * 100))% of the screen height (0% = bottom)")
+                                .font(.footnote).foregroundStyle(.secondary)
+                            Slider(value: $customY0, in: 0...0.9)
+                            Slider(value: $customY1, in: 0.1...1)
+                        }
+                    }
+                    Picker("Speed", selection: $speed) {
+                        ForEach(SpeedPreset.allCases) { Text($0.title).tag($0.rawValue) }
+                    }
+                    Picker("Wait for stable text", selection: $stability) {
+                        Text("Instant").tag(1)
+                        Text("Normal").tag(2)
+                        Text("Careful").tag(3)
+                    }
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Ignore text smaller than \(Int(minTextH * 100))% of the screen").font(.subheadline)
+                        Slider(value: $minTextH, in: 0...0.08)
+                    }
+                    TextField("Ignore text containing… (comma separated)", text: $ignoreList, axis: .vertical)
+                        .lineLimit(1...3)
+                } header: {
+                    Text("Reading")
+                } footer: {
+                    Text("Instant is fastest but may translate half-faded text. Ignore words hide watermarks and usernames, e.g. \"subscribe, @channel\".")
                 }
+
                 Section("Floating window") {
+                    Picker("Window size", selection: $winSize) {
+                        ForEach(WindowSize.allCases) { Text($0.title).tag($0.rawValue) }
+                    }
                     Picker("Appearance", selection: $theme) {
                         ForEach(PiPTheme.allCases) { Text($0.title).tag($0.rawValue) }
                     }
                     Picker("Text size", selection: $textSize) {
                         ForEach(PiPTextSize.allCases) { Text($0.title).tag($0.rawValue) }
                     }
+                    Picker("Font", selection: $pipFont) {
+                        ForEach(PiPFont.allCases) { Text($0.title).tag($0.rawValue) }
+                    }
+                    Toggle("Show original text", isOn: $showOriginal)
+                    Toggle("Open automatically when capture starts", isOn: $autoOpenPiP)
+                    Toggle("Clear when text ends", isOn: $autoClear)
+                    if autoClear {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Keep the translation \(String(format: "%.1f", clearHold)) s after the text ends")
+                                .font(.subheadline)
+                            Slider(value: $clearHold, in: 0...5, step: 0.5)
+                        }
+                    }
+                }
+
+                Section("Speech") {
                     Toggle("Speak translation aloud", isOn: $speak)
+                }
+
+                Section {
+                    TextEditor(text: $glossary)
+                        .frame(minHeight: 90)
+                        .font(.system(.footnote, design: .monospaced))
+                        .scrollContentBackground(.hidden)
+                } header: {
+                    Text("Glossary")
+                } footer: {
+                    Text("One per line, written as word=replacement. Applied to the finished translation, e.g. Lord Subaru=Subaru")
+                }
+
+                Section("Version") {
+                    LabeledContent("App", value: AppVersion.full)
+                    LabeledContent("Capture extension",
+                                   value: engine.extensionVersion == "–" ? "not seen yet" : "v\(engine.extensionVersion)")
                 }
                 Section("Changelog") {
                     ForEach(AppVersion.changelog, id: \.0) { v in
@@ -421,19 +553,23 @@ struct SettingsView: View {
                         .font(.footnote)
                 }
                 Section {
-                    Button("Reset settings", role: .destructive) {
-                        for k in ["source", "target", "mode", "area", "winSize", "showOriginal", "speed", "autoClear", "theme", "textSize", "speak"] {
+                    Button("Reset all settings", role: .destructive) {
+                        for k in ["source", "target", "mode", "area", "customY0", "customY1", "speed", "stability",
+                                  "minTextH", "ignoreList", "winSize", "theme", "textSize", "pipFont", "showOriginal",
+                                  "autoClear", "clearHold", "autoOpenPiP", "speak", "glossary"] {
                             UserDefaults.standard.removeObject(forKey: k)
                         }
                         engine.sourceCode = "auto"; engine.targetCode = "en"
+                        engine.syncConfig(); engine.applyStyle(); engine.applyWindowSize()
                     }
                 }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Settings")
-            .onChange(of: theme) { _, _ in engine.applyStyle() }
-            .onChange(of: textSize) { _, _ in engine.applyStyle() }
+            .onChange(of: readingKey) { _, _ in engine.syncConfig() }
+            .onChange(of: styleKey) { _, _ in engine.applyStyle() }
+            .onChange(of: winSize) { _, _ in engine.applyWindowSize() }
         }
     }
 }
@@ -461,7 +597,15 @@ struct HistoryView: View {
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("History")
-            .toolbar { Button("Clear") { engine.history.removeAll() } }
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    ShareLink(item: engine.history.map { "\($0.original)\n→ \($0.translated)" }.joined(separator: "\n\n"))
+                        .disabled(engine.history.isEmpty)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Clear") { engine.history.removeAll() }
+                }
+            }
         }
     }
 }
