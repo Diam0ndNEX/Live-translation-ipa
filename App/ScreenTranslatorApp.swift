@@ -345,6 +345,13 @@ struct HomeView: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(engine.translated.isEmpty)
+                Button {
+                    engine.retranslateLastFresh()
+                } label: {
+                    Label("Retry fresh", systemImage: "arrow.trianglehead.2.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .disabled(engine.original.isEmpty)
             }
             .font(.caption)
             .labelStyle(.titleAndIcon)
@@ -356,6 +363,19 @@ struct HomeView: View {
             if !engine.lastRaw.isEmpty {
                 Text("OCR sees: \(engine.lastRaw)")
                     .font(.caption).foregroundStyle(.secondary).lineLimit(3)
+                Button {
+                    UIPasteboard.general.string = engine.lastRaw
+                    engine.status = "Raw OCR text copied"
+                } label: {
+                    Label("Copy raw OCR", systemImage: "doc.text")
+                        .font(.caption.weight(.medium))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+            if engine.lastOutputQuality.hasPrefix("Review") || engine.lastOutputQuality.hasPrefix("Suspicious") {
+                Label(engine.lastOutputQuality, systemImage: "exclamationmark.triangle.fill")
+                    .font(.footnote).foregroundStyle(.orange)
             }
             if engine.extensionVersion != "–" && engine.extensionVersion != AppVersion.version {
                 Text("⚠️ Capture extension is v\(engine.extensionVersion), app is v\(AppVersion.version). Reinstall the IPA.")
