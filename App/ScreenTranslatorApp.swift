@@ -402,6 +402,11 @@ struct LanguagesView: View {
 
 // MARK: - Settings
 struct SettingsView: View {
+    private func textSizeOption(_ item: PiPTextSize) -> some View {
+        Text(item.title).tag(item.rawValue)
+    }
+
+
     private var confidencePercentage: String { String(Int(ocrConfidence * 100)) + "%" }
 
     @EnvironmentObject var engine: TranslatorEngine
@@ -485,9 +490,7 @@ struct SettingsView: View {
                     }
                     Picker("Text size", selection: $textSize) {
                         ForEach(PiPTextSize.allCases) { item in
-                            let title: String = item.title
-                            let value: String = item.rawValue
-                            Text(title).tag(value)
+                            textSizeOption(item)
                         }
                     }
                     Toggle("Show original above translation", isOn: $showOriginal)
