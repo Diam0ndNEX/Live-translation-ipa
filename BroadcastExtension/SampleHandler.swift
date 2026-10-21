@@ -173,7 +173,9 @@ class SampleHandler: RPBroadcastSampleHandler {
             send(kind: "ocr", lines: Array(lines.prefix(60)))
             return
         }
-        if TextSim.similar(key, sentKey, 0.88) {
+        // Use a very strict duplicate threshold. A lower threshold treats a
+        // subtitle with one changed word as "the same" and suppresses the update.
+        if TextSim.similar(key, sentKey, 0.97) {
             candidateKey = key
             return
         }
