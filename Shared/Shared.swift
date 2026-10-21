@@ -1,12 +1,13 @@
-// Screen Translator – Shared – v0.6.0
+// Screen Translator – Shared – v0.7.0
 import Foundation
 
 enum AppVersion {
-    static let version = "0.6.0"
-    static let build = 7
+    static let version = "0.7.0"
+    static let build = 8
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("0.7.0", "App icon. Correct version shown when signing (was 1.0). Big new Settings screen: custom OCR area, ignore small text, ignore list, glossary, stability, floating-window font, hold time, auto-open. Quick presets (Movie/Game/Comic), setup checklist, export history."),
         ("0.6.0", "Fixes mixed-up sentence order: text is grouped into blocks (bubble vs background), each block read in proper order and translated sentence by sentence in one batch. Ignores background text in another language. Floating-window appearance + text size, speak translation aloud."),
         ("0.5.0", "Much faster: OCR only reads your chosen area at reduced size, with the source language as a hint. Stops reading its own floating window (learns where it is). Speed presets, translation cache, auto-clear when text ends, pause, history tab, live OCR/translate timing + memory in diagnostics."),
         ("0.4.1", "Start section has a visible broadcast icon + separate floating-window button. Fixed build error."),
@@ -45,6 +46,7 @@ struct Config: Codable {
     var maxEdge: Double    // longest image side OCR works at (smaller = faster)
     var interval: Double   // minimum seconds between OCR passes
     var paused: Bool
+    var stability: Int?    // how many identical reads before text is sent (1 = instant)
 }
 
 enum TextSim {
