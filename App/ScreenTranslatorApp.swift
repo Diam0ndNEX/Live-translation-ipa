@@ -1,4 +1,4 @@
-// Screen Translator – App UI – v0.5.0
+// Screen Translator – App UI – v0.6.0
 import SwiftUI
 import ReplayKit
 import Translation
@@ -387,6 +387,9 @@ struct LanguagesView: View {
 // MARK: - Settings
 struct SettingsView: View {
     @EnvironmentObject var engine: TranslatorEngine
+    @AppStorage("theme") private var theme = PiPTheme.dark.rawValue
+    @AppStorage("textSize") private var textSize = PiPTextSize.auto.rawValue
+    @AppStorage("speak") private var speak = false
 
     var body: some View {
         NavigationStack {
@@ -395,6 +398,15 @@ struct SettingsView: View {
                     LabeledContent("App", value: AppVersion.full)
                     LabeledContent("Capture extension",
                                    value: engine.extensionVersion == "–" ? "not seen yet" : "v\(engine.extensionVersion)")
+                }
+                Section("Floating window") {
+                    Picker("Appearance", selection: $theme) {
+                        ForEach(PiPTheme.allCases) { Text($0.title).tag($0.rawValue) }
+                    }
+                    Picker("Text size", selection: $textSize) {
+                        ForEach(PiPTextSize.allCases) { Text($0.title).tag($0.rawValue) }
+                    }
+                    Toggle("Speak translation aloud", isOn: $speak)
                 }
                 Section("Changelog") {
                     ForEach(AppVersion.changelog, id: \.0) { v in
@@ -410,7 +422,7 @@ struct SettingsView: View {
                 }
                 Section {
                     Button("Reset settings", role: .destructive) {
-                        for k in ["source", "target", "mode", "area", "winSize", "showOriginal", "speed", "autoClear"] {
+                        for k in ["source", "target", "mode", "area", "winSize", "showOriginal", "speed", "autoClear", "theme", "textSize", "speak"] {
                             UserDefaults.standard.removeObject(forKey: k)
                         }
                         engine.sourceCode = "auto"; engine.targetCode = "en"
@@ -420,6 +432,8 @@ struct SettingsView: View {
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Settings")
+            .onChange(of: theme) { _, _ in engine.applyStyle() }
+            .onChange(of: textSize) { _, _ in engine.applyStyle() }
         }
     }
 }
