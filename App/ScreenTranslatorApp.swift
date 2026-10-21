@@ -539,12 +539,14 @@ struct SettingsView: View {
     }
 
     private var automationSection: some View {
-            Section("Automation") {
-                Toggle("Clear when text disappears", isOn: $autoClear)
-                Toggle("Pause translation", isOn: $engine.paused)
-            } footer: {
-                Text("Pause keeps the broadcast connected but stops new translation work. Your selected options are saved on this device.")
-            }
+        Section {
+            Toggle("Clear when text disappears", isOn: $autoClear)
+            Toggle("Pause translation", isOn: $engine.paused)
+        } header: {
+            Text("Automation")
+        } footer: {
+            Text("Pause keeps the broadcast connected but stops new translation work. Your selected options are saved on this device.")
+        }
     }
 
     private var diagnosticsSection: some View {
