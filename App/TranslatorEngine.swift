@@ -272,16 +272,30 @@ final class TranslatorEngine: ObservableObject {
     // MARK: Text blocks
     /// Lines in reading order: top to bottom, left to right within a row.
     private func readingOrder(_ lines: [OCRLine]) -> [OCRLine] {
-        let byY = lines.sorted { $0.y > $1.y }
+        // Vision coordinates use a bottom-left origin: larger y is visually higher.
+        // Explicit row bands avoid unstable ordering from fuzzy sort comparators.
+        let sorted = lines.enumerated().sorted {
+            if abs($0.element.y - $1.element.y) < 0.000001 { return $0.offset < $1.offset }
+            return $0.element.y > $1.element.y
+        }.map(\.element)
         var rows: [[OCRLine]] = []
-        for l in byY {
-            if let first = rows.last?.first, abs(first.y - l.y) < 0.4 * min(first.h, l.h) {
-                rows[rows.count - 1].append(l)
+        var anchors: [Double] = []
+        for line in sorted {
+            let tolerance = max(0.012, min(max(line.h, 0.012), 0.06) * 0.55)
+            if let idx = anchors.indices.first(where: { abs(anchors[$0] - line.y) <= tolerance }) {
+                rows[idx].append(line)
+                anchors[idx] = rows[idx].map(\.y).reduce(0, +) / Double(rows[idx].count)
             } else {
-                rows.append([l])
+                rows.append([line])
+                anchors.append(line.y)
             }
         }
-        return rows.flatMap { $0.sorted { $0.x < $1.x } }
+        return rows.flatMap { row in
+            row.enumerated().sorted {
+                if abs($0.element.x - $1.element.x) < 0.000001 { return $0.offset < $1.offset }
+                return $0.element.x < $1.element.x
+            }.map(\.element)
+        }
     }
 
     /// Clusters lines that belong together (similar size, stacked closely, overlapping horizontally).
@@ -299,9 +313,14 @@ final class TranslatorEngine: ObservableObject {
                 let gap = last.y - l.y
                 let lineH = max(last.h, l.h)
                 let sizeRatio = min(last.h, l.h) / max(last.h, l.h, 0.0001)
-                let stacked = gap > 0.2 * lineH && gap < 3.0 * lineH && overlap > 0.25 * min(lw, w2)
-                let sameRow = abs(gap) <= 0.35 * lineH && xGap < 0.06
-                if sizeRatio > 0.5 && (stacked || sameRow) {
+                let verticallyAdjacent = gap > 0.15 * lineH && gap < 2.8 * lineH
+                let horizontalOverlap = overlap > 0.15 * min(lw, w2)
+                // Center-aligned manga dialogue often has ragged line widths.
+                // Group aligned lines even when their bounding boxes barely overlap.
+                let sameTextColumn = abs(l.x - last.x) < max(0.075, 0.35 * max(lw, w2))
+                let stacked = verticallyAdjacent && (horizontalOverlap || sameTextColumn)
+                let sameRow = abs(gap) <= 0.45 * lineH && xGap < 0.08
+                if sizeRatio > 0.42 && (stacked || sameRow) {
                     blocks[i].append(l)
                     placed = true
                     break
@@ -340,15 +359,32 @@ final class TranslatorEngine: ObservableObject {
         }
         func top(_ b: [OCRLine]) -> Double { b.map { $0.y + $0.h / 2 }.max() ?? 0 }
         func left(_ b: [OCRLine]) -> Double { b.map { $0.x - ($0.w ?? 0) / 2 }.min() ?? 0 }
-        // Once relevant blocks are selected, always output them in reading order,
-        // never by visual size/importance. This prevents unrelated dialogue being
-        // reordered around a large caption.
-        return kept.sorted { a, b in
-            let ay = top(a), by = top(b)
-            if abs(ay - by) > max(blockHeight(a), blockHeight(b)) * 0.75 {
-                return ay > by
+        // Build explicit top-to-bottom row bands. A fuzzy pairwise comparator
+        // can be non-transitive and accidentally shuffle complete dialogue blocks.
+        let byTop = kept.enumerated().sorted {
+            let ay = top($0.element), by = top($1.element)
+            if abs(ay - by) < 0.000001 { return $0.offset < $1.offset }
+            return ay > by
+        }.map(\.element)
+        var rows: [[[OCRLine]]] = []
+        var anchors: [Double] = []
+        for block in byTop {
+            let y = top(block)
+            let tolerance = max(0.018, min(max(blockHeight(block), 0.018), 0.08) * 0.8)
+            if let idx = anchors.indices.first(where: { abs(anchors[$0] - y) <= tolerance }) {
+                rows[idx].append(block)
+                anchors[idx] = rows[idx].map { top($0) }.reduce(0, +) / Double(rows[idx].count)
+            } else {
+                rows.append([block])
+                anchors.append(y)
             }
-            return left(a) < left(b)
+        }
+        return rows.flatMap { row in
+            row.enumerated().sorted {
+                let ax = left($0.element), bx = left($1.element)
+                if abs(ax - bx) < 0.000001 { return $0.offset < $1.offset }
+                return ax < bx
+            }.map(\.element)
         }
     }
 
