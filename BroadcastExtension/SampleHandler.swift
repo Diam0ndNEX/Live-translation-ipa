@@ -1,4 +1,4 @@
-// Screen Translator – Broadcast extension – v0.5.0
+// Screen Translator – Broadcast extension – v0.6.0
 import ReplayKit
 import Vision
 import ImageIO
@@ -112,7 +112,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             guard y < 0.96 else { return nil }
             return OCRLine(t: c.string, x: Double(b.midX), y: y, h: Double(b.height) * span, w: Double(b.width))
         }
-        lines.sort { abs($0.y - $1.y) > 0.015 ? $0.y > $1.y : $0.x < $1.x }
+        lines.sort { $0.y != $1.y ? $0.y > $1.y : $0.x < $1.x }
         return lines
     }
 
