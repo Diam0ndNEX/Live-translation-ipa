@@ -1,4 +1,4 @@
-// Screen Translator – App – v0.5.0
+// Screen Translator – App – v0.6.0
 import SwiftUI
 import Translation
 import NaturalLanguage
@@ -108,11 +108,12 @@ final class TranslatorEngine: ObservableObject {
     let server = LoopbackServer()
 
     private var lastHandled = ""
-    private var queued: String?
+    private var queued: [String]?
     private var busy = false
     private var showing = false
-    private var pendingText = ""
-    private var legacyContinuation: CheckedContinuation<String?, Never>?
+    private var pendingTexts: [String] = []
+    private var legacyContinuation: CheckedContinuation<[String]?, Never>?
+    private let speech = AVSpeechSynthesizer()
     private var lastPacketDate = Date.distantPast
     private var cache: [String: String] = [:]
     private var directSession: TranslationSession?
@@ -131,6 +132,11 @@ final class TranslatorEngine: ObservableObject {
     private var windowSize: WindowSize { WindowSize(rawValue: ud.string(forKey: "winSize") ?? "") ?? .normal }
     private var speed: SpeedPreset { SpeedPreset(rawValue: ud.string(forKey: "speed") ?? "") ?? .balanced }
     private var showOriginal: Bool { (ud.object(forKey: "showOriginal") as? Bool) ?? false }
+    private var speakEnabled: Bool { (ud.object(forKey: "speak") as? Bool) ?? false }
+    private var pipStyle: PiPStyle {
+        PiPStyle.make(theme: PiPTheme(rawValue: ud.string(forKey: "theme") ?? "") ?? .dark,
+                      size: PiPTextSize(rawValue: ud.string(forKey: "textSize") ?? "") ?? .auto)
+    }
     private var autoClear: Bool { (ud.object(forKey: "autoClear") as? Bool) ?? true }
 
     init() {
@@ -189,6 +195,7 @@ final class TranslatorEngine: ObservableObject {
         targetCode = s
     }
     func applyWindowSize() { pip.setSize(windowSize.size) }
+    func applyStyle() { pip.style = pipStyle; pip.rerender() }
 
     // MARK: Packets from the extension
     private func handle(_ p: Packet) {
@@ -215,14 +222,114 @@ final class TranslatorEngine: ObservableObject {
         let range = area.range(mode: mode)
         var cand = p.lines.filter { range.contains($0.y) }
         cand = removeOwnOutput(cand)
-        // Smart: keep the dominant (biggest) text, ignore small UI/watermark text
-        if area == .smart, let maxH = cand.map(\.h).max() {
-            cand = cand.filter { $0.h >= maxH * 0.55 }
-        }
-        let texts = dedupe(cand.map(\.t).filter { !isTargetLanguage($0) })
+        cand = cand.filter { !isTargetLanguage($0.t) }
+        // Group lines into text blocks (speech bubble, caption, background text…), read each in order
+        let blocks = selectBlocks(makeBlocks(cand))
+        let texts = dedupe(blocks.map { blockText($0) }.filter { TextSim.norm($0).count >= 2 && plausiblySource($0) })
         guard !texts.isEmpty else { handleClear(); return }
-        let text = String(texts.joined(separator: mode == .movie ? " " : "\n").prefix(500))
-        enqueue(text)
+        enqueue(texts.map { String($0.prefix(400)) })
+    }
+
+    // MARK: Text blocks
+    /// Lines in reading order: top to bottom, left to right within a row.
+    private func readingOrder(_ lines: [OCRLine]) -> [OCRLine] {
+        let byY = lines.sorted { $0.y > $1.y }
+        var rows: [[OCRLine]] = []
+        for l in byY {
+            if let first = rows.last?.first, abs(first.y - l.y) < 0.4 * min(first.h, l.h) {
+                rows[rows.count - 1].append(l)
+            } else {
+                rows.append([l])
+            }
+        }
+        return rows.flatMap { $0.sorted { $0.x < $1.x } }
+    }
+
+    /// Clusters lines that belong together (similar size, stacked closely, overlapping horizontally).
+    private func makeBlocks(_ lines: [OCRLine]) -> [[OCRLine]] {
+        let sorted = lines.sorted { $0.y != $1.y ? $0.y > $1.y : $0.x < $1.x }
+        var blocks: [[OCRLine]] = []
+        for l in sorted {
+            let lw = l.w ?? 0.2
+            var placed = false
+            for i in blocks.indices {
+                guard let last = blocks[i].last else { continue }
+                let w2 = last.w ?? 0.2
+                let overlap = min(l.x + lw / 2, last.x + w2 / 2) - max(l.x - lw / 2, last.x - w2 / 2)
+                let xGap = max(0, max(l.x - lw / 2, last.x - w2 / 2) - min(l.x + lw / 2, last.x + w2 / 2))
+                let gap = last.y - l.y
+                let lineH = max(last.h, l.h)
+                let sizeRatio = min(last.h, l.h) / max(last.h, l.h, 0.0001)
+                let stacked = gap > 0.2 * lineH && gap < 2.2 * lineH && overlap > 0.25 * min(lw, w2)
+                let sameRow = abs(gap) <= 0.35 * lineH && xGap < 0.06
+                if sizeRatio > 0.5 && (stacked || sameRow) {
+                    blocks[i].append(l)
+                    placed = true
+                    break
+                }
+            }
+            if !placed { blocks.append([l]) }
+        }
+        return blocks
+    }
+
+    private func blockHeight(_ b: [OCRLine]) -> Double {
+        let h = b.map(\.h).sorted()
+        return h.isEmpty ? 0 : h[h.count / 2]
+    }
+    private func blockWeight(_ b: [OCRLine]) -> Double {
+        blockHeight(b) * Double(b.reduce(0) { $0 + $1.t.count }).squareRoot()
+    }
+
+    /// Movie mode keeps the dominant block(s); other modes keep everything that isn't tiny.
+    private func selectBlocks(_ blocks: [[OCRLine]]) -> [[OCRLine]] {
+        guard !blocks.isEmpty else { return [] }
+        let maxH = blocks.map { blockHeight($0) }.max() ?? 0
+        var kept = blocks
+        if mode == .movie {
+            kept = blocks.filter { blockHeight($0) >= maxH * 0.7 }
+            if kept.count > 2 { kept = Array(kept.sorted { blockWeight($0) > blockWeight($1) }.prefix(2)) }
+        } else if area == .smart {
+            kept = blocks.filter { blockHeight($0) >= maxH * 0.4 }
+        }
+        kept = Array(kept.sorted { blockWeight($0) > blockWeight($1) }.prefix(6))
+        func top(_ b: [OCRLine]) -> Double { b.map { $0.y + $0.h / 2 }.max() ?? 0 }
+        func left(_ b: [OCRLine]) -> Double { b.map { $0.x - ($0.w ?? 0) / 2 }.min() ?? 0 }
+        return kept.sorted { a, b in
+            let ra = Int((1 - top(a)) * 14), rb = Int((1 - top(b)) * 14)
+            return ra != rb ? ra < rb : left(a) < left(b)
+        }
+    }
+
+    private func isCJK(_ c: Character) -> Bool {
+        guard let v = c.unicodeScalars.first?.value else { return false }
+        return (0x3000...0x9FFF).contains(v) || (0xAC00...0xD7AF).contains(v) || (0xFF00...0xFFEF).contains(v)
+    }
+
+    /// One block's lines joined into running text ("p-" + "pq" → "p-pq").
+    private func blockText(_ lines: [OCRLine]) -> String {
+        var out = ""
+        for l in readingOrder(lines) {
+            let t = l.t.trimmingCharacters(in: .whitespaces)
+            if t.isEmpty { continue }
+            if out.isEmpty { out = t }
+            else if out.hasSuffix("-") { out += t }
+            else if let last = out.last, isCJK(last) { out += t }
+            else { out += " " + t }
+        }
+        return out
+    }
+
+    /// With a chosen source language, skips blocks that are clearly written in another language.
+    private func plausiblySource(_ text: String) -> Bool {
+        guard sourceCode != "auto", text.count >= 8 else { return true }
+        let rec = NLLanguageRecognizer()
+        rec.processString(text)
+        let hyp = rec.languageHypotheses(withMaximum: 3)
+        guard let top = hyp.max(by: { $0.value < $1.value }), top.value > 0.8 else { return true }
+        let src = Locale.Language(identifier: sourceCode).languageCode
+        let ps = hyp.filter { Locale.Language(identifier: $0.key.rawValue).languageCode == src }.map(\.value).max() ?? 0
+        return ps > 0.15
     }
 
     /// Removes lines that are the floating window's own text, and learns where that window sits.
@@ -259,11 +366,12 @@ final class TranslatorEngine: ObservableObject {
         return out
     }
 
-    private func enqueue(_ text: String) {
-        guard text != lastHandled else { return }
-        if TextSim.similar(text, lastHandled, 0.92) { lastHandled = text; return }   // tiny OCR jitter
-        lastHandled = text
-        queued = text
+    private func enqueue(_ blocks: [String]) {
+        let joined = blocks.joined(separator: "\n")
+        guard joined != lastHandled else { return }
+        if TextSim.similar(joined, lastHandled, 0.92) { lastHandled = joined; return }   // tiny OCR jitter
+        lastHandled = joined
+        queued = blocks
         if !busy { Task { await drain() } }
     }
 
@@ -292,67 +400,135 @@ final class TranslatorEngine: ObservableObject {
         busy = true
         defer { busy = false }
         // Always translate only the newest text; anything older is already out of date.
-        while let t = queued { queued = nil; await process(t) }
+        while let b = queued { queued = nil; await process(b) }
     }
 
     // MARK: Translation
-    private func process(_ text: String) async {
+    private func detectSource(_ text: String) -> Locale.Language? {
+        if sourceCode != "auto" { return Locale.Language(identifier: sourceCode) }
+        let rec = NLLanguageRecognizer()
+        rec.processString(text)
+        // Prefer a language whose pack is installed when the detector is torn between candidates
+        let installed = Set(languages.filter { langStatus[$0.code] == .installed }.map {
+            $0.code == "zh" ? NLLanguage.simplifiedChinese : NLLanguage(rawValue: $0.code)
+        })
+        var dom = rec.dominantLanguage
+        if let best = rec.languageHypotheses(withMaximum: 5)
+            .filter({ installed.contains($0.key) }).max(by: { $0.value < $1.value }), best.value > 0.15 {
+            dom = best.key
+        }
+        guard let d = dom else { return nil }
+        return Locale.Language(identifier: d.rawValue)
+    }
+
+    private func pairStatus(_ src: Locale.Language, _ target: Locale.Language) async -> LanguageAvailability.Status {
+        if sourceCode != "auto", let s = langStatus[sourceCode] { return s }
+        return await LanguageAvailability().status(from: src, to: target)
+    }
+
+    /// Splits a block into sentences so each is translated on its own (better quality, cacheable).
+    private func splitSentences(_ text: String) -> [String] {
+        guard text.count > 24 else { return [text] }
+        let tok = NLTokenizer(unit: .sentence)
+        tok.string = text
+        var out: [String] = []
+        tok.enumerateTokens(in: text.startIndex..<text.endIndex) { r, _ in
+            let s = String(text[r]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if s.isEmpty { return true }
+            if s.count < 4, let last = out.popLast() { out.append(last + " " + s) } else { out.append(s) }
+            return true
+        }
+        return out.isEmpty ? [text] : out
+    }
+
+    private func process(_ blocks: [String]) async {
         let t0 = Date()
         let target = Locale.Language(identifier: targetCode)
-        let cacheKey = "\(sourceCode)>\(targetCode)|\(text)"
-        if let hit = cache[cacheKey] { show(text, hit); return }
 
-        let source: Locale.Language
-        if sourceCode == "auto" {
-            let rec = NLLanguageRecognizer()
-            rec.processString(text)
-            // Prefer a language whose pack is installed when the detector is torn between candidates
-            let installed = Set(languages.filter { langStatus[$0.code] == .installed }.map {
-                $0.code == "zh" ? NLLanguage.simplifiedChinese : NLLanguage(rawValue: $0.code)
-            })
-            var dom = rec.dominantLanguage
-            if let best = rec.languageHypotheses(withMaximum: 5)
-                .filter({ installed.contains($0.key) }).max(by: { $0.value < $1.value }), best.value > 0.15 {
-                dom = best.key
+        var sentences: [[String]] = []          // per block
+        var done: [[String?]] = []              // translated sentence, nil = still to translate
+        var pending: [String: [(block: Int, index: Int, text: String)]] = [:]
+        var srcLangs: [String: Locale.Language] = [:]
+        var translatedAny = false
+
+        for (bi, text) in blocks.enumerated() {
+            guard let src = detectSource(text), src.languageCode != target.languageCode else {
+                sentences.append([text]); done.append([text]); continue
             }
-            guard let dom else { status = "Couldn't detect the language"; return }
-            source = Locale.Language(identifier: dom.rawValue)
-        } else {
-            source = Locale.Language(identifier: sourceCode)
+            let id = src.minimalIdentifier
+            srcLangs[id] = src
+            let parts = splitSentences(text)
+            sentences.append(parts)
+            var row: [String?] = []
+            for (si, part) in parts.enumerated() {
+                if let hit = cache["\(id)>\(targetCode)|\(part)"] {
+                    row.append(hit); translatedAny = true
+                } else {
+                    row.append(nil)
+                    pending[id, default: []].append((bi, si, part))
+                }
+            }
+            done.append(row)
         }
-        if source.languageCode == target.languageCode { status = "Text is already in the target language"; return }
 
-        let availability: LanguageAvailability.Status
-        if sourceCode != "auto", let s = langStatus[sourceCode] {
-            availability = s
-        } else {
-            availability = await LanguageAvailability().status(from: source, to: target)
+        var failed = false
+        for (id, items) in pending {
+            guard let src = srcLangs[id] else { continue }
+            let availability = await pairStatus(src, target)
+            if availability == .unsupported { status = "\(id) → \(targetCode) isn't supported"; failed = true; continue }
+            if availability == .supported { status = "Language pack missing – open the Languages tab" }
+            guard let out = await translateBatch(items.map { $0.text }, source: src, target: target,
+                                                 installed: availability == .installed),
+                  out.count == items.count else { failed = true; continue }
+            translatedAny = true
+            for (k, it) in items.enumerated() {
+                done[it.block][it.index] = out[k]
+                cache["\(id)>\(targetCode)|\(it.text)"] = out[k]
+            }
         }
-        if availability == .unsupported {
-            status = "\(source.minimalIdentifier) → \(targetCode) isn't supported"; return
-        }
+        if cache.count > 600 { cache.removeAll() }
 
-        var result: String?
-        if #available(iOS 26.0, *), availability == .installed {
+        guard translatedAny else {
+            status = failed ? "Translation failed – download the language packs (Languages tab)"
+                            : "Text is already in the target language"
+            return
+        }
+        var outBlocks: [String] = []
+        for (bi, row) in done.enumerated() {
+            var parts: [String] = []
+            for (si, v) in row.enumerated() { parts.append(v ?? sentences[bi][si]) }
+            outBlocks.append(parts.joined(separator: " "))
+        }
+        translateMs = Date().timeIntervalSince(t0) * 1000
+        status = "\(srcLangs.keys.sorted().joined(separator: "+")) → \(targetCode) ✓"
+        show(blocks.joined(separator: "\n"), outBlocks.joined(separator: "\n"))
+    }
+
+    /// Translates many sentences in one call.
+    private func translateBatch(_ texts: [String], source: Locale.Language, target: Locale.Language,
+                                installed: Bool) async -> [String]? {
+        if #available(iOS 26.0, *), installed {
             let k = "\(source.minimalIdentifier)>\(targetCode)"
             if directSession == nil || directKey != k {
                 directSession = TranslationSession(installedSource: source, target: target)
                 directKey = k
             }
-            result = try? await directSession?.translate(text).targetText
-            if result == nil { directSession = nil }
-        } else {
-            if availability == .supported { status = "Language pack missing – open the Languages tab" }
-            result = await translateLegacy(text, source: source, target: target)
+            guard let session = directSession else { return nil }
+            let r = await runBatch(session, texts)
+            if r == nil { directSession = nil }
+            return r
         }
-        guard let result else {
-            status = "Translation failed – download the language packs (Languages tab)"; return
+        return await translateLegacy(texts, source: source, target: target)
+    }
+
+    private func runBatch(_ session: TranslationSession, _ texts: [String]) async -> [String]? {
+        let reqs = texts.enumerated().map { TranslationSession.Request(sourceText: $0.element, clientIdentifier: String($0.offset)) }
+        guard let res = try? await session.translations(from: reqs) else { return nil }
+        var out = [String](repeating: "", count: texts.count)
+        for r in res {
+            if let id = r.clientIdentifier, let i = Int(id), i < out.count { out[i] = r.targetText }
         }
-        translateMs = Date().timeIntervalSince(t0) * 1000
-        if cache.count > 300 { cache.removeAll() }
-        cache[cacheKey] = result
-        status = "\(source.minimalIdentifier) → \(targetCode) ✓"
-        show(text, result)
+        return out
     }
 
     private func show(_ text: String, _ result: String) {
@@ -362,18 +538,31 @@ final class TranslatorEngine: ObservableObject {
         if history.first?.original != text {
             history.insert(HistoryItem(original: text, translated: result), at: 0)
             if history.count > 100 { history.removeLast() }
+            if speakEnabled { speak(result) }
         }
         renderedGrams = TextSim.grams(result).union(placeholderGrams)
         sourceGrams = TextSim.grams(text)
         pip.setSize(windowSize.size)
+        pip.style = pipStyle
         pip.render(original: text, translated: result, showOriginal: showOriginal)
     }
 
+    private func speak(_ s: String) {
+        let voices = ["zh-Hans": "zh-CN", "zh-Hant": "zh-TW", "pt": "pt-BR", "en": "en-US", "es": "es-ES",
+                      "fr": "fr-FR", "de": "de-DE", "it": "it-IT", "ja": "ja-JP", "ko": "ko-KR", "ru": "ru-RU",
+                      "ar": "ar-SA", "tr": "tr-TR", "hi": "hi-IN", "id": "id-ID", "nl": "nl-NL", "pl": "pl-PL",
+                      "th": "th-TH", "vi": "vi-VN", "uk": "uk-UA"]
+        speech.stopSpeaking(at: .immediate)
+        let u = AVSpeechUtterance(string: s)
+        u.voice = AVSpeechSynthesisVoice(language: voices[targetCode] ?? targetCode)
+        speech.speak(u)
+    }
+
     // iOS 18 path (needs the hosted .translationTask view in RootView)
-    private func translateLegacy(_ text: String, source: Locale.Language, target: Locale.Language) async -> String? {
-        await withCheckedContinuation { cont in
+    private func translateLegacy(_ texts: [String], source: Locale.Language, target: Locale.Language) async -> [String]? {
+        await withCheckedContinuation { (cont: CheckedContinuation<[String]?, Never>) in
             legacyContinuation = cont
-            pendingText = text
+            pendingTexts = texts
             if var c = legacyConfig, c.source == source, c.target == target {
                 c.invalidate(); legacyConfig = c
             } else {
@@ -383,11 +572,10 @@ final class TranslatorEngine: ObservableObject {
         }
     }
     func runLegacy(_ session: TranslationSession) async {
-        do { finishLegacy(try await session.translate(pendingText).targetText) }
-        catch { finishLegacy(nil) }
+        finishLegacy(await runBatch(session, pendingTexts))
     }
-    private func finishLegacy(_ s: String?) {
-        legacyContinuation?.resume(returning: s)
+    private func finishLegacy(_ r: [String]?) {
+        legacyContinuation?.resume(returning: r)
         legacyContinuation = nil
     }
 
@@ -440,7 +628,7 @@ final class TranslatorEngine: ObservableObject {
         if key == (Locale.Language(identifier: targetCode).languageCode?.identifier ?? "") { key = "es" }
         lastHandled = ""
         status = "Testing…"
-        enqueue(samples[key] ?? samples["en"]!)
+        enqueue([samples[key] ?? samples["en"]!])
     }
 
     static let fallbackLanguages: [LangItem] = [
