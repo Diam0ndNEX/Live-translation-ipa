@@ -1,4 +1,4 @@
-// Screen Translator – App – v0.4.0
+// Screen Translator – App – v0.4.1
 import SwiftUI
 import Translation
 import NaturalLanguage
