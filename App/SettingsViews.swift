@@ -99,7 +99,7 @@ struct ReadingSettings: View {
                     ForEach(SpeedPreset.allCases) { Text($0.title).tag($0.rawValue) }
                 }
                 Picker("Wait for stable text", selection: $stability) {
-                    Text("Instant").tag(1)
+                    Text("Fast (stable)").tag(1)
                     Text("Normal").tag(2)
                     Text("Careful").tag(3)
                 }
@@ -112,7 +112,7 @@ struct ReadingSettings: View {
             } header: {
                 Text("Speed & quality")
             } footer: {
-                Text("Instant is fastest but may translate half-faded text. Always boosting contrast helps thin or outlined fonts but is slower.")
+                Text("Fast still confirms two OCR passes to prevent flicker. Normal and Careful wait for more consistent frames. Always boosting contrast can help thin or outlined fonts but is slower.")
             }
         }
         .settingsPage("Reading & OCR")
