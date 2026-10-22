@@ -38,8 +38,30 @@ jobs:
           test -n "$SOURCE_VERSION"
           test -n "$SOURCE_BUILD"
 
-          sed -i '' -E "s/(MARKETING_VERSION: ")[0-9]+\.[0-9]+\.[0-9]+(")/\1$SOURCE_VERSION\2/g" project.yml
-          sed -i '' -E "s/(CURRENT_PROJECT_VERSION: ")[0-9]+(")/\1$SOURCE_BUILD\2/g" project.yml
+          export SOURCE_VERSION SOURCE_BUILD
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          path = Path("project.yml")
+          content = path.read_text()
+          content, version_count = re.subn(
+              r'(?m)^(\s*MARKETING_VERSION:\s*")[^"]*(".*)$',
+              lambda match: match.group(1) + os.environ["SOURCE_VERSION"] + match.group(2),
+              content,
+              count=1,
+          )
+          content, build_count = re.subn(
+              r'(?m)^(\s*CURRENT_PROJECT_VERSION:\s*")[^"]*(".*)$',
+              lambda match: match.group(1) + os.environ["SOURCE_BUILD"] + match.group(2),
+              content,
+              count=1,
+          )
+          if version_count != 1 or build_count != 1:
+              raise SystemExit(f"Expected one version and build setting; found {version_count} and {build_count}")
+          path.write_text(content)
+          PY
           echo "Synchronized project version to $SOURCE_VERSION ($SOURCE_BUILD)"
           xcodegen generate
 
