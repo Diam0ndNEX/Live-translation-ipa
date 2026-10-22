@@ -272,7 +272,7 @@ struct HomeView: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.secondary)
             HStack(spacing: 8) {
-                ForEach([("movie", "film", "Movie"), ("game", "gamecontroller", "Game"), ("comic", "book", "Comic")], id: \\.0) { item in
+                ForEach([("movie", "film", "Movie"), ("game", "gamecontroller", "Game"), ("comic", "book", "Comic")], id: \.0) { item in
                     Button {
                         engine.applyPreset(item.0)
                     } label: {
@@ -284,7 +284,7 @@ struct HomeView: View {
                                         in: Capsule())
                     }
                     .foregroundStyle(.white)
-                    .accessibilityLabel("\\(item.2) preset")
+                    .accessibilityLabel("\(item.2) preset")
                 }
             }
         }
