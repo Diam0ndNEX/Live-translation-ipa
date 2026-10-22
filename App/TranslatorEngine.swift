@@ -1069,7 +1069,8 @@ final class TranslatorEngine: ObservableObject {
                 }.sorted { movieScore($0) > movieScore($1) }
                 kept = Array(ranked.prefix(1))
                 trace("MOVIE SELECT", kept.first.map { "selected=\(blockText($0)) | score=\(Int(movieScore($0)))" } ?? "no credible subtitle; wait for stable source text")
-            }        } else if area == .smart {
+            }
+        } else if area == .smart {
             kept = blocks.filter { blockHeight($0) >= maxH * (mode == .comic ? 0.22 : 0.32) }
         }
         // Comic/game mode must not throw away small dialogue bubbles just because
