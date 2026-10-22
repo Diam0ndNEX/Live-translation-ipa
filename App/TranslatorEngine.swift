@@ -690,11 +690,14 @@ final class TranslatorEngine: ObservableObject {
                 let width = block.compactMap(\.w).max() ?? 0
                 let centerY = block.map(\.y).reduce(0, +) / Double(max(1, block.count))
                 let subtitleZoneBonus = (centerY >= 0.08 && centerY <= 0.48) ? 8.0 : 0.0
+                // App-switching often leaves numbered instructions near the top.
+                // Penalize upper chrome without forbidding top-positioned subtitles.
+                let upperScreenPenalty = centerY > 0.72 ? 22.0 : (centerY > 0.60 ? 8.0 : 0.0)
                 let words = text.split(whereSeparator: { $0.isWhitespace || $0.isPunctuation }).count
                 let sentenceBonus = (words >= 3 && text.contains(where: { ".!?¡¿。！？".contains($0) })) ? 10.0 : 0.0
                 let fragmentPenalty = (words <= 2 && letters < 15) ? 18.0 : 0.0
                 return min(letters, 140) + lineBonus + min(12.0, width * 12.0)
-                    + subtitleZoneBonus + sentenceBonus - fragmentPenalty
+                    + subtitleZoneBonus + sentenceBonus - fragmentPenalty - upperScreenPenalty
             }
             let ranked = blocks.filter { block in
                 let text = blockText(block)
@@ -707,8 +710,11 @@ final class TranslatorEngine: ObservableObject {
                         "floatingwindow", "startcapture", "closefloatingwindow",
                         "pausetranslating", "captureconnected", "home settings history",
                         "movie subtitles", "ocrsees"].contains(where: { norm.contains(TextSim.norm($0)) })
-                let passesBase = !uiLike && isUsefulOCRText(text)
-                    && !isTargetLanguage(text) && plausiblySource(text) && !isSingleGenericLabel
+                let instructionalUI = isMovieInstructionOrNavigationText(text)
+                let likelyTargetLanguage = isLikelyTargetLanguageForMovie(text)
+                let passesBase = !uiLike && !instructionalUI && !likelyTargetLanguage
+                    && isUsefulOCRText(text) && !isTargetLanguage(text)
+                    && plausiblySource(text) && !isSingleGenericLabel
                 let score = movieScore(block)
                 // A short/noisy fragment is not a subtitle just because it is the
                 // best remaining candidate. Wait for the next changed frame instead.
@@ -716,11 +722,13 @@ final class TranslatorEngine: ObservableObject {
                 let passes = passesBase && passesQuality
                 if !passes {
                     let reason = uiLike ? "ScreenLingo/player UI" :
+                        (instructionalUI ? "instructional/navigation text" :
+                        (likelyTargetLanguage ? "likely target-language text" :
                         (isSingleGenericLabel ? "short single-word label" :
                         (!isUsefulOCRText(text) ? "low OCR usefulness" :
                         (isTargetLanguage(text) ? "target-language feedback" :
                         (!plausiblySource(text) ? "source-language mismatch" :
-                        (!passesQuality ? "below subtitle quality threshold" : "other")))))
+                        (!passesQuality ? "below subtitle quality threshold" : "other")))))))
                     trace("MOVIE CANDIDATE REJECT", "\(text) | score=\(Int(score)); reason=\(reason)")
                 } else {
                     trace("MOVIE CANDIDATE ACCEPT", "\(text) | score=\(Int(score)); words=\(words.count); lines=\(block.count)")
@@ -798,6 +806,45 @@ final class TranslatorEngine: ObservableObject {
             else { out += " " + t }
         }
         return out
+    }
+
+    /// Reject obvious setup instructions/navigation text in Movie mode only.
+    /// These heuristics deliberately do not affect game or comic OCR.
+    private func isMovieInstructionOrNavigationText(_ text: String) -> Bool {
+        let n = TextSim.norm(text)
+        guard !n.isEmpty else { return false }
+        let phrases = [
+            "openthevideo", "openvideo", "startoutside", "tapthe", "selectthe",
+            "gotosettings", "returnto", "swipeto", "scrollto", "step1", "step2",
+            "step3", "step4", "step5", "screenshot", "backtocapture",
+            "trythis", "followthesesteps", "20to40sec", "2040sec"
+        ]
+        if phrases.contains(where: { n.contains($0) }) { return true }
+        if text.range(of: #"^\s*[0-9]{1,2}[.)]\s+"#, options: .regularExpression) != nil,
+           n.contains("video") || n.contains("sec") || n.contains("step")
+            || n.contains("open") || n.contains("screen") || n.contains("capture") {
+            return true
+        }
+        return false
+    }
+
+    /// For explicit source/target pairs, reject strong evidence that a Movie-mode
+    /// candidate is already in the target language. Short ambiguous dialogue is kept.
+    private func isLikelyTargetLanguageForMovie(_ text: String) -> Bool {
+        guard mode == .movie, sourceCode != "auto", sourceCode != targetCode,
+              text.count >= 10 else { return false }
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(text)
+        let target = Locale.Language(identifier: targetCode).languageCode
+        let source = Locale.Language(identifier: sourceCode).languageCode
+        let hypotheses = recognizer.languageHypotheses(withMaximum: 5)
+        let targetScore = hypotheses.reduce(0.0) {
+            $0 + (Locale.Language(identifier: $1.key.rawValue).languageCode == target ? $1.value : 0)
+        }
+        let sourceScore = hypotheses.reduce(0.0) {
+            $0 + (Locale.Language(identifier: $1.key.rawValue).languageCode == source ? $1.value : 0)
+        }
+        return targetScore >= 0.55 && targetScore > sourceScore * 1.8
     }
 
     /// Detect our own settings/diagnostics screens using combinations of distinctive UI labels.
