@@ -895,8 +895,15 @@ final class TranslatorEngine: ObservableObject {
                 // mode rank a fragment and discard the rest of the actual sentence.
                 // Keep the stricter vertical-only rule for comic/game bubbles, where
                 // adjacent same-row boxes may belong to different speakers.
+                // Vision can split one long subtitle into adjacent boxes whose
+                // vertical centers differ slightly (for example, a long left box and
+                // a short final-word box on the right). Compare box-edge spacing and
+                // the smaller box height, rather than requiring nearly identical
+                // center y values; otherwise the last words become a separate block.
                 let sameMovieRow = mode == .movie
-                    && abs(verticalGap) <= 0.35 * lineHeight
+                    && abs(verticalGap) <= max(0.016, min(previous.h, line.h) * 1.25)
+                    && edgeGap <= 0.35 * lineHeight
+                    && edgeGap >= -0.35 * lineHeight
                     && horizontalGap < 0.06
                 guard sizeRatio > 0.45, (stacked || sameMovieRow) else { continue }
 
@@ -1113,7 +1120,30 @@ final class TranslatorEngine: ObservableObject {
     /// Detect our own settings/diagnostics screens using combinations of distinctive UI labels.
     /// Requiring multiple markers avoids rejecting legitimate dialogue containing a common word.
     private func isScreenLingoInterface(_ lines: [OCRLine]) -> Bool {
+        let normalizedLines = lines.map { TextSim.norm($0.t) }
         let allText = TextSim.norm(lines.map(\.t).joined(separator: " "))
+
+        // The History screen is composed of repeated Original / Translation / Star
+        // cards with a date on each card. Those labels may be fragmented across OCR
+        // observations, so they do not necessarily trigger the distinctive settings
+        // screen fingerprints below. A repeated card pattern is strong evidence that
+        // ReplayKit is capturing ScreenLingo's own History UI, not subtitle dialogue.
+        let originalCardLabels = normalizedLines.filter { $0 == "original" }.count
+        let translationCardLabels = normalizedLines.filter { $0 == "translation" }.count
+        let starCardLabels = normalizedLines.filter { $0 == "star" }.count
+        let monthNames = [
+            "january", "february", "march", "april", "may", "june",
+            "july", "august", "september", "october", "november", "december"
+        ]
+        let datedCards = normalizedLines.filter { line in
+            line.range(of: #"[0-9]{4}"#, options: .regularExpression) != nil
+                && monthNames.contains(where: { line.contains($0) })
+        }.count
+        if originalCardLabels >= 2 && translationCardLabels >= 2
+            && starCardLabels >= 2 && datedCards >= 2 {
+            return true
+        }
+
         let markers = [
             "copyreportforchatgpt", "copycompactreportlast60seconds",
             "exportfulldiagnosticreporttxt", "compactreportsincludeonlythelast60seconds",
