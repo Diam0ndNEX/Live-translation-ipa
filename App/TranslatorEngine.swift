@@ -1055,19 +1055,23 @@ final class LoopbackServer {
     private var retryWork: DispatchWorkItem?
     private var isStopping = false
     private var retryCount = 0
+    private var startInProgress = false
 
     func start() {
         queue.async { [weak self] in self?.startOnQueue() }
     }
 
     private func startOnQueue() {
+        // TranslatorEngine.init() and scenePhase=.active can both request startup.
+        // Never bind a second listener while the existing one is starting or alive:
+        // cancelling and immediately rebinding the same UDP port can produce EADDRINUSE.
+        guard listener == nil, !startInProgress else {
+            onDiagnostic?("Duplicate listener start ignored; listener already exists or is starting")
+            return
+        }
+        startInProgress = true
         retryWork?.cancel()
         retryWork = nil
-        isStopping = true
-        listener?.stateUpdateHandler = nil
-        listener?.cancel()
-        listener = nil
-        isStopping = false
 
         guard let port = NWEndpoint.Port(rawValue: Loopback.port) else {
             onState?(false)
@@ -1101,9 +1105,13 @@ final class LoopbackServer {
                 case .failed(let error):
                     self.onState?(false)
                     self.onDiagnostic?("UDP listener failed: \(error)")
+                    self.listener = nil
+                    self.startInProgress = false
                     self.scheduleRetry()
                 case .cancelled:
                     if !self.isStopping {
+                        self.listener = nil
+                        self.startInProgress = false
                         self.onState?(false)
                         self.onDiagnostic?("UDP listener cancelled unexpectedly")
                         self.scheduleRetry()
@@ -1116,8 +1124,10 @@ final class LoopbackServer {
             }
             listener = l
             l.start(queue: queue)
+            startInProgress = false
             onDiagnostic?("UDP listener start requested on port \(port.rawValue)")
         } catch {
+            startInProgress = false
             onState?(false)
             onDiagnostic?("Could not create UDP listener on port \(port.rawValue): \(error)")
             scheduleRetry()
@@ -1144,11 +1154,14 @@ final class LoopbackServer {
             self.retryWork?.cancel()
             self.retryWork = nil
             self.isStopping = true
+            self.retryWork?.cancel()
+            self.retryWork = nil
             self.listener?.stateUpdateHandler = nil
             self.listener?.cancel()
             self.listener = nil
             self.peer?.cancel()
             self.peer = nil
+            self.startInProgress = false
             self.isStopping = false
             self.onState?(false)
             self.onDiagnostic?("UDP listener stopped by app")
