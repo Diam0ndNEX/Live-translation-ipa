@@ -331,6 +331,23 @@ final class TranslatorEngine: ObservableObject {
         return result
     }
 
+    private static var thermalStateLabel: String {
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: return "normal"
+        case .fair: return "warm"
+        case .serious: return "hot"
+        case .critical: return "critical"
+        @unknown default: return "unknown"
+        }
+    }
+
+    private static var batteryLevelLabel: String {
+        let device = UIDevice.current
+        device.isBatteryMonitoringEnabled = true
+        let level = device.batteryLevel
+        return level < 0 ? "unavailable" : "\(Int(level * 100))%"
+    }
+
     func copyDetailedDiagnosticReport(includeRecognizedText: Bool = true, compact: Bool = true) -> String {
         let now = Date()
         let traceEntries: [String]
@@ -355,6 +372,7 @@ final class TranslatorEngine: ObservableObject {
             "Filter counts: \(lastFilterSummary)",
             "Accepted=\(acceptedInputCount); stabilization waits=\(stabilizationWaitCount); stale discarded=\(discardedStaleCount); cache hits=\(cacheHits); failures=\(translationFailures)",
             "Last error=\(lastTranslationError); quality=\(lastOutputQuality); status=\(status)",
+            "Device: thermal=\(Self.thermalStateLabel); lowPowerMode=\(ProcessInfo.processInfo.isLowPowerModeEnabled); battery=\(Self.batteryLevelLabel)",
             "RAW OCR:\n\(String(lastRaw.prefix(compact ? 1200 : 10000)))",
             "CANDIDATE:\n\(String(lastCandidateText.prefix(compact ? 1000 : 10000)))",
             "SELECTED BLOCKS:\n\(String(lastSelectedBlocks.prefix(compact ? 1000 : 10000)))",
