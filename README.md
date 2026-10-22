@@ -12,7 +12,9 @@ ScreenLingo is a native iOS screen translator built with SwiftUI, Apple Vision O
 - Adjustable OCR confidence threshold and optional language-aware recognition correction.
 - Customizable PiP size, appearance, text size, and optional original-text display.
 - Optional speech output, pause, automatic clearing, and local translation history.
-- Live diagnostics for OCR latency, translation latency, frame counts, and extension memory.
+- Live diagnostics for OCR latency, translation latency, frame counts, extension memory, thermal state, Low Power Mode, and battery.
+- Local-only privacy controls with automatic history retention (7/30/90 days or forever).
+- Searchable translation history with starred entries and text/CSV export.
 - Custom ScreenLingo app icon and consistent app/extension version metadata.
 
 ## Identity
@@ -20,7 +22,7 @@ ScreenLingo is a native iOS screen translator built with SwiftUI, Apple Vision O
 - Display name: `ScreenLingo`
 - Bundle identifier: `com.diam0ndnex.screenlingo`
 - Broadcast extension identifier: `com.diam0ndnex.screenlingo.broadcast`
-- Version: `0.8.1` (build `11`)
+- Version: `1.4.0` (build `28`)
 
 The bundle identifier has changed from the previous placeholder ID. iOS treats it as a different app identity; to replace an older installation cleanly, uninstall the old Screen Translator build first. This may remove its local app data, so export anything important before uninstalling.
 
@@ -37,7 +39,7 @@ The workflow generates the icon asset from `App/ScreenLingoIcon.svg`, generates 
 
 OCR and translation are handled on-device using Apple frameworks. Language-pair availability depends on iOS and installed language packs. ScreenLingo cannot guarantee identical accuracy for every font, animation, language pair, or game UI; use Sharp for small text and Fast for lower latency.
 
-Translation history is stored locally in app preferences. This project does not send recognized text to a third-party translation server.
+Translation history and settings are stored locally on-device. History can be automatically pruned after 7, 30, or 90 days, or retained indefinitely. Text and CSV exports are created locally; review exported files before sharing because they may contain recognized screen text. Diagnostic reports can redact recognized text. This project does not send recognized text to a third-party translation server.
 
 ## Development
 
