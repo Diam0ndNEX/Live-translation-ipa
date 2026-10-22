@@ -1,5 +1,6 @@
 // ScreenLingo – App – v0.7.0
 import SwiftUI
+import UIKit
 import Translation
 import NaturalLanguage
 import AVFoundation
