@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.4.2"
-    static let build = 30
+    static let version = "1.4.3"
+    static let build = 31
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Keep this aligned with MARKETING_VERSION and CURRENT_PROJECT_VERSION in project.yml.
     static let changelog: [(String, String)] = [
+        ("1.4.3", "Require stable OCR across consecutive frames and reject recent truncated fragments to prevent translation and History flicker."),
         ("1.4.2", "Calibrate frame rotation from reading-order evidence and reject stale OCR packets after rotation changes."),
         ("1.4.1", "Fix history star controls and native TXT/CSV file export; add a smaller PiP text-size option."),
         ("1.4.0", "Add privacy dashboard, configurable local-history retention, and CSV history export; keep main branch unchanged."),
