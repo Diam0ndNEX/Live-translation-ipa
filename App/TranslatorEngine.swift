@@ -775,6 +775,26 @@ final class TranslatorEngine: ObservableObject {
         delayedClearWork?.cancel()
         delayedClearWork = nil
         let candidate = texts.map { String($0.prefix(900)) }.joined(separator: "\n")
+
+        // OCR can intermittently lose the first line/words of a still-visible subtitle.
+        // Do not replace a recently displayed complete sentence with a much shorter
+        // candidate that is exactly its tail; that produces a visible correct → truncated
+        // → correct flicker. This is deliberately short-lived and only applies to suffixes,
+        // so genuine new dialogue and unrelated text can still replace the current result.
+        let previousNorm = TextSim.norm(original)
+        let candidateNorm = TextSim.norm(candidate)
+        let shownRecently = showing && Date().timeIntervalSince(lastShowDate) < 2.0
+        let looksLikeDroppedPrefix = previousNorm.count >= candidateNorm.count + 8
+            && candidateNorm.count >= 8
+            && Double(candidateNorm.count) / Double(max(1, previousNorm.count)) < 0.82
+            && previousNorm.hasSuffix(candidateNorm)
+        if shownRecently && looksLikeDroppedPrefix {
+            stabilizationWaitCount += 1
+            trace("OCR STABILIZATION", "Rejected likely truncated suffix; kept recent complete text (old=\(previousNorm.count) chars, candidate=\(candidateNorm.count) chars)")
+            recordDiagnostic("Ignored a likely partial OCR result that omitted the beginning of the current sentence")
+            return
+        }
+
         pendingInput = candidate
         pendingInputCount = 1
         acceptedInputCount += 1
