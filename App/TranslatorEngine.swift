@@ -196,6 +196,9 @@ final class TranslatorEngine: ObservableObject {
                 self.recordDiagnostic(ready ? "UDP listener ready" : "UDP listener failed or stopped")
             }
         }
+        server.onDiagnostic = { [weak self] message in
+            Task { @MainActor in self?.recordDiagnostic(message) }
+        }
         recordDiagnostic("App initialized; starting UDP listener")
         server.start()
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -1048,38 +1051,109 @@ final class LoopbackServer {
     private let queue = DispatchQueue(label: "loopback.server")
     var onPacket: ((Packet) -> Void)?
     var onState: ((Bool) -> Void)?
+    var onDiagnostic: ((String) -> Void)?
+    private var retryWork: DispatchWorkItem?
+    private var isStopping = false
+    private var retryCount = 0
 
     func start() {
-        stop()
-        guard let port = NWEndpoint.Port(rawValue: Loopback.port),
-              let l = try? NWListener(using: .udp, on: port) else {
-            onState?(false)
-            return
-        }
-        l.newConnectionHandler = { [weak self] c in
-            guard let self else { return }
-            c.start(queue: self.queue)
-            self.peer = c
-            self.receive(on: c)
-        }
-        l.stateUpdateHandler = { [weak self] state in
-            switch state {
-            case .ready:
-                self?.onState?(true)
-            case .failed:
-                self?.onState?(false)
-                self?.queue.asyncAfter(deadline: .now() + 1) { self?.start() }
-            case .cancelled:
-                self?.onState?(false)
-            default:
-                break
-            }
-        }
-        l.start(queue: queue)
-        listener = l
+        queue.async { [weak self] in self?.startOnQueue() }
     }
 
-    func stop() { listener?.cancel(); listener = nil }
+    private func startOnQueue() {
+        retryWork?.cancel()
+        retryWork = nil
+        isStopping = true
+        listener?.stateUpdateHandler = nil
+        listener?.cancel()
+        listener = nil
+        isStopping = false
+
+        guard let port = NWEndpoint.Port(rawValue: Loopback.port) else {
+            onState?(false)
+            onDiagnostic?("Invalid UDP port: \(Loopback.port)")
+            scheduleRetry()
+            return
+        }
+        do {
+            let l = try NWListener(using: .udp, on: port)
+            l.newConnectionHandler = { [weak self] c in
+                guard let self else { return }
+                c.stateUpdateHandler = { [weak self] state in
+                    guard let self else { return }
+                    if case .failed(let error) = state {
+                        self.onDiagnostic?("UDP peer failed: \(error)")
+                    }
+                }
+                c.start(queue: self.queue)
+                self.peer?.cancel()
+                self.peer = c
+                self.onDiagnostic?("UDP peer accepted")
+                self.receive(on: c)
+            }
+            l.stateUpdateHandler = { [weak self] state in
+                guard let self else { return }
+                switch state {
+                case .ready:
+                    self.retryCount = 0
+                    self.onState?(true)
+                    self.onDiagnostic?("UDP listener ready on port \(port.rawValue)")
+                case .failed(let error):
+                    self.onState?(false)
+                    self.onDiagnostic?("UDP listener failed: \(error)")
+                    self.scheduleRetry()
+                case .cancelled:
+                    if !self.isStopping {
+                        self.onState?(false)
+                        self.onDiagnostic?("UDP listener cancelled unexpectedly")
+                        self.scheduleRetry()
+                    }
+                case .waiting(let error):
+                    self.onDiagnostic?("UDP listener waiting: \(error)")
+                default:
+                    break
+                }
+            }
+            listener = l
+            l.start(queue: queue)
+            onDiagnostic?("UDP listener start requested on port \(port.rawValue)")
+        } catch {
+            onState?(false)
+            onDiagnostic?("Could not create UDP listener on port \(port.rawValue): \(error)")
+            scheduleRetry()
+        }
+    }
+
+    private func scheduleRetry() {
+        guard retryWork == nil else { return }
+        retryCount += 1
+        let delay = min(15.0, pow(2.0, Double(min(retryCount - 1, 4))))
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.retryWork = nil
+            self.startOnQueue()
+        }
+        retryWork = work
+        onDiagnostic?("UDP listener retry \(retryCount) scheduled in \(Int(delay))s")
+        queue.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    func stop() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.retryWork?.cancel()
+            self.retryWork = nil
+            self.isStopping = true
+            self.listener?.stateUpdateHandler = nil
+            self.listener?.cancel()
+            self.listener = nil
+            self.peer?.cancel()
+            self.peer = nil
+            self.isStopping = false
+            self.onState?(false)
+            self.onDiagnostic?("UDP listener stopped by app")
+        }
+    }
 
     /// Sends settings back to the capture extension.
     func send(_ cfg: Config) {
