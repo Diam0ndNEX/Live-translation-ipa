@@ -197,6 +197,8 @@ struct WindowSettings: View {
     var body: some View {
         List {
             Section("Look") {
+                Text("iOS controls the floating PiP window itself. These options control the content layout and make text easier to fit inside it.")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Picker("Window size", selection: $winSize) {
                     ForEach(WindowSize.allCases) { Text($0.title).tag($0.rawValue) }
                 }
