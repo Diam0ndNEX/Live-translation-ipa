@@ -556,7 +556,7 @@ final class TranslatorEngine: ObservableObject {
                            ignoreList: ignore,
                            dropNoise: defaults.object(forKey: "dropNoise") as? Bool ?? true,
                            boost: defaults.object(forKey: "boost") as? Int ?? 1,
-                           stability: defaults.object(forKey: "stability") as? Int ?? 1,
+                           stability: defaults.object(forKey: "stability") as? Int ?? 2,
                            skipUnchanged: defaults.object(forKey: "skipUnchanged") as? Bool ?? true,
                            rotation: rotation,
                            adaptive: defaults.object(forKey: "adaptive") as? Bool ?? true,
@@ -787,7 +787,7 @@ final class TranslatorEngine: ObservableObject {
         let looksLikeDroppedPrefix = previousNorm.count >= candidateNorm.count + 8
             && candidateNorm.count >= 8
             && Double(candidateNorm.count) / Double(max(1, previousNorm.count)) < 0.82
-            && previousNorm.hasSuffix(candidateNorm)
+            && previousNorm.contains(candidateNorm)
         if shownRecently && looksLikeDroppedPrefix {
             stabilizationWaitCount += 1
             trace("OCR STABILIZATION", "Rejected likely truncated suffix; kept recent complete text (old=\(previousNorm.count) chars, candidate=\(candidateNorm.count) chars)")
@@ -1854,7 +1854,7 @@ final class TranslatorEngine: ObservableObject {
         let incomingLooksTruncated = currentNorm.count >= incomingNorm.count + 8
             && incomingNorm.count >= 8
             && Double(incomingNorm.count) / Double(max(1, currentNorm.count)) < 0.82
-            && currentNorm.hasSuffix(incomingNorm)
+            && currentNorm.contains(incomingNorm)
         if currentIsFresh && incomingLooksTruncated {
             trace("DISPLAY STABILIZATION", "Prevented truncated source from replacing display/history (current=\(currentNorm.count) chars, incoming=\(incomingNorm.count) chars)")
             recordDiagnostic("Kept current translation; incoming OCR looked like a truncated ending fragment")
