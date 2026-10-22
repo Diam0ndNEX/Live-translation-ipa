@@ -6,8 +6,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.2.6"
-    CURRENT_PROJECT_VERSION: "21"
+    MARKETING_VERSION: "1.2.7"
+    CURRENT_PROJECT_VERSION: "22"
 targets:
   ScreenLingo:
     type: application

@@ -168,7 +168,8 @@ final class TranslatorEngine: ObservableObject {
     private var renderedGrams = TextSim.grams("Waiting for screen text… Listening…")
     private var renderedNorm = TextSim.norm("Waiting for screen text… Listening…")
     private var sourceGrams: Set<String> = []
-    private var pipRegion: CGRect?
+    // Keep separate exclusion regions so distant subtitle bubbles cannot be erased together.
+    private var pipRegions: [CGRect] = []
     private var pipRegionStamp = Date.distantPast
 
     private var ud: UserDefaults { .standard }
@@ -277,25 +278,31 @@ final class TranslatorEngine: ObservableObject {
     }
 
     func copyDetailedDiagnosticReport() -> String {
-        [
+        // Keep the report small enough to paste into chat while preserving the
+        // latest filter decisions and examples needed to debug a bad translation.
+        let traceTail = processingTrace.suffix(100).joined(separator: "\n")
+        let eventTail = diagnosticEvents.suffix(30).joined(separator: "\n")
+        let sections = [
             "ScreenLingo \(AppVersion.full)",
             "Timestamp: \(ISO8601DateFormatter().string(from: Date()))",
             "Capture=\(capturePhase); connected=\(captureAlive); PiP=\(pipActive); extension=\(extensionVersion)",
             "Packets all=\(totalPackets), ping=\(pingPackets), OCR=\(ocrPackets), clear=\(clearPackets); last=\(lastPacketSummary)",
-            "Frames=\(frames); OCR passes=\(ocrCount); raw lines=\(lastOCRLineCount); OCR ms=\(ocrMs); translation ms=\(translateMs)",
+            "Frames=\(frames); OCR passes=\(ocrCount); raw lines=\(lastOCRLineCount); OCR ms=\(Int(ocrMs)); translation ms=\(Int(translateMs))",
             "Source setting=\(sourceCode), detected=\(lastDetectedLanguage), target=\(targetCode), mode=\(mode.rawValue), area=\(area.rawValue)",
             "Filter counts: \(lastFilterSummary)",
             "Accepted=\(acceptedInputCount); stale discarded=\(discardedStaleCount); cache hits=\(cacheHits); failures=\(translationFailures)",
             "Last error=\(lastTranslationError); quality=\(lastOutputQuality); status=\(status)",
-            "RAW OCR:\n\(lastRaw)",
-            "CANDIDATE:\n\(lastCandidateText)",
-            "SELECTED BLOCKS:\n\(lastSelectedBlocks)",
-            "TRANSLATION INPUT:\n\(lastTranslationInput)",
-            "CURRENT ORIGINAL:\n\(original)",
-            "CURRENT TRANSLATION:\n\(translated)",
-            "PROCESSING TRACE (last 60 seconds):\n\(processingTrace.joined(separator: "\n"))",
-            "RECENT EVENTS:\n\(diagnosticEvents.joined(separator: "\n"))"
-        ].joined(separator: "\n")
+            "RAW OCR:\n\(String(lastRaw.prefix(1200)))",
+            "CANDIDATE:\n\(String(lastCandidateText.prefix(1000)))",
+            "SELECTED BLOCKS:\n\(String(lastSelectedBlocks.prefix(1000)))",
+            "TRANSLATION INPUT:\n\(String(lastTranslationInput.prefix(1200)))",
+            "CURRENT ORIGINAL:\n\(String(original.prefix(800)))",
+            "CURRENT TRANSLATION:\n\(String(translated.prefix(800)))",
+            "PROCESSING TRACE (last 100 events):\n\(traceTail)",
+            "RECENT EVENTS (last 30):\n\(eventTail)"
+        ]
+        let report = sections.joined(separator: "\n")
+        return report.count <= 15000 ? report : String(report.prefix(14980)) + "\n[Report truncated at 15,000 characters]"
     }
 
     func clearDiagnosticEvents() {
@@ -673,10 +680,26 @@ final class TranslatorEngine: ObservableObject {
     /// Reject OCR blocks that are mostly counters, coordinates, timestamps, or visual noise.
     /// Keep short natural fragments such as "Rem:" and "p-" because dialogue is often split.
     private func isUsefulOCRText(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let letters = text.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
         let digits = text.unicodeScalars.filter { CharacterSet.decimalDigits.contains($0) }.count
-        guard letters >= 2 else { return false }
+        let visible = text.unicodeScalars.filter { !CharacterSet.whitespacesAndNewlines.contains($0) }.count
+        let punctuation = text.unicodeScalars.filter {
+            CharacterSet.punctuationCharacters.contains($0) || CharacterSet.symbols.contains($0)
+        }.count
+        guard letters >= 2, visible > 0 else { return false }
         if digits >= 5 && digits > letters { return false }
+        // Preserve short dialogue and stylized speech while rejecting severe OCR noise.
+        if visible >= 8 && Double(punctuation) / Double(visible) > 0.48 { return false }
+
+        let normalized = TextSim.norm(trimmed)
+        // ReplayKit's privacy sheet is not dialogue. Match phrase combinations, not
+        // generic words that may legitimately appear in subtitles.
+        let systemOverlayPhrases = [
+            "everythingonyourscreenincludingnotifications",
+            "enabledonotdisturbtopreventunexpectednotifications"
+        ]
+        if systemOverlayPhrases.contains(where: { normalized.contains($0) }) { return false }
         return true
     }
 
@@ -692,49 +715,62 @@ final class TranslatorEngine: ObservableObject {
         return ps > 0.15
     }
 
-    /// Removes lines that are the floating window's own text, and learns where that window sits.
+    /// Removes lines that are the floating window's own text without suppressing
+    /// unrelated subtitles elsewhere on screen.
     private func removeOwnOutput(_ lines: [OCRLine]) -> [OCRLine] {
         var mine: [OCRLine] = []
         var rest: [OCRLine] = []
-        for l in lines {
-            let lineNorm = TextSim.norm(l.t)
-            if lineNorm.count >= 3 {
-                let inOutput = TextSim.containment(of: l.t, in: renderedGrams)
-                let inSource = TextSim.containment(of: l.t, in: sourceGrams)
-                // Exact normalized substring matching catches OCR rows that are
-                // wrapped differently from the PiP layout. Fuzzy bigram matching
-                // remains as a fallback for imperfect recognition.
-                let isRenderedFragment = lineNorm.count >= 8 && renderedNorm.contains(lineNorm)
-                let fuzzyRenderedFragment = lineNorm.count >= 8 && inOutput >= 0.42
-
-                // The floating window can be captured by ReplayKit. OCR may split
-                // one rendered sentence into several short lines, so a strict 0.85
-                // containment plus a source/output margin misses our own overlay.
-                // Learn the overlay region from either its translation or (when
-                // enabled) its displayed original, then suppress everything inside it.
-                let matchesTranslation = isRenderedFragment || fuzzyRenderedFragment || inOutput >= 0.68
-                let matchesDisplayedOriginal = showOriginal && inSource >= 0.72
+        for line in lines {
+            let normalized = TextSim.norm(line.t)
+            if normalized.count >= 3 {
+                let outputOverlap = TextSim.containment(of: line.t, in: renderedGrams)
+                let sourceOverlap = TextSim.containment(of: line.t, in: sourceGrams)
+                let exactOutputFragment = normalized.count >= 8 && renderedNorm.contains(normalized)
+                // Common short words can overlap by chance. Require a longer fragment
+                // and a stronger score before treating OCR as our own rendered text.
+                let fuzzyOutputFragment = normalized.count >= 10 && outputOverlap >= 0.62
+                let strongOutputMatch = normalized.count >= 6 && outputOverlap >= 0.78
+                let matchesTranslation = exactOutputFragment || fuzzyOutputFragment || strongOutputMatch
+                let matchesDisplayedOriginal = showOriginal && normalized.count >= 8 && sourceOverlap >= 0.82
                 if matchesTranslation || matchesDisplayedOriginal {
-                    mine.append(l)
+                    mine.append(line)
                     continue
                 }
             }
-            rest.append(l)
+            rest.append(line)
         }
+
         if !mine.isEmpty {
-            var r = CGRect.null
-            for l in mine {
-                let w = l.w ?? 0.25
-                r = r.union(CGRect(x: l.x - w / 2, y: l.y - l.h / 2, width: w, height: l.h))
+            // Cluster matching lines spatially; never create one screen-sized rectangle
+            // from matches that happen to occur in different subtitle bubbles.
+            var clusters: [[OCRLine]] = []
+            for line in mine {
+                if let index = clusters.firstIndex(where: { cluster in
+                    cluster.contains { abs($0.x - line.x) <= 0.26 && abs($0.y - line.y) <= 0.16 }
+                }) {
+                    clusters[index].append(line)
+                } else {
+                    clusters.append([line])
+                }
             }
-            // The original text can sit above the translation, so reach further up when it is shown
-            pipRegion = r.insetBy(dx: -0.04, dy: showOriginal ? -0.18 : -0.06)
+            pipRegions = clusters.map { cluster in
+                var region = CGRect.null
+                for line in cluster {
+                    let width = max(0.02, min(line.w ?? 0.25, 0.8))
+                    region = region.union(CGRect(x: line.x - width / 2, y: line.y - line.h / 2,
+                                                 width: width, height: max(line.h, 0.015)))
+                }
+                return region.insetBy(dx: -0.025, dy: showOriginal ? -0.09 : -0.035)
+            }
             pipRegionStamp = Date()
         }
-        if let reg = pipRegion, Date().timeIntervalSince(pipRegionStamp) < 15 {
-            // The overlay can contain multiple OCR rows (original + translation).
-            // Once anchored by a text match, suppress every row within its bounds.
-            rest.removeAll { reg.contains(CGPoint(x: $0.x, y: $0.y)) }
+
+        if Date().timeIntervalSince(pipRegionStamp) < 8, !pipRegions.isEmpty {
+            rest.removeAll { line in
+                pipRegions.contains { $0.contains(CGPoint(x: line.x, y: line.y)) }
+            }
+        } else {
+            pipRegions.removeAll()
         }
         return rest
     }
