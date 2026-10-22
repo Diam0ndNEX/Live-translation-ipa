@@ -1275,7 +1275,25 @@ final class TranslatorEngine: ObservableObject {
         var translatedAny = false
 
         for (bi, text) in blocks.enumerated() {
-            guard let src = detectSource(text), src.languageCode != target.languageCode else {
+            let detected = detectSource(text)
+            let sourceLanguageCode = detected?.languageCode?.identifier
+            let targetLanguageCode = target.languageCode?.identifier
+            trace("SOURCE DETECTION EVIDENCE",
+                  "Block #\(bi + 1); setting=\(sourceCode); detected=\(sourceLanguageCode ?? "unknown"); target=\(targetLanguageCode ?? targetCode); text=\(text)")
+
+            // A manually chosen source language is a preference, not proof. Short OCR
+            // strings and English UI fragments can otherwise be force-labelled pt and
+            // returned unchanged by Apple Translation. Require affirmative source
+            // evidence before translating when the detector has a clear contradiction.
+            if sourceCode != "auto", sourceLanguageCode != nil,
+               sourceLanguageCode != sourceCode, sourceLanguageCode == targetLanguageCode {
+                trace("SOURCE DETECTION REJECT",
+                      "explicit source \(sourceCode) contradicted by strong target-language evidence; keep prior output instead of treating input as Portuguese: \(text)")
+                sentences.append([text])
+                done.append([text])
+                continue
+            }
+            guard let src = detected, src.languageCode != target.languageCode else {
                 sentences.append([text]); done.append([text]); continue
             }
             let id = src.minimalIdentifier
