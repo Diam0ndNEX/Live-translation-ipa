@@ -5,9 +5,7 @@ workflows:
     instance_type: mac_mini_m2
     environment:
       xcode: latest
-    # No automatic triggers: start builds manually to avoid wasting free build minutes.
-    triggering:
-      events: []
+    # No push/tag triggers: start builds manually to conserve free build minutes.
     scripts:
       - name: Install build tools
         script: |
@@ -69,6 +67,36 @@ workflows:
           EXT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$EXT/Info.plist")
           test "$EXT_VERSION" = "$SOURCE_VERSION"
           test "$EXT_BUILD" = "$SOURCE_BUILD"
+
+      - name: Save IPA permanently to GitHub Releases (optional)
+        script: |
+          set -euo pipefail
+          cd "$CM_BUILD_DIR"
+          if [ -z "${GITHUB_TOKEN:-}" ]; then
+            echo "GITHUB_TOKEN is not configured in Codemagic; IPA will be available as a Codemagic build artifact only."
+            echo "To keep Codemagic-built IPAs permanently, add a secret GITHUB_TOKEN in Codemagic with Contents: Read and write permission for Diam0ndNEX/Live-translation-ipa."
+            exit 0
+          fi
+
+          TAG="codemagic-build-${CM_BUILD_ID}"
+          RELEASE_JSON=$(curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/Diam0ndNEX/Live-translation-ipa/releases \
+            -d "$(python3 -c 'import json,os; tag=os.environ["TAG"]; print(json.dumps({"tag_name":tag,"name":"ScreenLingo "+tag,"body":"Unsigned IPA built by Codemagic. Source commit: "+os.environ.get("CM_COMMIT","unknown"),"draft":False,"prerelease":True}))')")
+          UPLOAD_URL=$(printf '%s' "$RELEASE_JSON" | python3 -c 'import json,sys; print(json.load(sys.stdin)["upload_url"].split("{")[0])')
+          curl --fail-with-body --silent --show-error \
+            -X POST \
+            -H "Authorization: Bearer $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @ScreenLingo.ipa \
+            "${UPLOAD_URL}?name=ScreenLingo.ipa"
+          echo "IPA uploaded to permanent GitHub Release: $TAG"
+        environment:
+          - GITHUB_TOKEN
 
     artifacts:
       - ScreenLingo.ipa
