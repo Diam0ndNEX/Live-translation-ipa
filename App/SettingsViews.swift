@@ -117,7 +117,7 @@ struct ReadingSettings: View {
         }
         .settingsPage("Reading & OCR")
         .onChange(of: key) { _, _ in engine.syncConfig() }
-        .onChange(of: frameRot) { _, _ in engine.syncConfig() }
+        .onChange(of: frameRot) { _, _ in engine.rotationSettingChanged() }
     }
 }
 
