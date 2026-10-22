@@ -515,6 +515,20 @@ struct HistoryView: View {
         }.joined(separator: "\n\n──────────\n\n")
     }
 
+    private func csvCell(_ value: String) -> String {
+        "\"" + value.replacingOccurrences(of: "\"", with: "\"\"")
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n") + "\""
+    }
+
+    private var exportCSV: String {
+        let rows = engine.history.map { item in
+            [item.date.ISO8601Format(), item.starred ? "true" : "false", item.original, item.translated]
+                .map(csvCell).joined(separator: ",")
+        }
+        return (["date,starred,original,translation"] + rows).joined(separator: "\n")
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -564,7 +578,10 @@ struct HistoryView: View {
             .navigationTitle("History")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    ShareLink(item: exportText) {
+                    Menu {
+                        ShareLink(item: exportText) { Label("Export as text", systemImage: "doc.text") }
+                        ShareLink(item: exportCSV) { Label("Export as CSV", systemImage: "tablecells") }
+                    } label: {
                         Image(systemName: "square.and.arrow.up")
                     }
                     .disabled(engine.history.isEmpty)
