@@ -1844,6 +1844,23 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func show(_ text: String, _ result: String) {
+        // Final guard immediately before changing the UI/history. OCR can still produce
+        // a truncated source after earlier stabilization (for example, if its wording
+        // differs just enough to pass the first filter). Keep the complete current line
+        // when a fresh candidate is only its ending fragment.
+        let currentNorm = TextSim.norm(original)
+        let incomingNorm = TextSim.norm(text)
+        let currentIsFresh = showing && Date().timeIntervalSince(lastShowDate) < 2.0
+        let incomingLooksTruncated = currentNorm.count >= incomingNorm.count + 8
+            && incomingNorm.count >= 8
+            && Double(incomingNorm.count) / Double(max(1, currentNorm.count)) < 0.82
+            && currentNorm.hasSuffix(incomingNorm)
+        if currentIsFresh && incomingLooksTruncated {
+            trace("DISPLAY STABILIZATION", "Prevented truncated source from replacing display/history (current=\(currentNorm.count) chars, incoming=\(incomingNorm.count) chars)")
+            recordDiagnostic("Kept current translation; incoming OCR looked like a truncated ending fragment")
+            return
+        }
+
         delayedClearWork?.cancel()
         delayedClearWork = nil
         original = text
