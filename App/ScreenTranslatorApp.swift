@@ -169,6 +169,7 @@ struct HomeView: View {
                 preview
                 settings
                 startButton
+                checklist
                 statusCard
             }
             .padding(.horizontal, 16)
@@ -179,6 +180,34 @@ struct HomeView: View {
         .onChange(of: area) { _, _ in engine.syncConfig() }
         .onChange(of: mode) { _, _ in engine.syncConfig() }
         .background(Theme.bg.ignoresSafeArea())
+    }
+
+    private var packReady: Bool {
+        if engine.sourceCode == "auto" {
+            return engine.languages.contains { engine.langStatus[$0.code] == .installed }
+        }
+        return engine.langStatus[engine.sourceCode] == .installed
+    }
+
+    private func checkRow(_ title: String, ok: Bool) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: ok ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(ok ? Color.green : Color.secondary)
+            Text(title).font(.footnote)
+            Spacer()
+        }
+    }
+
+    @ViewBuilder private var checklist: some View {
+        if !(packReady && engine.pipActive && engine.captureAlive) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Setup").font(.caption.bold()).foregroundStyle(.secondary)
+                checkRow("Language pack downloaded (Languages tab)", ok: packReady)
+                checkRow("Floating window open", ok: engine.pipActive)
+                checkRow("Screen capture running", ok: engine.captureAlive)
+            }
+            .card()
+        }
     }
 
     private var header: some View {
