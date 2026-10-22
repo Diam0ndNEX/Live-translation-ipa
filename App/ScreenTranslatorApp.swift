@@ -325,8 +325,7 @@ struct HomeView: View {
             .disabled(engine.original.isEmpty)
 
             Button {
-                engine.frozen.toggle()
-                engine.status = engine.frozen ? "PiP output frozen — capture continues" : "PiP output live again"
+                engine.toggleFrozenOutput()
             } label: {
                 Label(engine.frozen ? "Resume" : "Freeze",
                       systemImage: engine.frozen ? "play.fill" : "pause.fill")
