@@ -950,18 +950,13 @@ final class TranslatorEngine: ObservableObject {
         let maxH = blocks.map { blockHeight($0) }.max() ?? 0
         var kept = blocks
         if mode == .movie {
-            // Movie mode emits one best source subtitle per OCR frame. Keep all spatial
-            // regions available for ranking, but never translate overlapping candidates
-            // independently. Games/comics retain their multi-region selection below.
             func movieScore(_ block: [OCRLine]) -> Double {
                 let text = blockText(block)
                 let letters = Double(text.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count)
                 let lineBonus = Double(max(0, block.count - 1)) * 12
-                let width = block.compactMap(\.w).max() ?? 0
-                let centerY = block.map(\.y).reduce(0, +) / Double(max(1, block.count))
+                let width = block.compactMap(\\.w).max() ?? 0
+                let centerY = block.map(\\.y).reduce(0, +) / Double(max(1, block.count))
                 let subtitleZoneBonus = (centerY >= 0.08 && centerY <= 0.48) ? 8.0 : 0.0
-                // App-switching often leaves numbered instructions near the top.
-                // Penalize upper chrome without forbidding top-positioned subtitles.
                 let upperScreenPenalty = centerY > 0.72 ? 22.0 : (centerY > 0.60 ? 8.0 : 0.0)
                 let words = text.split(whereSeparator: { $0.isWhitespace || $0.isPunctuation }).count
                 let sentenceBonus = (words >= 3 && text.contains(where: { ".!?¡¿。！？".contains($0) })) ? 10.0 : 0.0
@@ -969,12 +964,41 @@ final class TranslatorEngine: ObservableObject {
                 return min(letters, 140) + lineBonus + min(12.0, width * 12.0)
                     + subtitleZoneBonus + sentenceBonus - fragmentPenalty - upperScreenPenalty
             }
-            let ranked = blocks.filter { block in
+
+            func centerY(_ block: [OCRLine]) -> Double {
+                block.map(\\.y).reduce(0, +) / Double(max(1, block.count))
+            }
+            func centerX(_ block: [OCRLine]) -> Double {
+                block.map(\\.x).reduce(0, +) / Double(max(1, block.count))
+            }
+            func leftEdge(_ block: [OCRLine]) -> Double {
+                block.map { $0.x - ($0.w ?? 0.2) / 2 }.min() ?? 0
+            }
+            func areAdjacentLyricRows(_ upper: [OCRLine], _ lower: [OCRLine]) -> Bool {
+                let upperHeight = max(blockHeight(upper), 0.001)
+                let lowerHeight = max(blockHeight(lower), 0.001)
+                let sizeRatio = min(upperHeight, lowerHeight) / max(upperHeight, lowerHeight)
+                let verticalGap = abs(centerY(upper) - centerY(lower))
+                let typicalHeight = max(upperHeight, lowerHeight)
+                guard sizeRatio >= 0.55,
+                      verticalGap >= min(upperHeight, lowerHeight) * 0.65,
+                      verticalGap <= max(0.12, typicalHeight * 4.2) else { return false }
+
+                // Lyrics often arrive as separate OCR blocks because centered lines
+                // have different widths. Accept either a shared center or a shared
+                // left edge, but require similar font size and close vertical spacing.
+                let centered = abs(centerX(upper) - centerX(lower)) <= 0.18
+                let leftAligned = abs(leftEdge(upper) - leftEdge(lower)) <= 0.14
+                return centered || leftAligned
+            }
+
+            // Filter player/app chrome before looking for lyric rows. Keep short
+            // candidate lines temporarily: a one- or two-word verse can be valid
+            // when it belongs to a coherent multi-line lyric group.
+            let eligible = blocks.filter { block in
                 let text = blockText(block)
                 let norm = TextSim.norm(text)
                 let words = text.split(whereSeparator: { $0.isWhitespace || $0.isPunctuation })
-                let letters = norm.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
-                let isSingleGenericLabel = words.count == 1 && letters < 13
                 let uiLike = isScreenLingoChromeText(text)
                     || ["copyrawocr", "showoriginaltext", "clearwhentextends",
                         "floatingwindow", "startcapture", "closefloatingwindow",
@@ -982,38 +1006,71 @@ final class TranslatorEngine: ObservableObject {
                         "movie subtitles", "ocrsees"].contains(where: { norm.contains(TextSim.norm($0)) })
                 let instructionalUI = isMovieInstructionOrNavigationText(text)
                 let likelyTargetLanguage = isLikelyTargetLanguageForMovie(text)
-                let passesBase = !uiLike && !instructionalUI && !likelyTargetLanguage
+                let passes = !uiLike && !instructionalUI && !likelyTargetLanguage
                     && isUsefulOCRText(text) && !isTargetLanguage(text)
-                    && plausiblySource(text) && !isSingleGenericLabel
-                let score = movieScore(block)
-                // A short/noisy fragment is not a subtitle just because it is the
-                // best remaining candidate. Wait for the next changed frame instead.
-                let passesQuality = score >= 20 && !(words.count <= 2 && letters < 10)
-                let passes = passesBase && passesQuality
+                    && plausiblySource(text)
                 if !passes {
                     let reason = uiLike ? "ScreenLingo/player UI" :
                         (instructionalUI ? "instructional/navigation text" :
                         (likelyTargetLanguage ? "likely target-language text" :
-                        (isSingleGenericLabel ? "short single-word label" :
                         (!isUsefulOCRText(text) ? "low OCR usefulness" :
                         (isTargetLanguage(text) ? "target-language feedback" :
-                        (!plausiblySource(text) ? "source-language mismatch" :
-                        (!passesQuality ? "below subtitle quality threshold" : "other")))))))
-                    trace("MOVIE CANDIDATE REJECT", "\(text) | score=\(Int(score)); reason=\(reason)")
-                } else {
-                    trace("MOVIE CANDIDATE ACCEPT", "\(text) | score=\(Int(score)); words=\(words.count); lines=\(block.count)")
+                        (!plausiblySource(text) ? "source-language mismatch" : "other")))))
+                    trace("MOVIE CANDIDATE REJECT", "\\(text) | reason=\\(reason)")
                 }
                 return passes
-            }.sorted { movieScore($0) > movieScore($1) }
-            kept = Array(ranked.prefix(1))
-            trace("MOVIE SELECT", kept.first.map { "selected=\(blockText($0)) | score=\(Int(movieScore($0)))" } ?? "no credible subtitle; WAIT — do not translate UI/transition fragments")
-            trace("MOVIE CANDIDATES", "ranked \(ranked.count) credible source-like block(s); selected \(kept.first.map { blockText($0) } ?? "[none — wait for credible subtitle text]")")
-        } else if area == .smart {
+            }
+
+            // Cluster adjacent, similarly sized, aligned text rows. A normal video
+            // subtitle remains one candidate; visible song lyrics can be translated
+            // as a single batch instead of repeatedly selecting only the bottom row.
+            let topToBottom = eligible.sorted { centerY($0) > centerY($1) }
+            var clusters: [[[OCRLine]]] = []
+            for block in topToBottom {
+                if let index = clusters.indices.first(where: { cluster in
+                    guard let previous = cluster.last else { return false }
+                    return areAdjacentLyricRows(previous, block)
+                }) {
+                    clusters[index].append(block)
+                } else {
+                    clusters.append([block])
+                }
+            }
+
+            let lyricGroups = clusters.filter { $0.count >= 2 && $0.count <= 6 }
+            func groupScore(_ group: [[OCRLine]]) -> Double {
+                group.reduce(0.0) { $0 + movieScore($1) } + Double(max(0, group.count - 1)) * 12
+            }
+            let bestGroup = lyricGroups.max { groupScore($0) < groupScore($1) }
+            let bestSingle = eligible.max { movieScore($0) < movieScore($1) }
+            if let group = bestGroup,
+               groupScore(group) >= max(30, (bestSingle.map(movieScore) ?? 0) * 1.1) {
+                kept = group.sorted { centerY($0) > centerY($1) }
+                trace("MOVIE LYRIC GROUP", "selected \\(kept.count) aligned rows | \\(kept.map { blockText($0) }.joined(separator: " / "))")
+            } else {
+                let ranked = eligible.filter { block in
+                    let text = blockText(block)
+                    let norm = TextSim.norm(text)
+                    let words = text.split(whereSeparator: { $0.isWhitespace || $0.isPunctuation })
+                    let letters = norm.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
+                    let isSingleGenericLabel = words.count == 1 && letters < 13
+                    let score = movieScore(block)
+                    let passesQuality = score >= 20 && !(words.count <= 2 && letters < 10) && !isSingleGenericLabel
+                    if !passesQuality {
+                        trace("MOVIE CANDIDATE REJECT", "\\(text) | score=\\(Int(score)); reason=below subtitle quality threshold")
+                    } else {
+                        trace("MOVIE CANDIDATE ACCEPT", "\\(text) | score=\\(Int(score)); words=\\(words.count); lines=\\(block.count)")
+                    }
+                    return passesQuality
+                }.sorted { movieScore($0) > movieScore($1) }
+                kept = Array(ranked.prefix(1))
+                trace("MOVIE SELECT", kept.first.map { "selected=\\(blockText($0)) | score=\\(Int(movieScore($0)))" } ?? "no credible subtitle; wait for stable source text")
+            }        } else if area == .smart {
             kept = blocks.filter { blockHeight($0) >= maxH * (mode == .comic ? 0.22 : 0.32) }
         }
         // Comic/game mode must not throw away small dialogue bubbles just because
         // they are smaller than a title or a background sign.
-        let limit = mode == .comic ? 14 : (mode == .game ? 10 : 3)
+        let limit = mode == .comic ? 14 : (mode == .game ? 10 : 6)
         if kept.count > limit {
             kept = Array(kept.sorted { blockWeight($0) > blockWeight($1) }.prefix(limit))
         }
