@@ -75,8 +75,8 @@ struct DiagnosticsView: View {
                     if engine.diagnosticEvents.isEmpty {
                         Text("No diagnostic events yet.").foregroundStyle(.secondary)
                     } else {
-                        ForEach(Array(engine.diagnosticEvents.suffix(60).enumerated()), id: \.offset) { _, event in
-                            Text(event).font(.caption.monospaced()).textSelection(.enabled)
+                        ForEach(Array(engine.diagnosticEvents.suffix(60).enumerated()), id: \.offset) { item in
+                            Text(item.element).font(.caption.monospaced()).textSelection(.enabled)
                         }
                     }
                 }
@@ -84,8 +84,8 @@ struct DiagnosticsView: View {
                     if engine.processingTrace.isEmpty {
                         Text("No OCR processing trace yet.").foregroundStyle(.secondary)
                     } else {
-                        ForEach(Array(engine.processingTrace.suffix(100).enumerated()), id: \.offset) { _, event in
-                            Text(event).font(.caption.monospaced()).textSelection(.enabled)
+                        ForEach(Array(engine.processingTrace.suffix(100).enumerated()), id: \.offset) { item in
+                            Text(item.element).font(.caption.monospaced()).textSelection(.enabled)
                         }
                     }
                 }
