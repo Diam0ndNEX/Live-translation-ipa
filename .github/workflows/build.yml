@@ -2,13 +2,15 @@ name: Build ScreenLingo IPA
 
 on:
   # Build only when explicitly requested from the Actions tab.
-  # This prevents every code commit from starting an expensive macOS build.
   workflow_dispatch:
 
 # Never spend minutes building an older commit when a newer build is queued.
 concurrency:
   group: screenlingo-ipa-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -51,7 +53,7 @@ jobs:
       - name: Package IPA
         run: |
           set -euo pipefail
-          mkdir Payload
+          mkdir -p Payload
           cp -R build/Build/Products/Release-iphoneos/ScreenLingo.app Payload/ScreenLingo.app
           zip -r ScreenLingo.ipa Payload
 
@@ -85,9 +87,24 @@ jobs:
           test "$EXT_VERSION" = "$SOURCE_VERSION"
           test "$EXT_BUILD" = "$SOURCE_BUILD"
 
+      # Release assets do not expire automatically like workflow artifacts.
+      - name: Publish permanent IPA release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: screenlingo-build-${{ github.run_number }}
+          name: ScreenLingo build ${{ github.run_number }}
+          body: |
+            Automatically generated unsigned ScreenLingo IPA.
+            Source commit: ${{ github.sha }}
+          files: ScreenLingo.ipa
+          draft: false
+          prerelease: true
+          make_latest: false
+
+      # Convenient short-term artifact alongside the permanent release asset.
       - uses: actions/upload-artifact@v4
         with:
           name: ScreenLingo-ipa
           path: ScreenLingo.ipa
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 90
