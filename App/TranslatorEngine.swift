@@ -1,9 +1,10 @@
-// Screen Translator – App – v0.7.0
+// Screen Translator – App – v0.8.0
 import SwiftUI
 import Translation
 import NaturalLanguage
 import AVFoundation
 import Network
+import os
 
 enum TranslateMode: String, CaseIterable, Identifiable {
     case movie, game, comic
@@ -74,13 +75,29 @@ struct HistoryItem: Identifiable {
     let original: String
     let translated: String
     var date = Date()
+    var starred = false
+}
+
+/// One speaker's line inside a block (label stays untranslated).
+private struct TUnit {
+    var label: String?
+    var sentences: [String]
+    var out: [String?]
+    var tokens: [(String, String)]
 }
 
 @MainActor
 final class TranslatorEngine: ObservableObject {
-    // Settings
+    static let settingKeys = [
+        "source", "target", "mode", "area", "customY0", "customY1", "speed", "stability", "minTextH", "ignoreList",
+        "frameRot", "dropNoise", "boost", "skipUnchanged", "cleanOCR", "slang", "speakerDetect", "highlightNames",
+        "langLock", "neverTranslate", "sourceFixes", "glossary", "winSize", "theme", "textSize", "pipFont",
+        "showOriginal", "autoClear", "clearHold", "minDisplay", "autoOpenPiP", "haptics", "speak", "adaptive", "idleMinutes"
+    ]
+
+    // Settings that live in the engine
     @Published var sourceCode: String {
-        didSet { UserDefaults.standard.set(sourceCode, forKey: "source"); lastHandled = ""; syncConfig() }
+        didSet { UserDefaults.standard.set(sourceCode, forKey: "source"); lastHandled = ""; lockedLang = nil; syncConfig() }
     }
     @Published var targetCode: String {
         didSet {
@@ -89,9 +106,11 @@ final class TranslatorEngine: ObservableObject {
         }
     }
     @Published var paused = false { didSet { syncConfig() } }
+    @Published var frozen = false
     // Languages
     @Published var languages: [LangItem] = TranslatorEngine.fallbackLanguages
     @Published var langStatus: [String: LanguageAvailability.Status] = [:]
+    @Published var lockedLang: String? = nil { didSet { diag.s.lockedLang = lockedLang ?? "–" } }
     // Output + diagnostics
     @Published var original = ""
     @Published var translated = ""
@@ -106,24 +125,42 @@ final class TranslatorEngine: ObservableObject {
     @Published var translateMs: Double = 0
     @Published var extFreeMB: Double = 0
     @Published var history: [HistoryItem] = []
+    @Published var profileNames: [String] = []
     // Translation session plumbing
     @Published var legacyConfig: TranslationSession.Configuration?
     @Published var downloadConfig: TranslationSession.Configuration?
 
     let pip = PiPRenderer()
     let server = LoopbackServer()
+    let diag = Diagnostics()
 
     private var lastHandled = ""
     private var queued: [String]?
+    private var queuedTs: Double = 0
+    private var currentTs: Double = 0
     private var busy = false
     private var showing = false
     private var pendingTexts: [String] = []
     private var legacyContinuation: CheckedContinuation<[String]?, Never>?
-    private let speech = AVSpeechSynthesizer()
     private var lastPacketDate = Date.distantPast
+    private var lastTextDate = Date()
+    private var lastShowDate = Date.distantPast
     private var cache: [String: String] = [:]
     private var directSession: TranslationSession?
     private var directKey = ""
+    private var clearTask: Task<Void, Never>?
+    private var tickCount = 0
+    private let speech = AVSpeechSynthesizer()
+    // Reading-order calibration
+    private var orderVote = 0.0
+    private var votesSinceChange = 0
+    private var trial = 0
+    private var autoRot = 0
+    private var rotRev = 0
+    private var calibrated = false
+    // Language lock
+    private var detectLog: [String] = []
+    private var mismatchStreak = 0
 
     // Self-reading protection: what the PiP window currently shows, and where it is on screen
     private let placeholderGrams = TextSim.grams("Waiting for screen text… Listening…")
@@ -132,31 +169,19 @@ final class TranslatorEngine: ObservableObject {
     private var pipRegion: CGRect?
     private var pipRegionStamp = Date.distantPast
 
+    // MARK: Settings readers
     private var ud: UserDefaults { .standard }
-    private var mode: TranslateMode { TranslateMode(rawValue: ud.string(forKey: "mode") ?? "") ?? .movie }
-    private var area: OCRArea { OCRArea(rawValue: ud.string(forKey: "area") ?? "") ?? .smart }
-    private var windowSize: WindowSize { WindowSize(rawValue: ud.string(forKey: "winSize") ?? "") ?? .normal }
-    private var speed: SpeedPreset { SpeedPreset(rawValue: ud.string(forKey: "speed") ?? "") ?? .balanced }
-    private var showOriginal: Bool { (ud.object(forKey: "showOriginal") as? Bool) ?? false }
-    private var speakEnabled: Bool { (ud.object(forKey: "speak") as? Bool) ?? false }
-    private var pipStyle: PiPStyle {
-        PiPStyle.make(theme: PiPTheme(rawValue: ud.string(forKey: "theme") ?? "") ?? .dark,
-                      size: PiPTextSize(rawValue: ud.string(forKey: "textSize") ?? "") ?? .auto,
-                      font: PiPFont(rawValue: ud.string(forKey: "pipFont") ?? "") ?? .standard)
-    }
-    private var autoClear: Bool { (ud.object(forKey: "autoClear") as? Bool) ?? true }
-    private var autoOpenPiP: Bool { (ud.object(forKey: "autoOpenPiP") as? Bool) ?? true }
-    private var clearHold: Double { (ud.object(forKey: "clearHold") as? Double) ?? 1.0 }
-    private var stability: Int { (ud.object(forKey: "stability") as? Int) ?? 2 }
-    private var minTextH: Double { (ud.object(forKey: "minTextH") as? Double) ?? 0 }
-    private var ignoreList: [String] {
-        (ud.string(forKey: "ignoreList") ?? "")
+    private func flag(_ k: String, _ d: Bool) -> Bool { (ud.object(forKey: k) as? Bool) ?? d }
+    private func num(_ k: String, _ d: Double) -> Double { (ud.object(forKey: k) as? Double) ?? d }
+    private func int(_ k: String, _ d: Int) -> Int { (ud.object(forKey: k) as? Int) ?? d }
+    private func list(_ k: String, lower: Bool) -> [String] {
+        (ud.string(forKey: k) ?? "")
             .split(whereSeparator: { $0 == "," || $0 == "\n" })
-            .map { $0.trimmingCharacters(in: .whitespaces).lowercased() }
+            .map { lower ? $0.trimmingCharacters(in: .whitespaces).lowercased() : $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
     }
-    private var glossary: [(String, String)] {
-        (ud.string(forKey: "glossary") ?? "").split(separator: "\n").compactMap { line -> (String, String)? in
+    private func pairs(_ k: String) -> [(String, String)] {
+        (ud.string(forKey: k) ?? "").split(separator: "\n").compactMap { line -> (String, String)? in
             let parts = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
             guard parts.count == 2 else { return nil }
             let from = parts[0].trimmingCharacters(in: .whitespaces)
@@ -164,7 +189,19 @@ final class TranslatorEngine: ObservableObject {
             return from.isEmpty ? nil : (from, to)
         }
     }
-    private var clearTask: Task<Void, Never>?
+    private var mode: TranslateMode { TranslateMode(rawValue: ud.string(forKey: "mode") ?? "") ?? .movie }
+    private var area: OCRArea { OCRArea(rawValue: ud.string(forKey: "area") ?? "") ?? .smart }
+    private var windowSize: WindowSize { WindowSize(rawValue: ud.string(forKey: "winSize") ?? "") ?? .normal }
+    private var speed: SpeedPreset { SpeedPreset(rawValue: ud.string(forKey: "speed") ?? "") ?? .balanced }
+    private var frameRotMode: String { ud.string(forKey: "frameRot") ?? "auto" }
+    private var showOriginal: Bool { flag("showOriginal", false) }
+    private var pipStyle: PiPStyle {
+        var st = PiPStyle.make(theme: PiPTheme(rawValue: ud.string(forKey: "theme") ?? "") ?? .dark,
+                               size: PiPTextSize(rawValue: ud.string(forKey: "textSize") ?? "") ?? .auto,
+                               font: PiPFont(rawValue: ud.string(forKey: "pipFont") ?? "") ?? .standard)
+        st.highlightNames = flag("highlightNames", true)
+        return st
+    }
 
     init() {
         sourceCode = UserDefaults.standard.string(forKey: "source") ?? "auto"
@@ -172,27 +209,65 @@ final class TranslatorEngine: ObservableObject {
         server.onPacket = { [weak self] p in Task { @MainActor in self?.handle(p) } }
         server.start()
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in
-                guard let self else { return }
-                let alive = Date().timeIntervalSince(self.lastPacketDate) < 5
-                if self.captureAlive && !alive {
-                    self.status = "Capture stopped – iOS may have closed the capture extension. Tap the broadcast icon again (try Speed: Fast)."
-                }
-                self.captureAlive = alive
-            }
+            Task { @MainActor in self?.tick() }
         }
         pip.setSize(windowSize.size)
         pip.onStatus = { [weak self] s in Task { @MainActor in self?.status = s } }
-        pip.onActiveChange = { [weak self] a in Task { @MainActor in self?.pipActive = a } }
+        pip.onActiveChange = { [weak self] a in
+            Task { @MainActor in self?.pipActive = a; self?.diag.log(a ? "Floating window opened" : "Floating window closed") }
+        }
+        profileNames = loadProfiles().keys.sorted()
+        diag.log("App started \(AppVersion.full)")
+    }
+
+    private func tick() {
+        tickCount += 1
+        let alive = Date().timeIntervalSince(lastPacketDate) < 5
+        if captureAlive && !alive {
+            status = "Capture stopped – iOS may have closed the capture extension. Tap the broadcast icon again (try Speed: Fast)."
+            diag.log("Capture stopped")
+        }
+        captureAlive = alive
+        if tickCount % 10 == 0, alive { syncConfig() }        // refreshes adaptive performance
+        let idle = int("idleMinutes", 0)
+        if idle > 0, alive, !paused, Date().timeIntervalSince(lastTextDate) > Double(idle) * 60 {
+            paused = true
+            status = "Paused after \(idle) min without text. Turn Pause off to resume."
+            diag.log("Auto-paused (idle)")
+        }
     }
 
     // MARK: Settings → capture extension
-    /// Sends OCR area, source-language hint and speed to the extension.
+    private var effectiveRot: Int {
+        if frameRotMode == "auto" { return autoRot }
+        return ((Int(frameRotMode) ?? 0) / 90) & 3
+    }
+
+    /// Called when the user changes the frame-rotation setting.
+    func rotationSettingChanged() {
+        autoRot = 0; trial = 0; orderVote = 0; votesSinceChange = 0; calibrated = false
+        rotRev += 1
+        syncConfig()
+    }
+
+    /// Sends OCR area, source-language hint, speed and rotation to the extension.
     func syncConfig() {
         let r = area.range(mode: mode)
-        server.send(Config(lang: sourceCode, y0: r.lowerBound, y1: r.upperBound,
-                           maxEdge: speed.maxEdge, interval: speed.interval, paused: paused,
-                           stability: stability))
+        var maxEdge = speed.maxEdge, interval = speed.interval
+        if flag("adaptive", true) {
+            switch ProcessInfo.processInfo.thermalState {
+            case .serious: maxEdge *= 0.75; interval *= 1.5
+            case .critical: maxEdge *= 0.55; interval *= 2.5
+            default: break
+            }
+            if ProcessInfo.processInfo.isLowPowerModeEnabled { interval *= 1.5 }
+            if extFreeMB > 0 && extFreeMB < 12 { maxEdge = min(maxEdge, 800) }
+        }
+        diag.s.rotation = effectiveRot
+        server.send(Config(lang: lockedLang ?? sourceCode, y0: r.lowerBound, y1: r.upperBound,
+                           maxEdge: maxEdge, interval: interval, paused: paused,
+                           stability: int("stability", 2), rot: effectiveRot, rev: rotRev,
+                           boost: int("boost", 1), skipUnchanged: flag("skipUnchanged", true)))
     }
 
     // MARK: PiP
@@ -235,45 +310,102 @@ final class TranslatorEngine: ObservableObject {
         lastHandled = ""
         syncConfig()
         status = "Preset applied: \(name)"
+        diag.log("Preset: \(name)")
     }
 
     // MARK: Packets from the extension
     private func handle(_ p: Packet) {
+        let now = Date()
         let wasAlive = captureAlive
-        lastPacketDate = Date()
+        lastPacketDate = now
         captureAlive = true
         frames = p.frames
         extensionVersion = p.version
         if let t = p.ocrMs { ocrMs = t }
         if let m = p.memFreeMB { extFreeMB = m }
+        diag.onPacket(p, transport: p.ts.map { max(0, now.timeIntervalSince1970 - $0) * 1000 })
 
         if !wasAlive {
+            diag.log("Capture connected (extension v\(p.version))")
+            lastTextDate = now
             syncConfig()
             // Capture just started: make sure the floating window is up too.
-            if autoOpenPiP, !pip.isActive, UIApplication.shared.applicationState == .active { startPiP() }
+            if flag("autoOpenPiP", true), !pip.isActive, UIApplication.shared.applicationState == .active { startPiP() }
         }
-        if p.kind == "ping" { syncConfig(); return }       // keeps the extension's settings fresh
+        if p.kind == "ping" { syncConfig(); return }          // keeps the extension's settings fresh
         if paused { return }
         if p.kind == "clear" { handleClear(); return }
         guard p.kind == "ocr" else { return }
         ocrCount += 1
         lastRaw = String(p.lines.map(\.t).joined(separator: " ").prefix(160))
 
+        // Is text arriving upside down? Votes only count packets made with the current rotation.
+        if p.rev == nil || p.rev == rotRev { updateOrderVote(p.lines) }
+
         let range = area.range(mode: mode)
-        let minH = minTextH
-        let ignore = ignoreList
-        var cand = p.lines.filter { l in
-            range.contains(l.y) && l.h >= minH && !ignore.contains(where: { l.t.lowercased().contains($0) })
+        let minH = num("minTextH", 0)
+        let ignore = list("ignoreList", lower: true)
+        var cand: [OCRLine] = []
+        for l in p.lines {
+            diag.s.linesIn += 1
+            if !range.contains(l.y) { diag.s.dropArea += 1; continue }
+            if l.h < minH { diag.s.dropSmall += 1; continue }
+            if ignore.contains(where: { l.t.lowercased().contains($0) }) { diag.s.dropIgnore += 1; continue }
+            cand.append(l)
         }
+        let n1 = cand.count
         cand = removeOwnOutput(cand)
+        diag.s.dropSelf += n1 - cand.count
+        let n2 = cand.count
         cand = cand.filter { !isTargetLanguage($0.t) }
-        // Group lines into text blocks (speech bubble, caption, background text…), read each in order
-        let blocks = selectBlocks(makeBlocks(cand))
-        let texts = dedupe(blocks.map { blockText($0) }.filter { TextSim.norm($0).count >= 2 && plausiblySource($0) })
+        diag.s.dropTarget += n2 - cand.count
+
+        let allBlocks = makeBlocks(cand)
+        diag.s.blocksIn += allBlocks.count
+        let blocks = selectBlocks(allBlocks)
+        diag.s.blocksKept += blocks.count
+        var texts: [String] = []
+        for b in blocks {
+            let t = blockText(b)
+            if TextSim.norm(t).count < 2 { continue }
+            if flag("dropNoise", true) && TextIntel.isNoise(t) { diag.s.dropNoise += 1; continue }
+            if !plausiblySource(t) { diag.s.dropLanguage += 1; continue }
+            texts.append(t)
+        }
+        texts = dedupe(texts)
         guard !texts.isEmpty else { handleClear(); return }
         clearTask?.cancel()
         clearTask = nil
+        queuedTs = p.ts ?? now.timeIntervalSince1970
         enqueue(texts.map { String($0.prefix(400)) })
+    }
+
+    // MARK: Reading-order calibration
+    /// Reads each text block forwards and backwards; if backwards reads more naturally, the frame is upside down.
+    private func updateOrderVote(_ lines: [OCRLine]) {
+        var diff = 0.0
+        for b in makeBlocks(lines) where b.count >= 2 {
+            let fwd = readingOrder(b).map(\.t)
+            diff += TextIntel.orderScore(fwd) - TextIntel.orderScore(Array(fwd.reversed()))
+        }
+        guard diff != 0 else { return }
+        orderVote = max(-30, min(30, orderVote * 0.8 + diff))
+        votesSinceChange += 1
+        diag.s.orderVote = orderVote
+        guard frameRotMode == "auto" else { return }
+        if orderVote < -4 && votesSinceChange >= 2 {
+            trial = (trial + 1) % 4
+            autoRot = [0, 2, 1, 3][trial]
+            rotRev += 1
+            orderVote = 0; votesSinceChange = 0; calibrated = false
+            diag.s.calibrated = false
+            diag.log("Reading order looks reversed → trying rotation \(autoRot * 90)°")
+            syncConfig()
+        } else if orderVote > 4 && !calibrated {
+            calibrated = true
+            diag.s.calibrated = true
+            diag.log("Reading order OK at rotation \(autoRot * 90)°")
+        }
     }
 
     // MARK: Text blocks
@@ -399,6 +531,9 @@ final class TranslatorEngine: ObservableObject {
             // The original text can sit above the translation, so reach further up when it is shown
             pipRegion = r.insetBy(dx: -0.04, dy: showOriginal ? -0.18 : -0.06)
             pipRegionStamp = Date()
+            if let g = pipRegion {
+                diag.s.pipRegion = "x \(Int(g.minX * 100))–\(Int(g.maxX * 100))%, y \(Int(g.minY * 100))–\(Int(g.maxY * 100))%"
+            }
         }
         if let reg = pipRegion, Date().timeIntervalSince(pipRegionStamp) < 15 {
             rest.removeAll { reg.contains(CGPoint(x: $0.x, y: $0.y)) }
@@ -422,8 +557,8 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func handleClear() {
-        guard autoClear, showing, clearTask == nil else { return }
-        let hold = clearHold
+        guard flag("autoClear", true), showing, clearTask == nil else { return }
+        let hold = num("clearHold", 1.0)
         if hold <= 0 { performClear(); return }
         clearTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(hold))
@@ -458,7 +593,14 @@ final class TranslatorEngine: ObservableObject {
         busy = true
         defer { busy = false }
         // Always translate only the newest text; anything older is already out of date.
-        while let b = queued { queued = nil; await process(b) }
+        while queued != nil {
+            let wait = num("minDisplay", 0) - Date().timeIntervalSince(lastShowDate)
+            if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+            guard let b = queued else { break }
+            queued = nil
+            currentTs = queuedTs
+            await process(b)
+        }
     }
 
     // MARK: Translation
@@ -466,29 +608,45 @@ final class TranslatorEngine: ObservableObject {
         if sourceCode != "auto" { return Locale.Language(identifier: sourceCode) }
         let rec = NLLanguageRecognizer()
         rec.processString(text)
+        let hyp = rec.languageHypotheses(withMaximum: 5)
+        let useLock = flag("langLock", true)
+        if useLock, let locked = lockedLang {
+            let p = hyp[NLLanguage(rawValue: locked)] ?? 0
+            if p > 0.1 || text.count < 12 { mismatchStreak = 0; return Locale.Language(identifier: locked) }
+            mismatchStreak += 1
+            if mismatchStreak >= 3 {
+                lockedLang = nil; detectLog = []; mismatchStreak = 0
+                diag.log("Language lock released")
+            } else {
+                return Locale.Language(identifier: locked)
+            }
+        }
         // Prefer a language whose pack is installed when the detector is torn between candidates
         let installed = Set(languages.filter { langStatus[$0.code] == .installed }.map {
             $0.code == "zh" ? NLLanguage.simplifiedChinese : NLLanguage(rawValue: $0.code)
         })
         var dom = rec.dominantLanguage
-        if let best = rec.languageHypotheses(withMaximum: 5)
-            .filter({ installed.contains($0.key) }).max(by: { $0.value < $1.value }), best.value > 0.15 {
+        if let best = hyp.filter({ installed.contains($0.key) }).max(by: { $0.value < $1.value }), best.value > 0.15 {
             dom = best.key
         }
         guard let d = dom else { return nil }
+        let code = Locale.Language(identifier: d.rawValue).minimalIdentifier
+        diag.s.detected = code
+        if useLock {
+            detectLog.append(code)
+            if detectLog.count > 6 { detectLog.removeFirst() }
+            if detectLog.count >= 4, let top = Dictionary(grouping: detectLog, by: { $0 }).max(by: { $0.value.count < $1.value.count }),
+               top.value.count >= 4 {
+                lockedLang = top.key
+                diag.log("Language locked to \(top.key)")
+            }
+        }
         return Locale.Language(identifier: d.rawValue)
     }
 
     private func pairStatus(_ src: Locale.Language, _ target: Locale.Language) async -> LanguageAvailability.Status {
         if sourceCode != "auto", let s = langStatus[sourceCode] { return s }
         return await LanguageAvailability().status(from: src, to: target)
-    }
-
-    /// User glossary ("word=replacement" lines) applied to the finished translation.
-    private func applyGlossary(_ s: String) -> String {
-        var out = s
-        for (from, to) in glossary { out = out.replacingOccurrences(of: from, with: to, options: [.caseInsensitive]) }
-        return out
     }
 
     /// Splits a block into sentences so each is translated on its own (better quality, cacheable).
@@ -506,34 +664,54 @@ final class TranslatorEngine: ObservableObject {
         return out.isEmpty ? [text] : out
     }
 
+    /// User glossary ("word=replacement" lines) applied to the finished translation.
+    private func applyGlossary(_ s: String) -> String {
+        var out = s
+        for (from, to) in pairs("glossary") { out = out.replacingOccurrences(of: from, with: to, options: [.caseInsensitive]) }
+        return out
+    }
+
     private func process(_ blocks: [String]) async {
         let t0 = Date()
         let target = Locale.Language(identifier: targetCode)
+        let cleanOn = flag("cleanOCR", true), slangOn = flag("slang", true), speakerOn = flag("speakerDetect", true)
+        let fixes = pairs("sourceFixes")
+        let never = list("neverTranslate", lower: false)
 
-        var sentences: [[String]] = []          // per block
-        var done: [[String?]] = []              // translated sentence, nil = still to translate
-        var pending: [String: [(block: Int, index: Int, text: String)]] = [:]
+        var units: [[TUnit]] = []
+        var pending: [String: [(b: Int, u: Int, s: Int, text: String)]] = [:]
         var srcLangs: [String: Locale.Language] = [:]
         var translatedAny = false
 
-        for (bi, text) in blocks.enumerated() {
+        for (bi, raw) in blocks.enumerated() {
+            var text = cleanOn ? TextIntel.cleanOCR(raw) : raw
+            for (from, to) in fixes { text = text.replacingOccurrences(of: from, with: to, options: [.caseInsensitive]) }
             guard let src = detectSource(text), src.languageCode != target.languageCode else {
-                sentences.append([text]); done.append([text]); continue
+                units.append([TUnit(label: nil, sentences: [text], out: [text], tokens: [])])
+                continue
             }
             let id = src.minimalIdentifier
             srcLangs[id] = src
-            let parts = splitSentences(text)
-            sentences.append(parts)
-            var row: [String?] = []
-            for (si, part) in parts.enumerated() {
-                if let hit = cache["\(id)>\(targetCode)|\(part)"] {
-                    row.append(hit); translatedAny = true
-                } else {
-                    row.append(nil)
-                    pending[id, default: []].append((bi, si, part))
+            if slangOn { text = TextIntel.expandSlang(text, lang: src.languageCode?.identifier ?? id) }
+            let parts = speakerOn ? TextIntel.splitDialogue(text) : [(label: String?.none, text: text)]
+            var row: [TUnit] = []
+            for (ui, d) in parts.enumerated() {
+                if let name = d.label { diag.learn(name) }
+                let prot = TextIntel.protect(d.text, words: never)
+                let sentences = splitSentences(prot.text)
+                diag.s.sentences += sentences.count
+                var outs: [String?] = []
+                for (si, s) in sentences.enumerated() {
+                    if let hit = cache["\(id)>\(targetCode)|\(s)"] {
+                        outs.append(hit); translatedAny = true; diag.s.cacheHits += 1
+                    } else {
+                        outs.append(nil); diag.s.cacheMisses += 1
+                        pending[id, default: []].append((bi, ui, si, s))
+                    }
                 }
+                row.append(TUnit(label: d.label, sentences: sentences, out: outs, tokens: prot.tokens))
             }
-            done.append(row)
+            units.append(row)
         }
 
         var failed = false
@@ -542,13 +720,35 @@ final class TranslatorEngine: ObservableObject {
             let availability = await pairStatus(src, target)
             if availability == .unsupported { status = "\(id) → \(targetCode) isn't supported"; failed = true; continue }
             if availability == .supported { status = "Language pack missing – open the Languages tab" }
-            guard let out = await translateBatch(items.map { $0.text }, source: src, target: target,
-                                                 installed: availability == .installed),
-                  out.count == items.count else { failed = true; continue }
-            translatedAny = true
-            for (k, it) in items.enumerated() {
-                done[it.block][it.index] = out[k]
-                cache["\(id)>\(targetCode)|\(it.text)"] = out[k]
+            diag.s.batches += 1
+            let installed = availability == .installed
+            var results = await translateBatch(items.map { $0.text }, source: src, target: target, installed: installed)
+            if results == nil || results?.count != items.count {
+                // One bad sentence shouldn't lose the whole batch: retry them one by one.
+                diag.log("Batch failed – retrying sentence by sentence")
+                var singles: [String?] = []
+                for it in items {
+                    if let r = await translateBatch([it.text], source: src, target: target, installed: installed), r.count == 1 {
+                        singles.append(r[0])
+                    } else {
+                        singles.append(nil); diag.s.failures += 1
+                    }
+                }
+                results = nil
+                for (k, it) in items.enumerated() {
+                    if let v = singles[k] {
+                        units[it.b][it.u].out[it.s] = v
+                        cache["\(id)>\(targetCode)|\(it.text)"] = v
+                        translatedAny = true
+                    } else { failed = true }
+                }
+            }
+            if let r = results {
+                translatedAny = true
+                for (k, it) in items.enumerated() {
+                    units[it.b][it.u].out[it.s] = r[k]
+                    cache["\(id)>\(targetCode)|\(it.text)"] = r[k]
+                }
             }
         }
         if cache.count > 600 { cache.removeAll() }
@@ -559,13 +759,20 @@ final class TranslatorEngine: ObservableObject {
             return
         }
         var outBlocks: [String] = []
-        for (bi, row) in done.enumerated() {
-            var parts: [String] = []
-            for (si, v) in row.enumerated() { parts.append(v ?? sentences[bi][si]) }
-            outBlocks.append(parts.joined(separator: " "))
+        for row in units {
+            var lines: [String] = []
+            for u in row {
+                var body: [String] = []
+                for (si, s) in u.sentences.enumerated() { body.append(u.out[si] ?? s) }
+                let joined = TextIntel.restore(body.joined(separator: " "), tokens: u.tokens)
+                lines.append(u.label.map { "\($0): \(joined)" } ?? joined)
+            }
+            outBlocks.append(applyGlossary(lines.joined(separator: "\n")))
         }
-        outBlocks = outBlocks.map { applyGlossary($0) }
         translateMs = Date().timeIntervalSince(t0) * 1000
+        Diagnostics.push(&diag.translateSeries, translateMs)
+        diag.s.translations += 1
+        diag.s.chars += blocks.joined().count
         status = "\(srcLangs.keys.sorted().joined(separator: "+")) → \(targetCode) ✓"
         show(blocks.joined(separator: "\n"), outBlocks.joined(separator: "\n"))
     }
@@ -579,11 +786,13 @@ final class TranslatorEngine: ObservableObject {
                 directSession = TranslationSession(installedSource: source, target: target)
                 directKey = k
             }
+            diag.s.sessionKind = "Direct session (iOS 26)"
             guard let session = directSession else { return nil }
             let r = await runBatch(session, texts)
             if r == nil { directSession = nil }
             return r
         }
+        diag.s.sessionKind = "Hosted view (iOS 18)"
         return await translateLegacy(texts, source: source, target: target)
     }
 
@@ -600,13 +809,18 @@ final class TranslatorEngine: ObservableObject {
     private func show(_ text: String, _ result: String) {
         clearTask?.cancel()
         clearTask = nil
+        guard !frozen else { return }
         original = text
         translated = result
         showing = true
+        lastTextDate = Date()
+        lastShowDate = Date()
+        if currentTs > 0 { Diagnostics.push(&diag.latencySeries, (Date().timeIntervalSince1970 - currentTs) * 1000) }
         if history.first?.original != text {
             history.insert(HistoryItem(original: text, translated: result), at: 0)
-            if history.count > 100 { history.removeLast() }
-            if speakEnabled { speak(result) }
+            if history.count > 200 { history.removeLast() }
+            if flag("speak", false) { speak(result) }
+            if flag("haptics", false) { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
         }
         renderedGrams = TextSim.grams(result).union(placeholderGrams)
         sourceGrams = TextSim.grams(text)
@@ -624,6 +838,20 @@ final class TranslatorEngine: ObservableObject {
         let u = AVSpeechUtterance(string: s)
         u.voice = AVSpeechSynthesisVoice(language: voices[targetCode] ?? targetCode)
         speech.speak(u)
+    }
+
+    /// Translate the current text again from scratch (ignores the cache).
+    func retranslate() {
+        guard !original.isEmpty else { return }
+        cache.removeAll()
+        lastHandled = ""
+        let blocks = original.components(separatedBy: "\n")
+        diag.log("Retranslating current text")
+        enqueue(blocks)
+    }
+
+    func toggleStar(_ id: UUID) {
+        if let i = history.firstIndex(where: { $0.id == id }) { history[i].starred.toggle() }
     }
 
     // iOS 18 path (needs the hosted .translationTask view in RootView)
@@ -685,6 +913,66 @@ final class TranslatorEngine: ObservableObject {
         await refreshStatus()
     }
 
+    // MARK: Profiles + backup
+    private func snapshot() -> [String: Any] {
+        var snap: [String: Any] = [:]
+        for k in Self.settingKeys { if let v = ud.object(forKey: k) { snap[k] = v } }
+        return snap
+    }
+    private func loadProfiles() -> [String: [String: Any]] {
+        guard let d = ud.data(forKey: "profiles"),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: [String: Any]] else { return [:] }
+        return o
+    }
+    func saveProfile(_ name: String) {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        guard !n.isEmpty else { return }
+        var all = loadProfiles()
+        all[n] = snapshot()
+        if let d = try? JSONSerialization.data(withJSONObject: all) { ud.set(d, forKey: "profiles") }
+        profileNames = all.keys.sorted()
+        status = "Profile saved: \(n)"
+        diag.log("Profile saved: \(n)")
+    }
+    func applyProfile(_ name: String) {
+        guard let snap = loadProfiles()[name] else { return }
+        for k in Self.settingKeys { if let v = snap[k] { ud.set(v, forKey: k) } else { ud.removeObject(forKey: k) } }
+        reloadSettings()
+        status = "Profile applied: \(name)"
+        diag.log("Profile applied: \(name)")
+    }
+    func deleteProfile(_ name: String) {
+        var all = loadProfiles()
+        all[name] = nil
+        if let d = try? JSONSerialization.data(withJSONObject: all) { ud.set(d, forKey: "profiles") }
+        profileNames = all.keys.sorted()
+    }
+    func exportSettings() -> String {
+        guard let d = try? JSONSerialization.data(withJSONObject: snapshot(), options: [.prettyPrinted, .sortedKeys]),
+              let s = String(data: d, encoding: .utf8) else { return "{}" }
+        return s
+    }
+    func importSettings(_ text: String) -> Bool {
+        guard let d = text.data(using: .utf8),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any] else { return false }
+        for k in Self.settingKeys { if let v = o[k] { ud.set(v, forKey: k) } }
+        reloadSettings()
+        return true
+    }
+    func resetAllSettings() {
+        for k in Self.settingKeys { ud.removeObject(forKey: k) }
+        reloadSettings()
+    }
+    /// Re-reads everything after settings were changed in bulk.
+    func reloadSettings() {
+        sourceCode = ud.string(forKey: "source") ?? "auto"
+        targetCode = ud.string(forKey: "target") ?? "en"
+        lastHandled = ""
+        rotationSettingChanged()
+        applyStyle()
+        applyWindowSize()
+    }
+
     // MARK: Test
     func runTest() {
         let samples = ["en": "Hello, how are you today?", "pt": "Olá, como você está hoje?",
@@ -696,6 +984,7 @@ final class TranslatorEngine: ObservableObject {
         if key == (Locale.Language(identifier: targetCode).languageCode?.identifier ?? "") { key = "es" }
         lastHandled = ""
         status = "Testing…"
+        queuedTs = Date().timeIntervalSince1970
         enqueue([samples[key] ?? samples["en"]!])
     }
 
