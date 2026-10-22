@@ -190,6 +190,7 @@ struct HomeView: View {
                 languageBar
                 presetRow
                 preview
+                previewTools
                 settings
                 startButton
                 checklist
@@ -301,6 +302,42 @@ struct HomeView: View {
         }
     }
 
+    /// Primary actions stay directly under the PiP preview instead of being buried in diagnostics.
+    private var previewTools: some View {
+        HStack(spacing: 8) {
+            Button {
+                UIPasteboard.general.string = engine.translated
+                engine.status = "Translation copied"
+            } label: {
+                Label("Copy", systemImage: "doc.on.doc")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(engine.translated.isEmpty)
+
+            Button {
+                engine.retranslateLast()
+            } label: {
+                Label("Re-translate", systemImage: "arrow.clockwise")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+            .disabled(engine.original.isEmpty)
+
+            Button {
+                engine.frozen.toggle()
+                engine.status = engine.frozen ? "PiP output frozen — capture continues" : "PiP output live again"
+            } label: {
+                Label(engine.frozen ? "Resume" : "Freeze",
+                      systemImage: engine.frozen ? "play.fill" : "pause.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.bordered)
+        }
+        .font(.caption.weight(.medium))
+        .controlSize(.small)
+    }
+
     private var settings: some View {
         VStack(spacing: 12) {
             SettingRow(icon: "film", tint: .blue, title: "Mode") {
@@ -406,16 +443,6 @@ struct HomeView: View {
             Text(engine.status).font(.footnote).foregroundStyle(.secondary)
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
                 Button {
-                    UIPasteboard.general.string = engine.translated
-                    engine.status = "Translation copied"
-                } label: {
-                    Label("Copy translation", systemImage: "doc.on.doc")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.bordered)
-                .disabled(engine.translated.isEmpty)
-
-                Button {
                     UIPasteboard.general.string = engine.original
                     engine.status = "Original text copied"
                 } label: {
@@ -432,15 +459,6 @@ struct HomeView: View {
                     }
                     .buttonStyle(.bordered)
                 }
-
-                Button {
-                    engine.retranslateLast()
-                } label: {
-                    Label("Re-translate", systemImage: "arrow.clockwise")
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.bordered)
-                .disabled(engine.original.isEmpty)
 
                 Button {
                     engine.retranslateLastFresh()
