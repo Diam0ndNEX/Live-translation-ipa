@@ -245,8 +245,11 @@ final class TranslatorEngine: ObservableObject {
         let now = Date()
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss.SSS"
-        processingTrace.append("[\(formatter.string(from: now))] [\(stage)] \(detail)")
+        let entry = "[\(formatter.string(from: now))] [\(stage)] \(detail)"
+        processingTrace.append(entry)
         processingTraceDates.append(now)
+        fullProcessingTrace.append(entry)
+        if fullProcessingTrace.count > 2000 { fullProcessingTrace.removeFirst(fullProcessingTrace.count - 2000) }
         while let first = processingTraceDates.first, now.timeIntervalSince(first) > 60 {
             processingTraceDates.removeFirst()
             processingTrace.removeFirst()
@@ -466,6 +469,11 @@ final class TranslatorEngine: ObservableObject {
         trace("PACKET", "OCR #\(ocrCount), frames=\(p.frames), lines=\(p.lines.count), extension=\(p.version), OCR ms=\(p.ocrMs ?? 0)")
         for (i, line) in p.lines.enumerated() {
             trace("RAW LINE", String(format: "#%02d x=%.3f y=%.3f w=%.3f h=%.3f | %@", i + 1, line.x, line.y, line.w ?? -1, line.h, line.t))
+        }
+        if isScreenLingoInterface(p.lines) {
+            trace("FRAME FILTER", "Skipped ScreenLingo settings/diagnostics UI frame; OCR is app chrome, not content")
+            recordDiagnostic("Ignored ScreenLingo UI frame with multiple interface markers")
+            return
         }
 
         let range = area.range(mode: mode)
@@ -711,6 +719,24 @@ final class TranslatorEngine: ObservableObject {
             else { out += " " + t }
         }
         return out
+    }
+
+    /// Detect our own settings/diagnostics screens using combinations of distinctive UI labels.
+    /// Requiring multiple markers avoids rejecting legitimate dialogue containing a common word.
+    private func isScreenLingoInterface(_ lines: [OCRLine]) -> Bool {
+        let allText = TextSim.norm(lines.map(\.t).joined(separator: " "))
+        let markers = [
+            "copycompactreportlast60seconds",
+            "exportfulldiagnosticreporttxt",
+            "compactreportsincludeonlythelast60seconds",
+            "includerecognizedtextinreports",
+            "refreshlanguageavailability",
+            "cleartranslationcache",
+            "cleardiagnosticeventlog",
+            "livediagnostics",
+            "runtranslationtest"
+        ]
+        return markers.filter { allText.contains($0) }.count >= 2
     }
 
     /// Reject OCR blocks that are mostly counters, coordinates, timestamps, or visual noise.
