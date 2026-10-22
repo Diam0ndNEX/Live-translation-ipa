@@ -1,12 +1,13 @@
-// Screen Translator – Shared – v0.7.0
+// Screen Translator – Shared – v0.8.0
 import Foundation
 
 enum AppVersion {
-    static let version = "0.7.0"
-    static let build = 8
+    static let version = "0.8.0"
+    static let build = 9
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("0.8.0", "Fixes reversed sentence order (auto-detects upside-down frames and rotates them, or pick the rotation manually). Context layer: speaker names kept, chat slang expanded, OCR clean-up, noise filter, language lock, never-translate words. Live Diagnostics tab. 30+ new options, profiles, backup, history search + stars."),
         ("0.7.0", "App icon. Correct version shown when signing (was 1.0). Big new Settings screen: custom OCR area, ignore small text, ignore list, glossary, stability, floating-window font, hold time, auto-open. Quick presets (Movie/Game/Comic), setup checklist, export history."),
         ("0.6.0", "Fixes mixed-up sentence order: text is grouped into blocks (bubble vs background), each block read in proper order and translated sentence by sentence in one batch. Ignores background text in another language. Floating-window appearance + text size, speak translation aloud."),
         ("0.5.0", "Much faster: OCR only reads your chosen area at reduced size, with the source language as a hint. Stops reading its own floating window (learns where it is). Speed presets, translation cache, auto-clear when text ends, pause, history tab, live OCR/translate timing + memory in diagnostics."),
@@ -36,6 +37,15 @@ struct Packet: Codable {
     var lines: [OCRLine]
     var ocrMs: Double?
     var memFreeMB: Double?
+    var ts: Double?        // when the extension sent it (seconds since 1970)
+    var rev: Int?          // settings revision the extension was using
+    var bufW: Int?
+    var bufH: Int?
+    var orient: Int?       // raw RPVideoSampleOrientationKey value
+    var cropW: Int?
+    var cropH: Int?
+    var passes: Int?       // OCR passes so far
+    var skipped: Int?      // unchanged frames skipped
 }
 
 /// App → extension (sent back over the same localhost link)
@@ -47,6 +57,10 @@ struct Config: Codable {
     var interval: Double   // minimum seconds between OCR passes
     var paused: Bool
     var stability: Int?    // how many identical reads before text is sent (1 = instant)
+    var rot: Int?          // extra clockwise quarter-turns applied to the frame (0...3)
+    var rev: Int?          // bumps whenever rot changes so stale packets can be ignored
+    var boost: Int?        // 0 = off, 1 = only when nothing is found, 2 = always
+    var skipUnchanged: Bool?
 }
 
 enum TextSim {
