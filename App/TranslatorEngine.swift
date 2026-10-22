@@ -470,6 +470,10 @@ final class TranslatorEngine: ObservableObject {
         for (i, line) in p.lines.enumerated() {
             trace("RAW LINE", String(format: "#%02d x=%.3f y=%.3f w=%.3f h=%.3f | %@", i + 1, line.x, line.y, line.w ?? -1, line.h, line.t))
         }
+        let orderedForTrace = readingOrder(p.lines)
+        trace("CANONICAL OCR ORDER", orderedForTrace.enumerated().map {
+            String(format: "#%02d y=%.3f x=%.3f | %@", $0.offset + 1, $0.element.y, $0.element.x, $0.element.t)
+        }.joined(separator: "\n"))
         if isScreenLingoInterface(p.lines) {
             trace("FRAME FILTER", "Skipped ScreenLingo settings/diagnostics UI frame; OCR is app chrome, not content")
             recordDiagnostic("Ignored ScreenLingo UI frame with multiple interface markers")
@@ -527,31 +531,39 @@ final class TranslatorEngine: ObservableObject {
     }
 
     // MARK: Text blocks
-    /// Lines in reading order: top to bottom, left to right within a row.
+    /// Deterministic visual reading order for Vision OCR observations.
+    /// Vision uses a bottom-left origin, so larger normalized y means visually higher.
+    /// Group by vertical overlap/line height (not exact y equality), then read each
+    /// row left-to-right. Stable index tie-breakers prevent sort comparator ambiguity.
     private func readingOrder(_ lines: [OCRLine]) -> [OCRLine] {
-        // Vision coordinates use a bottom-left origin: larger y is visually higher.
-        // Explicit row bands avoid unstable ordering from fuzzy sort comparators.
         let sorted = lines.enumerated().sorted {
             if abs($0.element.y - $1.element.y) < 0.000001 { return $0.offset < $1.offset }
             return $0.element.y > $1.element.y
-        }.map { $0.element }
-        var rows: [[OCRLine]] = []
+        }
+        var rows: [[(index: Int, line: OCRLine)]] = []
         var anchors: [Double] = []
-        for line in sorted {
-            let tolerance = max(0.012, min(max(line.h, 0.012), 0.06) * 0.55)
-            if let idx = anchors.indices.first(where: { abs(anchors[$0] - line.y) <= tolerance }) {
-                rows[idx].append(line)
-                anchors[idx] = rows[idx].map(\.y).reduce(0, +) / Double(rows[idx].count)
+        for item in sorted {
+            let line = item.element
+            let lineHeight = max(line.h, 0.012)
+            let tolerance = max(0.012, min(lineHeight * 0.65, 0.075))
+            // Prefer the nearest compatible row; do not attach to the first row
+            // merely because its tolerance happens to overlap.
+            let compatible = anchors.indices
+                .filter { abs(anchors[$0] - line.y) <= max(tolerance, min(lineHeight, 0.075) * 0.5) }
+                .min { abs(anchors[$0] - line.y) < abs(anchors[$1] - line.y) }
+            if let idx = compatible {
+                rows[idx].append((item.offset, line))
+                anchors[idx] = rows[idx].map { $0.line.y }.reduce(0, +) / Double(rows[idx].count)
             } else {
-                rows.append([line])
+                rows.append([(item.offset, line)])
                 anchors.append(line.y)
             }
         }
         return rows.flatMap { row in
-            row.enumerated().sorted {
-                if abs($0.element.x - $1.element.x) < 0.000001 { return $0.offset < $1.offset }
-                return $0.element.x < $1.element.x
-            }.map { $0.element }
+            row.sorted {
+                if abs($0.line.x - $1.line.x) < 0.000001 { return $0.index < $1.index }
+                return $0.line.x < $1.line.x
+            }.map(\.line)
         }
     }
 
@@ -560,12 +572,10 @@ final class TranslatorEngine: ObservableObject {
     /// often overlap even when they come from different speakers or speech bubbles.
     /// Only tightly aligned, similarly sized lines on adjacent rows may be joined.
     private func makeBlocks(_ lines: [OCRLine]) -> [[OCRLine]] {
-        let ordered = lines.enumerated().sorted {
-            if abs($0.element.y - $1.element.y) < 0.000001 {
-                return $0.element.x < $1.element.x
-            }
-            return $0.element.y > $1.element.y
-        }.map { $0.element }
+        // Use the same canonical row-based ordering everywhere. Sorting raw OCR
+        // observations independently here used to disagree with readingOrder() when
+        // several boxes occupied one visual line.
+        let ordered = readingOrder(lines)
 
         var blocks: [[OCRLine]] = []
         for line in ordered {
