@@ -1279,7 +1279,38 @@ final class TranslatorEngine: ObservableObject {
         var srcLangs: [String: Locale.Language] = [:]
         var translatedAny = false
 
-        for (bi, text) in blocks.enumerated() {
+        let cleanOCR = (UserDefaults.standard.object(forKey: "cleanOCR") as? Bool) ?? true
+        let expandSlang = (UserDefaults.standard.object(forKey: "slang") as? Bool) ?? true
+        let detectSpeakers = (UserDefaults.standard.object(forKey: "speakerDetect") as? Bool) ?? true
+        let neverWords = (UserDefaults.standard.string(forKey: "neverTranslate") ?? "")
+            .split(whereSeparator: { $0 == "," || $0 == "\n" })
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let sourceFixes = (UserDefaults.standard.string(forKey: "sourceFixes") ?? "")
+            .split(separator: "\n")
+            .compactMap { line -> (String, String)? in
+                let pair = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                guard pair.count == 2 else { return nil }
+                let from = pair[0].trimmingCharacters(in: .whitespaces)
+                let to = pair[1].trimmingCharacters(in: .whitespaces)
+                return from.isEmpty ? nil : (from, to)
+            }
+        let glossary = (UserDefaults.standard.string(forKey: "glossary") ?? "")
+            .split(separator: "\n")
+            .compactMap { line -> (String, String)? in
+                let pair = line.split(separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+                guard pair.count == 2 else { return nil }
+                let from = pair[0].trimmingCharacters(in: .whitespaces)
+                let to = pair[1].trimmingCharacters(in: .whitespaces)
+                return from.isEmpty ? nil : (from, to)
+            }
+
+        var protectedTokens: [[(String, String)]] = []
+        for (bi, rawText) in blocks.enumerated() {
+            var text = cleanOCR ? TextIntel.cleanOCR(rawText) : rawText
+            for (from, to) in sourceFixes {
+                text = text.replacingOccurrences(of: from, with: to, options: [.caseInsensitive])
+            }
             // Evaluate the OCR text independently even when the user selected a
             // source language. detectSource() intentionally honors that setting,
             // so using its return value as detector evidence would simply repeat
@@ -1314,12 +1345,23 @@ final class TranslatorEngine: ObservableObject {
             }
 
             guard let src = detectSource(text), src.languageCode != target.languageCode else {
-                sentences.append([text]); done.append([text]); continue
+                sentences.append([text]); done.append([text]); protectedTokens.append([]); continue
             }
             let id = src.minimalIdentifier
             lastDetectedLanguage = Locale.current.localizedString(forIdentifier: id) ?? id
             srcLangs[id] = src
             trace("SOURCE DETECTION", "Block #\(bi + 1) source=\(id), target=\(targetCode); text=\(text)")
+
+            if expandSlang {
+                text = TextIntel.expandSlang(text, lang: src.languageCode?.identifier ?? id)
+            }
+            let dialogue = detectSpeakers ? TextIntel.splitDialogue(text) : [(label: String?.none, text: text)]
+            // Protect both user-specified terms and detected speaker labels before
+            // translation, then restore the exact spelling after Apple Translation.
+            let labels = dialogue.compactMap { $0.label }
+            let protected = TextIntel.protect(text, words: Array((neverWords + labels).prefix(20)))
+            protectedTokens.append(protected.tokens)
+            text = protected.text
             // Do not split ordinary multi-sentence dialogue into isolated fragments.
             // Short fragments lose grammatical context and can be translated in the
             // wrong order. Only split unusually long OCR dumps to keep requests bounded.
@@ -1420,7 +1462,11 @@ final class TranslatorEngine: ObservableObject {
         for (bi, row) in done.enumerated() {
             var parts: [String] = []
             for (si, v) in row.enumerated() { parts.append(v ?? sentences[bi][si]) }
-            outBlocks.append(parts.joined(separator: " "))
+            var restored = TextIntel.restore(parts.joined(separator: " "), tokens: bi < protectedTokens.count ? protectedTokens[bi] : [])
+            for (from, to) in glossary {
+                restored = restored.replacingOccurrences(of: from, with: to, options: [.caseInsensitive])
+            }
+            outBlocks.append(restored)
         }
         translateMs = Date().timeIntervalSince(t0) * 1000
         let finalOutput = outBlocks.joined(separator: "\n")
