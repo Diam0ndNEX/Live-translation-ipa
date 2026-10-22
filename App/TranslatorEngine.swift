@@ -13,12 +13,12 @@ enum TranslateMode: String, CaseIterable, Identifiable {
     }
 }
 enum OCRArea: String, CaseIterable, Identifiable {
-    case smart, full, bottom, top, middle
+    case smart, full, bottom, top, middle, custom
     var id: String { rawValue }
     var title: String {
         switch self {
         case .smart: "Smart (auto)"; case .full: "Full screen"; case .bottom: "Bottom third"
-        case .top: "Top half"; case .middle: "Middle band"
+        case .top: "Top half"; case .middle: "Middle band"; case .custom: "Custom area"
         }
     }
     func range(mode: TranslateMode) -> ClosedRange<Double> {   // y: 0 = bottom, 1 = top
@@ -32,6 +32,11 @@ enum OCRArea: String, CaseIterable, Identifiable {
         case .bottom: return 0...0.33
         case .top: return 0.5...1
         case .middle: return 0.3...0.7
+        case .custom:
+            let defaults = UserDefaults.standard
+            let low = max(0, min(0.9, defaults.object(forKey: "customY0") as? Double ?? 0.0))
+            let high = max(low + 0.05, min(1, defaults.object(forKey: "customY1") as? Double ?? 0.5))
+            return low...high
         }
     }
 }
@@ -481,9 +486,24 @@ final class TranslatorEngine: ObservableObject {
     /// Sends OCR area, source-language hint and speed to the extension.
     func syncConfig() {
         let r = area.range(mode: mode)
+        let defaults = UserDefaults.standard
+        let customMinHeight = defaults.object(forKey: "minTextH") as? Double ?? 0
+        let ignore = (defaults.string(forKey: "ignoreList") ?? "")
+            .split(whereSeparator: { $0 == "," || $0 == "\n" })
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let rotationSetting = defaults.string(forKey: "frameRot") ?? "auto"
+        let rotation = ["90": 1, "180": 2, "270": 3][rotationSetting] ?? 0
         server.send(Config(lang: sourceCode, y0: r.lowerBound, y1: r.upperBound,
                            maxEdge: speed.maxEdge, interval: speed.interval, paused: paused,
-                           minimumConfidence: minimumOCRConfidence, languageCorrection: languageCorrection))
+                           minimumConfidence: minimumOCRConfidence, languageCorrection: languageCorrection,
+                           minimumTextHeight: customMinHeight > 0 ? customMinHeight : nil,
+                           ignoreList: ignore,
+                           dropNoise: defaults.object(forKey: "dropNoise") as? Bool ?? true,
+                           boost: defaults.object(forKey: "boost") as? Int ?? 1,
+                           stability: defaults.object(forKey: "stability") as? Int ?? 1,
+                           skipUnchanged: defaults.object(forKey: "skipUnchanged") as? Bool ?? true,
+                           rotation: rotation))
     }
 
     // MARK: PiP
