@@ -686,7 +686,13 @@ struct SettingsView: View {
                 Text(engine.translated.isEmpty ? "No translation yet." : engine.translated)
                     .font(.footnote).textSelection(.enabled)
             }
-            DisclosureGroup("Recent diagnostic events (latest first)") {
+            DisclosureGroup("Processing trace — last 60 seconds") {
+                Text(engine.processingTrace.isEmpty ? "No processing trace yet. Start capture and wait for text to appear." : engine.processingTrace.joined(separator: "\n"))
+                    .font(.system(.caption2, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            DisclosureGroup("Recent diagnostic events (latest first)")
                 if engine.diagnosticEvents.isEmpty {
                     Text("No diagnostic events yet.")
                         .font(.footnote).foregroundStyle(.secondary)
@@ -704,6 +710,11 @@ struct SettingsView: View {
             }
             Button("Clear translation cache") { engine.clearTranslationCache() }
             Button("Clear diagnostic event log", role: .destructive) { engine.clearDiagnosticEvents() }
+            Button("Copy detailed pipeline report") {
+                let report = engine.copyDetailedDiagnosticReport()
+                UIPasteboard.general.string = report
+                engine.status = "Detailed pipeline report copied"
+            }
             Button("Copy full diagnostic report") {
                 let report = [
                     "ScreenLingo \(AppVersion.full)",
@@ -749,7 +760,7 @@ struct SettingsView: View {
         } header: {
             Text("Live diagnostics")
         } footer: {
-            Text("The report includes capture handshake, packet flow, OCR filtering, translation stability and recent events. Copy it immediately after a failure so the event log captures the startup sequence.")
+            Text("The detailed report includes OCR text and coordinates, block boundaries, filtering decisions and language scores, cache decisions, per-block source/output pairs, and the last 60 seconds of processing. Copy immediately after a bad translation and send the report for analysis.")
         }
     }
 

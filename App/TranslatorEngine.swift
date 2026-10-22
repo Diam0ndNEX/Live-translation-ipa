@@ -120,6 +120,8 @@ final class TranslatorEngine: ObservableObject {
     @Published var translationFailures = 0
     @Published var lastTranslationError = "None"
     @Published var diagnosticEvents: [String] = []
+    @Published var processingTrace: [String] = []
+    private var processingTraceDates: [Date] = []
     @Published var lastPacketKind = "None"
     @Published var totalPackets = 0
     @Published var pingPackets = 0
@@ -231,15 +233,77 @@ final class TranslatorEngine: ObservableObject {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss.SSS"
         diagnosticEvents.append("[\(formatter.string(from: Date()))] \(message)")
-        if diagnosticEvents.count > 80 {
-            diagnosticEvents.removeFirst(diagnosticEvents.count - 80)
-        }
+        if diagnosticEvents.count > 120 { diagnosticEvents.removeFirst(diagnosticEvents.count - 120) }
         lastStatusChangeAt = Date()
+    }
+
+    /// Local-only pipeline trace. Entries expire after 60 seconds.
+    private func trace(_ stage: String, _ detail: String) {
+        let now = Date()
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        processingTrace.append("[\(formatter.string(from: now))] [\(stage)] \(detail)")
+        processingTraceDates.append(now)
+        while let first = processingTraceDates.first, now.timeIntervalSince(first) > 60 {
+            processingTraceDates.removeFirst()
+            processingTrace.removeFirst()
+        }
+        if processingTrace.count > 500 {
+            let excess = processingTrace.count - 500
+            processingTrace.removeFirst(excess)
+            processingTraceDates.removeFirst(excess)
+        }
+    }
+
+    private func traceBlock(_ lines: [OCRLine]) -> String {
+        let text = blockText(lines).replacingOccurrences(of: "\n", with: " ")
+        let minX = lines.map { $0.x - ($0.w ?? 0.2) / 2 }.min() ?? 0
+        let maxX = lines.map { $0.x + ($0.w ?? 0.2) / 2 }.max() ?? 0
+        let minY = lines.map { $0.y - $0.h / 2 }.min() ?? 0
+        let maxY = lines.map { $0.y + $0.h / 2 }.max() ?? 0
+        return String(format: "bbox x=%.3f…%.3f y=%.3f…%.3f; %d lines; text=%@", minX, maxX, minY, maxY, lines.count, text)
+    }
+
+    private func languageDecision(_ text: String) -> String {
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(text)
+        let target = Locale.Language(identifier: targetCode).languageCode
+        let hypotheses = recognizer.languageHypotheses(withMaximum: 5)
+        let scores = hypotheses.sorted { $0.value > $1.value }.map { item in
+            "\(Locale.Language(identifier: item.key.rawValue).languageCode ?? item.key.rawValue)=\(String(format: "%.2f", item.value))"
+        }.joined(separator: ", ")
+        let targetScore = hypotheses.reduce(0.0) { $0 + (Locale.Language(identifier: $1.key.rawValue).languageCode == target ? $1.value : 0) }
+        return "target=\(targetCode) score=\(String(format: "%.2f", targetScore)); hypotheses=[\(scores)]"
+    }
+
+    func copyDetailedDiagnosticReport() -> String {
+        [
+            "ScreenLingo \(AppVersion.full)",
+            "Timestamp: \(ISO8601DateFormatter().string(from: Date()))",
+            "Capture=\(capturePhase); connected=\(captureAlive); PiP=\(pipActive); extension=\(extensionVersion)",
+            "Packets all=\(totalPackets), ping=\(pingPackets), OCR=\(ocrPackets), clear=\(clearPackets); last=\(lastPacketSummary)",
+            "Frames=\(frames); OCR passes=\(ocrCount); raw lines=\(lastOCRLineCount); OCR ms=\(ocrMs); translation ms=\(translateMs)",
+            "Source setting=\(sourceCode), detected=\(lastDetectedLanguage), target=\(targetCode), mode=\(mode.rawValue), area=\(area.rawValue)",
+            "Filter counts: \(lastFilterSummary)",
+            "Accepted=\(acceptedInputCount); stale discarded=\(discardedStaleCount); cache hits=\(cacheHits); failures=\(translationFailures)",
+            "Last error=\(lastTranslationError); quality=\(lastOutputQuality); status=\(status)",
+            "RAW OCR:\n\(lastRaw)",
+            "CANDIDATE:\n\(lastCandidateText)",
+            "SELECTED BLOCKS:\n\(lastSelectedBlocks)",
+            "TRANSLATION INPUT:\n\(lastTranslationInput)",
+            "CURRENT ORIGINAL:\n\(original)",
+            "CURRENT TRANSLATION:\n\(translated)",
+            "PROCESSING TRACE (last 60 seconds):\n\(processingTrace.joined(separator: "\n"))",
+            "RECENT EVENTS:\n\(diagnosticEvents.joined(separator: "\n"))"
+        ].joined(separator: "\n")
     }
 
     func clearDiagnosticEvents() {
         diagnosticEvents.removeAll()
+        processingTrace.removeAll()
+        processingTraceDates.removeAll()
         recordDiagnostic("Diagnostic event log cleared")
+        trace("DIAGNOSTICS", "Event log and processing trace cleared")
     }
 
     private static let historyKey = "screenlingo.history.v1"
@@ -356,19 +420,36 @@ final class TranslatorEngine: ObservableObject {
         ocrCount += 1
         lastRaw = String(p.lines.map(\.t).joined(separator: " ").prefix(1200))
         lastOCRLineCount = p.lines.count
+        trace("PACKET", "OCR #\(ocrCount), frames=\(p.frames), lines=\(p.lines.count), extension=\(p.version), OCR ms=\(p.ocrMs ?? 0)")
+        for (i, line) in p.lines.enumerated() {
+            trace("RAW LINE", String(format: "#%02d x=%.3f y=%.3f w=%.3f h=%.3f | %@", i + 1, line.x, line.y, line.w ?? -1, line.h, line.t))
+        }
 
         let range = area.range(mode: mode)
         var cand = p.lines.filter { range.contains($0.y) }
+        trace("AREA FILTER", "\(p.lines.count) raw → \(cand.count) inside \(area.rawValue) y=\(range.lowerBound)…\(range.upperBound)")
+        let beforeOwnOutput = cand.count
         cand = removeOwnOutput(cand)
-        // Do not classify isolated OCR lines: short words and mixed-language UI
-        // fragments are frequently misidentified. Group first, then filter only
-        // complete spatial regions with a high-confidence language result.
+        trace("PIP FEEDBACK", "\(beforeOwnOutput - cand.count) lines removed as own output; \(cand.count) remain")
         let groupedBlocks = makeBlocks(cand)
-        let sourceBlocks = groupedBlocks.filter { !isTargetLanguage(blockText($0)) }
+        trace("BLOCK GROUPING", "\(cand.count) lines → \(groupedBlocks.count) blocks")
+        for (i, block) in groupedBlocks.enumerated() {
+            trace("BLOCK \(i + 1)", "\(traceBlock(block)); \(languageDecision(blockText(block)))")
+        }
+        let sourceBlocks = groupedBlocks.filter { block in
+            let text = blockText(block)
+            let rejected = isTargetLanguage(text)
+            trace("LANGUAGE FILTER", "\(rejected ? "REJECT target feedback" : "KEEP possible source") | \(text) | \(languageDecision(text))")
+            return !rejected
+        }
         let blocks = selectBlocks(sourceBlocks)
-        let texts = dedupe(blocks.map { blockText($0) }.filter {
-            TextSim.norm($0).count >= 2 && isUsefulOCRText($0) && plausiblySource($0)
+        trace("BLOCK SELECTION", "\(sourceBlocks.count) possible → \(blocks.count) selected; mode=\(mode.rawValue), area=\(area.rawValue)")
+        let texts = dedupe(blocks.map { blockText($0) }.filter { text in
+            let valid = TextSim.norm(text).count >= 2 && isUsefulOCRText(text) && plausiblySource(text)
+            trace("TEXT VALIDATION", "\(valid ? "KEEP" : "DROP") | \(text)")
+            return valid
         })
+        trace("FINAL OCR", texts.isEmpty ? "No source text accepted; keeping last good result." : "Sending \(texts.count) block(s):\n" + texts.enumerated().map { "#\($0.offset + 1) \($0.element)" }.joined(separator: "\n"))
         selectedBlockCount = texts.count
         lastSelectedBlocks = texts.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
         lastFilterSummary = "raw=\(p.lines.count), in-area=\(p.lines.filter { range.contains($0.y) }.count), post-filter=\(cand.count), grouped=\(groupedBlocks.count), source=\(sourceBlocks.count), selected=\(texts.count)"
@@ -821,6 +902,7 @@ final class TranslatorEngine: ObservableObject {
         let t0 = Date()
         lastTranslationError = "None"
         lastTranslationInput = blocks.joined(separator: "\n")
+        trace("TRANSLATION START", "\(blocks.count) block(s); target=\(targetCode); input:\n" + blocks.enumerated().map { "#\($0.offset + 1) \($0.element)" }.joined(separator: "\n"))
         let target = Locale.Language(identifier: targetCode)
 
         var sentences: [[String]] = []          // per block
@@ -836,6 +918,7 @@ final class TranslatorEngine: ObservableObject {
             let id = src.minimalIdentifier
             lastDetectedLanguage = Locale.current.localizedString(forIdentifier: id) ?? id
             srcLangs[id] = src
+            trace("SOURCE DETECTION", "Block #\(bi + 1) source=\(id), target=\(targetCode); text=\(text)")
             // Do not split ordinary multi-sentence dialogue into isolated fragments.
             // Short fragments lose grammatical context and can be translated in the
             // wrong order. Only split unusually long OCR dumps to keep requests bounded.
@@ -845,9 +928,11 @@ final class TranslatorEngine: ObservableObject {
             for (si, part) in parts.enumerated() {
                 if let hit = cache["\(id)>\(targetCode)|\(part)"] {
                     row.append(hit); translatedAny = true; cacheHits += 1
+                    trace("CACHE HIT", "Block #\(bi + 1) part #\(si + 1): \(part) → \(hit)")
                 } else {
                     row.append(nil)
                     pending[id, default: []].append((bi, si, part))
+                    trace("CACHE MISS", "Block #\(bi + 1) part #\(si + 1) queued for Apple Translation; \(id) → \(targetCode); text=\(part)")
                 }
             }
             done.append(row)
@@ -871,6 +956,7 @@ final class TranslatorEngine: ObservableObject {
             for (k, it) in items.enumerated() {
                 done[it.block][it.index] = out[k]
                 cache["\(id)>\(targetCode)|\(it.text)"] = out[k]
+                trace("TRANSLATION RESULT", "Block #\(it.block + 1) part #\(it.index + 1); \(id) → \(targetCode); source=\(it.text); output=\(out[k])")
             }
         }
         if cache.count > 600 { cache.removeAll() }
@@ -912,6 +998,7 @@ final class TranslatorEngine: ObservableObject {
         lastOutputQuality = Self.outputQuality(source: processedInput, output: finalOutput)
         capturePhase = "Translation complete"
         recordDiagnostic("Translation complete: \(processedInput.count) source chars, \(finalOutput.count) output chars")
+        trace("PUBLISHED OUTPUT", "quality=\(lastOutputQuality); output:\n\(finalOutput)")
         status = "\(srcLangs.keys.sorted().joined(separator: "+")) → \(targetCode) ✓"
         show(processedInput, finalOutput)
     }
