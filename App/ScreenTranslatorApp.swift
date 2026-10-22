@@ -648,7 +648,7 @@ struct HistoryView: View {
                 case .success:
                     engine.status = "History export saved"
                 case .failure(let error):
-                    engine.status = "History export failed: \\(error.localizedDescription)"
+                    engine.status = "History export failed: \(error.localizedDescription)"
                 }
                 exportDocument = nil
             }
