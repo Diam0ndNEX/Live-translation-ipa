@@ -517,6 +517,7 @@ struct SettingsView: View {
     @AppStorage("cleanOCR") private var cleanOCR = true
     @AppStorage("slang") private var slang = true
     @AppStorage("speakerDetect") private var speakerDetect = true
+    @AppStorage("langLock") private var langLock = true
     @AppStorage("neverTranslate") private var neverTranslate = ""
     @AppStorage("sourceFixes") private var sourceFixes = ""
     @AppStorage("glossary") private var glossary = ""
@@ -643,6 +644,7 @@ struct SettingsView: View {
             Toggle("Clean up OCR mistakes", isOn: $cleanOCR)
             Toggle("Expand chat slang", isOn: $slang)
             Toggle("Preserve speaker names", isOn: $speakerDetect)
+            Toggle("Lock detected language", isOn: $langLock)
             VStack(alignment: .leading, spacing: 6) {
                 Text("Never translate").font(.subheadline.weight(.medium))
                 TextEditor(text: $neverTranslate)
