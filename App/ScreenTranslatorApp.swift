@@ -2,6 +2,28 @@
 import SwiftUI
 import ReplayKit
 import Translation
+import UniformTypeIdentifiers
+
+
+/// Small UTF-8 document used by the native Files export sheet.
+struct HistoryExportDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.plainText, .commaSeparatedText] }
+    var text: String
+
+    init(text: String) { self.text = text }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents,
+              let value = String(data: data, encoding: .utf8) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        text = value
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: Data(text.utf8))
+    }
+}
 
 @main
 struct ScreenLingoApp: App {
@@ -500,6 +522,10 @@ struct HistoryView: View {
     @State private var query = ""
     @State private var onlyStarred = false
     @State private var showingClearConfirmation = false
+    @State private var showingExporter = false
+    @State private var exportDocument: HistoryExportDocument?
+    @State private var exportContentType: UTType = .plainText
+    @State private var exportFilename = "ScreenLingo-History.txt"
 
     private var filteredHistory: [HistoryItem] {
         engine.history.filter { item in
@@ -548,6 +574,13 @@ struct HistoryView: View {
                             Text(h.date, style: .date).font(.caption2).foregroundStyle(.tertiary)
                             Spacer()
                             Button {
+                                engine.toggleStar(h.id)
+                            } label: {
+                                Label(h.starred ? "Unstar" : "Star", systemImage: h.starred ? "star.slash.fill" : "star.fill")
+                            }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel(h.starred ? "Remove from favourites" : "Add to favourites")
+                            Button {
                                 UIPasteboard.general.string = h.translated
                             } label: { Label("Translation", systemImage: "doc.on.doc") }
                             .buttonStyle(.borderless)
@@ -579,8 +612,12 @@ struct HistoryView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Menu {
-                        ShareLink(item: exportText) { Label("Export as text", systemImage: "doc.text") }
-                        ShareLink(item: exportCSV) { Label("Export as CSV", systemImage: "tablecells") }
+                        Button { prepareExport(exportText, type: .plainText, filename: "ScreenLingo-History.txt") } label: {
+                            Label("Export as text file", systemImage: "doc.text")
+                        }
+                        Button { prepareExport(exportCSV, type: .commaSeparatedText, filename: "ScreenLingo-History.csv") } label: {
+                            Label("Export as CSV file", systemImage: "tablecells")
+                        }
                     } label: {
                         Image(systemName: "square.and.arrow.up")
                     }
@@ -603,6 +640,18 @@ struct HistoryView: View {
             } message: {
                 Text("This cannot be undone.")
             }
+            .fileExporter(isPresented: $showingExporter,
+                          document: exportDocument,
+                          contentType: exportContentType,
+                          defaultFilename: exportFilename) { result in
+                switch result {
+                case .success:
+                    engine.status = "History export saved"
+                case .failure(let error):
+                    engine.status = "History export failed: \\(error.localizedDescription)"
+                }
+                exportDocument = nil
+            }
             .overlay {
                 if engine.history.isEmpty {
                     ContentUnavailableView("No translations yet",
@@ -613,5 +662,12 @@ struct HistoryView: View {
                 }
             }
         }
+    }
+
+    private func prepareExport(_ text: String, type: UTType, filename: String) {
+        exportDocument = HistoryExportDocument(text: text)
+        exportContentType = type
+        exportFilename = filename
+        showingExporter = true
     }
 }
