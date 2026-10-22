@@ -18,6 +18,15 @@ jobs:
           mkdir -p App/Assets.xcassets/AppIcon.appiconset
           rsvg-convert -w 1024 -h 1024 App/ScreenLingoIcon.svg -o App/Assets.xcassets/AppIcon.appiconset/AppIcon.png
           printf '%s\n' '{"images":[{"filename":"AppIcon.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}' > App/Assets.xcassets/AppIcon.appiconset/Contents.json
+          # Shared/Shared.swift is the single source of truth for app versioning.
+          SOURCE_VERSION=$(sed -nE 's/^[[:space:]]*static let version = "([^"]+)".*/\1/p' Shared/Shared.swift | head -n 1)
+          SOURCE_BUILD=$(sed -nE 's/^[[:space:]]*static let build = ([0-9]+).*/\1/p' Shared/Shared.swift | head -n 1)
+          test -n "$SOURCE_VERSION"
+          test -n "$SOURCE_BUILD"
+          # Synchronize every XcodeGen target's version before project generation.
+          sed -i '' -E "s/(MARKETING_VERSION: \")[0-9]+\.[0-9]+\.[0-9]+(\")/\\1$SOURCE_VERSION\\2/g" project.yml
+          sed -i '' -E "s/(CURRENT_PROJECT_VERSION: \")[0-9]+(\")/\\1$SOURCE_BUILD\\2/g" project.yml
+          echo "Synchronized project version to $SOURCE_VERSION ($SOURCE_BUILD)"
           xcodegen generate
       - name: Build
         run: |
