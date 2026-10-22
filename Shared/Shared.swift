@@ -64,6 +64,13 @@ struct Config: Codable {
     var paused: Bool
     var minimumConfidence: Double
     var languageCorrection: Bool
+    var minimumTextHeight: Double?
+    var ignoreList: [String]?
+    var dropNoise: Bool?
+    var boost: Int?
+    var stability: Int?
+    var skipUnchanged: Bool?
+    var rotation: Int?
 }
 
 enum TextSim {
