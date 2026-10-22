@@ -876,6 +876,11 @@ final class TranslatorEngine: ObservableObject {
                 // line must be below the previous line and within a plausible line gap.
                 let centerDistance = abs(line.x - previous.x)
                 let overlapRatio = overlap / max(0.001, min(lineWidth, previousWidth))
+                let horizontalGap = max(
+                    0,
+                    max(line.x - lineWidth / 2, previous.x - previousWidth / 2)
+                        - min(line.x + lineWidth / 2, previous.x + previousWidth / 2)
+                )
                 let stacked = verticalGap > 0.20 * lineHeight
                     && edgeGap < 0.75 * lineHeight
                     && edgeGap > -0.35 * lineHeight
@@ -883,15 +888,17 @@ final class TranslatorEngine: ObservableObject {
                     // Large horizontal spans often indicate separate speech bubbles
                     // or an OCR line from the floating PiP overlay. Do not bridge them
                     // merely because their text boxes overlap a little.
-                    // When both observations span most of the frame, even a small
-                    // center shift can mean separate dialogue balloons. Keep the
-                    // threshold stricter than ordinary narrow subtitle lines.
                     && !(lineWidth > 0.62 && previousWidth > 0.62 && centerDistance > 0.035)
-                // Never merge two OCR observations on the same visual row.
-                // Vision often returns separate speech bubbles/characters on one row
-                // with overlapping, oversized text boxes. Joining those fragments is
-                // a common source of corruption such as "p-Rem:".
-                guard sizeRatio > 0.45, stacked else { continue }
+                // Movie subtitles can be returned as multiple side-by-side OCR boxes
+                // on one visual row. Claude's working implementation joined these
+                // when their box edges were close; keeping them separate lets Movie
+                // mode rank a fragment and discard the rest of the actual sentence.
+                // Keep the stricter vertical-only rule for comic/game bubbles, where
+                // adjacent same-row boxes may belong to different speakers.
+                let sameMovieRow = mode == .movie
+                    && abs(verticalGap) <= 0.35 * lineHeight
+                    && horizontalGap < 0.06
+                guard sizeRatio > 0.45, (stacked || sameMovieRow) else { continue }
 
                 let score = (overlap / min(lineWidth, previousWidth))
                     - abs(edgeGap) / lineHeight * 0.15
