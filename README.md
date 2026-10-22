@@ -6,7 +6,7 @@ ScreenLingo is a native iOS screen translator built with SwiftUI, Apple Vision O
 
 - Live screen text capture through a ReplayKit broadcast extension.
 - On-device OCR and translation with supported Apple language packs.
-- Floating Picture-in-Picture translation window.
+- Floating Picture-in-Picture translation window with quick freeze/resume controls.
 - Dedicated modes for subtitles, games/apps, and comics, with Movie mode able to translate aligned multi-row lyrics together.
 - Configurable OCR area and Fast / Balanced / Sharp performance profiles.
 - Adjustable OCR confidence threshold and optional language-aware recognition correction.
