@@ -494,6 +494,9 @@ struct SettingsView: View {
     private var confidencePercentage: String { String(Int(ocrConfidence * 100)) + "%" }
 
     @EnvironmentObject var engine: TranslatorEngine
+    @AppStorage("includeDiagnosticText") private var includeDiagnosticText = true
+    @State private var diagnosticExportURL: URL?
+    @State private var showingDiagnosticExport = false
     @AppStorage("theme") private var theme = PiPTheme.dark.rawValue
     @AppStorage("textSize") private var textSize = PiPTextSize.auto.rawValue
     @AppStorage("speak") private var speak = false
@@ -523,6 +526,25 @@ struct SettingsView: View {
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Settings")
+            .sheet(isPresented: $showingDiagnosticExport) {
+                NavigationStack {
+                    VStack(spacing: 16) {
+                        Image(systemName: "doc.text").font(.largeTitle)
+                        Text("Diagnostic report ready").font(.headline)
+                        Text("Share or save the full report as a .txt file. It follows your recognized-text privacy setting.")
+                            .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        if let diagnosticExportURL {
+                            ShareLink(item: diagnosticExportURL) {
+                                Label("Share / Save .txt", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
+                            }.buttonStyle(.borderedProminent)
+                        }
+                        Spacer()
+                    }.padding()
+                    .navigationTitle("Export diagnostics")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { showingDiagnosticExport = false } } }
+                }.presentationDetents([.medium])
+            }
             .onChange(of: theme) { _, _ in engine.applyStyle() }
             .onChange(of: textSize) { _, _ in engine.applyStyle() }
             .onChange(of: winSize) { _, _ in engine.applyWindowSize() }
@@ -710,57 +732,32 @@ struct SettingsView: View {
             }
             Button("Clear translation cache") { engine.clearTranslationCache() }
             Button("Clear diagnostic event log", role: .destructive) { engine.clearDiagnosticEvents() }
-            Button("Copy detailed pipeline report") {
-                let report = engine.copyDetailedDiagnosticReport()
-                UIPasteboard.general.string = report
-                engine.status = "Detailed pipeline report copied"
+            Toggle("Include recognized text in reports", isOn: $includeDiagnosticText)
+            Text(includeDiagnosticText
+                 ? "Reports include actual OCR, source dialogue, and translated text. Check before sharing."
+                 : "Text content is redacted. Coordinates, timestamps, block geometry, filter decisions, and language scores remain available.")
+                .font(.footnote).foregroundStyle(.secondary)
+            Button("Copy compact report (last 60 seconds)") {
+                UIPasteboard.general.string = engine.copyDetailedDiagnosticReport(includeRecognizedText: includeDiagnosticText, compact: true)
+                engine.status = "Compact diagnostic report copied"
             }
-            Button("Copy full diagnostic report") {
-                let report = [
-                    "ScreenLingo \(AppVersion.full)",
-                    "Timestamp: \(ISO8601DateFormatter().string(from: Date()))",
-                    "Capture phase: \(engine.capturePhase)",
-                    "UDP listener ready: \(engine.serverReady)",
-                    "Capture connected: \(engine.captureAlive)",
-                    "PiP active: \(engine.pipActive)",
-                    "Extension version: \(engine.extensionVersion)",
-                    "Last packet kind: \(engine.lastPacketKind)",
-                    "Last packet summary: \(engine.lastPacketSummary)",
-                    "Last packet age seconds: \(engine.lastPacketAge)",
-                    "Packet totals: all=\(engine.totalPackets), ping=\(engine.pingPackets), ocr=\(engine.ocrPackets), clear=\(engine.clearPackets)",
-                    "Frames: \(engine.frames)",
-                    "OCR passes: \(engine.ocrCount)",
-                    "Raw OCR lines: \(engine.lastOCRLineCount)",
-                    "OCR latency ms: \(engine.ocrMs)",
-                    "Translation latency ms: \(engine.translateMs)",
-                    "Extension free memory MB: \(engine.extFreeMB)",
-                    "Detected language: \(engine.lastDetectedLanguage)",
-                    "Target language: \(engine.targetCode)",
-                    "Selected blocks: \(engine.selectedBlockCount)",
-                    "Filter counts: \(engine.lastFilterSummary)",
-                    "Accepted inputs: \(engine.acceptedInputCount)",
-                    "Stabilization waits: \(engine.stabilizationWaitCount)",
-                    "Discarded stale translations: \(engine.discardedStaleCount)",
-                    "Cache hits: \(engine.cacheHits)",
-                    "Translation failures: \(engine.translationFailures)",
-                    "Output quality: \(engine.lastOutputQuality)",
-                    "Last translation error: \(engine.lastTranslationError)",
-                    "Status: \(engine.status)",
-                    "Last raw OCR: \(engine.lastRaw)",
-                    "Candidate text: \(engine.lastCandidateText)",
-                    "Selected block order:\n\(engine.lastSelectedBlocks)",
-                    "Translation input:\n\(engine.lastTranslationInput)",
-                    "Current original:\n\(engine.original)",
-                    "Current translation:\n\(engine.translated)",
-                    "Recent events:\n\(engine.diagnosticEvents.joined(separator: "\n"))"
-                ].joined(separator: "\n")
-                UIPasteboard.general.string = report
-                engine.status = "Full diagnostic report copied"
+            Button("Export full diagnostic report (.txt)") {
+                let report = engine.copyDetailedDiagnosticReport(includeRecognizedText: includeDiagnosticText, compact: false)
+                let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenLingo-Diagnostics-\(stamp).txt")
+                do {
+                    try Data(report.utf8).write(to: url, options: .atomic)
+                    diagnosticExportURL = url
+                    showingDiagnosticExport = true
+                    engine.status = "Full diagnostic report ready to share"
+                } catch {
+                    engine.status = "Could not export report: \(error.localizedDescription)"
+                }
             }
         } header: {
             Text("Live diagnostics")
         } footer: {
-            Text("The detailed report includes OCR text and coordinates, block boundaries, filtering decisions and language scores, cache decisions, per-block source/output pairs, and the last 60 seconds of processing. Copy immediately after a bad translation and send the report for analysis.")
+            Text("Compact reports include only the last 60 seconds and are capped at 15,000 characters. Export the fuller trace history as a .txt file for deeper debugging. The recognized-text toggle applies to both exports.")
         }
     }
 

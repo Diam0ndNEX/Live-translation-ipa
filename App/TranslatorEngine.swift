@@ -122,6 +122,8 @@ final class TranslatorEngine: ObservableObject {
     @Published var diagnosticEvents: [String] = []
     @Published var processingTrace: [String] = []
     private var processingTraceDates: [Date] = []
+    // Session-wide trace for full export; published trace remains a rolling 60-second view.
+    private var fullProcessingTrace: [String] = []
     @Published var lastPacketKind = "None"
     @Published var totalPackets = 0
     @Published var pingPackets = 0
@@ -277,38 +279,72 @@ final class TranslatorEngine: ObservableObject {
         return "target=\(targetCode) score=\(String(format: "%.2f", targetScore)); hypotheses=[\(scores)]"
     }
 
-    func copyDetailedDiagnosticReport() -> String {
-        // Keep the report small enough to paste into chat while preserving the
-        // latest filter decisions and examples needed to debug a bad translation.
-        let traceTail = processingTrace.suffix(100).joined(separator: "\n")
-        let eventTail = diagnosticEvents.suffix(30).joined(separator: "\n")
+    private func privacySafe(_ value: String, includeRecognizedText: Bool) -> String {
+        guard !includeRecognizedText else { return value }
+        var result = value
+        let patterns = [
+            #"(?i)(text=)[^;\n]*"#,
+            #"(?i)(RAW OCR:\n)[\s\S]*?(?=\n[A-Z][A-Z _()-]+:\n|\nPROCESSING TRACE|\nDIAGNOSTIC EVENTS|$)"#,
+            #"(?i)(CANDIDATE:\n)[\s\S]*?(?=\n[A-Z][A-Z _()-]+:\n|\nPROCESSING TRACE|\nDIAGNOSTIC EVENTS|$)"#,
+            #"(?i)(SELECTED BLOCKS:\n)[\s\S]*?(?=\n[A-Z][A-Z _()-]+:\n|\nPROCESSING TRACE|\nDIAGNOSTIC EVENTS|$)"#,
+            #"(?i)(TRANSLATION INPUT:\n)[\s\S]*?(?=\n[A-Z][A-Z _()-]+:\n|\nPROCESSING TRACE|\nDIAGNOSTIC EVENTS|$)"#,
+            #"(?i)(CURRENT ORIGINAL:\n)[\s\S]*?(?=\n[A-Z][A-Z _()-]+:\n|\nPROCESSING TRACE|\nDIAGNOSTIC EVENTS|$)"#,
+            #"(?i)(CURRENT TRANSLATION:\n)[\s\S]*?(?=\n[A-Z][A-Z _()-]+:\n|\nPROCESSING TRACE|\nDIAGNOSTIC EVENTS|$)"#,
+            #"(?i)(Accepted OCR input immediately: )[^;\n]*"#,
+            #"(?i)(Translation complete: )[^;\n]*"#
+        ]
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern) {
+                let range = NSRange(result.startIndex..., in: result)
+                result = regex.stringByReplacingMatches(in: result, range: range, withTemplate: "$1[REDACTED]")
+            }
+        }
+        return result
+    }
+
+    func copyDetailedDiagnosticReport(includeRecognizedText: Bool = true, compact: Bool = true) -> String {
+        let now = Date()
+        let traceEntries: [String]
+        let eventEntries: [String]
+        if compact {
+            let recent = zip(processingTrace, processingTraceDates).filter { now.timeIntervalSince($0.1) <= 60 }
+            traceEntries = recent.suffix(180).map { $0.0 }
+            eventEntries = Array(diagnosticEvents.suffix(30))
+        } else {
+            traceEntries = fullProcessingTrace
+            eventEntries = diagnosticEvents
+        }
         let sections = [
             "ScreenLingo \(AppVersion.full)",
-            "Timestamp: \(ISO8601DateFormatter().string(from: Date()))",
+            "Report type: \(compact ? "Compact (rolling 60 seconds)" : "Full diagnostic history; trace retention capped at 2,000 events")",
+            "Timestamp: \(ISO8601DateFormatter().string(from: now))",
+            "Recognized text included: \(includeRecognizedText)",
             "Capture=\(capturePhase); connected=\(captureAlive); PiP=\(pipActive); extension=\(extensionVersion)",
             "Packets all=\(totalPackets), ping=\(pingPackets), OCR=\(ocrPackets), clear=\(clearPackets); last=\(lastPacketSummary)",
             "Frames=\(frames); OCR passes=\(ocrCount); raw lines=\(lastOCRLineCount); OCR ms=\(Int(ocrMs)); translation ms=\(Int(translateMs))",
             "Source setting=\(sourceCode), detected=\(lastDetectedLanguage), target=\(targetCode), mode=\(mode.rawValue), area=\(area.rawValue)",
             "Filter counts: \(lastFilterSummary)",
-            "Accepted=\(acceptedInputCount); stale discarded=\(discardedStaleCount); cache hits=\(cacheHits); failures=\(translationFailures)",
+            "Accepted=\(acceptedInputCount); stabilization waits=\(stabilizationWaitCount); stale discarded=\(discardedStaleCount); cache hits=\(cacheHits); failures=\(translationFailures)",
             "Last error=\(lastTranslationError); quality=\(lastOutputQuality); status=\(status)",
-            "RAW OCR:\n\(String(lastRaw.prefix(1200)))",
-            "CANDIDATE:\n\(String(lastCandidateText.prefix(1000)))",
-            "SELECTED BLOCKS:\n\(String(lastSelectedBlocks.prefix(1000)))",
-            "TRANSLATION INPUT:\n\(String(lastTranslationInput.prefix(1200)))",
-            "CURRENT ORIGINAL:\n\(String(original.prefix(800)))",
-            "CURRENT TRANSLATION:\n\(String(translated.prefix(800)))",
-            "PROCESSING TRACE (last 100 events):\n\(traceTail)",
-            "RECENT EVENTS (last 30):\n\(eventTail)"
+            "RAW OCR:\n\(String(lastRaw.prefix(compact ? 1200 : 10000)))",
+            "CANDIDATE:\n\(String(lastCandidateText.prefix(compact ? 1000 : 10000)))",
+            "SELECTED BLOCKS:\n\(String(lastSelectedBlocks.prefix(compact ? 1000 : 10000)))",
+            "TRANSLATION INPUT:\n\(String(lastTranslationInput.prefix(compact ? 1200 : 10000)))",
+            "CURRENT ORIGINAL:\n\(String(original.prefix(compact ? 800 : 10000)))",
+            "CURRENT TRANSLATION:\n\(String(translated.prefix(compact ? 800 : 10000)))",
+            "PROCESSING TRACE (\(traceEntries.count) events):\n\(traceEntries.joined(separator: "\n"))",
+            "DIAGNOSTIC EVENTS (\(eventEntries.count) events):\n\(eventEntries.joined(separator: "\n"))"
         ]
-        let report = sections.joined(separator: "\n")
-        return report.count <= 15000 ? report : String(report.prefix(14980)) + "\n[Report truncated at 15,000 characters]"
+        let report = privacySafe(sections.joined(separator: "\n"), includeRecognizedText: includeRecognizedText)
+        guard compact, report.count > 15000 else { return report }
+        return String(report.prefix(14960)) + "\n[Compact report truncated at 15,000 characters]"
     }
 
     func clearDiagnosticEvents() {
         diagnosticEvents.removeAll()
         processingTrace.removeAll()
         processingTraceDates.removeAll()
+        fullProcessingTrace.removeAll()
         recordDiagnostic("Diagnostic event log cleared")
         trace("DIAGNOSTICS", "Event log and processing trace cleared")
     }
