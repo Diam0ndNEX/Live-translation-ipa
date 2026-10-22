@@ -173,6 +173,7 @@ final class TranslatorEngine: ObservableObject {
     // This filters transient OCR mixtures while adding only one capture interval.
     private var pendingInput = ""
     private var pendingInputCount = 0
+    private var lastShowDate = Date.distantPast
     private var showing = false
     private var pendingTexts: [String] = []
     private var legacyContinuation: CheckedContinuation<[String]?, Never>?
@@ -587,7 +588,8 @@ final class TranslatorEngine: ObservableObject {
         if !wasAlive {
             syncConfig()
             // Capture just started: make sure the floating window is up too.
-            if !pip.isActive, UIApplication.shared.applicationState == .active { startPiP() }
+            let autoOpen = (ud.object(forKey: "autoOpenPiP") as? Bool) ?? true
+            if autoOpen, !pip.isActive, UIApplication.shared.applicationState == .active { startPiP() }
         }
         if p.kind == "ping" { syncConfig(); return }       // keeps the extension's settings fresh
         if paused { return }
@@ -1349,8 +1351,15 @@ final class TranslatorEngine: ObservableObject {
     private func drain() async {
         busy = true
         defer { busy = false }
-        // Always translate only the newest text; anything older is already out of date.
-        while let b = queued { queued = nil; await process(b) }
+        // Keep rapid subtitle changes readable without processing stale intermediate text.
+        while queued != nil {
+            let minimum = max(0, min(4, ud.object(forKey: "minDisplay") as? Double ?? 0))
+            let wait = minimum - Date().timeIntervalSince(lastShowDate)
+            if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
+            guard let latest = queued else { break }
+            queued = nil
+            await process(latest)
+        }
     }
 
     // MARK: Translation
@@ -1716,10 +1725,14 @@ final class TranslatorEngine: ObservableObject {
         original = text
         translated = result
         showing = true
+        lastShowDate = Date()
         if history.first?.original != text {
             history.insert(HistoryItem(original: text, translated: result), at: 0)
             if history.count > 100 { history.removeLast() }
             if speakEnabled { speak(result) }
+            if (ud.object(forKey: "haptics") as? Bool) ?? false {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            }
         }
         renderedGrams = TextSim.grams(result).union(placeholderGrams)
         renderedNorm = TextSim.norm(result) + TextSim.norm("Waiting for screen text… Listening…")
