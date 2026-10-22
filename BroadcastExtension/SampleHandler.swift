@@ -109,8 +109,10 @@ class SampleHandler: RPBroadcastSampleHandler {
             r.automaticallyDetectsLanguage = false
             r.recognitionLanguages = langs
         } else {
+            // Let Vision choose its language model when the user selected Auto.
+            // Supplying every supported language at once creates a huge, unordered
+            // candidate set and can bias OCR toward English on multilingual frames.
             r.automaticallyDetectsLanguage = true
-            if !recognitionLanguages.isEmpty { r.recognitionLanguages = recognitionLanguages }
         }
         return r
     }

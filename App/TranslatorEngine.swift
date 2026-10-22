@@ -463,7 +463,10 @@ final class TranslatorEngine: ObservableObject {
                     // Large horizontal spans often indicate separate speech bubbles
                     // or an OCR line from the floating PiP overlay. Do not bridge them
                     // merely because their text boxes overlap a little.
-                    && !(lineWidth > 0.72 && previousWidth > 0.72 && centerDistance > 0.06)
+                    // When both observations span most of the frame, even a small
+                    // center shift can mean separate dialogue balloons. Keep the
+                    // threshold stricter than ordinary narrow subtitle lines.
+                    && !(lineWidth > 0.62 && previousWidth > 0.62 && centerDistance > 0.035)
                 // Never merge two OCR observations on the same visual row.
                 // Vision often returns separate speech bubbles/characters on one row
                 // with overlapping, oversized text boxes. Joining those fragments is
@@ -752,13 +755,21 @@ final class TranslatorEngine: ObservableObject {
         let targetProbability = hypotheses.reduce(0.0) { partial, item in
             partial + (Locale.Language(identifier: item.key.rawValue).languageCode == target ? item.value : 0)
         }
-        // The recognizer is uncertain on OCR fragments, so use combined probability
-        // rather than requiring the single dominant hypothesis to exceed 0.8.
-        if text.count >= 12 && targetProbability >= 0.34 { return true }
-        if text.count >= 7, let dominant = r.dominantLanguage,
-           Locale.Language(identifier: dominant.rawValue).languageCode == target,
-           (hypotheses[dominant] ?? 0) >= 0.48 { return true }
-        return false
+        let strongestNonTarget = hypotheses
+            .filter { Locale.Language(identifier: $0.key.rawValue).languageCode != target }
+            .map(\.value)
+            .max() ?? 0
+
+        // Reject only a coherent target-language region. OCR fragments from a
+        // Portuguese sentence can contain common English tokens ("he", "is", "the"),
+        // so a low 0.34 threshold discarded legitimate source dialogue. Requiring
+        // a stronger score and a margin over the strongest alternative avoids
+        // throwing away source-language fragments while still blocking English PiP
+        // feedback during Portuguese → English translation.
+        guard text.count >= 10,
+              targetProbability >= 0.58,
+              targetProbability >= strongestNonTarget * 1.25 else { return false }
+        return true
     }
 
     private func drain() async {
