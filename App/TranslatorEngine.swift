@@ -1481,11 +1481,11 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func handleClear() {
-        guard autoClear, showing else { return }
+        guard !frozen, autoClear, showing else { return }
         delayedClearWork?.cancel()
         let delay = textHoldDuration
         let work = DispatchWorkItem { [weak self] in
-            guard let self, self.showing else { return }
+            guard let self, self.showing, !self.frozen else { return }
             self.showing = false
             self.lastHandled = ""
             self.original = ""
@@ -1498,6 +1498,21 @@ final class TranslatorEngine: ObservableObject {
         }
         delayedClearWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// Freeze the floating output without stopping OCR or the capture extension.
+    func toggleFrozenOutput() {
+        frozen.toggle()
+        delayedClearWork?.cancel()
+        delayedClearWork = nil
+        if frozen {
+            status = "PiP output frozen — capture continues"
+        } else {
+            if !translated.isEmpty {
+                pip.render(original: original, translated: translated, showOriginal: showOriginal)
+            }
+            status = "PiP output live again"
+        }
     }
 
     /// Re-run translation on the most recently recognized text without restarting capture.
