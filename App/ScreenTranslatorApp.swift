@@ -677,8 +677,8 @@ struct SettingsView: View {
                     Text("No diagnostic events yet.")
                         .font(.footnote).foregroundStyle(.secondary)
                 } else {
-                    ForEach(Array(engine.diagnosticEvents.reversed().enumerated()), id: \.offset) { _, event in
-                        Text(event).font(.system(.caption, design: .monospaced))
+                    ForEach(Array(engine.diagnosticEvents.reversed().enumerated()), id: \.offset) { item in
+                        Text(item.element).font(.system(.caption, design: .monospaced))
                             .textSelection(.enabled).padding(.vertical, 2)
                     }
                 }
