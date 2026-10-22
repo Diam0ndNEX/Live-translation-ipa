@@ -3,7 +3,7 @@ import SwiftUI
 
 struct DiagnosticsView: View {
     @EnvironmentObject private var engine: TranslatorEngine
-    @AppStorage("includeDiagnosticText") private var includeDiagnosticText = true
+    @AppStorage("includeDiagnosticText") private var includeDiagnosticText = false
     @State private var compactReport = true
     @State private var showClearConfirmation = false
 
