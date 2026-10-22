@@ -119,6 +119,9 @@ final class TranslatorEngine: ObservableObject {
     @Published var cacheHits = 0
     @Published var translationFailures = 0
     @Published var lastTranslationError = "None"
+    @Published var lockedLang: String? = nil
+    private var languageDetectionHistory: [String] = []
+    private var languageMismatchCount = 0
     @Published var diagnosticEvents: [String] = []
     @Published var processingTrace: [String] = []
     private var processingTraceDates: [Date] = []
@@ -1331,17 +1334,47 @@ final class TranslatorEngine: ObservableObject {
         if sourceCode != "auto" { return Locale.Language(identifier: sourceCode) }
         let rec = NLLanguageRecognizer()
         rec.processString(text)
-        // Prefer a language whose pack is installed when the detector is torn between candidates
+        let hypotheses = rec.languageHypotheses(withMaximum: 5)
+        let useLock = (UserDefaults.standard.object(forKey: "langLock") as? Bool) ?? true
+        if useLock, let lockedLang {
+            let probability = hypotheses[NLLanguage(rawValue: lockedLang)] ?? 0
+            if probability > 0.10 || text.count < 12 {
+                languageMismatchCount = 0
+                return Locale.Language(identifier: lockedLang)
+            }
+            languageMismatchCount += 1
+            if languageMismatchCount >= 3 {
+                self.lockedLang = nil
+                languageDetectionHistory.removeAll()
+                languageMismatchCount = 0
+                recordDiagnostic("Automatic language lock released after repeated contradictory evidence")
+            } else {
+                return Locale.Language(identifier: lockedLang)
+            }
+        }
+        // Prefer an installed language pack only when the model's evidence is ambiguous.
         let installed = Set(languages.filter { langStatus[$0.code] == .installed }.map {
             $0.code == "zh" ? NLLanguage.simplifiedChinese : NLLanguage(rawValue: $0.code)
         })
-        var dom = rec.dominantLanguage
-        if let best = rec.languageHypotheses(withMaximum: 5)
-            .filter({ installed.contains($0.key) }).max(by: { $0.value < $1.value }), best.value > 0.15 {
-            dom = best.key
+        var dominant = rec.dominantLanguage
+        if let best = hypotheses.filter({ installed.contains($0.key) }).max(by: { $0.value < $1.value }),
+           best.value > 0.15 {
+            dominant = best.key
         }
-        guard let d = dom else { return nil }
-        return Locale.Language(identifier: d.rawValue)
+        guard let detected = dominant else { return nil }
+        if useLock {
+            let code = Locale.Language(identifier: detected.rawValue).minimalIdentifier
+            languageDetectionHistory.append(code)
+            if languageDetectionHistory.count > 6 { languageDetectionHistory.removeFirst() }
+            if languageDetectionHistory.count >= 4,
+               let winner = Dictionary(grouping: languageDetectionHistory, by: { $0 })
+                    .max(by: { $0.value.count < $1.value.count }),
+               winner.value.count >= 4 {
+                lockedLang = winner.key
+                recordDiagnostic("Automatic language locked to \(winner.key)")
+            }
+        }
+        return Locale.Language(identifier: detected.rawValue)
     }
 
     private func pairStatus(_ src: Locale.Language, _ target: Locale.Language) async -> LanguageAvailability.Status {
