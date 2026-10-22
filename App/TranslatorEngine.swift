@@ -189,6 +189,14 @@ final class TranslatorEngine: ObservableObject {
         targetCode = UserDefaults.standard.string(forKey: "target") ?? "en"
         history = Self.loadHistory()
         server.onPacket = { [weak self] p in Task { @MainActor in self?.handle(p) } }
+        server.onState = { [weak self] ready in
+            Task { @MainActor in
+                guard let self else { return }
+                self.serverReady = ready
+                self.recordDiagnostic(ready ? "UDP listener ready" : "UDP listener failed or stopped")
+            }
+        }
+        recordDiagnostic("App initialized; starting UDP listener")
         server.start()
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in
@@ -199,6 +207,13 @@ final class TranslatorEngine: ObservableObject {
                 }
                 self.captureAlive = alive
                 self.lastPacketAge = self.lastPacketDate == .distantPast ? -1 : Date().timeIntervalSince(self.lastPacketDate)
+                if self.lastPacketDate == .distantPast {
+                    self.capturePhase = self.serverReady ? "Listener ready; waiting for capture extension" : "Listener unavailable"
+                } else if !alive {
+                    self.capturePhase = "Packets stopped; extension may have ended"
+                } else {
+                    self.capturePhase = self.pipActive ? "Capture connected; PiP active" : "Capture connected; PiP inactive"
+                }
             }
         }
         pip.setSize(windowSize.size)
@@ -305,6 +320,19 @@ final class TranslatorEngine: ObservableObject {
     private func handle(_ p: Packet) {
         let wasAlive = captureAlive
         lastPacketDate = Date()
+        lastPacketKind = p.kind
+        totalPackets += 1
+        lastPacketSummary = "kind=\(p.kind), frames=\(p.frames), lines=\(p.lines.count), version=\(p.version)"
+        switch p.kind {
+        case "ping": pingPackets += 1
+        case "ocr": ocrPackets += 1
+        case "clear": clearPackets += 1
+        default: break
+        }
+        capturePhase = "Receiving \(p.kind) packets"
+        if totalPackets == 1 || totalPackets % 20 == 0 {
+            recordDiagnostic("Packet #\(totalPackets): \(lastPacketSummary)")
+        }
         captureAlive = true
         frames = p.frames
         extensionVersion = p.version
@@ -321,7 +349,7 @@ final class TranslatorEngine: ObservableObject {
         if p.kind == "clear" { handleClear(); return }
         guard p.kind == "ocr" else { return }
         ocrCount += 1
-        lastRaw = String(p.lines.map(\.t).joined(separator: " ").prefix(500))
+        lastRaw = String(p.lines.map(\.t).joined(separator: " ").prefix(1200))
         lastOCRLineCount = p.lines.count
 
         let range = area.range(mode: mode)
@@ -343,6 +371,7 @@ final class TranslatorEngine: ObservableObject {
         })
         selectedBlockCount = texts.count
         lastSelectedBlocks = texts.enumerated().map { "\($0.offset + 1). \($0.element)" }.joined(separator: "\n")
+        lastFilterSummary = "raw=\(p.lines.count), in-area=\(p.lines.filter { range.contains($0.y) }.count), post-filter=\(cand.count), grouped=\(groupedBlocks.count), source=\(sourceBlocks.count), selected=\(texts.count)"
         // A single empty/noisy OCR pass is not evidence that the dialogue disappeared.
         // Keep the last good result until the extension explicitly reports a clear frame.
         guard !texts.isEmpty else { return }
@@ -358,7 +387,15 @@ final class TranslatorEngine: ObservableObject {
             pendingInput = candidate
             pendingInputCount = 1
         }
-        guard pendingInputCount >= 2 else { return }
+        guard pendingInputCount >= 2 else {
+            stabilizationWaitCount += 1
+            lastCandidateText = candidate
+            capturePhase = "Stabilizing OCR candidate (\(pendingInputCount)/2)"
+            return
+        }
+        acceptedInputCount += 1
+        lastCandidateText = candidate
+        recordDiagnostic("Accepted OCR input: \(candidate.count) characters")
 
         // Keep separate spatial regions separate; never merge different bubbles.
         enqueue(texts.map { String($0.prefix(900)) })
@@ -823,11 +860,15 @@ final class TranslatorEngine: ObservableObject {
         // oscillation). Only publish results that still match the latest accepted OCR.
         let processedInput = blocks.joined(separator: "\n")
         guard lastHandled == processedInput else {
+            discardedStaleCount += 1
+            recordDiagnostic("Discarded stale translation result")
             status = "Discarded stale translation — newer screen text is being processed"
             return
         }
 
         lastOutputQuality = Self.outputQuality(source: processedInput, output: finalOutput)
+        capturePhase = "Translation complete"
+        recordDiagnostic("Translation complete: \(processedInput.count) source chars, \(finalOutput.count) output chars")
         status = "\(srcLangs.keys.sorted().joined(separator: "+")) → \(targetCode) ✓"
         show(processedInput, finalOutput)
     }
@@ -1006,11 +1047,15 @@ final class LoopbackServer {
     private var peer: NWConnection?
     private let queue = DispatchQueue(label: "loopback.server")
     var onPacket: ((Packet) -> Void)?
+    var onState: ((Bool) -> Void)?
 
     func start() {
         stop()
         guard let port = NWEndpoint.Port(rawValue: Loopback.port),
-              let l = try? NWListener(using: .udp, on: port) else { return }
+              let l = try? NWListener(using: .udp, on: port) else {
+            onState?(false)
+            return
+        }
         l.newConnectionHandler = { [weak self] c in
             guard let self else { return }
             c.start(queue: self.queue)
@@ -1018,8 +1063,16 @@ final class LoopbackServer {
             self.receive(on: c)
         }
         l.stateUpdateHandler = { [weak self] state in
-            if case .failed = state {
+            switch state {
+            case .ready:
+                self?.onState?(true)
+            case .failed:
+                self?.onState?(false)
                 self?.queue.asyncAfter(deadline: .now() + 1) { self?.start() }
+            case .cancelled:
+                self?.onState?(false)
+            default:
+                break
             }
         }
         l.start(queue: queue)
