@@ -425,6 +425,15 @@ final class TranslatorEngine: ObservableObject {
         UserDefaults.standard.set(data, forKey: Self.historyKey)
     }
 
+    func applyHistoryRetention() {
+        let retentionDays = max(0, UserDefaults.standard.integer(forKey: "historyRetentionDays"))
+        guard retentionDays > 0,
+              let cutoff = Calendar.current.date(byAdding: .day, value: -retentionDays, to: Date()) else { return }
+        let retained = history.filter { $0.date >= cutoff }
+        if retained.count != history.count { history = retained }
+        recordDiagnostic("Applied history retention: \(retentionDays) day(s); retained \(history.count) item(s)")
+    }
+
     func toggleStar(_ id: UUID) {
         guard let index = history.firstIndex(where: { $0.id == id }) else { return }
         history[index].starred.toggle()
