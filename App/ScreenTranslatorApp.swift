@@ -1,4 +1,4 @@
-// Screen Translator – App UI – v0.7.0
+// Screen Translator – App UI – v0.8.0
 import SwiftUI
 import ReplayKit
 import Translation
@@ -35,6 +35,7 @@ struct RootView: View {
             HomeView().tabItem { Label("Home", systemImage: "house.fill") }
             LanguagesView().tabItem { Label("Languages", systemImage: "globe") }
             HistoryView().tabItem { Label("History", systemImage: "clock") }
+            DiagnosticsView().tabItem { Label("Diagnostics", systemImage: "waveform.path.ecg") }
             SettingsView().tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
         .environmentObject(engine)
@@ -167,6 +168,7 @@ struct HomeView: View {
                 languageBar
                 presetRow
                 preview
+                previewTools
                 settings
                 startButton
                 checklist
@@ -180,6 +182,31 @@ struct HomeView: View {
         .onChange(of: area) { _, _ in engine.syncConfig() }
         .onChange(of: mode) { _, _ in engine.syncConfig() }
         .background(Theme.bg.ignoresSafeArea())
+    }
+
+    private func toolButton(_ icon: String, _ title: String, _ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.caption.weight(.semibold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(Theme.card, in: Capsule())
+        }
+        .foregroundStyle(.white)
+    }
+
+    private var previewTools: some View {
+        HStack(spacing: 8) {
+            toolButton("doc.on.doc", "Copy") {
+                UIPasteboard.general.string = engine.translated
+                engine.status = "Copied the current translation"
+            }
+            toolButton("arrow.clockwise", "Retranslate") { engine.retranslate() }
+            toolButton(engine.frozen ? "play.fill" : "pause.fill", engine.frozen ? "Unfreeze" : "Freeze") {
+                engine.frozen.toggle()
+                engine.status = engine.frozen ? "Floating window frozen" : "Floating window live again"
+            }
+        }
     }
 
     private var presetRow: some View {
@@ -429,173 +456,47 @@ struct LanguagesView: View {
     }
 }
 
-// MARK: - Settings
-struct SettingsView: View {
-    @EnvironmentObject var engine: TranslatorEngine
-    // Reading
-    @AppStorage("mode") private var mode = TranslateMode.movie.rawValue
-    @AppStorage("area") private var area = OCRArea.smart.rawValue
-    @AppStorage("customY0") private var customY0 = 0.0
-    @AppStorage("customY1") private var customY1 = 0.5
-    @AppStorage("speed") private var speed = SpeedPreset.balanced.rawValue
-    @AppStorage("stability") private var stability = 2
-    @AppStorage("minTextH") private var minTextH = 0.0
-    @AppStorage("ignoreList") private var ignoreList = ""
-    // Floating window
-    @AppStorage("winSize") private var winSize = WindowSize.normal.rawValue
-    @AppStorage("theme") private var theme = PiPTheme.dark.rawValue
-    @AppStorage("textSize") private var textSize = PiPTextSize.auto.rawValue
-    @AppStorage("pipFont") private var pipFont = PiPFont.standard.rawValue
-    @AppStorage("showOriginal") private var showOriginal = false
-    @AppStorage("autoClear") private var autoClear = true
-    @AppStorage("clearHold") private var clearHold = 1.0
-    @AppStorage("autoOpenPiP") private var autoOpenPiP = true
-    // Speech + glossary
-    @AppStorage("speak") private var speak = false
-    @AppStorage("glossary") private var glossary = ""
-
-    private var readingKey: String { "\(mode)|\(area)|\(customY0)|\(customY1)|\(speed)|\(stability)" }
-    private var styleKey: String { "\(theme)|\(textSize)|\(pipFont)" }
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    Picker("Mode", selection: $mode) {
-                        ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) }
-                    }
-                    Picker("OCR area", selection: $area) {
-                        ForEach(OCRArea.allCases) { Text($0.title).tag($0.rawValue) }
-                    }
-                    if area == OCRArea.custom.rawValue {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("From \(Int(customY0 * 100))% to \(Int(customY1 * 100))% of the screen height (0% = bottom)")
-                                .font(.footnote).foregroundStyle(.secondary)
-                            Slider(value: $customY0, in: 0...0.9)
-                            Slider(value: $customY1, in: 0.1...1)
-                        }
-                    }
-                    Picker("Speed", selection: $speed) {
-                        ForEach(SpeedPreset.allCases) { Text($0.title).tag($0.rawValue) }
-                    }
-                    Picker("Wait for stable text", selection: $stability) {
-                        Text("Instant").tag(1)
-                        Text("Normal").tag(2)
-                        Text("Careful").tag(3)
-                    }
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Ignore text smaller than \(Int(minTextH * 100))% of the screen").font(.subheadline)
-                        Slider(value: $minTextH, in: 0...0.08)
-                    }
-                    TextField("Ignore text containing… (comma separated)", text: $ignoreList, axis: .vertical)
-                        .lineLimit(1...3)
-                } header: {
-                    Text("Reading")
-                } footer: {
-                    Text("Instant is fastest but may translate half-faded text. Ignore words hide watermarks and usernames, e.g. \"subscribe, @channel\".")
-                }
-
-                Section("Floating window") {
-                    Picker("Window size", selection: $winSize) {
-                        ForEach(WindowSize.allCases) { Text($0.title).tag($0.rawValue) }
-                    }
-                    Picker("Appearance", selection: $theme) {
-                        ForEach(PiPTheme.allCases) { Text($0.title).tag($0.rawValue) }
-                    }
-                    Picker("Text size", selection: $textSize) {
-                        ForEach(PiPTextSize.allCases) { Text($0.title).tag($0.rawValue) }
-                    }
-                    Picker("Font", selection: $pipFont) {
-                        ForEach(PiPFont.allCases) { Text($0.title).tag($0.rawValue) }
-                    }
-                    Toggle("Show original text", isOn: $showOriginal)
-                    Toggle("Open automatically when capture starts", isOn: $autoOpenPiP)
-                    Toggle("Clear when text ends", isOn: $autoClear)
-                    if autoClear {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("Keep the translation \(String(format: "%.1f", clearHold)) s after the text ends")
-                                .font(.subheadline)
-                            Slider(value: $clearHold, in: 0...5, step: 0.5)
-                        }
-                    }
-                }
-
-                Section("Speech") {
-                    Toggle("Speak translation aloud", isOn: $speak)
-                }
-
-                Section {
-                    TextEditor(text: $glossary)
-                        .frame(minHeight: 90)
-                        .font(.system(.footnote, design: .monospaced))
-                        .scrollContentBackground(.hidden)
-                } header: {
-                    Text("Glossary")
-                } footer: {
-                    Text("One per line, written as word=replacement. Applied to the finished translation, e.g. Lord Subaru=Subaru")
-                }
-
-                Section("Version") {
-                    LabeledContent("App", value: AppVersion.full)
-                    LabeledContent("Capture extension",
-                                   value: engine.extensionVersion == "–" ? "not seen yet" : "v\(engine.extensionVersion)")
-                }
-                Section("Changelog") {
-                    ForEach(AppVersion.changelog, id: \.0) { v in
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("v\(v.0)").bold()
-                            Text(v.1).font(.footnote).foregroundStyle(.secondary)
-                        }
-                    }
-                }
-                Section("How to use") {
-                    Text("1. Languages tab → download your source and target packs.\n2. Home → Start. Allow the floating window, then Start Broadcast.\n3. Switch to your app. If nothing shows, use Test translation.")
-                        .font(.footnote)
-                }
-                Section {
-                    Button("Reset all settings", role: .destructive) {
-                        for k in ["source", "target", "mode", "area", "customY0", "customY1", "speed", "stability",
-                                  "minTextH", "ignoreList", "winSize", "theme", "textSize", "pipFont", "showOriginal",
-                                  "autoClear", "clearHold", "autoOpenPiP", "speak", "glossary"] {
-                            UserDefaults.standard.removeObject(forKey: k)
-                        }
-                        engine.sourceCode = "auto"; engine.targetCode = "en"
-                        engine.syncConfig(); engine.applyStyle(); engine.applyWindowSize()
-                    }
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle("Settings")
-            .onChange(of: readingKey) { _, _ in engine.syncConfig() }
-            .onChange(of: styleKey) { _, _ in engine.applyStyle() }
-            .onChange(of: winSize) { _, _ in engine.applyWindowSize() }
-        }
-    }
-}
-
 // MARK: - History
 struct HistoryView: View {
     @EnvironmentObject var engine: TranslatorEngine
+    @State private var query = ""
+    @State private var onlyStarred = false
+
+    private var items: [HistoryItem] {
+        engine.history.filter { h in
+            (!onlyStarred || h.starred)
+                && (query.isEmpty || h.original.localizedCaseInsensitiveContains(query)
+                    || h.translated.localizedCaseInsensitiveContains(query))
+        }
+    }
 
     var body: some View {
         NavigationStack {
             List {
                 Section {
-                    Text("Everything that was translated, newest first. Tap a line to copy its translation.")
+                    Text("Tap a line to copy its translation. Swipe right to star it.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                ForEach(engine.history) { h in
+                ForEach(items) { h in
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(h.translated).font(.body.weight(.semibold))
+                        HStack(alignment: .top) {
+                            Text(h.translated).font(.body.weight(.semibold))
+                            Spacer()
+                            if h.starred { Image(systemName: "star.fill").foregroundStyle(.yellow) }
+                        }
                         Text(h.original).font(.caption).foregroundStyle(.secondary)
                     }
                     .contentShape(Rectangle())
                     .onTapGesture { UIPasteboard.general.string = h.translated }
+                    .swipeActions(edge: .leading) {
+                        Button { engine.toggleStar(h.id) } label: { Label("Star", systemImage: "star") }
+                            .tint(.yellow)
+                    }
                 }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
+            .searchable(text: $query, prompt: "Search history")
             .navigationTitle("History")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
@@ -603,7 +504,10 @@ struct HistoryView: View {
                         .disabled(engine.history.isEmpty)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Clear") { engine.history.removeAll() }
+                    Menu {
+                        Toggle("Only starred", isOn: $onlyStarred)
+                        Button("Clear unstarred", role: .destructive) { engine.history.removeAll { !$0.starred } }
+                    } label: { Image(systemName: "ellipsis.circle") }
                 }
             }
         }
