@@ -618,74 +618,125 @@ struct SettingsView: View {
     }
 
     private var diagnosticsSection: some View {
-            Section("Live diagnostics") {
-                LabeledContent("Capture", value: engine.captureAlive ? "Connected" : "No packets")
-                LabeledContent("Extension version", value: engine.extensionVersion)
-                LabeledContent("Frames seen", value: "\(engine.frames)")
-                LabeledContent("OCR passes", value: "\(engine.ocrCount)")
-                LabeledContent("Raw OCR lines", value: "\(engine.lastOCRLineCount)")
-                LabeledContent("Selected text blocks", value: "\(engine.selectedBlockCount)")
-                LabeledContent("Output check", value: engine.lastOutputQuality)
-                LabeledContent("OCR latency", value: "\(Int(engine.ocrMs)) ms")
-                LabeledContent("Translation latency", value: "\(Int(engine.translateMs)) ms")
-                LabeledContent("Free extension memory", value: "\(Int(engine.extFreeMB)) MB")
-                LabeledContent("Last packet age", value: engine.lastPacketAge < 0 ? "Never" : String(format: "%.1f s", engine.lastPacketAge))
-                LabeledContent("Detected source", value: engine.lastDetectedLanguage)
-                LabeledContent("Translation cache hits", value: "\(engine.cacheHits)")
-                LabeledContent("Translation failures", value: "\(engine.translationFailures)")
-                LabeledContent("Last translation error", value: engine.lastTranslationError)
-                LabeledContent("Current status", value: engine.status)
-                if !engine.lastRaw.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Last raw OCR text").font(.caption).foregroundStyle(.secondary)
-                        Text(engine.lastRaw).font(.footnote).textSelection(.enabled)
+        Section {
+            LabeledContent("Pipeline phase", value: engine.capturePhase)
+            LabeledContent("App UDP listener", value: engine.serverReady ? "Ready" : "Not ready")
+            LabeledContent("Capture extension", value: engine.captureAlive ? "Connected" : "No packets")
+            LabeledContent("PiP state", value: engine.pipActive ? "Active" : "Inactive")
+            LabeledContent("Extension version", value: engine.extensionVersion)
+            LabeledContent("Last packet kind", value: engine.lastPacketKind)
+            LabeledContent("Last packet", value: engine.lastPacketSummary)
+            LabeledContent("Last packet age", value: engine.lastPacketAge < 0 ? "Never" : String(format: "%.2f s", engine.lastPacketAge))
+            LabeledContent("Packets received", value: "\(engine.totalPackets)")
+            LabeledContent("Ping / OCR / clear", value: "\(engine.pingPackets) / \(engine.ocrPackets) / \(engine.clearPackets)")
+            LabeledContent("Frames reported", value: "\(engine.frames)")
+            LabeledContent("OCR passes", value: "\(engine.ocrCount)")
+            LabeledContent("Raw OCR lines", value: "\(engine.lastOCRLineCount)")
+            LabeledContent("OCR latency", value: String(format: "%.1f ms", engine.ocrMs))
+            LabeledContent("Translation latency", value: String(format: "%.1f ms", engine.translateMs))
+            LabeledContent("Extension free memory", value: String(format: "%.1f MB", engine.extFreeMB))
+            LabeledContent("Source language", value: engine.lastDetectedLanguage)
+            LabeledContent("Target language", value: engine.targetCode)
+            LabeledContent("Selected blocks", value: "\(engine.selectedBlockCount)")
+            LabeledContent("OCR filter counts", value: engine.lastFilterSummary)
+            LabeledContent("Accepted inputs", value: "\(engine.acceptedInputCount)")
+            LabeledContent("Waiting for stabilization", value: "\(engine.stabilizationWaitCount)")
+            LabeledContent("Stale results discarded", value: "\(engine.discardedStaleCount)")
+            LabeledContent("Translation cache hits", value: "\(engine.cacheHits)")
+            LabeledContent("Translation failures", value: "\(engine.translationFailures)")
+            LabeledContent("Output quality", value: engine.lastOutputQuality)
+            LabeledContent("Last translation error", value: engine.lastTranslationError)
+            LabeledContent("Current status", value: engine.status)
+
+            DisclosureGroup("Last raw OCR text") {
+                Text(engine.lastRaw.isEmpty ? "No OCR received yet." : engine.lastRaw)
+                    .font(.footnote).textSelection(.enabled)
+            }
+            DisclosureGroup("Latest candidate text") {
+                Text(engine.lastCandidateText.isEmpty ? "No candidate yet." : engine.lastCandidateText)
+                    .font(.footnote).textSelection(.enabled)
+            }
+            DisclosureGroup("Selected blocks / reading order") {
+                Text(engine.lastSelectedBlocks.isEmpty ? "No blocks selected." : engine.lastSelectedBlocks)
+                    .font(.footnote).textSelection(.enabled)
+            }
+            DisclosureGroup("Translation input") {
+                Text(engine.lastTranslationInput.isEmpty ? "No translation input yet." : engine.lastTranslationInput)
+                    .font(.footnote).textSelection(.enabled)
+            }
+            DisclosureGroup("Current original") {
+                Text(engine.original.isEmpty ? "No original text yet." : engine.original)
+                    .font(.footnote).textSelection(.enabled)
+            }
+            DisclosureGroup("Current translation") {
+                Text(engine.translated.isEmpty ? "No translation yet." : engine.translated)
+                    .font(.footnote).textSelection(.enabled)
+            }
+            DisclosureGroup("Recent diagnostic events (latest first)") {
+                if engine.diagnosticEvents.isEmpty {
+                    Text("No diagnostic events yet.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    ForEach(Array(engine.diagnosticEvents.reversed().enumerated()), id: \.offset) { _, event in
+                        Text(event).font(.system(.caption, design: .monospaced))
+                            .textSelection(.enabled).padding(.vertical, 2)
                     }
-                }
-                if !engine.lastSelectedBlocks.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Selected blocks in translation order").font(.caption).foregroundStyle(.secondary)
-                        Text(engine.lastSelectedBlocks).font(.footnote).textSelection(.enabled)
-                    }
-                }
-                if !engine.lastTranslationInput.isEmpty {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Last translation input").font(.caption).foregroundStyle(.secondary)
-                        Text(engine.lastTranslationInput).font(.footnote).textSelection(.enabled)
-                    }
-                }
-                Button("Run translation test") { engine.runTest() }
-                Button("Refresh language availability") {
-                    Task { await engine.refreshStatus() }
-                }
-                Button("Clear translation cache") {
-                    engine.clearTranslationCache()
-                }
-                Button("Copy diagnostic report") {
-                    let report = [
-                        "ScreenLingo \(AppVersion.full)",
-                        "Capture connected: \(engine.captureAlive)",
-                        "Extension version: \(engine.extensionVersion)",
-                        "Frames: \(engine.frames)",
-                        "OCR updates: \(engine.ocrCount)",
-                        "OCR latency: \(engine.ocrMs) ms",
-                        "Translation latency: \(engine.translateMs) ms",
-                        "Free extension memory: \(engine.extFreeMB) MB",
-                        "Detected language: \(engine.lastDetectedLanguage)",
-                        "Translation cache hits: \(engine.cacheHits)",
-                        "Translation failures: \(engine.translationFailures)",
-                        "Last error: \(engine.lastTranslationError)",
-                        "Output quality: \(engine.lastOutputQuality)",
-                        "Raw OCR lines: \(engine.lastOCRLineCount)",
-                        "Selected blocks: \(engine.selectedBlockCount)",
-                        "Selected block order:\n\(engine.lastSelectedBlocks)",
-                        "Translation input:\n\(engine.lastTranslationInput)",
-                        "Status: \(engine.status)",
-                        "Last OCR: \(engine.lastRaw)"
-                    ].joined(separator: "\\n")
-                    UIPasteboard.general.string = report
-                    engine.status = "Diagnostic report copied"
                 }
             }
+
+            Button("Run translation test") { engine.runTest() }
+            Button("Refresh language availability") {
+                Task { await engine.refreshStatus() }
+            }
+            Button("Clear translation cache") { engine.clearTranslationCache() }
+            Button("Clear diagnostic event log", role: .destructive) { engine.clearDiagnosticEvents() }
+            Button("Copy full diagnostic report") {
+                let report = [
+                    "ScreenLingo \(AppVersion.full)",
+                    "Timestamp: \(ISO8601DateFormatter().string(from: Date()))",
+                    "Capture phase: \(engine.capturePhase)",
+                    "UDP listener ready: \(engine.serverReady)",
+                    "Capture connected: \(engine.captureAlive)",
+                    "PiP active: \(engine.pipActive)",
+                    "Extension version: \(engine.extensionVersion)",
+                    "Last packet kind: \(engine.lastPacketKind)",
+                    "Last packet summary: \(engine.lastPacketSummary)",
+                    "Last packet age seconds: \(engine.lastPacketAge)",
+                    "Packet totals: all=\(engine.totalPackets), ping=\(engine.pingPackets), ocr=\(engine.ocrPackets), clear=\(engine.clearPackets)",
+                    "Frames: \(engine.frames)",
+                    "OCR passes: \(engine.ocrCount)",
+                    "Raw OCR lines: \(engine.lastOCRLineCount)",
+                    "OCR latency ms: \(engine.ocrMs)",
+                    "Translation latency ms: \(engine.translateMs)",
+                    "Extension free memory MB: \(engine.extFreeMB)",
+                    "Detected language: \(engine.lastDetectedLanguage)",
+                    "Target language: \(engine.targetCode)",
+                    "Selected blocks: \(engine.selectedBlockCount)",
+                    "Filter counts: \(engine.lastFilterSummary)",
+                    "Accepted inputs: \(engine.acceptedInputCount)",
+                    "Stabilization waits: \(engine.stabilizationWaitCount)",
+                    "Discarded stale translations: \(engine.discardedStaleCount)",
+                    "Cache hits: \(engine.cacheHits)",
+                    "Translation failures: \(engine.translationFailures)",
+                    "Output quality: \(engine.lastOutputQuality)",
+                    "Last translation error: \(engine.lastTranslationError)",
+                    "Status: \(engine.status)",
+                    "Last raw OCR: \(engine.lastRaw)",
+                    "Candidate text: \(engine.lastCandidateText)",
+                    "Selected block order:\n\(engine.lastSelectedBlocks)",
+                    "Translation input:\n\(engine.lastTranslationInput)",
+                    "Current original:\n\(engine.original)",
+                    "Current translation:\n\(engine.translated)",
+                    "Recent events:\n\(engine.diagnosticEvents.joined(separator: "\n"))"
+                ].joined(separator: "\n")
+                UIPasteboard.general.string = report
+                engine.status = "Full diagnostic report copied"
+            }
+        } header: {
+            Text("Live diagnostics")
+        } footer: {
+            Text("The report includes capture handshake, packet flow, OCR filtering, translation stability and recent events. Copy it immediately after a failure so the event log captures the startup sequence.")
+        }
     }
 
     private var changelogSection: some View {
