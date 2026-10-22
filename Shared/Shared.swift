@@ -71,6 +71,8 @@ struct Config: Codable {
     var stability: Int?
     var skipUnchanged: Bool?
     var rotation: Int?
+    var adaptive: Bool?
+    var idleMinutes: Int?
 }
 
 enum TextSim {
