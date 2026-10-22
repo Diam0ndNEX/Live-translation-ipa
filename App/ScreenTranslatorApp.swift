@@ -281,7 +281,9 @@ struct HomeView: View {
                             .font(.footnote.weight(.semibold))
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 10)
-                            .background(mode == item.0 ? Theme.gradient : Theme.card,
+                            .background(mode == item.0
+                                            ? Color(red: 0.12, green: 0.82, blue: 0.72)
+                                            : Theme.card,
                                         in: Capsule())
                     }
                     .foregroundStyle(.white)
