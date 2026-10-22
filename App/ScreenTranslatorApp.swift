@@ -692,7 +692,7 @@ struct SettingsView: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            DisclosureGroup("Recent diagnostic events (latest first)")
+            DisclosureGroup("Recent diagnostic events (latest first)") {
                 if engine.diagnosticEvents.isEmpty {
                     Text("No diagnostic events yet.")
                         .font(.footnote).foregroundStyle(.secondary)
