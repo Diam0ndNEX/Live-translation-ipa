@@ -1,75 +1,93 @@
 name: Build ScreenLingo IPA
+
 on:
+  # Build only when explicitly requested from the Actions tab.
+  # This prevents every code commit from starting an expensive macOS build.
   workflow_dispatch:
-  push:
-    branches:
-      - codex/screenlingo-v0.7.0
+
+# Never spend minutes building an older commit when a newer build is queued.
+concurrency:
+  group: screenlingo-ipa-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
     runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
-      - run: brew install xcodegen librsvg
+
+      - name: Install build tools
+        run: brew install xcodegen librsvg
+
       - name: Generate app icon and project
         run: |
+          set -euo pipefail
           mkdir -p App/Assets.xcassets/AppIcon.appiconset
           rsvg-convert -w 1024 -h 1024 App/ScreenLingoIcon.svg -o App/Assets.xcassets/AppIcon.appiconset/AppIcon.png
           printf '%s\n' '{"images":[{"filename":"AppIcon.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}' > App/Assets.xcassets/AppIcon.appiconset/Contents.json
-          # Shared/Shared.swift is the single source of truth for app versioning.
+
           SOURCE_VERSION=$(sed -nE 's/^[[:space:]]*static let version = "([^"]+)".*/\1/p' Shared/Shared.swift | head -n 1)
           SOURCE_BUILD=$(sed -nE 's/^[[:space:]]*static let build = ([0-9]+).*/\1/p' Shared/Shared.swift | head -n 1)
           test -n "$SOURCE_VERSION"
           test -n "$SOURCE_BUILD"
-          # Synchronize every XcodeGen target's version before project generation.
-          sed -i '' -E "s/(MARKETING_VERSION: \")[0-9]+\.[0-9]+\.[0-9]+(\")/\\1$SOURCE_VERSION\\2/g" project.yml
-          sed -i '' -E "s/(CURRENT_PROJECT_VERSION: \")[0-9]+(\")/\\1$SOURCE_BUILD\\2/g" project.yml
+
+          sed -i '' -E "s/(MARKETING_VERSION: ")[0-9]+\.[0-9]+\.[0-9]+(")/\1$SOURCE_VERSION\2/g" project.yml
+          sed -i '' -E "s/(CURRENT_PROJECT_VERSION: ")[0-9]+(")/\1$SOURCE_BUILD\2/g" project.yml
           echo "Synchronized project version to $SOURCE_VERSION ($SOURCE_BUILD)"
           xcodegen generate
+
       - name: Build
         run: |
+          set -euo pipefail
           xcodebuild -project ScreenLingo.xcodeproj -scheme ScreenLingo \
             -configuration Release -sdk iphoneos -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+
       - name: Package IPA
         run: |
+          set -euo pipefail
           mkdir Payload
           cp -R build/Build/Products/Release-iphoneos/ScreenLingo.app Payload/ScreenLingo.app
           zip -r ScreenLingo.ipa Payload
+
       - name: Verify packaged app and extension versions
         run: |
           set -euo pipefail
           APP="Payload/ScreenLingo.app"
-          # Read the expected release identity from the source version constants.
-          # Bumping AppVersion.version/build automatically updates these checks; no
-          # hard-coded workflow version needs to be edited for each release.
           SOURCE_VERSION=$(sed -nE 's/^[[:space:]]*static let version = "([^"]+)".*/\1/p' Shared/Shared.swift | head -n 1)
           SOURCE_BUILD=$(sed -nE 's/^[[:space:]]*static let build = ([0-9]+).*/\1/p' Shared/Shared.swift | head -n 1)
           test -n "$SOURCE_VERSION"
           test -n "$SOURCE_BUILD"
+
           PROJECT_VERSION=$(sed -nE 's/^[[:space:]]*MARKETING_VERSION: "([^"]+)".*/\1/p' project.yml | head -n 1)
           PROJECT_BUILD=$(sed -nE 's/^[[:space:]]*CURRENT_PROJECT_VERSION: "([^"]+)".*/\1/p' project.yml | head -n 1)
           echo "Source version: $SOURCE_VERSION ($SOURCE_BUILD)"
           echo "Project version: $PROJECT_VERSION ($PROJECT_BUILD)"
           test "$PROJECT_VERSION" = "$SOURCE_VERSION"
           test "$PROJECT_BUILD" = "$SOURCE_BUILD"
-          EXPECTED_VERSION="$SOURCE_VERSION"
-          EXPECTED_BUILD="$SOURCE_BUILD"
+
           APP_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Info.plist")
           echo "Main app version: $APP_VERSION ($APP_BUILD)"
-          test "$APP_VERSION" = "$EXPECTED_VERSION"
-          test "$APP_BUILD" = "$EXPECTED_BUILD"
+          test "$APP_VERSION" = "$SOURCE_VERSION"
+          test "$APP_BUILD" = "$SOURCE_BUILD"
+
           EXT=$(find "$APP/PlugIns" -maxdepth 1 -type d -name "*.appex" -print -quit)
           test -n "$EXT"
           EXT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$EXT/Info.plist")
           EXT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$EXT/Info.plist")
           echo "Capture extension version: $EXT_VERSION ($EXT_BUILD)"
-          test "$EXT_VERSION" = "$EXPECTED_VERSION"
-          test "$EXT_BUILD" = "$EXPECTED_BUILD"
+          test "$EXT_VERSION" = "$SOURCE_VERSION"
+          test "$EXT_BUILD" = "$SOURCE_BUILD"
+
       - uses: actions/upload-artifact@v4
         with:
           name: ScreenLingo-ipa
           path: ScreenLingo.ipa
+          if-no-files-found: error
+          retention-days: 7
