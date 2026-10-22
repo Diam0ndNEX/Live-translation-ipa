@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.4.6"
-    static let build = 34
+    static let version = "1.4.7"
+    static let build = 35
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Keep this aligned with MARKETING_VERSION and CURRENT_PROJECT_VERSION in project.yml.
     static let changelog: [(String, String)] = [
+        ("1.4.7", "Translate coherent multi-row lyrics together in Movie mode; refine quick setup and compact action layout."),
         ("1.4.6", "Group slightly offset OCR boxes from the same Movie subtitle row and ignore repeated ScreenLingo History UI captures."),
         ("1.4.5", "Protect original subtitle fragments from PiP feedback filtering when source and translated text share names or phrases."),
         ("1.4.4", "Keep side-by-side subtitle OCR boxes grouped in Movie mode to prevent partial subtitle selection and translation flicker."),
