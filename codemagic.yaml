@@ -25,8 +25,26 @@ workflows:
           test -n "$SOURCE_VERSION"
           test -n "$SOURCE_BUILD"
 
-          sed -i '' -E "s/(MARKETING_VERSION: ")[0-9]+\.[0-9]+\.[0-9]+(")/\1$SOURCE_VERSION\2/g" project.yml
-          sed -i '' -E "s/(CURRENT_PROJECT_VERSION: ")[0-9]+(")/\1$SOURCE_BUILD\2/g" project.yml
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('project.yml')
+          text = path.read_text()
+          text, version_count = re.subn(
+              r'(MARKETING_VERSION: ")[^"]+(" )'.replace('" )', '")'),
+              lambda match: match.group(1) + __import__('os').environ['SOURCE_VERSION'] + match.group(2),
+              text,
+          )
+          text, build_count = re.subn(
+              r'(CURRENT_PROJECT_VERSION: ")[^"]+(" )'.replace('" )', '")'),
+              lambda match: match.group(1) + __import__('os').environ['SOURCE_BUILD'] + match.group(2),
+              text,
+          )
+          if not version_count or not build_count:
+              raise SystemExit(f'Could not update project.yml version fields: {version_count=}, {build_count=}')
+          path.write_text(text)
+          PY
           echo "Building ScreenLingo version $SOURCE_VERSION ($SOURCE_BUILD)"
           xcodegen generate
 
