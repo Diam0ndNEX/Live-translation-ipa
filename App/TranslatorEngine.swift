@@ -474,9 +474,17 @@ final class TranslatorEngine: ObservableObject {
         trace("CANONICAL OCR ORDER", orderedForTrace.enumerated().map {
             String(format: "#%02d y=%.3f x=%.3f | %@", $0.offset + 1, $0.element.y, $0.element.x, $0.element.t)
         }.joined(separator: "\n"))
-        if isScreenLingoInterface(p.lines) {
-            trace("FRAME FILTER", "Skipped ScreenLingo settings/diagnostics UI frame; OCR is app chrome, not content")
-            recordDiagnostic("Ignored ScreenLingo UI frame with multiple interface markers")
+        // Frame provenance marker: ReplayKit packets do not expose a reliable foreground
+        // bundle identifier here, so we distinguish positively identified ScreenLingo
+        // UI from every other/uncertain frame. The latter may be target content, the
+        // iPad Home Screen, or a swipe/transition; never label it as confirmed content.
+        let frameIsScreenLingoUI = isScreenLingoInterface(p.lines)
+        trace("FRAME ORIGIN", frameIsScreenLingoUI
+              ? "SCREENLINGO_APP_UI | this frame contains distinctive ScreenLingo controls; exclude from translation"
+              : "NON_SCREENLINGO_OR_UNKNOWN | may be target app, iPad Home Screen, or swipe/transition; ReplayKit packet has no trustworthy app identity")
+        if frameIsScreenLingoUI {
+            trace("FRAME FILTER", "DROP entire ScreenLingo app UI frame before block grouping/translation")
+            recordDiagnostic("FRAME ORIGIN=SCREENLINGO_APP_UI; ignored app-owned interface frame")
             return
         }
 
@@ -485,8 +493,9 @@ final class TranslatorEngine: ObservableObject {
         trace("AREA FILTER", "\(p.lines.count) raw → \(cand.count) inside \(area.rawValue) y=\(range.lowerBound)…\(range.upperBound)")
         if mode == .movie {
             let beforeUI = cand.count
+            let removedUI = cand.filter { isScreenLingoChromeText($0.t) }
             cand = cand.filter { !isScreenLingoChromeText($0.t) }
-            trace("MOVIE UI FILTER", "\(beforeUI - cand.count) explicit ScreenLingo UI lines removed; \(cand.count) remain")
+            trace("MOVIE UI FILTER", "\(beforeUI - cand.count) explicit ScreenLingo UI lines removed; \(cand.count) remain; dropped=[\(removedUI.map(\.t).joined(separator: " | "))]")
         }
         let beforeOwnOutput = cand.count
         cand = removeOwnOutput(cand)
@@ -680,13 +689,22 @@ final class TranslatorEngine: ObservableObject {
             }
             let ranked = blocks.filter { block in
                 let text = blockText(block)
-                return !isScreenLingoChromeText(text)
+                let norm = TextSim.norm(text)
+                let words = text.split(whereSeparator: { $0.isWhitespace || $0.isPunctuation })
+                let letters = norm.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
+                let isSingleGenericLabel = words.count == 1 && letters < 13
+                let passes = !isScreenLingoChromeText(text)
                     && isUsefulOCRText(text)
                     && !isTargetLanguage(text)
                     && plausiblySource(text)
+                    && !isSingleGenericLabel
+                if !passes {
+                    trace("MOVIE CANDIDATE REJECT", "\(text) | reason=\(isScreenLingoChromeText(text) ? "ScreenLingo chrome" : (isSingleGenericLabel ? "short single-word label; not credible subtitle evidence" : (!isUsefulOCRText(text) ? "low OCR usefulness" : (isTargetLanguage(text) ? "target-language feedback" : (!plausiblySource(text) ? "source-language mismatch" : "other")))) )")
+                }
+                return passes
             }.sorted { movieScore($0) > movieScore($1) }
             kept = Array(ranked.prefix(1))
-            trace("MOVIE CANDIDATES", "ranked \(ranked.count) source-like block(s); selected \(kept.first.map { blockText($0) } ?? "[none]")")
+            trace("MOVIE CANDIDATES", "ranked \(ranked.count) credible source-like block(s); selected \(kept.first.map { blockText($0) } ?? "[none — wait for credible subtitle text]")")
         } else if area == .smart {
             kept = blocks.filter { blockHeight($0) >= maxH * (mode == .comic ? 0.22 : 0.32) }
         }
@@ -778,10 +796,17 @@ final class TranslatorEngine: ObservableObject {
             "currentoriginal",
             "currenttranslation"
         ]
-        if markers.filter({ allText.contains($0) }).count >= 2 { return true }
+        let matchedDistinctive = markers.filter { allText.contains($0) }
+        // A single highly distinctive diagnostic phrase is sufficient: OCR can miss
+        // the neighbouring controls on a scrolling/transitioning app screen.
+        if !matchedDistinctive.isEmpty {
+            return true
+        }
 
-        // Changelog/Home pages may lack diagnostic controls. Require a combination of
-        // navigation labels and app/version chrome; generic words alone are insufficient.
+        // Home/changelog/settings screens can be only partly visible during swipes.
+        // Require several navigation labels plus an app-specific/version marker;
+        // ordinary iOS Home Screen icons or generic words must not be mistaken for
+        // ScreenLingo itself.
         let navigation = ["home", "languages", "settings", "history"]
             .filter { allText.contains($0) }.count
         let hasAppChrome = allText.contains("screenlingo")
