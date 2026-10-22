@@ -150,7 +150,7 @@ final class TranslatorEngine: ObservableObject {
         "source", "target", "mode", "area", "customY0", "customY1", "winSize", "theme", "textSize",
         "pipFont", "highlightNames", "showOriginal", "speed", "autoClear", "textHoldDuration",
         "ocrConfidence", "languageCorrection", "rightToLeftReading", "cleanOCR", "slang",
-        "speakerDetect", "neverTranslate", "sourceFixes", "glossary", "speak"
+        "speakerDetect", "langLock", "neverTranslate", "sourceFixes", "glossary", "speak"
     ]
     // Translation session plumbing
     @Published var legacyConfig: TranslationSession.Configuration?
@@ -1510,7 +1510,7 @@ final class TranslatorEngine: ObservableObject {
             sentences.append(parts)
             var row: [String?] = []
             for (si, part) in parts.enumerated() {
-                if let hit = cache["\(id)>\(targetCode)|\(part)"] {
+                if protected.tokens.isEmpty, let hit = cache["\(id)>\(targetCode)|\(part)"] {
                     row.append(hit); translatedAny = true; cacheHits += 1
                     trace("CACHE HIT", "Block #\(bi + 1) part #\(si + 1): \(part) → \(hit)")
                 } else {
@@ -1580,7 +1580,11 @@ final class TranslatorEngine: ObservableObject {
                     continue
                 }
                 done[it.block][it.index] = result
-                cache["\(id)>\(targetCode)|\(it.text)"] = result
+                // Cached placeholder-based translations can restore the wrong
+                // speaker/name if a later block uses the same placeholder token.
+                if it.block < protectedTokens.count, protectedTokens[it.block].isEmpty {
+                    cache["\(id)>\(targetCode)|\(it.text)"] = result
+                }
                 trace("TRANSLATION RESULT", "Block #\(it.block + 1) part #\(it.index + 1); \(id) → \(targetCode); source=\(it.text); output=\(result)")
             }
         }
