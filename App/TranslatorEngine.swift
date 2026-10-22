@@ -1401,11 +1401,11 @@ final class TranslatorEngine: ObservableObject {
         let t0 = Date()
         // Normalize common OCR substitutions before language scoring and translation.
         // Keep raw OCR available in diagnostics; cleaned text is used only for translation.
-        let blocks = rawBlocks.map { TextIntel.cleanOCR($0) }
+        let blocks = rawBlocks
         lastTranslationError = "None"
         lastTranslationInput = blocks.joined(separator: "\n")
         trace("OCR CLEANUP", "raw=\(rawBlocks.joined(separator: " | "))")
-        trace("OCR CLEANUP", "cleaned=\(blocks.joined(separator: " | "))")
+        trace("OCR CLEANUP", "cleanup is applied per block according to the Clean up OCR mistakes setting")
         trace("TRANSLATION START", "\(blocks.count) block(s); target=\(targetCode); input:\n" + blocks.enumerated().map { "#\($0.offset + 1) \($0.element)" }.joined(separator: "\n"))
         let target = Locale.Language(identifier: targetCode)
 
