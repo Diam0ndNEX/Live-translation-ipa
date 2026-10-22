@@ -12,13 +12,14 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var lastRun = Date.distantPast
     private var lastPing = Date.distantPast
     private var candidateKey = ""
+    private var candidateCount = 0
     private var sentKey = ""
     private var emptyPasses = 0
     private var lastOcrMs: Double = 0
     private var heartbeat: DispatchSourceTimer?
 
     private let cfgLock = NSLock()
-    private var _config = Config(lang: "auto", y0: 0, y1: 1, maxEdge: 1400, interval: 0.25, paused: false, minimumConfidence: 0.30, languageCorrection: true)
+    private var _config = Config(lang: "auto", y0: 0, y1: 1, maxEdge: 1400, interval: 0.25, paused: false, minimumConfidence: 0.30, languageCorrection: true, minimumTextHeight: nil, ignoreList: nil, dropNoise: nil, boost: nil, stability: nil, skipUnchanged: nil, rotation: nil)
     private var config: Config {
         get { cfgLock.lock(); defer { cfgLock.unlock() }; return _config }
         set { cfgLock.lock(); _config = newValue; cfgLock.unlock() }
@@ -104,7 +105,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         let r = VNRecognizeTextRequest()
         r.recognitionLevel = .accurate
         r.usesLanguageCorrection = cfg.languageCorrection
-        r.minimumTextHeight = Float(min(0.1, 0.01 / max(0.1, span)))
+        r.minimumTextHeight = Float(max(0, min(0.1, cfg.minimumTextHeight ?? (0.01 / max(0.1, span)))))
         if let langs = visionLanguages(for: cfg.lang) {
             r.automaticallyDetectsLanguage = false
             r.recognitionLanguages = langs
@@ -124,9 +125,15 @@ class SampleHandler: RPBroadcastSampleHandler {
         let handler = VNImageRequestHandler(ciImage: img, options: [:])
         guard (try? handler.perform([req])) != nil, let results = req.results else { return [] }
 
+        let ignored = (cfg.ignoreList ?? []).map { $0.lowercased() }.filter { !$0.isEmpty }
         var lines = results.compactMap { obs -> OCRLine? in
             guard let c = obs.topCandidates(1).first, c.confidence >= Float(cfg.minimumConfidence), c.string.count >= 2,
                   c.string.contains(where: { $0.isLetter || $0.isNumber }) else { return nil }
+            let normalized = c.string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            if ignored.contains(where: { normalized.contains($0) }) { return nil }
+            let letters = c.string.filter(\.isLetter).count
+            let digits = c.string.filter(\.isNumber).count
+            if (cfg.dropNoise ?? false) && (letters < 2 || (digits > 0 && letters * 2 < digits)) { return nil }
             let b = obs.boundingBox
             let y = y0 + Double(b.midY) * span
             guard y < 0.96 else { return nil }
@@ -147,7 +154,8 @@ class SampleHandler: RPBroadcastSampleHandler {
         var edge = cfg.maxEdge
         if freeMB() < 15 { edge = min(edge, 800) }          // memory getting tight
 
-        let base = CIImage(cvPixelBuffer: pb).oriented(orientation)
+        let extra = [CGImagePropertyOrientation.up, .right, .down, .left][((cfg.rotation ?? 0) % 4 + 4) % 4]
+        let base = CIImage(cvPixelBuffer: pb).oriented(orientation).oriented(extra)
         let ext = base.extent
         let crop = CGRect(x: ext.minX, y: ext.minY + ext.height * y0,
                           width: ext.width, height: ext.height * (y1 - y0))
@@ -159,14 +167,15 @@ class SampleHandler: RPBroadcastSampleHandler {
             img = img.transformed(by: CGAffineTransform(scaleX: s, y: s))
         }
 
-        var lines = ocr(img, cfg, y0, y1)
+        let boost = cfg.boost ?? 1
+        let boosted = img
+            .applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 0.0, kCIInputContrastKey: 1.8])
+            .applyingFilter("CISharpenLuminance", parameters: [kCIInputSharpnessKey: 0.8])
+        var lines = boost == 2 ? ocr(boosted, cfg, y0, y1) : ocr(img, cfg, y0, y1)
         if lines.isEmpty {
             emptyPasses += 1
-            // Fallback for hard text (thin, outlined, low contrast): boost contrast and retry
-            if emptyPasses % 3 == 0 && freeMB() > 20 {
-                let boosted = img
-                    .applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 0.0, kCIInputContrastKey: 1.8])
-                    .applyingFilter("CISharpenLuminance", parameters: [kCIInputSharpnessKey: 0.8])
+            // Fallback for hard text (thin, outlined, low contrast): retry when configured.
+            if boost == 1 && emptyPasses % 3 == 0 && freeMB() > 20 {
                 lines = ocr(boosted, cfg, y0, y1)
             }
         } else {
@@ -187,22 +196,22 @@ class SampleHandler: RPBroadcastSampleHandler {
         // do not wait for a second identical OCR pass. Later frames are deduplicated
         // against the last delivered text to avoid repeatedly translating the same frame.
         let key = lines.map(\.t).joined(separator: " ")
-        if sentKey.isEmpty {
-            sentKey = key
+        let skipUnchanged = cfg.skipUnchanged ?? true
+        if skipUnchanged && !sentKey.isEmpty && TextSim.similar(key, sentKey, 0.97) {
             candidateKey = key
-            send(kind: "ocr", lines: Array(lines.prefix(60)))
+            candidateCount = 0
             return
         }
-        // Use a very strict duplicate threshold. A lower threshold treats a
-        // subtitle with one changed word as "the same" and suppresses the update.
-        if TextSim.similar(key, sentKey, 0.97) {
+        let required = max(1, min(3, cfg.stability ?? 1))
+        if TextSim.similar(key, candidateKey, 0.97) {
+            candidateCount += 1
+        } else {
             candidateKey = key
-            return
+            candidateCount = 1
         }
-        // Text changed enough to be a new subtitle/dialogue state. Deliver immediately.
-        // Store the new key before sending so the next video frame cannot duplicate it.
-        candidateKey = key
+        guard candidateCount >= required else { return }
         sentKey = key
+        candidateCount = 0
         send(kind: "ocr", lines: Array(lines.prefix(60)))
     }
 
