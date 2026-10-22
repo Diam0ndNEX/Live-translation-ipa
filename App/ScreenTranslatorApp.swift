@@ -510,12 +510,21 @@ struct SettingsView: View {
     @AppStorage("ocrConfidence") private var ocrConfidence: Double = 0.30
     @AppStorage("languageCorrection") private var languageCorrection = true
     @AppStorage("rightToLeftReading") private var rightToLeftReading = false
+    @AppStorage("cleanOCR") private var cleanOCR = true
+    @AppStorage("slang") private var slang = true
+    @AppStorage("speakerDetect") private var speakerDetect = true
+    @AppStorage("neverTranslate") private var neverTranslate = ""
+    @AppStorage("sourceFixes") private var sourceFixes = ""
+    @AppStorage("glossary") private var glossary = ""
+    @AppStorage("pipFont") private var pipFont = PiPFont.standard.rawValue
+    @AppStorage("highlightNames") private var highlightNames = true
 
     var body: some View {
         NavigationStack {
             List {
                 appBuildSection
                 translationPerformanceSection
+                textIntelligenceSection
                 floatingWindowSection
                 automationSection
                 diagnosticsSection
@@ -547,6 +556,8 @@ struct SettingsView: View {
             }
             .onChange(of: theme) { _, _ in engine.applyStyle() }
             .onChange(of: textSize) { _, _ in engine.applyStyle() }
+            .onChange(of: pipFont) { _, _ in engine.applyStyle() }
+            .onChange(of: highlightNames) { _, _ in engine.applyStyle() }
             .onChange(of: winSize) { _, _ in engine.applyWindowSize() }
             .onChange(of: speed) { _, _ in engine.syncConfig() }
             .onChange(of: area) { _, _ in engine.syncConfig() }
@@ -607,6 +618,45 @@ struct SettingsView: View {
             }
     }
 
+    private var textIntelligenceSection: some View {
+        Section {
+            Toggle("Clean up OCR mistakes", isOn: $cleanOCR)
+            Toggle("Expand chat slang", isOn: $slang)
+            Toggle("Preserve speaker names", isOn: $speakerDetect)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Never translate").font(.subheadline.weight(.medium))
+                TextEditor(text: $neverTranslate)
+                    .frame(minHeight: 58, maxHeight: 110)
+                    .font(.system(.footnote, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                Text("Names or terms separated by commas or new lines.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Fix OCR source text").font(.subheadline.weight(.medium))
+                TextEditor(text: $sourceFixes)
+                    .frame(minHeight: 58, maxHeight: 110)
+                    .font(.system(.footnote, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                Text("One correction per line: wrong=right.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Translation glossary").font(.subheadline.weight(.medium))
+                TextEditor(text: $glossary)
+                    .frame(minHeight: 58, maxHeight: 110)
+                    .font(.system(.footnote, design: .monospaced))
+                    .scrollContentBackground(.hidden)
+                Text("One replacement per line: translated term=preferred term.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        } header: {
+            Text("Text intelligence")
+        } footer: {
+            Text("These rules run on recognized content before or after translation. They do not change what the screen recorder captures.")
+        }
+    }
+
     private var floatingWindowSection: some View {
             Section("Floating window") {
                 Picker("Window size", selection: $winSize) {
@@ -624,6 +674,10 @@ struct SettingsView: View {
                         textSizeOption(item)
                     }
                 }
+                Picker("Translation font", selection: $pipFont) {
+                    ForEach(PiPFont.allCases) { font in Text(font.title).tag(font.rawValue) }
+                }
+                Toggle("Highlight speaker names", isOn: $highlightNames)
                 Toggle("Show original above translation", isOn: $showOriginal)
                 Toggle("Speak translations aloud", isOn: $speak)
             }
