@@ -1,4 +1,4 @@
-// Screen Translator – Broadcast extension – v0.7.0
+// Screen Translator – Broadcast extension – v0.8.0
 import ReplayKit
 import Vision
 import ImageIO
@@ -9,6 +9,8 @@ import os
 class SampleHandler: RPBroadcastSampleHandler {
     private var conn: NWConnection?
     private var frames = 0
+    private var passes = 0
+    private var skipped = 0
     private var lastRun = Date.distantPast
     private var lastPing = Date.distantPast
     private var candidateKey = ""
@@ -16,6 +18,8 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var candidateCount = 0
     private var emptyPasses = 0
     private var lastOcrMs: Double = 0
+    private var ocrSig: [UInt8] = []
+    private var info = (bw: 0, bh: 0, orient: 1, cw: 0, ch: 0)
 
     private let cfgLock = NSLock()
     private var _config = Config(lang: "auto", y0: 0, y1: 1, maxEdge: 1400, interval: 0.25, paused: false)
@@ -61,14 +65,56 @@ class SampleHandler: RPBroadcastSampleHandler {
         guard !cfg.paused, now.timeIntervalSince(lastRun) >= cfg.interval,
               let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
+        // Skip frames that look identical to the last one we read (saves battery, keeps things fast)
+        if cfg.skipUnchanged ?? true {
+            let sig = signature(pb)
+            if !sig.isEmpty, sig.count == ocrSig.count, now.timeIntervalSince(lastRun) < 2.0,
+               meanDiff(sig, ocrSig) <= 1.5 {
+                skipped += 1
+                return
+            }
+            ocrSig = sig
+        }
+
         var orientation = CGImagePropertyOrientation.up
         if let n = CMGetAttachment(sampleBuffer, key: RPVideoSampleOrientationKey as CFString,
                                    attachmentModeOut: nil) as? NSNumber,
            let o = CGImagePropertyOrientation(rawValue: n.uint32Value) {
             orientation = o
         }
+        info.bw = CVPixelBufferGetWidth(pb)
+        info.bh = CVPixelBufferGetHeight(pb)
+        info.orient = Int(orientation.rawValue)
         autoreleasepool { recognize(pb, orientation, cfg) }
         lastRun = Date()
+    }
+
+    // MARK: Cheap change detection
+    private func signature(_ pb: CVPixelBuffer) -> [UInt8] {
+        CVPixelBufferLockBaseAddress(pb, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
+        let planar = CVPixelBufferIsPlanar(pb)
+        guard let base = planar ? CVPixelBufferGetBaseAddressOfPlane(pb, 0) : CVPixelBufferGetBaseAddress(pb) else { return [] }
+        let w = planar ? CVPixelBufferGetWidthOfPlane(pb, 0) : CVPixelBufferGetWidth(pb)
+        let h = planar ? CVPixelBufferGetHeightOfPlane(pb, 0) : CVPixelBufferGetHeight(pb)
+        let stride = planar ? CVPixelBufferGetBytesPerRowOfPlane(pb, 0) : CVPixelBufferGetBytesPerRow(pb)
+        let bpp = planar ? 1 : 4
+        guard w > 8, h > 8 else { return [] }
+        var out: [UInt8] = []
+        out.reserveCapacity(576)
+        for gy in 0..<24 {
+            let row = base.advanced(by: ((gy * (h - 1)) / 23) * stride)
+            for gx in 0..<24 {
+                out.append(row.load(fromByteOffset: ((gx * (w - 1)) / 23) * bpp, as: UInt8.self))
+            }
+        }
+        return out
+    }
+
+    private func meanDiff(_ a: [UInt8], _ b: [UInt8]) -> Double {
+        var d = 0
+        for i in 0..<a.count { d += abs(Int(a[i]) - Int(b[i])) }
+        return Double(d) / Double(max(1, a.count))
     }
 
     // MARK: OCR
@@ -119,8 +165,14 @@ class SampleHandler: RPBroadcastSampleHandler {
 
     private func freeMB() -> Double { Double(os_proc_available_memory()) / 1_048_576 }
 
+    private func enhanced(_ i: CIImage) -> CIImage {
+        i.applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 0.0, kCIInputContrastKey: 1.8])
+            .applyingFilter("CISharpenLuminance", parameters: [kCIInputSharpnessKey: 0.8])
+    }
+
     private func recognize(_ pb: CVPixelBuffer, _ orientation: CGImagePropertyOrientation, _ cfg: Config) {
         let t0 = CFAbsoluteTimeGetCurrent()
+        passes += 1
 
         // Only read the chosen area, at reduced size: this is the big speed-up.
         let margin = 0.03
@@ -128,7 +180,9 @@ class SampleHandler: RPBroadcastSampleHandler {
         var edge = cfg.maxEdge
         if freeMB() < 15 { edge = min(edge, 800) }          // memory getting tight
 
-        let base = CIImage(cvPixelBuffer: pb).oriented(orientation)
+        // iOS's orientation hint first, then the app's extra quarter-turns (fixes upside-down frames)
+        let extra = [CGImagePropertyOrientation.up, .right, .down, .left][(cfg.rot ?? 0) & 3]
+        let base = CIImage(cvPixelBuffer: pb).oriented(orientation).oriented(extra)
         let ext = base.extent
         let crop = CGRect(x: ext.minX, y: ext.minY + ext.height * y0,
                           width: ext.width, height: ext.height * (y1 - y0))
@@ -139,16 +193,16 @@ class SampleHandler: RPBroadcastSampleHandler {
             let s = edge / longEdge
             img = img.transformed(by: CGAffineTransform(scaleX: s, y: s))
         }
+        info.cw = Int(img.extent.width)
+        info.ch = Int(img.extent.height)
 
-        var lines = ocr(img, cfg, y0, y1)
+        let boost = cfg.boost ?? 1
+        var lines = ocr(boost == 2 ? enhanced(img) : img, cfg, y0, y1)
         if lines.isEmpty {
             emptyPasses += 1
             // Fallback for hard text (thin, outlined, low contrast): boost contrast and retry
-            if emptyPasses % 3 == 0 && freeMB() > 20 {
-                let boosted = img
-                    .applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 0.0, kCIInputContrastKey: 1.8])
-                    .applyingFilter("CISharpenLuminance", parameters: [kCIInputSharpnessKey: 0.8])
-                lines = ocr(boosted, cfg, y0, y1)
+            if boost == 1 && emptyPasses % 3 == 0 && freeMB() > 20 {
+                lines = ocr(enhanced(img), cfg, y0, y1)
             }
         } else {
             emptyPasses = 0
@@ -158,7 +212,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         if lines.isEmpty {
             if emptyPasses >= 4 {
                 if !sentKey.isEmpty { send(kind: "clear", lines: []) }
-                sentKey = ""; candidateKey = ""
+                sentKey = ""; candidateKey = ""; candidateCount = 0
             }
             return
         }
@@ -179,7 +233,10 @@ class SampleHandler: RPBroadcastSampleHandler {
     private func send(kind: String, lines: [OCRLine]) {
         func encode(_ l: [OCRLine]) -> Data? {
             try? JSONEncoder().encode(Packet(kind: kind, version: AppVersion.version, frames: frames, lines: l,
-                                             ocrMs: lastOcrMs, memFreeMB: freeMB()))
+                                             ocrMs: lastOcrMs, memFreeMB: freeMB(),
+                                             ts: Date().timeIntervalSince1970, rev: config.rev,
+                                             bufW: info.bw, bufH: info.bh, orient: info.orient,
+                                             cropW: info.cw, cropH: info.ch, passes: passes, skipped: skipped))
         }
         var data = encode(lines)
         if let d = data, d.count > 60000 { data = encode(Array(lines.prefix(30))) }
