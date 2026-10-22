@@ -503,6 +503,7 @@ struct SettingsView: View {
     @AppStorage("showOriginal") private var showOriginal = false
     @AppStorage("speed") private var speed = SpeedPreset.balanced.rawValue
     @AppStorage("autoClear") private var autoClear = true
+    @AppStorage("textHoldDuration") private var textHoldDuration: Double = 2.0
     @AppStorage("ocrConfidence") private var ocrConfidence: Double = 0.30
     @AppStorage("languageCorrection") private var languageCorrection = true
     @AppStorage("rightToLeftReading") private var rightToLeftReading = false
@@ -609,6 +610,19 @@ struct SettingsView: View {
     private var automationSection: some View {
         Section {
             Toggle("Clear when text disappears", isOn: $autoClear)
+            if autoClear {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack {
+                        Text("Keep text visible after it disappears")
+                        Spacer()
+                        Text(textHoldDuration == 0 ? "Immediately" : String(format: "%.1f s", textHoldDuration))
+                            .monospacedDigit().foregroundStyle(.secondary)
+                    }
+                    Slider(value: $textHoldDuration, in: 0...10, step: 0.5)
+                    Text("Keeps the last translation on screen briefly after the source text vanishes. New text cancels the countdown.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
             Toggle("Pause translation", isOn: $engine.paused)
         } header: {
             Text("Automation")

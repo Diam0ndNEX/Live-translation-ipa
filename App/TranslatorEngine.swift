@@ -181,7 +181,9 @@ final class TranslatorEngine: ObservableObject {
                       size: PiPTextSize(rawValue: ud.string(forKey: "textSize") ?? "") ?? .auto)
     }
     private var autoClear: Bool { (ud.object(forKey: "autoClear") as? Bool) ?? true }
+    private var textHoldDuration: Double { max(0, min(15, ud.object(forKey: "textHoldDuration") as? Double ?? 2.0)) }
     private var minimumOCRConfidence: Double { ud.object(forKey: "ocrConfidence") as? Double ?? 0.30 }
+    private var delayedClearWork: DispatchWorkItem?
     private var languageCorrection: Bool { (ud.object(forKey: "languageCorrection") as? Bool) ?? true }
 
     init() {
@@ -379,6 +381,8 @@ final class TranslatorEngine: ObservableObject {
         // blocks updates until the user swipes or the text changes again.
         // Accept the first usable state; enqueue() already suppresses OCR jitter
         // and near-duplicates without blocking short-lived subtitles.
+        delayedClearWork?.cancel()
+        delayedClearWork = nil
         let candidate = texts.map { String($0.prefix(900)) }.joined(separator: "\n")
         pendingInput = candidate
         pendingInputCount = 1
@@ -451,10 +455,15 @@ final class TranslatorEngine: ObservableObject {
 
                 // Vision y increases upward. Since input is top-to-bottom, the next
                 // line must be below the previous line and within a plausible line gap.
+                let centerDistance = abs(line.x - previous.x)
+                let overlapRatio = overlap / max(0.001, min(lineWidth, previousWidth))
                 let stacked = verticalGap > 0.20 * lineHeight
-                    && verticalGap < 2.0 * lineHeight
-                    && (overlap > 0.18 * min(lineWidth, previousWidth)
-                        || abs(line.x - previous.x) < 0.16)
+                    && verticalGap < 1.45 * lineHeight
+                    && (overlapRatio > 0.35 || centerDistance < 0.09)
+                    // Large horizontal spans often indicate separate speech bubbles
+                    // or an OCR line from the floating PiP overlay. Do not bridge them
+                    // merely because their text boxes overlap a little.
+                    && !(lineWidth > 0.72 && previousWidth > 0.72 && centerDistance > 0.06)
                 // Same-row fragments are joined only when their boxes overlap; a small
                 // horizontal gap alone is not enough to merge separate characters/bubbles.
                 let sameRow = abs(verticalGap) <= 0.30 * lineHeight && overlap > 0
@@ -655,13 +664,22 @@ final class TranslatorEngine: ObservableObject {
 
     private func handleClear() {
         guard autoClear, showing else { return }
-        showing = false
-        lastHandled = ""
-        original = ""
-        translated = ""
-        renderedGrams = placeholderGrams
-        renderedNorm = TextSim.norm("Waiting for screen text… Listening…")
-        pip.render(original: "", translated: "Listening…", showOriginal: false)
+        delayedClearWork?.cancel()
+        let delay = textHoldDuration
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.showing else { return }
+            self.showing = false
+            self.lastHandled = ""
+            self.original = ""
+            self.translated = ""
+            self.renderedGrams = self.placeholderGrams
+            self.renderedNorm = TextSim.norm("Waiting for screen text… Listening…")
+            self.sourceGrams = []
+            self.pip.render(original: "", translated: "Listening…", showOriginal: false)
+            self.recordDiagnostic("Cleared vanished text after \(delay, specifier: "%.1f") seconds")
+        }
+        delayedClearWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     /// Re-run translation on the most recently recognized text without restarting capture.
@@ -913,6 +931,8 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func show(_ text: String, _ result: String) {
+        delayedClearWork?.cancel()
+        delayedClearWork = nil
         original = text
         translated = result
         showing = true
