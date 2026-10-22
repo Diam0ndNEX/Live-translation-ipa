@@ -321,6 +321,7 @@ struct ProfilesSettings: View {
 
 // MARK: - Privacy & history
 struct PrivacySettings: View {
+    @EnvironmentObject var engine: TranslatorEngine
     @AppStorage("historyRetentionDays") private var retentionDays = 0
     @AppStorage("includeDiagnosticText") private var includeDiagnosticText = false
     @State private var showRetentionInfo = false
@@ -354,6 +355,7 @@ struct PrivacySettings: View {
             }
         }
         .settingsPage("Privacy & history")
+        .onChange(of: retentionDays) { _, _ in engine.applyHistoryRetention() }
     }
 }
 
