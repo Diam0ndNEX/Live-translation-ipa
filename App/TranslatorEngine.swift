@@ -343,36 +343,73 @@ final class TranslatorEngine: ObservableObject {
     }
 
     /// Clusters lines that belong together (similar size, stacked closely, overlapping horizontally).
+    /// Groups only geometrically related lines. Coordinates are normalized to the
+    /// full, orientation-corrected frame (0 = bottom, 1 = top). Process top-to-bottom
+    /// and never join neighboring side-by-side bubbles just because their gap is small.
     private func makeBlocks(_ lines: [OCRLine]) -> [[OCRLine]] {
-        let sorted = lines.sorted { $0.y != $1.y ? $0.y > $1.y : $0.x < $1.x }
+        let ordered = lines.enumerated().sorted {
+            if abs($0.element.y - $1.element.y) < 0.000001 {
+                return $0.element.x < $1.element.x
+            }
+            return $0.element.y > $1.element.y
+        }.map { $0.element }
+
         var blocks: [[OCRLine]] = []
-        for l in sorted {
-            let lw = l.w ?? 0.2
-            var placed = false
-            for i in blocks.indices {
-                guard let last = blocks[i].last else { continue }
-                let w2 = last.w ?? 0.2
-                let overlap = min(l.x + lw / 2, last.x + w2 / 2) - max(l.x - lw / 2, last.x - w2 / 2)
-                let xGap = max(0, max(l.x - lw / 2, last.x - w2 / 2) - min(l.x + lw / 2, last.x + w2 / 2))
-                let gap = last.y - l.y
-                let lineH = max(last.h, l.h)
-                let sizeRatio = min(last.h, l.h) / max(last.h, l.h, 0.0001)
-                let verticallyAdjacent = gap > 0.15 * lineH && gap < 2.8 * lineH
-                let horizontalOverlap = overlap > 0.15 * min(lw, w2)
-                // Center-aligned manga dialogue often has ragged line widths.
-                // Group aligned lines even when their bounding boxes barely overlap.
-                let sameTextColumn = abs(l.x - last.x) < max(0.075, 0.35 * max(lw, w2))
-                let stacked = verticallyAdjacent && (horizontalOverlap || sameTextColumn)
-                let sameRow = abs(gap) <= 0.45 * lineH && xGap < 0.08
-                if sizeRatio > 0.42 && (stacked || sameRow) {
-                    blocks[i].append(l)
-                    placed = true
-                    break
+        for line in ordered {
+            let lineWidth = max(line.w ?? 0.2, 0.001)
+            var bestIndex: Int?
+            var bestScore = -Double.infinity
+
+            for index in blocks.indices {
+                guard let previous = blocks[index].last else { continue }
+                // A line can only attach to the immediately preceding line of a block.
+                // Do not let a distant line jump across another speech bubble.
+                let previousWidth = max(previous.w ?? 0.2, 0.001)
+                let overlap = min(line.x + lineWidth / 2, previous.x + previousWidth / 2)
+                    - max(line.x - lineWidth / 2, previous.x - previousWidth / 2)
+                let gapX = max(0, abs(line.x - previous.x) - (lineWidth + previousWidth) / 2)
+                let verticalGap = previous.y - line.y
+                let lineHeight = max(previous.h, line.h, 0.001)
+                let sizeRatio = min(previous.h, line.h) / lineHeight
+
+                // Vision y increases upward. Since input is top-to-bottom, the next
+                // line must be below the previous line and within a plausible line gap.
+                let stacked = verticalGap > 0.20 * lineHeight
+                    && verticalGap < 2.0 * lineHeight
+                    && (overlap > 0.18 * min(lineWidth, previousWidth)
+                        || abs(line.x - previous.x) < 0.16)
+                // Same-row fragments are joined only when their boxes overlap; a small
+                // horizontal gap alone is not enough to merge separate characters/bubbles.
+                let sameRow = abs(verticalGap) <= 0.30 * lineHeight && overlap > 0
+                guard sizeRatio > 0.45, stacked || sameRow else { continue }
+
+                let score = (overlap / min(lineWidth, previousWidth))
+                    - abs(verticalGap) / lineHeight * 0.1
+                    - abs(line.x - previous.x) * 0.2
+                if score > bestScore {
+                    bestScore = score
+                    bestIndex = index
                 }
             }
-            if !placed { blocks.append([l]) }
+
+            if let bestIndex {
+                blocks[bestIndex].append(line)
+            } else {
+                blocks.append([line])
+            }
         }
-        return blocks
+
+        // Canonicalize each block's line order after grouping, then order regions
+        // top-to-bottom. For regions on the same row, read left-to-right (or RTL
+        // in the later mode-specific display ordering).
+        return blocks.map { readingOrder($0) }.sorted {
+            let ay = $0.map(\.y).max() ?? 0
+            let by = $1.map(\.y).max() ?? 0
+            if abs(ay - by) > 0.02 { return ay > by }
+            let ax = $0.map(\.x).min() ?? 0
+            let bx = $1.map(\.x).min() ?? 0
+            return ax < bx
+        }
     }
 
     private func blockHeight(_ b: [OCRLine]) -> Double {
