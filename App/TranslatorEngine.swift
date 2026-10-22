@@ -560,7 +560,8 @@ final class TranslatorEngine: ObservableObject {
                            skipUnchanged: defaults.object(forKey: "skipUnchanged") as? Bool ?? true,
                            rotation: rotation,
                            adaptive: defaults.object(forKey: "adaptive") as? Bool ?? true,
-                           idleMinutes: defaults.object(forKey: "idleMinutes") as? Int ?? 0))
+                           idleMinutes: defaults.object(forKey: "idleMinutes") as? Int ?? 0,
+                            revision: rotationRevision))
     }
 
     /// Reset automatic reading-order calibration when the user changes the rotation mode.
@@ -572,14 +573,14 @@ final class TranslatorEngine: ObservableObject {
         rotationCalibrated = false
         rotationRevision += 1
         syncConfig()
-        recordDiagnostic("Reading-order calibration reset; mode=\\(UserDefaults.standard.string(forKey: \"frameRot\") ?? \"auto\")")
+        recordDiagnostic("Reading-order calibration reset; mode=\(UserDefaults.standard.string(forKey: \"frameRot\") ?? \"auto\")")
     }
 
     /// Detect when line order reads more naturally in reverse and try another frame rotation.
     private func updateOrderVote(_ lines: [OCRLine]) {
         var difference = 0.0
         for block in makeBlocks(lines) where block.count >= 2 {
-            let forward = readingOrder(block).map(\\.t)
+            let forward = readingOrder(block).map(\.t)
             difference += TextIntel.orderScore(forward) - TextIntel.orderScore(Array(forward.reversed()))
         }
         guard difference != 0 else { return }
@@ -594,11 +595,11 @@ final class TranslatorEngine: ObservableObject {
             orderVote = 0
             votesSinceRotationChange = 0
             rotationCalibrated = false
-            recordDiagnostic("Reading order appears reversed; testing rotation \\(autoRotation * 90)°")
+            recordDiagnostic("Reading order appears reversed; testing rotation \(autoRotation * 90)°")
             syncConfig()
         } else if orderVote > 4 && !rotationCalibrated {
             rotationCalibrated = true
-            recordDiagnostic("Reading order calibrated at rotation \\(autoRotation * 90)°")
+            recordDiagnostic("Reading order calibrated at rotation \(autoRotation * 90)°")
         }
     }
 
@@ -686,17 +687,6 @@ final class TranslatorEngine: ObservableObject {
         if paused { return }
         if p.kind == "clear" { handleClear(); return }
         guard p.kind == "ocr" else { return }
-        if let packetRevision = p.rev, packetRevision != rotationRevision {
-            discardedStaleCount += 1
-            trace("ROTATION REVISION", "Dropped stale OCR packet revision=\\(packetRevision), current=\\(rotationRevision)")
-            return
-        }
-        let revisionBeforeCalibration = rotationRevision
-        updateOrderVote(p.lines)
-        if rotationRevision != revisionBeforeCalibration {
-            trace("ROTATION REVISION", "Dropped frame used to choose a new reading rotation")
-            return
-        }
         ocrCount += 1
         lastRaw = String(p.lines.map(\.t).joined(separator: " ").prefix(1200))
         lastOCRLineCount = p.lines.count
@@ -722,6 +712,17 @@ final class TranslatorEngine: ObservableObject {
             return
         }
 
+        if let packetRevision = p.rev, packetRevision != rotationRevision {
+            discardedStaleCount += 1
+            trace("ROTATION REVISION", "Dropped stale OCR packet revision=\(packetRevision), current=\(rotationRevision)")
+            return
+        }
+        let revisionBeforeCalibration = rotationRevision
+        updateOrderVote(p.lines)
+        if rotationRevision != revisionBeforeCalibration {
+            trace("ROTATION REVISION", "Dropped frame used to choose a new reading rotation")
+            return
+        }
         let range = area.range(mode: mode)
         var cand = p.lines.filter { range.contains($0.y) }
         trace("AREA FILTER", "\(p.lines.count) raw → \(cand.count) inside \(area.rawValue) y=\(range.lowerBound)…\(range.upperBound)")
