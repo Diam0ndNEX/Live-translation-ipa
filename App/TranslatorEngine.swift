@@ -673,8 +673,8 @@ final class TranslatorEngine: ObservableObject {
         }
         lastHandled = ""
         syncConfig()
-        status = "Preset applied: \\(name)"
-        diag.log("Preset: \\(name)")
+        status = "Preset applied: \(name)"
+        diag.log("Preset: \(name)")
     }
 
     // MARK: Packets from the extension
