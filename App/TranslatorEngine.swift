@@ -1341,6 +1341,7 @@ final class TranslatorEngine: ObservableObject {
                       "target language is more likely than configured source; not sending this block through translation: \(text)")
                 sentences.append([text])
                 done.append([text])
+                protectedTokens.append([])
                 continue
             }
 
