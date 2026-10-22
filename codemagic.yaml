@@ -25,9 +25,27 @@ workflows:
           test -n "$SOURCE_VERSION"
           test -n "$SOURCE_BUILD"
 
-          SOURCE_VERSION="$SOURCE_VERSION" SOURCE_BUILD="$SOURCE_BUILD" python3 -c 'import os,re,pathlib; p=pathlib.Path("project.yml"); s=p.read_text(); s,nv=re.subn(r"(MARKETING_VERSION: \\")([^\\"]+)(\\")", lambda m:m.group(1)+os.environ["SOURCE_VERSION"]+m.group(3), s); s,nb=re.subn(r"(CURRENT_PROJECT_VERSION: \\")([^\\"]+)(\\")", lambda m:m.group(1)+os.environ["SOURCE_BUILD"]+m.group(3), s);
-          if not nv or not nb: raise SystemExit(f"Could not update version fields: {nv=}, {nb=}")
-          p.write_text(s)'
+          SOURCE_VERSION="$SOURCE_VERSION" SOURCE_BUILD="$SOURCE_BUILD" python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          path = Path("project.yml")
+          text = path.read_text()
+          text, version_count = re.subn(
+              r'(MARKETING_VERSION: ["])[^"]+(["] )'.replace('] ', ']'),
+              lambda match: match.group(1) + os.environ["SOURCE_VERSION"] + match.group(2),
+              text,
+          )
+          text, build_count = re.subn(
+              r'(CURRENT_PROJECT_VERSION: ["])[^"]+(["] )'.replace('] ', ']'),
+              lambda match: match.group(1) + os.environ["SOURCE_BUILD"] + match.group(2),
+              text,
+          )
+          if not version_count or not build_count:
+              raise SystemExit(f"Could not update version fields: {version_count=}, {build_count=}")
+          path.write_text(text)
+          PY
           echo "Building ScreenLingo version $SOURCE_VERSION ($SOURCE_BUILD)"
           xcodegen generate
 
