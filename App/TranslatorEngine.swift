@@ -954,8 +954,8 @@ final class TranslatorEngine: ObservableObject {
                 let text = blockText(block)
                 let letters = Double(text.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count)
                 let lineBonus = Double(max(0, block.count - 1)) * 12
-                let width = block.compactMap(\\.w).max() ?? 0
-                let centerY = block.map(\\.y).reduce(0, +) / Double(max(1, block.count))
+                let width = block.compactMap(\.w).max() ?? 0
+                let centerY = block.map(\.y).reduce(0, +) / Double(max(1, block.count))
                 let subtitleZoneBonus = (centerY >= 0.08 && centerY <= 0.48) ? 8.0 : 0.0
                 let upperScreenPenalty = centerY > 0.72 ? 22.0 : (centerY > 0.60 ? 8.0 : 0.0)
                 let words = text.split(whereSeparator: { $0.isWhitespace || $0.isPunctuation }).count
@@ -966,10 +966,10 @@ final class TranslatorEngine: ObservableObject {
             }
 
             func centerY(_ block: [OCRLine]) -> Double {
-                block.map(\\.y).reduce(0, +) / Double(max(1, block.count))
+                block.map(\.y).reduce(0, +) / Double(max(1, block.count))
             }
             func centerX(_ block: [OCRLine]) -> Double {
-                block.map(\\.x).reduce(0, +) / Double(max(1, block.count))
+                block.map(\.x).reduce(0, +) / Double(max(1, block.count))
             }
             func leftEdge(_ block: [OCRLine]) -> Double {
                 block.map { $0.x - ($0.w ?? 0.2) / 2 }.min() ?? 0
@@ -998,7 +998,6 @@ final class TranslatorEngine: ObservableObject {
             let eligible = blocks.filter { block in
                 let text = blockText(block)
                 let norm = TextSim.norm(text)
-                let words = text.split(whereSeparator: { $0.isWhitespace || $0.isPunctuation })
                 let uiLike = isScreenLingoChromeText(text)
                     || ["copyrawocr", "showoriginaltext", "clearwhentextends",
                         "floatingwindow", "startcapture", "closefloatingwindow",
@@ -1016,7 +1015,7 @@ final class TranslatorEngine: ObservableObject {
                         (!isUsefulOCRText(text) ? "low OCR usefulness" :
                         (isTargetLanguage(text) ? "target-language feedback" :
                         (!plausiblySource(text) ? "source-language mismatch" : "other")))))
-                    trace("MOVIE CANDIDATE REJECT", "\\(text) | reason=\\(reason)")
+                    trace("MOVIE CANDIDATE REJECT", "\(text) | reason=\(reason)")
                 }
                 return passes
             }
@@ -1046,7 +1045,7 @@ final class TranslatorEngine: ObservableObject {
             if let group = bestGroup,
                groupScore(group) >= max(30, (bestSingle.map(movieScore) ?? 0) * 1.1) {
                 kept = group.sorted { centerY($0) > centerY($1) }
-                trace("MOVIE LYRIC GROUP", "selected \\(kept.count) aligned rows | \\(kept.map { blockText($0) }.joined(separator: " / "))")
+                trace("MOVIE LYRIC GROUP", "selected \(kept.count) aligned rows | \(kept.map { blockText($0) }.joined(separator: " / "))")
             } else {
                 let ranked = eligible.filter { block in
                     let text = blockText(block)
@@ -1057,14 +1056,14 @@ final class TranslatorEngine: ObservableObject {
                     let score = movieScore(block)
                     let passesQuality = score >= 20 && !(words.count <= 2 && letters < 10) && !isSingleGenericLabel
                     if !passesQuality {
-                        trace("MOVIE CANDIDATE REJECT", "\\(text) | score=\\(Int(score)); reason=below subtitle quality threshold")
+                        trace("MOVIE CANDIDATE REJECT", "\(text) | score=\(Int(score)); reason=below subtitle quality threshold")
                     } else {
-                        trace("MOVIE CANDIDATE ACCEPT", "\\(text) | score=\\(Int(score)); words=\\(words.count); lines=\\(block.count)")
+                        trace("MOVIE CANDIDATE ACCEPT", "\(text) | score=\(Int(score)); words=\(words.count); lines=\(block.count)")
                     }
                     return passesQuality
                 }.sorted { movieScore($0) > movieScore($1) }
                 kept = Array(ranked.prefix(1))
-                trace("MOVIE SELECT", kept.first.map { "selected=\\(blockText($0)) | score=\\(Int(movieScore($0)))" } ?? "no credible subtitle; wait for stable source text")
+                trace("MOVIE SELECT", kept.first.map { "selected=\(blockText($0)) | score=\(Int(movieScore($0)))" } ?? "no credible subtitle; wait for stable source text")
             }        } else if area == .smart {
             kept = blocks.filter { blockHeight($0) >= maxH * (mode == .comic ? 0.22 : 0.32) }
         }
