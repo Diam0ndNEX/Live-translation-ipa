@@ -813,7 +813,15 @@ final class TranslatorEngine: ObservableObject {
             "translationinput", "currentoriginal", "currenttranslation",
             "showoriginaltext", "clearwhentextends", "floatingwindow",
             "startcapture", "closefloatingwindow", "pausetranslating",
-            "captureconnected", "copyrawocr", "ocrsees", "extensionmemoryleft"
+            "captureconnected", "copyrawocr", "ocrsees", "extensionmemoryleft",
+            // Settings/diagnostics labels observed in real OCR reports. These are
+            // deliberately multi-word fingerprints rather than generic words.
+            "languageawareocrcorrection", "selectedblocks", "ocrfiltercounts",
+            "acceptedinputs", "waitingforstabilization", "staleresultsdiscarded",
+            "translationcachehits", "translationfailures", "outputquality",
+            "lasttranslationerror", "currentstatus", "lastrawocrtext",
+            "latestcandidatetext", "selectedblocksreadingorder",
+            "processingtracelast60seconds", "recentdiagnosticeventslatestfirst"
         ]
         let matchedDistinctive = markers.filter { allText.contains($0) }
         // A diagnostic label is distinctive; on the main screen, require two
@@ -824,6 +832,19 @@ final class TranslatorEngine: ObservableObject {
              "copyrawocr", "ocrsees", "extensionmemoryleft"].contains($0)
         }) { return true }
         if matchedDistinctive.count >= 2 { return true }
+
+        // The diagnostics screen may not include the app title or version in the
+        // current crop. A cluster of diagnostics-only labels is a stronger fingerprint.
+        let diagnosticMarkers = [
+            "selectedblocks", "ocrfiltercounts", "acceptedinputs",
+            "waitingforstabilization", "staleresultsdiscarded",
+            "translationcachehits", "translationfailures", "outputquality",
+            "lasttranslationerror", "currentstatus", "lastrawocrtext",
+            "latestcandidatetext", "translationinput", "currentoriginal",
+            "currenttranslation", "processingtracelast60seconds"
+        ]
+        let diagnosticCount = diagnosticMarkers.filter { allText.contains($0) }.count
+        if diagnosticCount >= 3 { return true }
 
         let navigation = ["home", "languages", "settings", "history"]
             .filter { allText.contains($0) }.count
@@ -850,7 +871,13 @@ final class TranslatorEngine: ObservableObject {
             "changelog", "languagesettings", "mode", "copyrawocr",
             "showoriginaltext", "clearwhentextends", "floatingwindow",
             "startcapture", "closefloatingwindow", "pausetranslating",
-            "captureconnected", "ocrsees", "extensionmemoryleft"
+            "captureconnected", "ocrsees", "extensionmemoryleft",
+            "languageawareocrcorrection", "selectedblocks", "ocrfiltercounts",
+            "acceptedinputs", "waitingforstabilization", "staleresultsdiscarded",
+            "translationcachehits", "translationfailures", "outputquality",
+            "lasttranslationerror", "currentstatus", "lastrawocrtext",
+            "latestcandidatetext", "selectedblocksreadingorder",
+            "processingtracelast60seconds", "recentdiagnosticeventslatestfirst"
         ]
         if exact.contains(n) { return true }
         let phrases = [
@@ -860,7 +887,13 @@ final class TranslatorEngine: ObservableObject {
             "checkbeforesharing", "movie subtitles", "movie/subtitles",
             "recommended balance between text detail",
             "right-to-left manga reading", "text capture area",
-            "performance profile", "ocr ms", "translate ms"
+            "performance profile", "ocr ms", "translate ms",
+            "language-aware ocr correction", "selected blocks / reading order",
+            "ocr filter counts", "accepted inputs", "waiting for stabilization",
+            "stale results discarded", "translation cache hits",
+            "translation failures", "output quality", "last translation error",
+            "current status", "last raw ocr text", "latest candidate text",
+            "processing trace - last 60 seconds", "recent diagnostic events"
         ]
         return phrases.contains { n.contains(TextSim.norm($0)) }
     }
