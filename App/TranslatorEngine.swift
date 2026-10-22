@@ -141,6 +141,14 @@ final class TranslatorEngine: ObservableObject {
     @Published var history: [HistoryItem] = [] {
         didSet { saveHistory() }
     }
+    @Published var profileNames: [String] = []
+    private static let profileStorageKey = "screenlingo.profiles.v1"
+    private static let profileSettingKeys = [
+        "source", "target", "mode", "area", "customY0", "customY1", "winSize", "theme", "textSize",
+        "pipFont", "highlightNames", "showOriginal", "speed", "autoClear", "textHoldDuration",
+        "ocrConfidence", "languageCorrection", "rightToLeftReading", "cleanOCR", "slang",
+        "speakerDetect", "neverTranslate", "sourceFixes", "glossary", "speak"
+    ]
     // Translation session plumbing
     @Published var legacyConfig: TranslationSession.Configuration?
     @Published var downloadConfig: TranslationSession.Configuration?
@@ -198,6 +206,7 @@ final class TranslatorEngine: ObservableObject {
         sourceCode = UserDefaults.standard.string(forKey: "source") ?? "auto"
         targetCode = UserDefaults.standard.string(forKey: "target") ?? "en"
         history = Self.loadHistory()
+        profileNames = (UserDefaults.standard.dictionary(forKey: Self.profileStorageKey) ?? [:]).keys.sorted()
         server.onPacket = { [weak self] p in Task { @MainActor in self?.handle(p) } }
         server.onState = { [weak self] ready in
             Task { @MainActor in
@@ -372,6 +381,97 @@ final class TranslatorEngine: ObservableObject {
         }
         guard let data = try? JSONEncoder().encode(Array(stored)) else { return }
         UserDefaults.standard.set(data, forKey: Self.historyKey)
+    }
+
+
+    // MARK: Settings profiles and backup
+    private func storedProfiles() -> [String: [String: Any]] {
+        UserDefaults.standard.dictionary(forKey: Self.profileStorageKey) as? [String: [String: Any]] ?? [:]
+    }
+
+    func saveProfile(_ name: String) {
+        let key = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !key.isEmpty else { status = "Enter a profile name"; return }
+        var profiles = storedProfiles()
+        var values: [String: Any] = [:]
+        for setting in Self.profileSettingKeys {
+            if let value = UserDefaults.standard.object(forKey: setting) { values[setting] = value }
+        }
+        profiles[key] = values
+        UserDefaults.standard.set(profiles, forKey: Self.profileStorageKey)
+        profileNames = profiles.keys.sorted()
+        status = "Saved profile: \(key)"
+        recordDiagnostic("Saved settings profile \(key)")
+    }
+
+    func applyProfile(_ name: String) {
+        guard let values = storedProfiles()[name] else { status = "Profile not found"; return }
+        for (key, value) in values where Self.profileSettingKeys.contains(key) {
+            UserDefaults.standard.set(value, forKey: key)
+        }
+        sourceCode = UserDefaults.standard.string(forKey: "source") ?? sourceCode
+        targetCode = UserDefaults.standard.string(forKey: "target") ?? targetCode
+        syncConfig()
+        applyStyle()
+        applyWindowSize()
+        status = "Applied profile: \(name)"
+        recordDiagnostic("Applied settings profile \(name)")
+    }
+
+    func deleteProfile(_ name: String) {
+        var profiles = storedProfiles()
+        profiles.removeValue(forKey: name)
+        UserDefaults.standard.set(profiles, forKey: Self.profileStorageKey)
+        profileNames = profiles.keys.sorted()
+    }
+
+    func exportSettings() -> String {
+        let payload: [String: Any] = [
+            "format": "ScreenLingoSettings",
+            "version": 1,
+            "settings": Dictionary(uniqueKeysWithValues: Self.profileSettingKeys.compactMap { key in
+                UserDefaults.standard.object(forKey: key).map { (key, $0) }
+            }),
+            "profiles": storedProfiles()
+        ]
+        guard JSONSerialization.isValidJSONObject(payload),
+              let data = try? JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys]),
+              let result = String(data: data, encoding: .utf8) else { return "{}" }
+        return result
+    }
+
+    @discardableResult
+    func importSettings(_ text: String) -> Bool {
+        guard let data = text.data(using: .utf8),
+              let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            status = "Invalid settings backup"; return false
+        }
+        let values = (payload["settings"] as? [String: Any]) ?? payload
+        var imported = 0
+        for key in Self.profileSettingKeys {
+            if let value = values[key], !(value is NSNull) {
+                UserDefaults.standard.set(value, forKey: key); imported += 1
+            }
+        }
+        if let profiles = payload["profiles"] as? [String: [String: Any]] {
+            UserDefaults.standard.set(profiles, forKey: Self.profileStorageKey)
+            profileNames = profiles.keys.sorted()
+        }
+        sourceCode = UserDefaults.standard.string(forKey: "source") ?? sourceCode
+        targetCode = UserDefaults.standard.string(forKey: "target") ?? targetCode
+        syncConfig(); applyStyle(); applyWindowSize()
+        status = imported > 0 ? "Imported \(imported) settings" : "No recognized settings found"
+        recordDiagnostic("Imported settings backup: \(imported) setting(s)")
+        return imported > 0
+    }
+
+    func resetAllSettings() {
+        for key in Self.profileSettingKeys { UserDefaults.standard.removeObject(forKey: key) }
+        sourceCode = "auto"
+        targetCode = "en"
+        syncConfig(); applyStyle(); applyWindowSize()
+        status = "Settings reset to defaults"
+        recordDiagnostic("Reset all app settings")
     }
 
     // MARK: Settings → capture extension
