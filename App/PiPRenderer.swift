@@ -14,10 +14,10 @@ enum PiPTheme: String, CaseIterable, Identifiable {
     }
 }
 enum PiPTextSize: String, CaseIterable, Identifiable {
-    case auto, large, huge
+    case small, auto, large, huge
     var id: String { rawValue }
     var title: String {
-        switch self { case .auto: "Auto"; case .large: "Large"; case .huge: "Huge" }
+        switch self { case .small: "Small"; case .auto: "Auto"; case .large: "Large"; case .huge: "Huge" }
     }
 }
 enum PiPFont: String, CaseIterable, Identifiable {
@@ -43,6 +43,7 @@ struct PiPStyle {
     static func make(theme: PiPTheme, size: PiPTextSize, font: PiPFont = .standard) -> PiPStyle {
         let hi: CGFloat, lo: CGFloat
         switch size {
+        case .small: hi = 30; lo = 10
         case .auto: hi = 44; lo = 16
         case .large: hi = 56; lo = 24
         case .huge: hi = 72; lo = 32
