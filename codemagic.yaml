@@ -79,6 +79,7 @@ workflows:
           fi
 
           TAG="codemagic-build-${CM_BUILD_ID}"
+          export TAG
           RELEASE_JSON=$(curl --fail-with-body --silent --show-error \
             -X POST \
             -H "Authorization: Bearer $GITHUB_TOKEN" \
@@ -95,8 +96,6 @@ workflows:
             --data-binary @ScreenLingo.ipa \
             "${UPLOAD_URL}?name=ScreenLingo.ipa"
           echo "IPA uploaded to permanent GitHub Release: $TAG"
-        environment:
-          - GITHUB_TOKEN
 
     artifacts:
       - ScreenLingo.ipa
