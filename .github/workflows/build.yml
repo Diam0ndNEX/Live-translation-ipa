@@ -33,8 +33,21 @@ jobs:
         run: |
           set -euo pipefail
           APP="Payload/ScreenLingo.app"
-          EXPECTED_VERSION="1.2.1"
-          EXPECTED_BUILD="16"
+          # Read the expected release identity from the source version constants.
+          # Bumping AppVersion.version/build automatically updates these checks; no
+          # hard-coded workflow version needs to be edited for each release.
+          SOURCE_VERSION=$(sed -nE 's/^[[:space:]]*static let version = "([^"]+)".*/\1/p' Shared/Shared.swift | head -n 1)
+          SOURCE_BUILD=$(sed -nE 's/^[[:space:]]*static let build = ([0-9]+).*/\1/p' Shared/Shared.swift | head -n 1)
+          test -n "$SOURCE_VERSION"
+          test -n "$SOURCE_BUILD"
+          PROJECT_VERSION=$(sed -nE 's/^[[:space:]]*MARKETING_VERSION: "([^"]+)".*/\1/p' project.yml | head -n 1)
+          PROJECT_BUILD=$(sed -nE 's/^[[:space:]]*CURRENT_PROJECT_VERSION: "([^"]+)".*/\1/p' project.yml | head -n 1)
+          echo "Source version: $SOURCE_VERSION ($SOURCE_BUILD)"
+          echo "Project version: $PROJECT_VERSION ($PROJECT_BUILD)"
+          test "$PROJECT_VERSION" = "$SOURCE_VERSION"
+          test "$PROJECT_BUILD" = "$SOURCE_BUILD"
+          EXPECTED_VERSION="$SOURCE_VERSION"
+          EXPECTED_BUILD="$SOURCE_BUILD"
           APP_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist")
           APP_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Info.plist")
           echo "Main app version: $APP_VERSION ($APP_BUILD)"
