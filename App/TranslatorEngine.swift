@@ -655,6 +655,28 @@ final class TranslatorEngine: ObservableObject {
     func applyWindowSize() { pip.setSize(windowSize.size) }
     func applyStyle() { pip.style = pipStyle; pip.rerender() }
 
+    /// One-tap bundles of settings for common screen types.
+    func applyPreset(_ name: String) {
+        switch name {
+        case "movie":
+            ud.set("movie", forKey: "mode")
+            ud.set("smart", forKey: "area")
+            ud.set("balanced", forKey: "speed")
+        case "game":
+            ud.set("game", forKey: "mode")
+            ud.set("full", forKey: "area")
+            ud.set("fast", forKey: "speed")
+        default:
+            ud.set("comic", forKey: "mode")
+            ud.set("full", forKey: "area")
+            ud.set("sharp", forKey: "speed")
+        }
+        lastHandled = ""
+        syncConfig()
+        status = "Preset applied: \\(name)"
+        diag.log("Preset: \\(name)")
+    }
+
     // MARK: Packets from the extension
     private func handle(_ p: Packet) {
         let wasAlive = captureAlive
@@ -1027,7 +1049,7 @@ final class TranslatorEngine: ObservableObject {
             let topToBottom = eligible.sorted { centerY($0) > centerY($1) }
             var clusters: [[[OCRLine]]] = []
             for block in topToBottom {
-                if let index = clusters.indices.first(where: { cluster in
+                if let index = clusters.firstIndex(where: { cluster in
                     guard let previous = cluster.last else { return false }
                     return areAdjacentLyricRows(previous, block)
                 }) {
