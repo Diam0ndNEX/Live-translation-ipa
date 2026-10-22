@@ -1493,10 +1493,14 @@ final class TranslatorEngine: ObservableObject {
                 text = TextIntel.expandSlang(text, lang: src.languageCode?.identifier ?? id)
             }
             let dialogue = detectSpeakers ? TextIntel.splitDialogue(text) : [(label: String?.none, text: text)]
-            // Protect both user-specified terms and detected speaker labels before
-            // translation, then restore the exact spelling after Apple Translation.
+            // Keep separate speakers on separate lines and protect their labels so
+            // the translator cannot rename, translate, or merge them into dialogue.
             let labels = dialogue.compactMap { $0.label }
-            let protected = TextIntel.protect(text, words: Array((neverWords + labels).prefix(20)))
+            let dialogueText = dialogue.map { segment in
+                segment.label.map { "\($0): \(segment.text)" } ?? segment.text
+            }.joined(separator: "\n")
+            // Protect user-specified terms and speaker labels, then restore exact spelling.
+            let protected = TextIntel.protect(dialogueText, words: Array((neverWords + labels).prefix(20)))
             protectedTokens.append(protected.tokens)
             text = protected.text
             // Do not split ordinary multi-sentence dialogue into isolated fragments.
