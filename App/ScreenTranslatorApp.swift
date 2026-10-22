@@ -35,6 +35,7 @@ struct RootView: View {
             HomeView().tabItem { Label("Home", systemImage: "house.fill") }
             LanguagesView().tabItem { Label("Languages", systemImage: "globe") }
             HistoryView().tabItem { Label("History", systemImage: "clock") }
+            DiagnosticsView().tabItem { Label("Diagnostics", systemImage: "waveform.path.ecg") }
             SettingsView().tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
         .environmentObject(engine)
