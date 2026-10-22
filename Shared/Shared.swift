@@ -3,7 +3,7 @@ import Foundation
 
 enum AppVersion {
     static let version = "1.4.6"
-    static let build = 33
+    static let build = 34
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Keep this aligned with MARKETING_VERSION and CURRENT_PROJECT_VERSION in project.yml.
     static let changelog: [(String, String)] = [
