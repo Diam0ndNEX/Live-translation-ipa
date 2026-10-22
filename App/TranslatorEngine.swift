@@ -1181,12 +1181,13 @@ final class TranslatorEngine: ObservableObject {
     /// repeatedly translated as if it were source dialogue.
     private func isTargetLanguage(_ s: String) -> Bool {
         let text = s.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard text.count >= 7 else { return false }
+        // Very short fragments are too ambiguous to classify safely.
+        guard text.count >= 12 else { return false }
         let target = Locale.Language(identifier: targetCode).languageCode
         guard let target else { return false }
-        let r = NLLanguageRecognizer()
-        r.processString(text)
-        let hypotheses = r.languageHypotheses(withMaximum: 5)
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(text)
+        let hypotheses = recognizer.languageHypotheses(withMaximum: 5)
         let targetProbability = hypotheses.reduce(0.0) { partial, item in
             partial + (Locale.Language(identifier: item.key.rawValue).languageCode == target ? item.value : 0)
         }
@@ -1195,15 +1196,23 @@ final class TranslatorEngine: ObservableObject {
             .map(\.value)
             .max() ?? 0
 
-        // Reject only a coherent target-language region. OCR fragments from a
-        // Portuguese sentence can contain common English tokens ("he", "is", "the"),
-        // so a low 0.34 threshold discarded legitimate source dialogue. Requiring
-        // a stronger score and a margin over the strongest alternative avoids
-        // throwing away source-language fragments while still blocking English PiP
-        // feedback during Portuguese → English translation.
-        guard text.count >= 10,
-              targetProbability >= 0.58,
-              targetProbability >= strongestNonTarget * 1.25 else { return false }
+        // With a manually selected source language, compare the detector's evidence
+        // against that source too. The old 0.58 threshold missed the reported case:
+        // English led at 0.36 while Portuguese was not a credible hypothesis, so the
+        // English instruction passed filtering and was sent to Portuguese → English.
+        let source = Locale.Language(identifier: sourceCode).languageCode
+        let sourceProbability = hypotheses.reduce(0.0) { partial, item in
+            partial + (Locale.Language(identifier: item.key.rawValue).languageCode == source ? item.value : 0)
+        }
+        let sourceIsExplicitAndDifferent = sourceCode != "auto" && source != target
+        let targetLeadsClearly = targetProbability >= strongestNonTarget * 1.5
+        let contradictsChosenSource = !sourceIsExplicitAndDifferent || sourceProbability < targetProbability * 0.60
+
+        guard targetProbability >= 0.32,
+              targetLeadsClearly,
+              contradictsChosenSource else { return false }
+        trace("LANGUAGE FILTER EVIDENCE",
+              "classify as target-language feedback; target=\(targetCode) score=\(String(format: "%.2f", targetProbability)); source=\(sourceCode) score=\(String(format: "%.2f", sourceProbability)); text=\(text)")
         return true
     }
 
@@ -1298,19 +1307,60 @@ final class TranslatorEngine: ObservableObject {
             let availability = await pairStatus(src, target)
             if availability == .unsupported { status = "\(id) → \(targetCode) isn't supported"; failed = true; continue }
             if availability == .supported { status = "Language pack missing – open the Languages tab" }
-            guard let out = await translateBatch(items.map { $0.text }, source: src, target: target,
-                                                 installed: availability == .installed),
-                  out.count == items.count else {
+            var out = await translateBatch(items.map { $0.text }, source: src, target: target,
+                                           installed: availability == .installed)
+            if out == nil || out?.count != items.count {
+                // Claude's main branch has a useful resilience improvement: one bad
+                // sentence should not make an otherwise valid batch disappear.
+                // Retry each item independently before reporting a translation failure.
+                trace("BATCH RETRY", "batch failed for \(id) → \(targetCode); retrying \(items.count) item(s) individually")
+                var recovered = [String?](repeating: nil, count: items.count)
+                for (index, item) in items.enumerated() {
+                    if let single = await translateBatch([item.text], source: src, target: target,
+                                                          installed: availability == .installed),
+                       single.count == 1,
+                       !single[0].trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        recovered[index] = single[0].trimmingCharacters(in: .whitespacesAndNewlines)
+                    }
+                }
+                if recovered.allSatisfy({ $0 != nil }) {
+                    out = recovered.compactMap { $0 }
+                    trace("BATCH RETRY", "individual retry recovered all \(items.count) item(s)")
+                } else {
+                    failed = true
+                    translationFailures += 1
+                    lastTranslationError = "Translation batch and individual retry failed for \(id) → \(targetCode)"
+                    trace("TRANSLATION FAILURE", lastTranslationError)
+                    continue
+                }
+            }
+            guard let results = out, results.count == items.count else {
                 failed = true
                 translationFailures += 1
-                lastTranslationError = "Translation returned no result for \(id) → \(targetCode)"
+                lastTranslationError = "Translation returned incomplete results for \(id) → \(targetCode)"
                 continue
             }
             translatedAny = true
             for (k, it) in items.enumerated() {
-                done[it.block][it.index] = out[k]
-                cache["\(id)>\(targetCode)|\(it.text)"] = out[k]
-                trace("TRANSLATION RESULT", "Block #\(it.block + 1) part #\(it.index + 1); \(id) → \(targetCode); source=\(it.text); output=\(out[k])")
+                let result = results[k].trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !result.isEmpty else {
+                    failed = true
+                    translationFailures += 1
+                    lastTranslationError = "Empty translation result for \(id) → \(targetCode)"
+                    continue
+                }
+                // Never cache an unchanged response when language evidence says the
+                // OCR text is already in the target language. That is a detection
+                // problem, not a valid translation to persist and replay.
+                if TextSim.norm(result) == TextSim.norm(it.text), isTargetLanguage(it.text) {
+                    failed = true
+                    lastTranslationError = "Unchanged target-language text was returned as a translation"
+                    trace("SUSPICIOUS RESULT", "\(it.text) was returned unchanged; skipped cache write")
+                    continue
+                }
+                done[it.block][it.index] = result
+                cache["\(id)>\(targetCode)|\(it.text)"] = result
+                trace("TRANSLATION RESULT", "Block #\(it.block + 1) part #\(it.index + 1); \(id) → \(targetCode); source=\(it.text); output=\(result)")
             }
         }
         if cache.count > 600 { cache.removeAll() }
