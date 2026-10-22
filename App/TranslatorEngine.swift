@@ -119,6 +119,21 @@ final class TranslatorEngine: ObservableObject {
     @Published var cacheHits = 0
     @Published var translationFailures = 0
     @Published var lastTranslationError = "None"
+    @Published var diagnosticEvents: [String] = []
+    @Published var lastPacketKind = "None"
+    @Published var totalPackets = 0
+    @Published var pingPackets = 0
+    @Published var ocrPackets = 0
+    @Published var clearPackets = 0
+    @Published var lastPacketSummary = "No packets received"
+    @Published var capturePhase = "Waiting for extension"
+    @Published var acceptedInputCount = 0
+    @Published var discardedStaleCount = 0
+    @Published var stabilizationWaitCount = 0
+    @Published var lastCandidateText = ""
+    @Published var lastFilterSummary = "No OCR processed"
+    @Published var serverReady = false
+    @Published var lastStatusChangeAt = Date()
     @Published var history: [HistoryItem] = [] {
         didSet { saveHistory() }
     }
@@ -191,6 +206,21 @@ final class TranslatorEngine: ObservableObject {
         pip.onActiveChange = { [weak self] a in Task { @MainActor in self?.pipActive = a } }
     }
 
+
+    private func recordDiagnostic(_ message: String) {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss.SSS"
+        diagnosticEvents.append("[\(formatter.string(from: Date()))] \(message)")
+        if diagnosticEvents.count > 80 {
+            diagnosticEvents.removeFirst(diagnosticEvents.count - 80)
+        }
+        lastStatusChangeAt = Date()
+    }
+
+    func clearDiagnosticEvents() {
+        diagnosticEvents.removeAll()
+        recordDiagnostic("Diagnostic event log cleared")
+    }
 
     private static let historyKey = "screenlingo.history.v1"
 
