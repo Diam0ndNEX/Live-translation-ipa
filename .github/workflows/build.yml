@@ -107,4 +107,4 @@ jobs:
           name: ScreenLingo-ipa
           path: ScreenLingo.ipa
           if-no-files-found: error
-          retention-days: 90
+          retention-days: 400
