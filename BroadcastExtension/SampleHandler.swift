@@ -15,6 +15,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var sentKey = ""
     private var emptyPasses = 0
     private var lastOcrMs: Double = 0
+    private var heartbeat: DispatchSourceTimer?
 
     private let cfgLock = NSLock()
     private var _config = Config(lang: "auto", y0: 0, y1: 1, maxEdge: 1400, interval: 0.25, paused: false, minimumConfidence: 0.30, languageCorrection: true)
@@ -36,10 +37,27 @@ class SampleHandler: RPBroadcastSampleHandler {
         c.start(queue: .global(qos: .utility))
         conn = c
         listen()
+        // The first UDP datagram can be lost if the host app's listener is still
+        // starting. Keep announcing the extension independently of video frames,
+        // so the app can recover from startup races and temporarily unavailable frames.
         send(kind: "ping", lines: [])
+        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+        timer.schedule(deadline: .now() + 0.5, repeating: 1.0, leeway: .milliseconds(100))
+        timer.setEventHandler { [weak self] in
+            guard let self else { return }
+            self.send(kind: "ping", lines: [])
+        }
+        heartbeat = timer
+        timer.resume()
     }
 
-    override func broadcastFinished() { conn?.cancel() }
+    override func broadcastFinished() {
+        heartbeat?.setEventHandler {}
+        heartbeat?.cancel()
+        heartbeat = nil
+        conn?.cancel()
+        conn = nil
+    }
 
     /// The app sends settings back over the same link.
     private func listen() {
