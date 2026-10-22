@@ -401,14 +401,24 @@ final class TranslatorEngine: ObservableObject {
     private static func loadHistory() -> [HistoryItem] {
         guard let data = UserDefaults.standard.data(forKey: historyKey),
               let stored = try? JSONDecoder().decode([StoredHistoryItem].self, from: data) else { return [] }
-        return stored.prefix(100).map { item in
-            let value = HistoryItem(original: item.original, translated: item.translated, date: item.date, starred: item.starred ?? false)
-            return value
-        }
+        let retentionDays = max(0, UserDefaults.standard.integer(forKey: "historyRetentionDays"))
+        let cutoff = retentionDays > 0
+            ? Calendar.current.date(byAdding: .day, value: -retentionDays, to: Date())
+            : nil
+        return stored.filter { item in cutoff.map { item.date >= $0 } ?? true }
+            .prefix(100)
+            .map { item in
+                HistoryItem(original: item.original, translated: item.translated, date: item.date, starred: item.starred ?? false)
+            }
     }
 
     private func saveHistory() {
-        let stored = history.prefix(100).map {
+        let retentionDays = max(0, UserDefaults.standard.integer(forKey: "historyRetentionDays"))
+        let cutoff = retentionDays > 0
+            ? Calendar.current.date(byAdding: .day, value: -retentionDays, to: Date())
+            : nil
+        let retained = history.filter { item in cutoff.map { item.date >= $0 } ?? true }
+        let stored = retained.prefix(100).map {
             StoredHistoryItem(original: $0.original, translated: $0.translated, date: $0.date, starred: $0.starred)
         }
         guard let data = try? JSONEncoder().encode(Array(stored)) else { return }
