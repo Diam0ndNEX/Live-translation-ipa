@@ -155,7 +155,7 @@ final class TranslatorEngine: ObservableObject {
         "source", "target", "mode", "area", "customY0", "customY1", "winSize", "theme", "textSize",
         "pipFont", "highlightNames", "showOriginal", "speed", "autoClear", "textHoldDuration",
         "ocrConfidence", "languageCorrection", "rightToLeftReading", "cleanOCR", "slang",
-        "speakerDetect", "langLock", "neverTranslate", "sourceFixes", "glossary", "speak",
+        "speakerDetect", "langLock", "neverTranslate", "sourceFixes", "glossary", "speak", "includeDiagnosticText",
         "customY0", "customY1", "frameRot", "minTextH", "ignoreList", "dropNoise", "boost",
         "stability", "skipUnchanged"
     ]
