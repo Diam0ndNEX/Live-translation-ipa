@@ -1275,25 +1275,40 @@ final class TranslatorEngine: ObservableObject {
         var translatedAny = false
 
         for (bi, text) in blocks.enumerated() {
-            let detected = detectSource(text)
-            let sourceLanguageCode = detected?.languageCode?.identifier
-            let targetLanguageCode = target.languageCode?.identifier
+            // Evaluate the OCR text independently even when the user selected a
+            // source language. detectSource() intentionally honors that setting,
+            // so using its return value as detector evidence would simply repeat
+            // the configured language and fail to catch English mistakenly sent as pt.
+            let recognizer = NLLanguageRecognizer()
+            recognizer.processString(text)
+            let hypotheses = recognizer.languageHypotheses(withMaximum: 5)
+            let sourceEvidence = hypotheses.reduce(0.0) { score, item in
+                score + (Locale.Language(identifier: item.key.rawValue).languageCode
+                         == Locale.Language(identifier: sourceCode).languageCode ? item.value : 0)
+            }
+            let targetEvidence = hypotheses.reduce(0.0) { score, item in
+                score + (Locale.Language(identifier: item.key.rawValue).languageCode
+                         == target.languageCode ? item.value : 0)
+            }
+            let evidenceSummary = hypotheses.sorted { $0.value > $1.value }.map {
+                "\(Locale.Language(identifier: $0.key.rawValue).languageCode?.identifier ?? $0.key.rawValue)=\(String(format: "%.2f", $0.value))"
+            }.joined(separator: ", ")
             trace("SOURCE DETECTION EVIDENCE",
-                  "Block #\(bi + 1); setting=\(sourceCode); detected=\(sourceLanguageCode ?? "unknown"); target=\(targetLanguageCode ?? targetCode); text=\(text)")
+                  "Block #\(bi + 1); setting=\(sourceCode); target=\(targetCode); sourceScore=\(String(format: "%.2f", sourceEvidence)); targetScore=\(String(format: "%.2f", targetEvidence)); hypotheses=[\(evidenceSummary)]; text=\(text)")
 
-            // A manually chosen source language is a preference, not proof. Short OCR
-            // strings and English UI fragments can otherwise be force-labelled pt and
-            // returned unchanged by Apple Translation. Require affirmative source
-            // evidence before translating when the detector has a clear contradiction.
-            if sourceCode != "auto", sourceLanguageCode != nil,
-               sourceLanguageCode != sourceCode, sourceLanguageCode == targetLanguageCode {
+            // The configured source language must not override clear evidence that
+            // OCR captured text already in the target language. Short fragments remain
+            // ambiguous, so only apply this guard to sufficiently informative text.
+            if sourceCode != "auto", sourceCode != targetCode, text.count >= 12,
+               targetEvidence >= 0.32, targetEvidence >= sourceEvidence * 1.5 {
                 trace("SOURCE DETECTION REJECT",
-                      "explicit source \(sourceCode) contradicted by strong target-language evidence; keep prior output instead of treating input as Portuguese: \(text)")
+                      "target language is more likely than configured source; not sending this block through translation: \(text)")
                 sentences.append([text])
                 done.append([text])
                 continue
             }
-            guard let src = detected, src.languageCode != target.languageCode else {
+
+            guard let src = detectSource(text), src.languageCode != target.languageCode else {
                 sentences.append([text]); done.append([text]); continue
             }
             let id = src.minimalIdentifier
