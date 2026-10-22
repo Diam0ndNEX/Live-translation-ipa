@@ -469,13 +469,14 @@ struct LanguagesView: View {
 struct HistoryView: View {
     @EnvironmentObject var engine: TranslatorEngine
     @State private var query = ""
+    @State private var onlyStarred = false
     @State private var showingClearConfirmation = false
 
     private var filteredHistory: [HistoryItem] {
-        guard !query.isEmpty else { return engine.history }
-        return engine.history.filter {
-            $0.original.localizedCaseInsensitiveContains(query) ||
-            $0.translated.localizedCaseInsensitiveContains(query)
+        engine.history.filter { item in
+            (!onlyStarred || item.starred) &&
+            (query.isEmpty || item.original.localizedCaseInsensitiveContains(query) ||
+             item.translated.localizedCaseInsensitiveContains(query))
         }
     }
 
@@ -489,7 +490,7 @@ struct HistoryView: View {
         NavigationStack {
             List {
                 Section {
-                    Text("Saved locally on this device. Search by source or translation, copy either version, or export the full history.")
+                    Text("Tap a translation to copy it. Swipe right to star or unstar entries. Search either language and export your history.")
                         .font(.footnote).foregroundStyle(.secondary)
                     if !engine.history.isEmpty {
                         Text("\(filteredHistory.count) of \(engine.history.count) entries")
@@ -515,6 +516,17 @@ struct HistoryView: View {
                         .font(.caption)
                     }
                     .padding(.vertical, 4)
+                    .contentShape(Rectangle())
+                    .onTapGesture { UIPasteboard.general.string = h.translated }
+                    .swipeActions(edge: .leading) {
+                        Button { engine.toggleStar(h.id) } label: {
+                            Label(h.starred ? "Unstar" : "Star", systemImage: h.starred ? "star.slash" : "star")
+                        }
+                        .tint(.yellow)
+                    }
+                    .overlay(alignment: .topTrailing) {
+                        if h.starred { Image(systemName: "star.fill").foregroundStyle(.yellow).padding(.top, 2) }
+                    }
                 }
             }
             .scrollContentBackground(.hidden)
@@ -522,13 +534,21 @@ struct HistoryView: View {
             .searchable(text: $query, prompt: "Search original or translation")
             .navigationTitle("History")
             .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    if !engine.history.isEmpty {
-                        ShareLink(item: exportText) {
-                            Image(systemName: "square.and.arrow.up")
-                        }
-                        Button("Clear", role: .destructive) { showingClearConfirmation = true }
+                ToolbarItem(placement: .topBarLeading) {
+                    ShareLink(item: exportText) {
+                        Image(systemName: "square.and.arrow.up")
                     }
+                    .disabled(engine.history.isEmpty)
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Toggle("Only starred", isOn: $onlyStarred)
+                        Button("Clear unstarred", role: .destructive) {
+                            engine.history.removeAll { !$0.starred }
+                        }
+                        Button("Clear all history", role: .destructive) { showingClearConfirmation = true }
+                    } label: { Image(systemName: "ellipsis.circle") }
+                    .disabled(engine.history.isEmpty)
                 }
             }
             .confirmationDialog("Delete all translation history?", isPresented: $showingClearConfirmation, titleVisibility: .visible) {
