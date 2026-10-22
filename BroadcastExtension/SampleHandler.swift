@@ -10,6 +10,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var conn: NWConnection?
     private var frames = 0
     private var lastRun = Date.distantPast
+    private var lastUsefulTextAt = Date()
     private var lastPing = Date.distantPast
     private var candidateKey = ""
     private var candidateCount = 0
@@ -19,7 +20,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var heartbeat: DispatchSourceTimer?
 
     private let cfgLock = NSLock()
-    private var _config = Config(lang: "auto", y0: 0, y1: 1, maxEdge: 1400, interval: 0.25, paused: false, minimumConfidence: 0.30, languageCorrection: true, minimumTextHeight: nil, ignoreList: nil, dropNoise: nil, boost: nil, stability: nil, skipUnchanged: nil, rotation: nil)
+    private var _config = Config(lang: "auto", y0: 0, y1: 1, maxEdge: 1400, interval: 0.25, paused: false, minimumConfidence: 0.30, languageCorrection: true, minimumTextHeight: nil, ignoreList: nil, dropNoise: nil, boost: nil, stability: nil, skipUnchanged: nil, rotation: nil, adaptive: true, idleMinutes: 0)
     private var config: Config {
         get { cfgLock.lock(); defer { cfgLock.unlock() }; return _config }
         set { cfgLock.lock(); _config = newValue; cfgLock.unlock() }
@@ -76,7 +77,11 @@ class SampleHandler: RPBroadcastSampleHandler {
         if now.timeIntervalSince(lastPing) > 2 { lastPing = now; send(kind: "ping", lines: []) }
 
         let cfg = config
-        guard !cfg.paused, now.timeIntervalSince(lastRun) >= cfg.interval,
+        let idleMinutes = max(0, cfg.idleMinutes ?? 0)
+        let isIdle = (cfg.adaptive ?? true) && idleMinutes > 0
+            && now.timeIntervalSince(lastUsefulTextAt) >= TimeInterval(idleMinutes * 60)
+        let effectiveInterval = isIdle ? max(cfg.interval, 0.9) : cfg.interval
+        guard !cfg.paused, now.timeIntervalSince(lastRun) >= effectiveInterval,
               let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
         var orientation = CGImagePropertyOrientation.up
@@ -152,6 +157,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         let margin = 0.03
         let y0 = max(0, cfg.y0 - margin), y1 = min(1, cfg.y1 + margin)
         var edge = cfg.maxEdge
+        if isIdle { edge = min(edge, 900) }                 // save power while no text is visible
         if freeMB() < 15 { edge = min(edge, 800) }          // memory getting tight
 
         let extra = [CGImagePropertyOrientation.up, .right, .down, .left][((cfg.rotation ?? 0) % 4 + 4) % 4]
@@ -190,6 +196,8 @@ class SampleHandler: RPBroadcastSampleHandler {
             }
             return
         }
+
+        lastUsefulTextAt = Date()
 
         // Low-latency capture: the first readable frame is valuable because subtitles
         // and dialogue can disappear in 1–2 seconds. Send a new scene/text immediately;
