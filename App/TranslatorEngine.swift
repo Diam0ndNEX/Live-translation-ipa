@@ -717,12 +717,6 @@ final class TranslatorEngine: ObservableObject {
             trace("ROTATION REVISION", "Dropped stale OCR packet revision=\(packetRevision), current=\(rotationRevision)")
             return
         }
-        let revisionBeforeCalibration = rotationRevision
-        updateOrderVote(p.lines)
-        if rotationRevision != revisionBeforeCalibration {
-            trace("ROTATION REVISION", "Dropped frame used to choose a new reading rotation")
-            return
-        }
         let range = area.range(mode: mode)
         var cand = p.lines.filter { range.contains($0.y) }
         trace("AREA FILTER", "\(p.lines.count) raw → \(cand.count) inside \(area.rawValue) y=\(range.lowerBound)…\(range.upperBound)")
@@ -739,6 +733,13 @@ final class TranslatorEngine: ObservableObject {
             let beforeDedupe = cand.count
             cand = dedupeOCRLines(cand)
             trace("OCR DEDUPE", "\(beforeDedupe) lines → \(cand.count); removed \(beforeDedupe - cand.count) near-identical OCR copies with overlapping geometry")
+        }
+        // Calibrate from filtered source candidates, not our own PiP or app controls.
+        let revisionBeforeCalibration = rotationRevision
+        updateOrderVote(cand)
+        if rotationRevision != revisionBeforeCalibration {
+            trace("ROTATION REVISION", "Dropped frame used to choose a new reading rotation")
+            return
         }
         let groupedBlocks = makeBlocks(cand)
         trace("BLOCK GROUPING", "\(cand.count) lines → \(groupedBlocks.count) blocks")
