@@ -230,16 +230,37 @@ final class TranslatorEngine: ObservableObject {
         attemptPiP(0, done)
     }
     private func attemptPiP(_ n: Int, _ done: @escaping () -> Void) {
-        if pip.isActive { done(); return }
-        if pip.start() {
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { done() }
+        // A true return from start() means iOS accepted the request, not that PiP
+        // actually became active. The previous implementation called done() after
+        // one second regardless, masking a failed start and leaving capture unusable.
+        if pip.isActive {
+            status = captureAlive ? "Capture connected · floating window ready" : status
+            done()
             return
         }
-        if n >= 8 {
-            status = "PiP couldn't start – stay on the Home tab and tap Start again"
-            done(); return
+        if n >= 12 {
+            status = "PiP failed to become active. Keep ScreenLingo in the foreground, close other PiP windows, then retry."
+            done()
+            return
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.attemptPiP(n + 1, done) }
+
+        if pip.start() {
+            status = "Waiting for iOS to open the floating window… (attempt \(n + 1)/12)"
+        } else {
+            status = "iOS PiP is not ready yet… retrying (attempt \(n + 1)/12)"
+        }
+
+        // Wait for the delegate to report actual activation; if iOS rejected or
+        // stalled the request, try again instead of reporting success prematurely.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) { [weak self] in
+            guard let self else { done(); return }
+            if self.pip.isActive {
+                self.status = self.captureAlive ? "Capture connected · floating window ready" : self.status
+                done()
+            } else {
+                self.attemptPiP(n + 1, done)
+            }
+        }
     }
     func swapLanguages() {
         guard sourceCode != "auto" else { status = "Pick a source language to swap"; return }
