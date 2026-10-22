@@ -569,7 +569,17 @@ final class TranslatorEngine: ObservableObject {
             let t = l.t.trimmingCharacters(in: .whitespaces)
             if t.isEmpty { continue }
             if out.isEmpty { out = t }
-            else if out.hasSuffix("-") { out += t }
+            else if out.hasSuffix("-"),
+                    let first = t.first,
+                    first.isLowercase,
+                    !t.hasPrefix("Rem:"),
+                    !t.hasPrefix("O-") {
+                // Join a hyphenated word only when the continuation looks like the
+                // lowercase remainder of that word. OCR can place separate bubbles
+                // on adjacent rows (for example "p-" beside "Rem:"); blindly joining
+                // them creates the exact cross-speaker word corruption seen in reports.
+                out += t
+            }
             else if let last = out.last, isCJK(last) { out += t }
             else { out += " " + t }
         }
@@ -676,7 +686,7 @@ final class TranslatorEngine: ObservableObject {
             self.renderedNorm = TextSim.norm("Waiting for screen text… Listening…")
             self.sourceGrams = []
             self.pip.render(original: "", translated: "Listening…", showOriginal: false)
-            self.recordDiagnostic("Cleared vanished text after \(delay, specifier: "%.1f") seconds")
+            self.recordDiagnostic("Cleared vanished text after " + String(format: "%.1f", delay) + " seconds")
         }
         delayedClearWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
