@@ -11,6 +11,22 @@ struct DiagnosticsView: View {
         LabeledContent(title, value: value)
     }
 
+    private var thermalState: String {
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: "Normal"
+        case .fair: "Warm"
+        case .serious: "Hot / throttling"
+        case .critical: "Critical"
+        @unknown default: "Unknown"
+        }
+    }
+
+    private var batteryState: String {
+        let level = UIDevice.current.batteryLevel
+        guard level >= 0 else { return "Unavailable" }
+        return "\(Int(level * 100))%"
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -38,6 +54,16 @@ struct DiagnosticsView: View {
                     metric("Cache hits / failures", "\(engine.cacheHits) / \(engine.translationFailures)")
                     metric("Output quality", engine.lastOutputQuality)
                     metric("Last translation error", engine.lastTranslationError)
+                }
+                Section("Device & performance") {
+                    metric("Thermal state", thermalState)
+                    metric("Low Power Mode", ProcessInfo.processInfo.isLowPowerModeEnabled ? "On" : "Off")
+                    metric("Battery", batteryState)
+                    metric("App available memory", "\(Int(Double(os_proc_available_memory()) / 1_048_576)) MB")
+                    metric("Translation mode", UserDefaults.standard.string(forKey: "mode") ?? "movie")
+                    metric("OCR area", UserDefaults.standard.string(forKey: "area") ?? "smart")
+                    metric("Source / target", "\(engine.sourceCode) → \(engine.targetCode)")
+                    metric("Language lock", (UserDefaults.standard.object(forKey: "langLock") as? Bool ?? true) ? "Enabled" : "Disabled")
                 }
                 Section("Current text path") {
                     DisclosureGroup("Raw OCR") {
@@ -93,6 +119,7 @@ struct DiagnosticsView: View {
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Diagnostics")
+            .onAppear { UIDevice.current.isBatteryMonitoringEnabled = true }
             .confirmationDialog("Clear diagnostic history?", isPresented: $showClearConfirmation, titleVisibility: .visible) {
                 Button("Clear diagnostics", role: .destructive) { engine.clearDiagnosticEvents() }
                 Button("Cancel", role: .cancel) {}
