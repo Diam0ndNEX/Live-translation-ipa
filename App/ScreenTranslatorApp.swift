@@ -497,6 +497,10 @@ struct SettingsView: View {
     @AppStorage("includeDiagnosticText") private var includeDiagnosticText = true
     @State private var diagnosticExportURL: URL?
     @State private var showingDiagnosticExport = false
+    @State private var newProfileName = ""
+    @State private var showingProfileNamePrompt = false
+    @State private var showingImportResult = false
+    @State private var importResultMessage = ""
     @AppStorage("theme") private var theme = PiPTheme.dark.rawValue
     @AppStorage("textSize") private var textSize = PiPTextSize.auto.rawValue
     @AppStorage("speak") private var speak = false
@@ -525,6 +529,7 @@ struct SettingsView: View {
                 appBuildSection
                 translationPerformanceSection
                 textIntelligenceSection
+                profilesBackupSection
                 floatingWindowSection
                 automationSection
                 diagnosticsSection
@@ -553,6 +558,21 @@ struct SettingsView: View {
                     .navigationBarTitleDisplayMode(.inline)
                     .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { showingDiagnosticExport = false } } }
                 }.presentationDetents([.medium])
+            }
+            .alert("Save settings profile", isPresented: $showingProfileNamePrompt) {
+                TextField("Profile name", text: $newProfileName)
+                Button("Cancel", role: .cancel) {}
+                Button("Save") {
+                    engine.saveProfile(newProfileName)
+                    newProfileName = ""
+                }
+            } message: {
+                Text("Save the current translation, OCR and floating-window settings.")
+            }
+            .alert("Settings import", isPresented: $showingImportResult) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text(importResultMessage)
             }
             .onChange(of: theme) { _, _ in engine.applyStyle() }
             .onChange(of: textSize) { _, _ in engine.applyStyle() }
@@ -654,6 +674,43 @@ struct SettingsView: View {
             Text("Text intelligence")
         } footer: {
             Text("These rules run on recognized content before or after translation. They do not change what the screen recorder captures.")
+        }
+    }
+
+    private var profilesBackupSection: some View {
+        Section {
+            Button { showingProfileNamePrompt = true } label: {
+                Label("Save current settings as profile", systemImage: "square.and.arrow.down")
+            }
+            if engine.profileNames.isEmpty {
+                Text("No saved profiles yet.").font(.footnote).foregroundStyle(.secondary)
+            } else {
+                ForEach(engine.profileNames, id: \.self) { profile in
+                    HStack {
+                        Button(profile) { engine.applyProfile(profile) }
+                        Spacer()
+                        Button(role: .destructive) { engine.deleteProfile(profile) } label: {
+                            Image(systemName: "trash")
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
+            ShareLink(item: engine.exportSettings()) {
+                Label("Export settings backup", systemImage: "square.and.arrow.up")
+            }
+            Button {
+                let clipboard = UIPasteboard.general.string ?? ""
+                let success = engine.importSettings(clipboard)
+                importResultMessage = success ? "Settings imported successfully." : "No valid ScreenLingo settings backup was found on the clipboard."
+                showingImportResult = true
+            } label: {
+                Label("Import backup from clipboard", systemImage: "doc.on.clipboard")
+            }
+        } header: {
+            Text("Profiles & backup")
+        } footer: {
+            Text("Backups contain preferences and saved profiles, not translation history or screen content.")
         }
     }
 
