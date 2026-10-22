@@ -184,8 +184,11 @@ struct WindowSettings: View {
     @AppStorage("pipFont") private var pipFont = PiPFont.standard.rawValue
     @AppStorage("highlightNames") private var highlightNames = true
     @AppStorage("showOriginal") private var showOriginal = false
+    @AppStorage("autoOpenPiP") private var autoOpenPiP = true
     @AppStorage("autoClear") private var autoClear = true
     @AppStorage("textHoldDuration") private var clearHold = 2.0
+    @AppStorage("minDisplay") private var minDisplay = 0.0
+    @AppStorage("haptics") private var haptics = false
     @AppStorage("speak") private var speak = false
 
     private var styleKey: String { "\(theme)|\(textSize)|\(pipFont)|\(highlightNames)" }
