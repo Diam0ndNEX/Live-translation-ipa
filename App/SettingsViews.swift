@@ -507,28 +507,46 @@ struct SettingsView: View {
     }
 
     private var resetSection: some View {
-            Section("Reset") {
-                Button("Reset all settings", role: .destructive) {
-                    for key in ["source", "target", "mode", "area", "winSize", "showOriginal", "speed", "autoClear", "ocrConfidence", "languageCorrection", "rightToLeftReading", "theme", "textSize", "speak"] {
-                        UserDefaults.standard.removeObject(forKey: key)
-                    }
-                    engine.sourceCode = "auto"
-                    engine.targetCode = "en"
-                    mode = TranslateMode.movie.rawValue
-                    area = OCRArea.smart.rawValue
-                    winSize = WindowSize.normal.rawValue
-                    showOriginal = false
-                    speed = SpeedPreset.balanced.rawValue
-                    autoClear = true
-                    theme = PiPTheme.dark.rawValue
-                    textSize = PiPTextSize.auto.rawValue
-                    speak = false
-                    engine.paused = false
-                    engine.syncConfig()
-                    engine.applyWindowSize()
-                    engine.applyStyle()
-                }
+        Section("Reset") {
+            Button("Reset all settings", role: .destructive) {
+                engine.resetAllSettings()
+                engine.paused = false
+                includeDiagnosticText = true
+                mode = TranslateMode.movie.rawValue
+                area = OCRArea.smart.rawValue
+                winSize = WindowSize.normal.rawValue
+                showOriginal = false
+                speed = SpeedPreset.balanced.rawValue
+                autoClear = true
+                textHoldDuration = 2.0
+                ocrConfidence = 0.30
+                languageCorrection = true
+                rightToLeftReading = false
+                cleanOCR = true
+                slang = true
+                speakerDetect = true
+                langLock = true
+                neverTranslate = ""
+                sourceFixes = ""
+                glossary = ""
+                theme = PiPTheme.dark.rawValue
+                textSize = PiPTextSize.auto.rawValue
+                pipFont = PiPFont.standard.rawValue
+                highlightNames = true
+                customY0 = 0.0
+                customY1 = 0.5
+                frameRot = "auto"
+                minTextH = 0.0
+                ignoreList = ""
+                dropNoise = true
+                boost = 1
+                stability = 1
+                skipUnchanged = true
+                engine.syncConfig()
+                engine.applyWindowSize()
+                engine.applyStyle()
             }
+        }
     }
     private var speedDescription: String {
         switch SpeedPreset(rawValue: speed) ?? .balanced {
