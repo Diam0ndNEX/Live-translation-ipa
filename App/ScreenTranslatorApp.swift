@@ -523,6 +523,15 @@ struct SettingsView: View {
     @AppStorage("glossary") private var glossary = ""
     @AppStorage("pipFont") private var pipFont = PiPFont.standard.rawValue
     @AppStorage("highlightNames") private var highlightNames = true
+    @AppStorage("customY0") private var customY0 = 0.0
+    @AppStorage("customY1") private var customY1 = 0.5
+    @AppStorage("frameRot") private var frameRot = "auto"
+    @AppStorage("minTextH") private var minTextH = 0.0
+    @AppStorage("ignoreList") private var ignoreList = ""
+    @AppStorage("dropNoise") private var dropNoise = true
+    @AppStorage("boost") private var boost = 1
+    @AppStorage("stability") private var stability = 1
+    @AppStorage("skipUnchanged") private var skipUnchanged = true
 
     var body: some View {
         NavigationStack {
@@ -585,6 +594,15 @@ struct SettingsView: View {
             .onChange(of: mode) { _, _ in engine.syncConfig() }
             .onChange(of: ocrConfidence) { _, _ in engine.syncConfig() }
             .onChange(of: languageCorrection) { _, _ in engine.syncConfig() }
+            .onChange(of: customY0) { _, _ in engine.syncConfig() }
+            .onChange(of: customY1) { _, _ in engine.syncConfig() }
+            .onChange(of: minTextH) { _, _ in engine.syncConfig() }
+            .onChange(of: ignoreList) { _, _ in engine.syncConfig() }
+            .onChange(of: dropNoise) { _, _ in engine.syncConfig() }
+            .onChange(of: boost) { _, _ in engine.syncConfig() }
+            .onChange(of: stability) { _, _ in engine.syncConfig() }
+            .onChange(of: skipUnchanged) { _, _ in engine.syncConfig() }
+            .onChange(of: frameRot) { _, _ in engine.syncConfig() }
         }
     }
 
@@ -611,6 +629,14 @@ struct SettingsView: View {
                         ocrAreaOption(item)
                     }
                 }
+                if area == OCRArea.custom.rawValue {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Read from \(Int(customY0 * 100))% to \(Int(customY1 * 100))% of screen height (0% = bottom)")
+                            .font(.footnote).foregroundStyle(.secondary)
+                        Slider(value: $customY0, in: 0...0.9)
+                        Slider(value: $customY1, in: 0.1...1)
+                    }
+                }
                 Picker("Performance profile", selection: $speed) {
                     ForEach(SpeedPreset.allCases) { item in
                         speedPresetOption(item)
@@ -631,6 +657,31 @@ struct SettingsView: View {
                     Slider(value: $ocrConfidence, in: 0.15...0.75, step: 0.05)
                     Text("Lower values catch faint or stylized text but may include more mistakes. Higher values are stricter and can miss difficult text.")
                         .font(.caption).foregroundStyle(.secondary)
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Ignore text smaller than \(Int(minTextH * 100))% of screen height")
+                    Slider(value: $minTextH, in: 0...0.08, step: 0.005)
+                }
+                TextField("Ignore text containing… (comma separated)", text: $ignoreList, axis: .vertical)
+                    .lineLimit(1...3)
+                Toggle("Ignore numbers and symbol noise", isOn: $dropNoise)
+                Picker("Contrast boost", selection: $boost) {
+                    Text("Off").tag(0)
+                    Text("Only when text is hard to find").tag(1)
+                    Text("Always").tag(2)
+                }
+                Picker("Wait for stable text", selection: $stability) {
+                    Text("Instant").tag(1)
+                    Text("Normal").tag(2)
+                    Text("Careful").tag(3)
+                }
+                Toggle("Skip unchanged frames", isOn: $skipUnchanged)
+                Picker("Frame rotation", selection: $frameRot) {
+                    Text("Automatic").tag("auto")
+                    Text("None").tag("0")
+                    Text("90° clockwise").tag("90")
+                    Text("180° (upside down)").tag("180")
+                    Text("270° clockwise").tag("270")
                 }
             } header: {
                 Text("Translation & performance")
