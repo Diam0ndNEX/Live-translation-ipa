@@ -14,7 +14,9 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var lastPing = Date.distantPast
     private var candidateKey = ""
     private var candidateCount = 0
+    private var candidateLines: [OCRLine] = []
     private var sentKey = ""
+    private var lastSentAt = Date.distantPast
     private var emptyPasses = 0
     private var lastOcrMs: Double = 0
     private var heartbeat: DispatchSourceTimer?
@@ -195,35 +197,64 @@ class SampleHandler: RPBroadcastSampleHandler {
         if lines.isEmpty {
             if emptyPasses >= 4 {
                 if !sentKey.isEmpty { send(kind: "clear", lines: []) }
-                sentKey = ""; candidateKey = ""
+                sentKey = ""; candidateKey = ""; candidateLines = []; lastSentAt = .distantPast
             }
             return
         }
 
         lastUsefulTextAt = Date()
 
-        // Low-latency capture: the first readable frame is valuable because subtitles
-        // and dialogue can disappear in 1–2 seconds. Send a new scene/text immediately;
-        // do not wait for a second identical OCR pass. Later frames are deduplicated
-        // against the last delivered text to avoid repeatedly translating the same frame.
+        // Require at least two consecutive OCR passes even if "Fast" is selected.
+        // A single Vision frame can drop the beginning/end of a subtitle; publishing
+        // each changed frame makes the translator and History oscillate between variants.
         let key = lines.map(\.t).joined(separator: " ")
+        let keyNorm = TextSim.norm(key)
+        let sentNorm = TextSim.norm(sentKey)
         let skipUnchanged = cfg.skipUnchanged ?? true
         if skipUnchanged && !sentKey.isEmpty && TextSim.similar(key, sentKey, 0.97) {
-            candidateKey = key
+            candidateKey = ""
             candidateCount = 0
+            candidateLines = []
             return
         }
-        let required = max(1, min(3, cfg.stability ?? 1))
+
+        // Reject a substantially shorter OCR reading that is contained inside the
+        // last accepted text while that text is still fresh. This catches fragments
+        // that are not necessarily a suffix, before they can trigger translation/history.
+        let recentAcceptedText = Date().timeIntervalSince(lastSentAt) < 2.5
+        let looksLikeTruncatedFragment = recentAcceptedText
+            && sentNorm.count >= keyNorm.count + 8
+            && keyNorm.count >= 8
+            && Double(keyNorm.count) / Double(max(1, sentNorm.count)) < 0.82
+            && sentNorm.contains(keyNorm)
+        if looksLikeTruncatedFragment {
+            candidateKey = ""
+            candidateCount = 0
+            candidateLines = []
+            return
+        }
+
+        // "Instant" used to mean one frame, which is too unstable for live OCR.
+        // Keep the speed control but enforce a minimum two-pass confirmation.
+        let required = max(2, min(3, cfg.stability ?? 2))
         if TextSim.similar(key, candidateKey, 0.97) {
             candidateCount += 1
+            // Keep the matching lines from this pass; only near-identical candidates
+            // reach this branch, so the selected frame remains internally consistent.
+            candidateLines = lines
         } else {
             candidateKey = key
             candidateCount = 1
+            candidateLines = lines
         }
         guard candidateCount >= required else { return }
-        sentKey = key
+        let acceptedLines = candidateLines.isEmpty ? lines : candidateLines
+        sentKey = acceptedLines.map(\.t).joined(separator: " ")
+        lastSentAt = Date()
+        candidateKey = ""
         candidateCount = 0
-        send(kind: "ocr", lines: Array(lines.prefix(60)))
+        candidateLines = []
+        send(kind: "ocr", lines: Array(acceptedLines.prefix(60)))
     }
 
     // MARK: Send
