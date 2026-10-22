@@ -23,6 +23,7 @@ struct SettingsView: View {
                     NavigationLink { WindowSettings() } label: { Label("Floating window", systemImage: "rectangle.on.rectangle") }
                     NavigationLink { PerformanceSettings() } label: { Label("Performance & power", systemImage: "bolt.fill") }
                     NavigationLink { ProfilesSettings() } label: { Label("Profiles & backup", systemImage: "square.stack.3d.up") }
+                    NavigationLink { PrivacySettings() } label: { Label("Privacy & history", systemImage: "hand.raised") }
                     NavigationLink { AboutSettings() } label: { Label("About & help", systemImage: "info.circle") }
                 } footer: {
                     Text(AppVersion.full)
@@ -315,6 +316,44 @@ struct ProfilesSettings: View {
             }
         }
         .settingsPage("Profiles & backup")
+    }
+}
+
+// MARK: - Privacy & history
+struct PrivacySettings: View {
+    @AppStorage("historyRetentionDays") private var retentionDays = 0
+    @AppStorage("includeDiagnosticText") private var includeDiagnosticText = false
+    @State private var showRetentionInfo = false
+
+    var body: some View {
+        List {
+            Section {
+                Picker("Keep translation history", selection: $retentionDays) {
+                    Text("Forever").tag(0)
+                    Text("7 days").tag(7)
+                    Text("30 days").tag(30)
+                    Text("90 days").tag(90)
+                }
+            } header: {
+                Text("Local history")
+            } footer: {
+                Text("Older entries are removed automatically when history is loaded or next saved. History stays on this device and is not uploaded by ScreenLingo.")
+            }
+            Section {
+                Toggle("Include recognized text in diagnostic reports", isOn: $includeDiagnosticText)
+            } header: {
+                Text("Diagnostics")
+            } footer: {
+                Text("Turn this off before sharing reports if the screen may contain private messages, account details, or other sensitive text.")
+            }
+            Section("Data controls") {
+                LabeledContent("Storage", value: "On this device")
+                LabeledContent("Translation service", value: "Apple on-device")
+                Text("Exported history and diagnostic reports can contain screen text. Review them before sharing.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+        }
+        .settingsPage("Privacy & history")
     }
 }
 
