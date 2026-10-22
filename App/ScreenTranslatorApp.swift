@@ -188,6 +188,7 @@ struct HomeView: View {
             VStack(spacing: 16) {
                 header
                 languageBar
+                presetRow
                 preview
                 settings
                 startButton
@@ -264,6 +265,31 @@ struct HomeView: View {
     }
 
     /// Doubles as a live preview AND keeps the PiP layer on screen (required for PiP to start).
+    /// One-tap presets make the current reading setup easy to understand and restore.
+    private var presetRow: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Quick setup")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 8) {
+                ForEach([("movie", "film", "Movie"), ("game", "gamecontroller", "Game"), ("comic", "book", "Comic")], id: \\.0) { item in
+                    Button {
+                        engine.applyPreset(item.0)
+                    } label: {
+                        Label(item.2, systemImage: item.1)
+                            .font(.footnote.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .background(mode == item.0 ? Theme.gradient : Theme.card,
+                                        in: Capsule())
+                    }
+                    .foregroundStyle(.white)
+                    .accessibilityLabel("\\(item.2) preset")
+                }
+            }
+        }
+    }
+
     private var preview: some View {
         VStack(spacing: 6) {
             PiPPreview(layer: engine.pip.displayLayer)
@@ -378,50 +404,61 @@ struct HomeView: View {
                 Spacer()
             }
             Text(engine.status).font(.footnote).foregroundStyle(.secondary)
-            HStack(spacing: 8) {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
                 Button {
                     UIPasteboard.general.string = engine.translated
                     engine.status = "Translation copied"
                 } label: {
-                    Label("Copy result", systemImage: "doc.on.doc")
+                    Label("Copy translation", systemImage: "doc.on.doc")
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.bordered)
                 .disabled(engine.translated.isEmpty)
+
                 Button {
                     UIPasteboard.general.string = engine.original
                     engine.status = "Original text copied"
                 } label: {
                     Label("Copy original", systemImage: "text.quote")
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.bordered)
                 .disabled(engine.original.isEmpty)
+
                 if !engine.translated.isEmpty {
                     ShareLink(item: engine.translated) {
-                        Label("Share", systemImage: "square.and.arrow.up")
+                        Label("Share translation", systemImage: "square.and.arrow.up")
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .buttonStyle(.bordered)
                 }
+
                 Button {
                     engine.retranslateLast()
                 } label: {
                     Label("Re-translate", systemImage: "arrow.clockwise")
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.bordered)
                 .disabled(engine.original.isEmpty)
-                Button {
-                    engine.clearCurrentTranslation()
-                } label: {
-                    Label("Clear", systemImage: "xmark.circle")
-                }
-                .buttonStyle(.bordered)
-                .disabled(engine.translated.isEmpty)
+
                 Button {
                     engine.retranslateLastFresh()
                 } label: {
                     Label("Retry fresh", systemImage: "arrow.trianglehead.2.clockwise")
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
                 .buttonStyle(.bordered)
                 .disabled(engine.original.isEmpty)
+
+                Button {
+                    engine.clearCurrentTranslation()
+                } label: {
+                    Label("Clear output", systemImage: "xmark.circle")
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .buttonStyle(.bordered)
+                .disabled(engine.translated.isEmpty)
             }
             .font(.caption)
             .labelStyle(.titleAndIcon)
