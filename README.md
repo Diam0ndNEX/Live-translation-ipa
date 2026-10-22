@@ -7,7 +7,7 @@ ScreenLingo is a native iOS screen translator built with SwiftUI, Apple Vision O
 - Live screen text capture through a ReplayKit broadcast extension.
 - On-device OCR and translation with supported Apple language packs.
 - Floating Picture-in-Picture translation window.
-- Dedicated modes for subtitles, games/apps, and comics.
+- Dedicated modes for subtitles, games/apps, and comics, with Movie mode able to translate aligned multi-row lyrics together.
 - Configurable OCR area and Fast / Balanced / Sharp performance profiles.
 - Adjustable OCR confidence threshold and optional language-aware recognition correction.
 - Customizable PiP size, appearance, text size, and optional original-text display.
@@ -22,7 +22,7 @@ ScreenLingo is a native iOS screen translator built with SwiftUI, Apple Vision O
 - Display name: `ScreenLingo`
 - Bundle identifier: `com.diam0ndnex.screenlingo`
 - Broadcast extension identifier: `com.diam0ndnex.screenlingo.broadcast`
-- Version: `1.4.0` (build `28`)
+- Version: `1.4.7` (build `35`)
 
 The bundle identifier has changed from the previous placeholder ID. iOS treats it as a different app identity; to replace an older installation cleanly, uninstall the old Screen Translator build first. This may remove its local app data, so export anything important before uninstalling.
 
@@ -43,4 +43,4 @@ Translation history and settings are stored locally on-device. History can be au
 
 ## Development
 
-The Xcode project is generated from `project.yml`. The app and ReplayKit extension share packet/config models in `Shared/Shared.swift`.
+The Xcode project is generated from `project.yml`. The app and ReplayKit extension share packet/config models in `Shared/Shared.swift`. Version metadata in `Shared/Shared.swift` and `project.yml` must stay synchronized.
