@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.2.0"
-    static let build = 15
+    static let version = "1.2.1"
+    static let build = 16
     static var full: String { "v\(version) (build \(build))" }
-    // Newest first. Add a line here each time you bump the version.
+    // Newest first. Keep this aligned with MARKETING_VERSION and CURRENT_PROJECT_VERSION in project.yml.
     static let changelog: [(String, String)] = [
+        ("1.2.1", "Fix duplicate UDP listener startup on app activation, prevent port rebind races, and improve capture connection recovery diagnostics."),
         ("1.2.0", "Comic-context translation, stable OCR reading order, centered dialogue grouping, right-to-left manga support, block-order diagnostics, output truncation checks, and app/extension version 1.2.0 build 15."),
         ("1.1.0", "Improved comic dialogue ordering, richer live diagnostics, history search/export, quick output actions, cache controls, and explicit bundle version metadata."),
         ("0.8.0", "ScreenLingo bundle identity, advanced controls, live OCR tuning, and safer capture preferences."),
