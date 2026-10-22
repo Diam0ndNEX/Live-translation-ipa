@@ -130,6 +130,14 @@ final class TranslatorEngine: ObservableObject {
     @Published var lockedLang: String? = nil
     private var languageDetectionHistory: [String] = []
     private var languageMismatchCount = 0
+    // Automatic frame-rotation calibration: reject upside-down OCR ordering and retry
+    // alternate quarter-turns, echoing a revision so stale frames cannot be published.
+    private var orderVote = 0.0
+    private var votesSinceRotationChange = 0
+    private var rotationTrial = 0
+    private var autoRotation = 0
+    private var rotationRevision = 0
+    private var rotationCalibrated = false
     @Published var diagnosticEvents: [String] = []
     @Published var processingTrace: [String] = []
     private var processingTraceDates: [Date] = []
@@ -540,7 +548,7 @@ final class TranslatorEngine: ObservableObject {
             .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         let rotationSetting = defaults.string(forKey: "frameRot") ?? "auto"
-        let rotation = ["90": 1, "180": 2, "270": 3][rotationSetting] ?? 0
+        let rotation = rotationSetting == "auto" ? autoRotation : (["90": 1, "180": 2, "270": 3][rotationSetting] ?? 0)
         server.send(Config(lang: sourceCode, y0: r.lowerBound, y1: r.upperBound,
                            maxEdge: speed.maxEdge, interval: speed.interval, paused: paused,
                            minimumConfidence: minimumOCRConfidence, languageCorrection: languageCorrection,
@@ -553,6 +561,45 @@ final class TranslatorEngine: ObservableObject {
                            rotation: rotation,
                            adaptive: defaults.object(forKey: "adaptive") as? Bool ?? true,
                            idleMinutes: defaults.object(forKey: "idleMinutes") as? Int ?? 0))
+    }
+
+    /// Reset automatic reading-order calibration when the user changes the rotation mode.
+    func rotationSettingChanged() {
+        autoRotation = 0
+        rotationTrial = 0
+        orderVote = 0
+        votesSinceRotationChange = 0
+        rotationCalibrated = false
+        rotationRevision += 1
+        syncConfig()
+        recordDiagnostic("Reading-order calibration reset; mode=\\(UserDefaults.standard.string(forKey: \"frameRot\") ?? \"auto\")")
+    }
+
+    /// Detect when line order reads more naturally in reverse and try another frame rotation.
+    private func updateOrderVote(_ lines: [OCRLine]) {
+        var difference = 0.0
+        for block in makeBlocks(lines) where block.count >= 2 {
+            let forward = readingOrder(block).map(\\.t)
+            difference += TextIntel.orderScore(forward) - TextIntel.orderScore(Array(forward.reversed()))
+        }
+        guard difference != 0 else { return }
+        orderVote = max(-30, min(30, orderVote * 0.8 + difference))
+        votesSinceRotationChange += 1
+        let mode = UserDefaults.standard.string(forKey: "frameRot") ?? "auto"
+        guard mode == "auto" else { return }
+        if orderVote < -4 && votesSinceRotationChange >= 2 {
+            rotationTrial = (rotationTrial + 1) % 4
+            autoRotation = [0, 2, 1, 3][rotationTrial]
+            rotationRevision += 1
+            orderVote = 0
+            votesSinceRotationChange = 0
+            rotationCalibrated = false
+            recordDiagnostic("Reading order appears reversed; testing rotation \\(autoRotation * 90)°")
+            syncConfig()
+        } else if orderVote > 4 && !rotationCalibrated {
+            rotationCalibrated = true
+            recordDiagnostic("Reading order calibrated at rotation \\(autoRotation * 90)°")
+        }
     }
 
     // MARK: PiP
@@ -639,6 +686,17 @@ final class TranslatorEngine: ObservableObject {
         if paused { return }
         if p.kind == "clear" { handleClear(); return }
         guard p.kind == "ocr" else { return }
+        if let packetRevision = p.rev, packetRevision != rotationRevision {
+            discardedStaleCount += 1
+            trace("ROTATION REVISION", "Dropped stale OCR packet revision=\\(packetRevision), current=\\(rotationRevision)")
+            return
+        }
+        let revisionBeforeCalibration = rotationRevision
+        updateOrderVote(p.lines)
+        if rotationRevision != revisionBeforeCalibration {
+            trace("ROTATION REVISION", "Dropped frame used to choose a new reading rotation")
+            return
+        }
         ocrCount += 1
         lastRaw = String(p.lines.map(\.t).joined(separator: " ").prefix(1200))
         lastOCRLineCount = p.lines.count
