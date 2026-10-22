@@ -987,8 +987,8 @@ final class TranslatorEngine: ObservableObject {
                 // Lyrics often arrive as separate OCR blocks because centered lines
                 // have different widths. Accept either a shared center or a shared
                 // left edge, but require similar font size and close vertical spacing.
-                let centered = abs(centerX(upper) - centerX(lower)) <= 0.18
-                let leftAligned = abs(leftEdge(upper) - leftEdge(lower)) <= 0.14
+                let centered = abs(centerX(upper) - centerX(lower)) <= 0.12
+                let leftAligned = abs(leftEdge(upper) - leftEdge(lower)) <= 0.10
                 return centered || leftAligned
             }
 
@@ -1036,7 +1036,11 @@ final class TranslatorEngine: ObservableObject {
                 }
             }
 
-            let lyricGroups = clusters.filter { $0.count >= 2 && $0.count <= 6 }
+            let lyricGroups = clusters.filter { group in
+                guard group.count >= 2, group.count <= 6,
+                      let first = group.first, let last = group.last else { return false }
+                return centerY(first) - centerY(last) <= 0.34
+            }
             func groupScore(_ group: [[OCRLine]]) -> Double {
                 group.reduce(0.0) { $0 + movieScore($1) } + Double(max(0, group.count - 1)) * 12
             }
