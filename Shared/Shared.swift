@@ -7,7 +7,7 @@ enum AppVersion {
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Keep this aligned with MARKETING_VERSION and CURRENT_PROJECT_VERSION in project.yml.
     static let changelog: [(String, String)] = [
-        ("1.3.2", "Improve Portuguese→English source-vs-target language checks, reject suspicious unchanged results, retry failed translation batches, and clean common OCR character substitutions."),
+        ("1.3.2", "Improve source-vs-target language checks, retry failed batches, configurable OCR cleanup, slang expansion, speaker and protected-term handling, source corrections, glossary rules, stable language lock, settings profiles/backup, and PiP font/highlighting controls."),
         ("1.3.1", "Prevent spatial-only PiP feedback suppression from deleting genuine source text; improve OCR dialogue grouping using box-edge spacing."),
         ("1.3.0", "Unify OCR row ordering across block grouping and translation; improve deterministic bounding-box row clustering and add canonical OCR-order diagnostics; build 25."),
         ("1.2.9", "Ignore captured ScreenLingo settings/diagnostics screens and retain full diagnostic trace history for .txt export; build 24."),
