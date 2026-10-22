@@ -423,10 +423,10 @@ final class TranslatorEngine: ObservableObject {
         }
     }
 
-    /// Clusters lines that belong together (similar size, stacked closely, overlapping horizontally).
-    /// Groups only geometrically related lines. Coordinates are normalized to the
-    /// full, orientation-corrected frame (0 = bottom, 1 = top). Process top-to-bottom
-    /// and never join neighboring side-by-side bubbles just because their gap is small.
+    /// Clusters OCR lines into vertical text runs.
+    /// Same-row OCR observations are deliberately kept separate: their bounding boxes
+    /// often overlap even when they come from different speakers or speech bubbles.
+    /// Only tightly aligned, similarly sized lines on adjacent rows may be joined.
     private func makeBlocks(_ lines: [OCRLine]) -> [[OCRLine]] {
         let ordered = lines.enumerated().sorted {
             if abs($0.element.y - $1.element.y) < 0.000001 {
@@ -464,10 +464,11 @@ final class TranslatorEngine: ObservableObject {
                     // or an OCR line from the floating PiP overlay. Do not bridge them
                     // merely because their text boxes overlap a little.
                     && !(lineWidth > 0.72 && previousWidth > 0.72 && centerDistance > 0.06)
-                // Same-row fragments are joined only when their boxes overlap; a small
-                // horizontal gap alone is not enough to merge separate characters/bubbles.
-                let sameRow = abs(verticalGap) <= 0.30 * lineHeight && overlap > 0
-                guard sizeRatio > 0.45, stacked || sameRow else { continue }
+                // Never merge two OCR observations on the same visual row.
+                // Vision often returns separate speech bubbles/characters on one row
+                // with overlapping, oversized text boxes. Joining those fragments is
+                // a common source of corruption such as "p-Rem:".
+                guard sizeRatio > 0.45, stacked else { continue }
 
                 let score = (overlap / min(lineWidth, previousWidth))
                     - abs(verticalGap) / lineHeight * 0.1
