@@ -291,7 +291,11 @@ struct HomeView: View {
                     .background(Theme.card, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
                 }
                 VStack(spacing: 2) {
-                    BroadcastPicker(onTap: { engine.startPiP() }).frame(width: 60, height: 60)
+                    // Do not launch PiP on the broadcast-picker tap. iOS must first
+                    // present its broadcast sheet and start the extension; starting PiP
+                    // at the same moment can compete with/interrupt that transition.
+                    // TranslatorEngine starts PiP after it receives the extension's first packet.
+                    BroadcastPicker().frame(width: 60, height: 60)
                     Text("Start capture").font(.footnote.weight(.semibold)).foregroundStyle(.white)
                 }
                 .frame(maxWidth: .infinity, minHeight: 96)
