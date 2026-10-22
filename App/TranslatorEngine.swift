@@ -483,6 +483,11 @@ final class TranslatorEngine: ObservableObject {
         let range = area.range(mode: mode)
         var cand = p.lines.filter { range.contains($0.y) }
         trace("AREA FILTER", "\(p.lines.count) raw → \(cand.count) inside \(area.rawValue) y=\(range.lowerBound)…\(range.upperBound)")
+        if mode == .movie {
+            let beforeUI = cand.count
+            cand = cand.filter { !isScreenLingoChromeText($0.t) }
+            trace("MOVIE UI FILTER", "\(beforeUI - cand.count) explicit ScreenLingo UI lines removed; \(cand.count) remain")
+        }
         let beforeOwnOutput = cand.count
         cand = removeOwnOutput(cand)
         trace("PIP FEEDBACK", "\(beforeOwnOutput - cand.count) lines removed as own output; \(cand.count) remain")
@@ -661,10 +666,27 @@ final class TranslatorEngine: ObservableObject {
         let maxH = blocks.map { blockHeight($0) }.max() ?? 0
         var kept = blocks
         if mode == .movie {
-            // Text may occur anywhere. Retain several substantial regions, not just
-            // the largest bottom subtitle, and preserve each region independently.
-            kept = blocks.filter { blockHeight($0) >= maxH * 0.42 }
-            if kept.count > 8 { kept = Array(kept.sorted { blockWeight($0) > blockWeight($1) }.prefix(8)) }
+            // Movie mode emits one best source subtitle per OCR frame. Keep all spatial
+            // regions available for ranking, but never translate overlapping candidates
+            // independently. Games/comics retain their multi-region selection below.
+            func movieScore(_ block: [OCRLine]) -> Double {
+                let text = blockText(block)
+                let letters = Double(text.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count)
+                let lineBonus = Double(max(0, block.count - 1)) * 12
+                let width = block.compactMap(\.w).max() ?? 0
+                let centerY = block.map(\.y).reduce(0, +) / Double(max(1, block.count))
+                let subtitleZoneBonus = (centerY >= 0.08 && centerY <= 0.48) ? 8.0 : 0.0
+                return min(letters, 140) + lineBonus + min(12.0, width * 12.0) + subtitleZoneBonus
+            }
+            let ranked = blocks.filter { block in
+                let text = blockText(block)
+                return !isScreenLingoChromeText(text)
+                    && isUsefulOCRText(text)
+                    && !isTargetLanguage(text)
+                    && plausiblySource(text)
+            }.sorted { movieScore($0) > movieScore($1) }
+            kept = Array(ranked.prefix(1))
+            trace("MOVIE CANDIDATES", "ranked \(ranked.count) source-like block(s); selected \(kept.first.map { blockText($0) } ?? "[none]")")
         } else if area == .smart {
             kept = blocks.filter { blockHeight($0) >= maxH * (mode == .comic ? 0.22 : 0.32) }
         }
@@ -740,6 +762,7 @@ final class TranslatorEngine: ObservableObject {
     private func isScreenLingoInterface(_ lines: [OCRLine]) -> Bool {
         let allText = TextSim.norm(lines.map(\.t).joined(separator: " "))
         let markers = [
+            "copyreportforchatgpt",
             "copycompactreportlast60seconds",
             "exportfulldiagnosticreporttxt",
             "compactreportsincludeonlythelast60seconds",
@@ -748,9 +771,49 @@ final class TranslatorEngine: ObservableObject {
             "cleartranslationcache",
             "cleardiagnosticeventlog",
             "livediagnostics",
-            "runtranslationtest"
+            "processingtrace",
+            "recentdiagnosticevents",
+            "runtranslationtest",
+            "translationinput",
+            "currentoriginal",
+            "currenttranslation"
         ]
-        return markers.filter { allText.contains($0) }.count >= 2
+        if markers.filter({ allText.contains($0) }).count >= 2 { return true }
+
+        // Changelog/Home pages may lack diagnostic controls. Require a combination of
+        // navigation labels and app/version chrome; generic words alone are insufficient.
+        let navigation = ["home", "languages", "settings", "history"]
+            .filter { allText.contains($0) }.count
+        let hasAppChrome = allText.contains("screenlingo")
+            || allText.contains("changelog")
+            || allText.contains("build")
+            || allText.contains("version")
+        return navigation >= 3 && hasAppChrome
+    }
+
+    /// Strong app-owned labels only. Generic words are rejected only when they form
+    /// a known control label; this avoids a global ban on words used in real dialogue.
+    private func isScreenLingoChromeText(_ text: String) -> Bool {
+        let n = TextSim.norm(text)
+        guard !n.isEmpty else { return false }
+        let exact: Set<String> = [
+            "home", "languages", "settings", "history", "screenlingo",
+            "translationinput", "currentoriginal", "currenttranslation",
+            "processingtrace", "recentdiagnosticevents", "runtranslationtest",
+            "refreshlanguageavailability", "cleartranslationcache",
+            "cleardiagnosticeventlog", "includerecognizedtextinreports",
+            "copyreportforchatgpt", "copycompactreportlast60seconds",
+            "exportfulldiagnosticreporttxt", "retranslate", "retryfresh",
+            "changelog", "languagesettings"
+        ]
+        if exact.contains(n) { return true }
+        let phrases = [
+            "reportsincludeactualocrsourcedialogueandtranslatedtext",
+            "compactreportsincludeonlythelast60seconds",
+            "exportthefullertracehistoryasatxtfile",
+            "checkbeforesharing"
+        ]
+        return phrases.contains { n.contains($0) }
     }
 
     /// Reject OCR blocks that are mostly counters, coordinates, timestamps, or visual noise.
@@ -853,7 +916,25 @@ final class TranslatorEngine: ObservableObject {
 
     private func dedupe(_ lines: [String]) -> [String] {
         var out: [String] = []
-        for l in lines where !out.contains(where: { TextSim.similar($0, l, 0.9) }) { out.append(l) }
+        for line in lines {
+            let normalized = TextSim.norm(line)
+            guard !normalized.isEmpty else { continue }
+            let duplicateIndex = out.firstIndex { existing in
+                let existingNorm = TextSim.norm(existing)
+                guard !existingNorm.isEmpty else { return false }
+                let shortCount = min(normalized.count, existingNorm.count)
+                let longCount = max(normalized.count, existingNorm.count)
+                let containment = Double(shortCount) / Double(max(1, longCount))
+                return TextSim.similar(line, existing, 0.78)
+                    || (shortCount >= 8 && containment >= 0.78
+                        && (normalized.contains(existingNorm) || existingNorm.contains(normalized)))
+            }
+            if let duplicateIndex {
+                if line.count > out[duplicateIndex].count { out[duplicateIndex] = line }
+            } else {
+                out.append(line)
+            }
+        }
         return out
     }
 
