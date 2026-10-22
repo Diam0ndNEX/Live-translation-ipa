@@ -78,12 +78,14 @@ struct HistoryItem: Identifiable {
     let original: String
     let translated: String
     var date = Date()
+    var starred = false
 }
 
 private struct StoredHistoryItem: Codable {
     let original: String
     let translated: String
     let date: Date
+    var starred: Bool?
 }
 
 @MainActor
@@ -382,19 +384,23 @@ final class TranslatorEngine: ObservableObject {
         guard let data = UserDefaults.standard.data(forKey: historyKey),
               let stored = try? JSONDecoder().decode([StoredHistoryItem].self, from: data) else { return [] }
         return stored.prefix(100).map { item in
-            let value = HistoryItem(original: item.original, translated: item.translated, date: item.date)
+            let value = HistoryItem(original: item.original, translated: item.translated, date: item.date, starred: item.starred ?? false)
             return value
         }
     }
 
     private func saveHistory() {
         let stored = history.prefix(100).map {
-            StoredHistoryItem(original: $0.original, translated: $0.translated, date: $0.date)
+            StoredHistoryItem(original: $0.original, translated: $0.translated, date: $0.date, starred: $0.starred)
         }
         guard let data = try? JSONEncoder().encode(Array(stored)) else { return }
         UserDefaults.standard.set(data, forKey: Self.historyKey)
     }
 
+    func toggleStar(_ id: UUID) {
+        guard let index = history.firstIndex(where: { $0.id == id }) else { return }
+        history[index].starred.toggle()
+    }
 
     // MARK: Settings profiles and backup
     private func storedProfiles() -> [String: [String: Any]] {
