@@ -101,6 +101,7 @@ final class TranslatorEngine: ObservableObject {
         }
     }
     @Published var paused = false { didSet { syncConfig() } }
+    @Published var frozen = false
     // Languages
     @Published var languages: [LangItem] = TranslatorEngine.fallbackLanguages
     @Published var langStatus: [String: LanguageAvailability.Status] = [:]
@@ -1975,6 +1976,10 @@ final class TranslatorEngine: ObservableObject {
 
         delayedClearWork?.cancel()
         delayedClearWork = nil
+        guard !frozen else {
+            trace("OUTPUT FROZEN", "Kept current PiP translation while capture continues")
+            return
+        }
         original = text
         translated = result
         showing = true
