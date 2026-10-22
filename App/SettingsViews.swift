@@ -1,233 +1,85 @@
-// ScreenLingo – Modular settings and backup controls
+// Screen Translator – App – v0.8.0
 import SwiftUI
-import UIKit
 
-// MARK: - Settings
+private extension View {
+    func settingsPage(_ title: String) -> some View {
+        self.scrollContentBackground(.hidden)
+            .background(Theme.bg.ignoresSafeArea())
+            .navigationTitle(title)
+            .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+// MARK: - Settings home
 struct SettingsView: View {
-    private func translationModeOption(_ item: TranslateMode) -> some View {
-        Text(item.title).tag(item.rawValue)
-    }
-
-    private func ocrAreaOption(_ item: OCRArea) -> some View {
-        Text(item.title).tag(item.rawValue)
-    }
-
-    private func windowSizeOption(_ item: WindowSize) -> some View {
-        Text(item.title).tag(item.rawValue)
-    }
-
-    private func themeOption(_ item: PiPTheme) -> some View {
-        Text(item.title).tag(item.rawValue)
-    }
-
-    private func speedPresetOption(_ item: SpeedPreset) -> some View {
-        Text(item.title).tag(item.rawValue)
-    }
-
-    private func textSizeOption(_ item: PiPTextSize) -> some View {
-        Text(item.title).tag(item.rawValue)
-    }
-
-
-    private var confidencePercentage: String { String(Int(ocrConfidence * 100)) + "%" }
-
     @EnvironmentObject var engine: TranslatorEngine
-    @AppStorage("includeDiagnosticText") private var includeDiagnosticText = true
-    @State private var diagnosticExportURL: URL?
-    @State private var showingDiagnosticExport = false
-    @State private var newProfileName = ""
-    @State private var showingProfileNamePrompt = false
-    @State private var showingImportResult = false
-    @State private var importResultMessage = ""
-    @AppStorage("theme") private var theme = PiPTheme.dark.rawValue
-    @AppStorage("textSize") private var textSize = PiPTextSize.auto.rawValue
-    @AppStorage("speak") private var speak = false
-    @AppStorage("mode") private var mode = TranslateMode.movie.rawValue
-    @AppStorage("area") private var area = OCRArea.smart.rawValue
-    @AppStorage("winSize") private var winSize = WindowSize.normal.rawValue
-    @AppStorage("showOriginal") private var showOriginal = false
-    @AppStorage("speed") private var speed = SpeedPreset.balanced.rawValue
-    @AppStorage("autoClear") private var autoClear = true
-    @AppStorage("textHoldDuration") private var textHoldDuration: Double = 2.0
-    @AppStorage("ocrConfidence") private var ocrConfidence: Double = 0.30
-    @AppStorage("languageCorrection") private var languageCorrection = true
-    @AppStorage("rightToLeftReading") private var rightToLeftReading = false
-    @AppStorage("cleanOCR") private var cleanOCR = true
-    @AppStorage("slang") private var slang = true
-    @AppStorage("speakerDetect") private var speakerDetect = true
-    @AppStorage("langLock") private var langLock = true
-    @AppStorage("neverTranslate") private var neverTranslate = ""
-    @AppStorage("sourceFixes") private var sourceFixes = ""
-    @AppStorage("glossary") private var glossary = ""
-    @AppStorage("pipFont") private var pipFont = PiPFont.standard.rawValue
-    @AppStorage("highlightNames") private var highlightNames = true
-    @AppStorage("customY0") private var customY0 = 0.0
-    @AppStorage("customY1") private var customY1 = 0.5
-    @AppStorage("frameRot") private var frameRot = "auto"
-    @AppStorage("minTextH") private var minTextH = 0.0
-    @AppStorage("ignoreList") private var ignoreList = ""
-    @AppStorage("dropNoise") private var dropNoise = true
-    @AppStorage("boost") private var boost = 1
-    @AppStorage("stability") private var stability = 1
-    @AppStorage("skipUnchanged") private var skipUnchanged = true
-    @AppStorage("adaptive") private var adaptive = true
-    @AppStorage("idleMinutes") private var idleMinutes = 0
 
     var body: some View {
         NavigationStack {
             List {
-                appBuildSection
-                translationPerformanceSection
-                textIntelligenceSection
-                profilesBackupSection
-                floatingWindowSection
-                automationSection
-                diagnosticsSection
-                changelogSection
-                privacySection
-                resetSection
+                Section {
+                    NavigationLink { ReadingSettings() } label: { Label("Reading & OCR", systemImage: "viewfinder") }
+                    NavigationLink { IntelligenceSettings() } label: { Label("Understanding & rules", systemImage: "brain") }
+                    NavigationLink { WindowSettings() } label: { Label("Floating window", systemImage: "rectangle.on.rectangle") }
+                    NavigationLink { PerformanceSettings() } label: { Label("Performance & power", systemImage: "bolt.fill") }
+                    NavigationLink { ProfilesSettings() } label: { Label("Profiles & backup", systemImage: "square.stack.3d.up") }
+                    NavigationLink { AboutSettings() } label: { Label("About & help", systemImage: "info.circle") }
+                } footer: {
+                    Text(AppVersion.full)
+                }
             }
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Settings")
-            .sheet(isPresented: $showingDiagnosticExport) {
-                NavigationStack {
-                    VStack(spacing: 16) {
-                        Image(systemName: "doc.text").font(.largeTitle)
-                        Text("Diagnostic report ready").font(.headline)
-                        Text("Share or save the full report as a .txt file. It follows your recognized-text privacy setting.")
-                            .font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                        if let diagnosticExportURL {
-                            ShareLink(item: diagnosticExportURL) {
-                                Label("Share / Save .txt", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity)
-                            }.buttonStyle(.borderedProminent)
-                        }
-                        Spacer()
-                    }.padding()
-                    .navigationTitle("Export diagnostics")
-                    .navigationBarTitleDisplayMode(.inline)
-                    .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { showingDiagnosticExport = false } } }
-                }.presentationDetents([.medium])
-            }
-            .alert("Save settings profile", isPresented: $showingProfileNamePrompt) {
-                TextField("Profile name", text: $newProfileName)
-                Button("Cancel", role: .cancel) {}
-                Button("Save") {
-                    engine.saveProfile(newProfileName)
-                    newProfileName = ""
-                }
-            } message: {
-                Text("Save the current translation, OCR and floating-window settings.")
-            }
-            .alert("Settings import", isPresented: $showingImportResult) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text(importResultMessage)
-            }
-            .onChange(of: theme) { _, _ in engine.applyStyle() }
-            .onChange(of: textSize) { _, _ in engine.applyStyle() }
-            .onChange(of: pipFont) { _, _ in engine.applyStyle() }
-            .onChange(of: highlightNames) { _, _ in engine.applyStyle() }
-            .onChange(of: winSize) { _, _ in engine.applyWindowSize() }
-            .onChange(of: speed) { _, _ in engine.syncConfig() }
-            .onChange(of: area) { _, _ in engine.syncConfig() }
-            .onChange(of: mode) { _, _ in engine.syncConfig() }
-            .onChange(of: ocrConfidence) { _, _ in engine.syncConfig() }
-            .onChange(of: languageCorrection) { _, _ in engine.syncConfig() }
-            .onChange(of: customY0) { _, _ in engine.syncConfig() }
-            .onChange(of: customY1) { _, _ in engine.syncConfig() }
-            .onChange(of: minTextH) { _, _ in engine.syncConfig() }
-            .onChange(of: ignoreList) { _, _ in engine.syncConfig() }
-            .onChange(of: dropNoise) { _, _ in engine.syncConfig() }
-            .onChange(of: boost) { _, _ in engine.syncConfig() }
-            .onChange(of: stability) { _, _ in engine.syncConfig() }
-            .onChange(of: skipUnchanged) { _, _ in engine.syncConfig() }
-            .onChange(of: frameRot) { _, _ in engine.syncConfig() }
-            .onChange(of: adaptive) { _, _ in engine.syncConfig() }
-            .onChange(of: idleMinutes) { _, _ in engine.syncConfig() }
         }
     }
+}
 
-    private var appBuildSection: some View {
-            Section("App & build") {
-                LabeledContent("App", value: "ScreenLingo")
-                LabeledContent("Version", value: AppVersion.full)
-                LabeledContent("Bundle ID", value: "com.diam0ndnex.screenlingo")
-                LabeledContent("Capture extension",
-                               value: engine.extensionVersion == "–" ? "Not connected" : "v\(engine.extensionVersion)")
-                LabeledContent("Capture", value: engine.captureAlive ? "Connected" : "Idle")
-            }
-    }
+// MARK: - Reading & OCR
+struct ReadingSettings: View {
+    @EnvironmentObject var engine: TranslatorEngine
+    @AppStorage("mode") private var mode = TranslateMode.movie.rawValue
+    @AppStorage("area") private var area = OCRArea.smart.rawValue
+    @AppStorage("customY0") private var customY0 = 0.0
+    @AppStorage("customY1") private var customY1 = 0.5
+    @AppStorage("frameRot") private var frameRot = "auto"
+    @AppStorage("speed") private var speed = SpeedPreset.balanced.rawValue
+    @AppStorage("stability") private var stability = 2
+    @AppStorage("minTextH") private var minTextH = 0.0
+    @AppStorage("ignoreList") private var ignoreList = ""
+    @AppStorage("dropNoise") private var dropNoise = true
+    @AppStorage("boost") private var boost = 1
+    @AppStorage("skipUnchanged") private var skipUnchanged = true
 
-    private var translationPerformanceSection: some View {
-            Section {
-                Picker("Translation mode", selection: $mode) {
-                    ForEach(TranslateMode.allCases) { item in
-                        translationModeOption(item)
-                    }
+    private var key: String { "\(mode)|\(area)|\(customY0)|\(customY1)|\(speed)|\(stability)|\(boost)|\(skipUnchanged)" }
+
+    var body: some View {
+        List {
+            Section("What to read") {
+                Picker("Mode", selection: $mode) {
+                    ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) }
                 }
-                Picker("Text capture area", selection: $area) {
-                    ForEach(OCRArea.allCases) { item in
-                        ocrAreaOption(item)
-                    }
+                Picker("OCR area", selection: $area) {
+                    ForEach(OCRArea.allCases) { Text($0.title).tag($0.rawValue) }
                 }
                 if area == OCRArea.custom.rawValue {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Read from \(Int(customY0 * 100))% to \(Int(customY1 * 100))% of screen height (0% = bottom)")
+                        Text("From \(Int(customY0 * 100))% to \(Int(customY1 * 100))% of the screen height (0% = bottom)")
                             .font(.footnote).foregroundStyle(.secondary)
                         Slider(value: $customY0, in: 0...0.9)
                         Slider(value: $customY1, in: 0.1...1)
                     }
                 }
-                Picker("Performance profile", selection: $speed) {
-                    ForEach(SpeedPreset.allCases) { item in
-                        speedPresetOption(item)
-                    }
-                }
-                Text(speedDescription)
-                    .font(.footnote).foregroundStyle(.secondary)
-                Toggle("Language-aware OCR correction", isOn: $languageCorrection)
-                Toggle("Right-to-left manga reading", isOn: $rightToLeftReading)
-                Text("Use this for Japanese manga layouts that read right-to-left. Leave it off for subtitles, games, and left-to-right comics.")
-                    .font(.caption).foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Minimum OCR confidence")
-                        Spacer()
-                        Text(confidencePercentage).monospacedDigit().foregroundStyle(.secondary)
-                    }
-                    Slider(value: $ocrConfidence, in: 0.15...0.75, step: 0.05)
-                    Text("Lower values catch faint or stylized text but may include more mistakes. Higher values are stricter and can miss difficult text.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Ignore text smaller than \(Int(minTextH * 100))% of screen height")
-                    Slider(value: $minTextH, in: 0...0.08, step: 0.005)
+                    Text("Ignore text smaller than \(Int(minTextH * 100))% of the screen").font(.subheadline)
+                    Slider(value: $minTextH, in: 0...0.08)
                 }
                 TextField("Ignore text containing… (comma separated)", text: $ignoreList, axis: .vertical)
                     .lineLimit(1...3)
-                Toggle("Ignore numbers and symbol noise", isOn: $dropNoise)
-                Picker("Contrast boost", selection: $boost) {
-                    Text("Off").tag(0)
-                    Text("Only when text is hard to find").tag(1)
-                    Text("Always").tag(2)
-                }
-                Picker("Wait for stable text", selection: $stability) {
-                    Text("Instant").tag(1)
-                    Text("Normal").tag(2)
-                    Text("Careful").tag(3)
-                }
-                Toggle("Skip unchanged frames", isOn: $skipUnchanged)
-                Toggle("Adaptive power saving", isOn: $adaptive)
-                Picker("Reduce OCR after no text", selection: $idleMinutes) {
-                    Text("Never").tag(0)
-                    Text("1 minute").tag(1)
-                    Text("3 minutes").tag(3)
-                    Text("5 minutes").tag(5)
-                    Text("10 minutes").tag(10)
-                }
-                Text("After this much time without readable text, OCR runs less often at a lower resolution to save battery.")
-                    .font(.caption).foregroundStyle(.secondary)
+                Toggle("Ignore numbers and symbols", isOn: $dropNoise)
+            }
+
+            Section {
                 Picker("Frame rotation", selection: $frameRot) {
                     Text("Automatic").tag("auto")
                     Text("None").tag("0")
@@ -236,272 +88,249 @@ struct SettingsView: View {
                     Text("270° clockwise").tag("270")
                 }
             } header: {
-                Text("Translation & performance")
+                Text("Sentence order")
             } footer: {
-                Text("Fast reduces OCR work for lower latency. Sharp processes larger frames for small text but may use more memory and battery.")
+                Text("If sentences come out in the wrong order, the capture is probably rotated. Automatic detects this by checking which direction the lines read naturally. Pick a fixed rotation if you want to force it.")
             }
-    }
 
-    private var textIntelligenceSection: some View {
-        Section {
-            Toggle("Clean up OCR mistakes", isOn: $cleanOCR)
-            Toggle("Expand chat slang", isOn: $slang)
-            Toggle("Preserve speaker names", isOn: $speakerDetect)
-            Toggle("Lock detected language", isOn: $langLock)
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Never translate").font(.subheadline.weight(.medium))
-                TextEditor(text: $neverTranslate)
-                    .frame(minHeight: 58, maxHeight: 110)
-                    .font(.system(.footnote, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                Text("Names or terms separated by commas or new lines.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Fix OCR source text").font(.subheadline.weight(.medium))
-                TextEditor(text: $sourceFixes)
-                    .frame(minHeight: 58, maxHeight: 110)
-                    .font(.system(.footnote, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                Text("One correction per line: wrong=right.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Translation glossary").font(.subheadline.weight(.medium))
-                TextEditor(text: $glossary)
-                    .frame(minHeight: 58, maxHeight: 110)
-                    .font(.system(.footnote, design: .monospaced))
-                    .scrollContentBackground(.hidden)
-                Text("One replacement per line: translated term=preferred term.")
-                    .font(.caption).foregroundStyle(.secondary)
-            }
-        } header: {
-            Text("Text intelligence")
-        } footer: {
-            Text("These rules run on recognized content before or after translation. They do not change what the screen recorder captures.")
-        }
-    }
-
-    private var profilesBackupSection: some View {
-        Section {
-            Button { showingProfileNamePrompt = true } label: {
-                Label("Save current settings as profile", systemImage: "square.and.arrow.down")
-            }
-            if engine.profileNames.isEmpty {
-                Text("No saved profiles yet.").font(.footnote).foregroundStyle(.secondary)
-            } else {
-                ForEach(engine.profileNames, id: \.self) { profile in
-                    HStack {
-                        Button(profile) { engine.applyProfile(profile) }
-                        Spacer()
-                        Button(role: .destructive) { engine.deleteProfile(profile) } label: {
-                            Image(systemName: "trash")
-                        }
-                        .buttonStyle(.borderless)
-                    }
+            Section {
+                Picker("Speed", selection: $speed) {
+                    ForEach(SpeedPreset.allCases) { Text($0.title).tag($0.rawValue) }
                 }
+                Picker("Wait for stable text", selection: $stability) {
+                    Text("Instant").tag(1)
+                    Text("Normal").tag(2)
+                    Text("Careful").tag(3)
+                }
+                Picker("Contrast boost", selection: $boost) {
+                    Text("Off").tag(0)
+                    Text("Only when text is hard to find").tag(1)
+                    Text("Always").tag(2)
+                }
+                Toggle("Skip unchanged frames", isOn: $skipUnchanged)
+            } header: {
+                Text("Speed & quality")
+            } footer: {
+                Text("Instant is fastest but may translate half-faded text. Always boosting contrast helps thin or outlined fonts but is slower.")
             }
-            ShareLink(item: engine.exportSettings()) {
-                Label("Export settings backup", systemImage: "square.and.arrow.up")
-            }
-            Button {
-                let clipboard = UIPasteboard.general.string ?? ""
-                let success = engine.importSettings(clipboard)
-                importResultMessage = success ? "Settings imported successfully." : "No valid ScreenLingo settings backup was found on the clipboard."
-                showingImportResult = true
-            } label: {
-                Label("Import backup from clipboard", systemImage: "doc.on.clipboard")
-            }
-        } header: {
-            Text("Profiles & backup")
-        } footer: {
-            Text("Backups contain preferences and saved profiles, not translation history or screen content.")
         }
+        .settingsPage("Reading & OCR")
+        .onChange(of: key) { _, _ in engine.syncConfig() }
+        .onChange(of: frameRot) { _, _ in engine.syncConfig() }
+    }
+}
+
+// MARK: - Understanding & rules
+struct IntelligenceSettings: View {
+    @AppStorage("cleanOCR") private var cleanOCR = true
+    @AppStorage("slang") private var slang = true
+    @AppStorage("speakerDetect") private var speakerDetect = true
+    @AppStorage("langLock") private var langLock = true
+    @AppStorage("neverTranslate") private var neverTranslate = ""
+    @AppStorage("sourceFixes") private var sourceFixes = ""
+    @AppStorage("glossary") private var glossary = ""
+
+    private func editor(_ text: Binding<String>) -> some View {
+        TextEditor(text: text)
+            .frame(minHeight: 80)
+            .font(.system(.footnote, design: .monospaced))
+            .scrollContentBackground(.hidden)
     }
 
-    private var floatingWindowSection: some View {
-            Section("Floating window") {
+    var body: some View {
+        List {
+            Section {
+                Toggle("Clean up OCR mistakes", isOn: $cleanOCR)
+                Toggle("Expand chat slang (pq, vc, tbm, idk…)", isOn: $slang)
+                Toggle("Recognize speakers (\"Name: text\")", isOn: $speakerDetect)
+                Toggle("Lock detected language", isOn: $langLock)
+            } header: {
+                Text("Understanding")
+            } footer: {
+                Text("Speaker names stay untranslated and each speaker gets their own line. Slang is spelled out before translating so it isn't misread. The language lock stops Automatic from flip-flopping between languages.")
+            }
+            Section {
+                editor($neverTranslate)
+            } header: {
+                Text("Never translate")
+            } footer: {
+                Text("Words or names to keep exactly as written, separated by commas or new lines. Example: Subaru, Emilia")
+            }
+            Section {
+                editor($sourceFixes)
+            } header: {
+                Text("Fix the original text (before translating)")
+            } footer: {
+                Text("One per line: wrong=right. Example: Rern=Rem")
+            }
+            Section {
+                editor($glossary)
+            } header: {
+                Text("Fix the translation (after translating)")
+            } footer: {
+                Text("One per line: word=replacement. Example: Lord Subaru=Subaru")
+            }
+        }
+        .settingsPage("Understanding & rules")
+    }
+}
+
+// MARK: - Floating window
+struct WindowSettings: View {
+    @EnvironmentObject var engine: TranslatorEngine
+    @AppStorage("winSize") private var winSize = WindowSize.normal.rawValue
+    @AppStorage("theme") private var theme = PiPTheme.dark.rawValue
+    @AppStorage("textSize") private var textSize = PiPTextSize.auto.rawValue
+    @AppStorage("pipFont") private var pipFont = PiPFont.standard.rawValue
+    @AppStorage("highlightNames") private var highlightNames = true
+    @AppStorage("showOriginal") private var showOriginal = false
+    @AppStorage("autoClear") private var autoClear = true
+    @AppStorage("textHoldDuration") private var clearHold = 2.0
+    @AppStorage("speak") private var speak = false
+
+    private var styleKey: String { "\(theme)|\(textSize)|\(pipFont)|\(highlightNames)" }
+
+    var body: some View {
+        List {
+            Section("Look") {
                 Picker("Window size", selection: $winSize) {
-                    ForEach(WindowSize.allCases) { item in
-                        windowSizeOption(item)
-                    }
+                    ForEach(WindowSize.allCases) { Text($0.title).tag($0.rawValue) }
                 }
                 Picker("Appearance", selection: $theme) {
-                    ForEach(PiPTheme.allCases) { item in
-                        themeOption(item)
-                    }
+                    ForEach(PiPTheme.allCases) { Text($0.title).tag($0.rawValue) }
                 }
                 Picker("Text size", selection: $textSize) {
-                    ForEach(PiPTextSize.allCases) { item in
-                        textSizeOption(item)
+                    ForEach(PiPTextSize.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                Picker("Font", selection: $pipFont) {
+                    ForEach(PiPFont.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                Toggle("Colour speaker names", isOn: $highlightNames)
+                Toggle("Show original text", isOn: $showOriginal)
+            }
+            Section {
+                Toggle("Open automatically when capture starts", isOn: $autoOpenPiP)
+                Toggle("Clear when text ends", isOn: $autoClear)
+                if autoClear {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Keep the translation \(String(format: "%.1f", clearHold)) s after the text ends")
+                            .font(.subheadline)
+                        Slider(value: $clearHold, in: 0...5, step: 0.5)
                     }
                 }
-                Picker("Translation font", selection: $pipFont) {
-                    ForEach(PiPFont.allCases) { font in Text(font.title).tag(font.rawValue) }
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Show each translation at least \(String(format: "%.1f", minDisplay)) s").font(.subheadline)
+                    Slider(value: $minDisplay, in: 0...4, step: 0.5)
                 }
-                Toggle("Highlight speaker names", isOn: $highlightNames)
-                Toggle("Show original above translation", isOn: $showOriginal)
-                Toggle("Speak translations aloud", isOn: $speak)
+            } header: {
+                Text("Behaviour")
+            } footer: {
+                Text("A minimum display time stops fast-changing text from flickering past before you can read it.")
             }
-    }
-
-    private var automationSection: some View {
-        Section {
-            Toggle("Clear when text disappears", isOn: $autoClear)
-            if autoClear {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Keep text visible after it disappears")
-                        Spacer()
-                        Text(textHoldDuration == 0 ? "Immediately" : String(format: "%.1f s", textHoldDuration))
-                            .monospacedDigit().foregroundStyle(.secondary)
-                    }
-                    Slider(value: $textHoldDuration, in: 0...10, step: 0.5)
-                    Text("Keeps the last translation on screen briefly after the source text vanishes. New text cancels the countdown.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+            Section("Feedback") {
+                Toggle("Vibrate on new translation", isOn: $haptics)
+                Toggle("Speak translation aloud", isOn: $speak)
             }
-            Toggle("Pause translation", isOn: $engine.paused)
-        } header: {
-            Text("Automation")
-        } footer: {
-            Text("Pause keeps the broadcast connected but stops new translation work. Your selected options are saved on this device.")
         }
+        .settingsPage("Floating window")
+        .onChange(of: styleKey) { _, _ in engine.applyStyle() }
+        .onChange(of: winSize) { _, _ in engine.applyWindowSize() }
     }
+}
 
-    private var diagnosticsSection: some View {
-        Section {
-            LabeledContent("Pipeline phase", value: engine.capturePhase)
-            LabeledContent("App UDP listener", value: engine.serverReady ? "Ready" : "Not ready")
-            LabeledContent("Capture extension", value: engine.captureAlive ? "Connected" : "No packets")
-            LabeledContent("PiP state", value: engine.pipActive ? "Active" : "Inactive")
-            LabeledContent("Extension version", value: engine.extensionVersion)
-            LabeledContent("Last packet kind", value: engine.lastPacketKind)
-            LabeledContent("Last packet", value: engine.lastPacketSummary)
-            LabeledContent("Last packet age", value: engine.lastPacketAge < 0 ? "Never" : String(format: "%.2f s", engine.lastPacketAge))
-            LabeledContent("Packets received", value: "\(engine.totalPackets)")
-            LabeledContent("Ping / OCR / clear", value: "\(engine.pingPackets) / \(engine.ocrPackets) / \(engine.clearPackets)")
-            LabeledContent("Frames reported", value: "\(engine.frames)")
-            LabeledContent("OCR passes", value: "\(engine.ocrCount)")
-            LabeledContent("Raw OCR lines", value: "\(engine.lastOCRLineCount)")
-            LabeledContent("OCR latency", value: String(format: "%.1f ms", engine.ocrMs))
-            LabeledContent("Translation latency", value: String(format: "%.1f ms", engine.translateMs))
-            LabeledContent("Extension free memory", value: String(format: "%.1f MB", engine.extFreeMB))
-            LabeledContent("Source language", value: engine.lastDetectedLanguage)
-            LabeledContent("Target language", value: engine.targetCode)
-            LabeledContent("Selected blocks", value: "\(engine.selectedBlockCount)")
-            LabeledContent("OCR filter counts", value: engine.lastFilterSummary)
-            LabeledContent("Accepted inputs", value: "\(engine.acceptedInputCount)")
-            LabeledContent("Waiting for stabilization", value: "\(engine.stabilizationWaitCount)")
-            LabeledContent("Stale results discarded", value: "\(engine.discardedStaleCount)")
-            LabeledContent("Translation cache hits", value: "\(engine.cacheHits)")
-            LabeledContent("Translation failures", value: "\(engine.translationFailures)")
-            LabeledContent("Output quality", value: engine.lastOutputQuality)
-            LabeledContent("Last translation error", value: engine.lastTranslationError)
-            LabeledContent("Current status", value: engine.status)
+// MARK: - Performance
+struct PerformanceSettings: View {
+    @EnvironmentObject var engine: TranslatorEngine
+    @AppStorage("adaptive") private var adaptive = true
+    @AppStorage("idleMinutes") private var idleMinutes = 0
 
-            DisclosureGroup("Last raw OCR text") {
-                Text(engine.lastRaw.isEmpty ? "No OCR received yet." : engine.lastRaw)
-                    .font(.footnote).textSelection(.enabled)
-            }
-            DisclosureGroup("Latest candidate text") {
-                Text(engine.lastCandidateText.isEmpty ? "No candidate yet." : engine.lastCandidateText)
-                    .font(.footnote).textSelection(.enabled)
-            }
-            DisclosureGroup("Selected blocks / reading order") {
-                Text(engine.lastSelectedBlocks.isEmpty ? "No blocks selected." : engine.lastSelectedBlocks)
-                    .font(.footnote).textSelection(.enabled)
-            }
-            DisclosureGroup("Translation input") {
-                Text(engine.lastTranslationInput.isEmpty ? "No translation input yet." : engine.lastTranslationInput)
-                    .font(.footnote).textSelection(.enabled)
-            }
-            DisclosureGroup("Current original") {
-                Text(engine.original.isEmpty ? "No original text yet." : engine.original)
-                    .font(.footnote).textSelection(.enabled)
-            }
-            DisclosureGroup("Current translation") {
-                Text(engine.translated.isEmpty ? "No translation yet." : engine.translated)
-                    .font(.footnote).textSelection(.enabled)
-            }
-            DisclosureGroup("Processing trace — last 60 seconds") {
-                Text(engine.processingTrace.isEmpty ? "No processing trace yet. Start capture and wait for text to appear." : engine.processingTrace.joined(separator: "\n"))
-                    .font(.system(.caption2, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            DisclosureGroup("Recent diagnostic events (latest first)") {
-                if engine.diagnosticEvents.isEmpty {
-                    Text("No diagnostic events yet.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                } else {
-                    ForEach(Array(engine.diagnosticEvents.reversed().enumerated()), id: \.offset) { item in
-                        Text(item.element).font(.system(.caption, design: .monospaced))
-                            .textSelection(.enabled).padding(.vertical, 2)
-                    }
+    var body: some View {
+        List {
+            Section {
+                Toggle("Adaptive performance", isOn: $adaptive)
+                Picker("Pause after no text for", selection: $idleMinutes) {
+                    Text("Never").tag(0)
+                    Text("1 minute").tag(1)
+                    Text("2 minutes").tag(2)
+                    Text("5 minutes").tag(5)
+                    Text("10 minutes").tag(10)
+                    Text("30 minutes").tag(30)
                 }
+            } footer: {
+                Text("Adaptive performance reads less often when the phone gets hot, Low Power Mode is on, or the capture extension is running low on memory. Auto-pause saves battery during long gaps.")
             }
-
-            Button("Run translation test") { engine.runTest() }
-            Button("Refresh language availability") {
-                Task { await engine.refreshStatus() }
+            Section {
+                Button("Reset diagnostics counters") { engine.clearDiagnosticEvents() }
             }
-            Button("Clear translation cache") { engine.clearTranslationCache() }
-            Button("Clear diagnostic event log", role: .destructive) { engine.clearDiagnosticEvents() }
-            Toggle("Include recognized text in reports", isOn: $includeDiagnosticText)
-            Text(includeDiagnosticText
-                 ? "Reports include actual OCR, source dialogue, and translated text. Check before sharing."
-                 : "Text content is redacted. Coordinates, timestamps, block geometry, filter decisions, and language scores remain available.")
-                .font(.footnote).foregroundStyle(.secondary)
-            Button {
-                let report = engine.copyDetailedDiagnosticReport(
-                    includeRecognizedText: includeDiagnosticText,
-                    compact: true
-                )
-                let chatPrompt = """
-                Please diagnose this ScreenLingo live-translation issue using the report below. Base conclusions on evidence in the trace; do not assume a fix worked unless the report verifies it.
-
-                Focus on:
-                1. OCR reading ScreenLingo UI/PiP output (for example Home, Settings, History, or "pt → en") instead of only the video.
-                2. Duplicate subtitle copies at different positions producing overlapping blocks sent for translation.
-                3. PiP/self-output feedback filtering that appears ineffective.
-                4. In movie mode, suppress interface text and choose one clearest, most complete source-language subtitle block.
-                5. Concrete fixes at the correct pipeline stage and diagnostics to verify them, without regressing games, manga, or other OCR modes.
-
-                DIAGNOSTIC REPORT
-                ----------------
-                \(report)
-                """
-                UIPasteboard.general.string = chatPrompt
-                engine.status = "ChatGPT-ready diagnostic report copied"
-            } label: {
-                Label("Copy report for ChatGPT", systemImage: "text.bubble")
-            }
-            Button("Copy compact report (last 60 seconds)") {
-                UIPasteboard.general.string = engine.copyDetailedDiagnosticReport(includeRecognizedText: includeDiagnosticText, compact: true)
-                engine.status = "Compact diagnostic report copied"
-            }
-            Button("Export full diagnostic report (.txt)") {
-                let report = engine.copyDetailedDiagnosticReport(includeRecognizedText: includeDiagnosticText, compact: false)
-                let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-                let url = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenLingo-Diagnostics-\(stamp).txt")
-                do {
-                    try Data(report.utf8).write(to: url, options: .atomic)
-                    diagnosticExportURL = url
-                    showingDiagnosticExport = true
-                    engine.status = "Full diagnostic report ready to share"
-                } catch {
-                    engine.status = "Could not export report: \(error.localizedDescription)"
-                }
-            }
-        } header: {
-            Text("Live diagnostics")
-        } footer: {
-            Text("Compact reports include only the last 60 seconds and are capped at 15,000 characters. Export the fuller trace history as a .txt file for deeper debugging. The recognized-text toggle applies to both exports.")
         }
+        .settingsPage("Performance & power")
+        .onChange(of: adaptive) { _, _ in engine.syncConfig() }
     }
+}
 
-    private var changelogSection: some View {
+// MARK: - Profiles & backup
+struct ProfilesSettings: View {
+    @EnvironmentObject var engine: TranslatorEngine
+    @State private var name = ""
+    @State private var message = ""
+
+    var body: some View {
+        List {
+            Section {
+                TextField("Profile name (e.g. Anime night)", text: $name)
+                Button("Save current settings as profile") {
+                    engine.saveProfile(name)
+                    name = ""
+                }
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            } header: {
+                Text("Save")
+            } footer: {
+                Text("A profile remembers every setting, including languages. Swipe a profile to delete it.")
+            }
+            Section("Your profiles") {
+                if engine.profileNames.isEmpty {
+                    Text("None yet.").font(.footnote).foregroundStyle(.secondary)
+                }
+                ForEach(engine.profileNames, id: \.self) { p in
+                    Button(p) { engine.applyProfile(p) }
+                        .swipeActions { Button("Delete", role: .destructive) { engine.deleteProfile(p) } }
+                }
+            }
+            Section {
+                ShareLink(item: engine.exportSettings()) { Label("Export settings", systemImage: "square.and.arrow.up") }
+                Button {
+                    message = engine.importSettings(UIPasteboard.general.string ?? "")
+                        ? "Settings imported from the clipboard."
+                        : "The clipboard doesn't contain exported settings."
+                } label: { Label("Import settings from clipboard", systemImage: "square.and.arrow.down") }
+                if !message.isEmpty { Text(message).font(.footnote).foregroundStyle(.secondary) }
+            } header: {
+                Text("Backup")
+            } footer: {
+                Text("Export, then copy the text somewhere safe. To restore, copy it again and tap Import.")
+            }
+        }
+        .settingsPage("Profiles & backup")
+    }
+}
+
+// MARK: - About
+struct AboutSettings: View {
+    @EnvironmentObject var engine: TranslatorEngine
+    @State private var confirmReset = false
+
+    var body: some View {
+        List {
+            Section("Version") {
+                LabeledContent("App", value: AppVersion.full)
+                LabeledContent("Capture extension",
+                               value: engine.extensionVersion == "–" ? "not seen yet" : "v\(engine.extensionVersion)")
+            }
+            Section("How to use") {
+                Text("1. Languages tab → download your source and target packs.\n2. Home → Start. Allow the floating window, then Start Broadcast.\n3. Switch to your app. If nothing shows, use Test translation, and check the Diagnostics tab.")
+                    .font(.footnote)
+            }
             Section("Changelog") {
                 ForEach(AppVersion.changelog, id: \.0) { v in
                     VStack(alignment: .leading, spacing: 2) {
@@ -510,65 +339,13 @@ struct SettingsView: View {
                     }
                 }
             }
-    }
-
-    private var privacySection: some View {
-            Section("Privacy") {
-                Label("On-device translation", systemImage: "iphone")
-                Text("ScreenLingo uses Apple's on-device Translation framework and stores translation history in local app preferences. This project does not upload your recognized text to a translation server.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
-    }
-
-    private var resetSection: some View {
-        Section("Reset") {
-            Button("Reset all settings", role: .destructive) {
-                engine.resetAllSettings()
-                engine.paused = false
-                includeDiagnosticText = true
-                mode = TranslateMode.movie.rawValue
-                area = OCRArea.smart.rawValue
-                winSize = WindowSize.normal.rawValue
-                showOriginal = false
-                speed = SpeedPreset.balanced.rawValue
-                autoClear = true
-                textHoldDuration = 2.0
-                ocrConfidence = 0.30
-                languageCorrection = true
-                rightToLeftReading = false
-                cleanOCR = true
-                slang = true
-                speakerDetect = true
-                langLock = true
-                neverTranslate = ""
-                sourceFixes = ""
-                glossary = ""
-                theme = PiPTheme.dark.rawValue
-                textSize = PiPTextSize.auto.rawValue
-                pipFont = PiPFont.standard.rawValue
-                highlightNames = true
-                customY0 = 0.0
-                customY1 = 0.5
-                frameRot = "auto"
-                minTextH = 0.0
-                ignoreList = ""
-                dropNoise = true
-                boost = 1
-                stability = 1
-                skipUnchanged = true
-                adaptive = true
-                idleMinutes = 0
-                engine.syncConfig()
-                engine.applyWindowSize()
-                engine.applyStyle()
+            Section {
+                Button("Reset all settings", role: .destructive) { confirmReset = true }
             }
         }
-    }
-    private var speedDescription: String {
-        switch SpeedPreset(rawValue: speed) ?? .balanced {
-        case .fast: "Lowest latency and lighter CPU use; best for fast dialogue."
-        case .balanced: "Recommended balance between text detail, responsiveness, and battery."
-        case .sharp: "Higher OCR resolution for small subtitles and dense game text; more demanding."
+        .settingsPage("About & help")
+        .confirmationDialog("Reset every setting to its default?", isPresented: $confirmReset, titleVisibility: .visible) {
+            Button("Reset all settings", role: .destructive) { engine.resetAllSettings() }
         }
     }
 }
