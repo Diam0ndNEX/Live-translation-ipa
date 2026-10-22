@@ -70,6 +70,8 @@ struct SettingsView: View {
     @AppStorage("boost") private var boost = 1
     @AppStorage("stability") private var stability = 1
     @AppStorage("skipUnchanged") private var skipUnchanged = true
+    @AppStorage("adaptive") private var adaptive = true
+    @AppStorage("idleMinutes") private var idleMinutes = 0
 
     var body: some View {
         NavigationStack {
@@ -141,6 +143,8 @@ struct SettingsView: View {
             .onChange(of: stability) { _, _ in engine.syncConfig() }
             .onChange(of: skipUnchanged) { _, _ in engine.syncConfig() }
             .onChange(of: frameRot) { _, _ in engine.syncConfig() }
+            .onChange(of: adaptive) { _, _ in engine.syncConfig() }
+            .onChange(of: idleMinutes) { _, _ in engine.syncConfig() }
         }
     }
 
@@ -214,6 +218,16 @@ struct SettingsView: View {
                     Text("Careful").tag(3)
                 }
                 Toggle("Skip unchanged frames", isOn: $skipUnchanged)
+                Toggle("Adaptive power saving", isOn: $adaptive)
+                Picker("Reduce OCR after no text", selection: $idleMinutes) {
+                    Text("Never").tag(0)
+                    Text("1 minute").tag(1)
+                    Text("3 minutes").tag(3)
+                    Text("5 minutes").tag(5)
+                    Text("10 minutes").tag(10)
+                }
+                Text("After this much time without readable text, OCR runs less often at a lower resolution to save battery.")
+                    .font(.caption).foregroundStyle(.secondary)
                 Picker("Frame rotation", selection: $frameRot) {
                     Text("Automatic").tag("auto")
                     Text("None").tag("0")
@@ -542,6 +556,8 @@ struct SettingsView: View {
                 boost = 1
                 stability = 1
                 skipUnchanged = true
+                adaptive = true
+                idleMinutes = 0
                 engine.syncConfig()
                 engine.applyWindowSize()
                 engine.applyStyle()
