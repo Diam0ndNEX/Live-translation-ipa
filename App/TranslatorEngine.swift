@@ -358,14 +358,9 @@ final class TranslatorEngine: ObservableObject {
         let range = area.range(mode: mode)
         var cand = p.lines.filter { range.contains($0.y) }
         cand = removeOwnOutput(cand)
-        // Filter complete, confidently target-language OCR lines before grouping.
-        // This is especially important when ReplayKit sees the English PiP output:
-        // if it gets merged with Portuguese dialogue first, language detection may
-        // classify the entire mixed block as source text and feed our output back in.
-        cand = cand.filter { !isTargetLanguage($0.t) }
-        // Target-language filtering is also performed after grouping OCR lines into regions.
-        // Detect language on complete OCR regions, not isolated fragments such as
-        // "Rem:" or "p-", which are too short for reliable language identification.
+        // Do not classify isolated OCR lines: short words and mixed-language UI
+        // fragments are frequently misidentified. Group first, then filter only
+        // complete spatial regions with a high-confidence language result.
         let groupedBlocks = makeBlocks(cand)
         let sourceBlocks = groupedBlocks.filter { !isTargetLanguage(blockText($0)) }
         let blocks = selectBlocks(sourceBlocks)
@@ -379,26 +374,17 @@ final class TranslatorEngine: ObservableObject {
         // Keep the last good result until the extension explicitly reports a clear frame.
         guard !texts.isEmpty else { return }
 
-        // Stabilize the selected text over two consecutive OCR passes. The first
-        // usable candidate can be a partial subtitle or a contaminated read of the
-        // floating window; confirming it once prevents rapid output oscillation.
+        // The capture extension deliberately sends only changed OCR states, not
+        // repeated identical frames. Waiting for a second matching packet therefore
+        // blocks updates until the user swipes or the text changes again.
+        // Accept the first usable state; enqueue() already suppresses OCR jitter
+        // and near-duplicates without blocking short-lived subtitles.
         let candidate = texts.map { String($0.prefix(900)) }.joined(separator: "\n")
-        if TextSim.similar(candidate, pendingInput, 0.88) {
-            pendingInputCount += 1
-            pendingInput = candidate
-        } else {
-            pendingInput = candidate
-            pendingInputCount = 1
-        }
-        guard pendingInputCount >= 2 else {
-            stabilizationWaitCount += 1
-            lastCandidateText = candidate
-            capturePhase = "Stabilizing OCR candidate (\(pendingInputCount)/2)"
-            return
-        }
+        pendingInput = candidate
+        pendingInputCount = 1
         acceptedInputCount += 1
         lastCandidateText = candidate
-        recordDiagnostic("Accepted OCR input: \(candidate.count) characters")
+        recordDiagnostic("Accepted OCR input immediately: \(candidate.count) characters")
 
         // Keep separate spatial regions separate; never merge different bubbles.
         enqueue(texts.map { String($0.prefix(900)) })

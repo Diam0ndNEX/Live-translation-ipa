@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.2.2"
-    static let build = 17
+    static let version = "1.2.3"
+    static let build = 18
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Keep this aligned with MARKETING_VERSION and CURRENT_PROJECT_VERSION in project.yml.
     static let changelog: [(String, String)] = [
+        ("1.2.3", "Fix live OCR updates by accepting changed capture packets immediately and grouping OCR lines before target-language filtering; version 1.2.3 build 18."),
         ("1.2.2", "Move the loopback UDP channel to a fresh port after persistent address-in-use failures; keep app and capture extension synchronized."),
         ("1.2.1", "Fix duplicate UDP listener startup on app activation, prevent port rebind races, and improve capture connection recovery diagnostics."),
         ("1.2.0", "Comic-context translation, stable OCR reading order, centered dialogue grouping, right-to-left manga support, block-order diagnostics, output truncation checks, and app/extension version 1.2.0 build 15."),
