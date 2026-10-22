@@ -1257,12 +1257,27 @@ final class TranslatorEngine: ObservableObject {
                 let outputOverlap = TextSim.containment(of: line.t, in: renderedGrams)
                 let sourceOverlap = TextSim.containment(of: line.t, in: sourceGrams)
                 let exactOutputFragment = normalized.count >= 8 && renderedNorm.contains(normalized)
+
+                // A source line can share names and short phrases with its translation
+                // (for example, "Itadori e Yuta" vs "Itadori and Yuta"). Protect a
+                // strong match to the currently displayed original before testing
+                // translation overlap, otherwise the PiP feedback filter can delete
+                // the first source line and make the selected subtitle oscillate
+                // between a complete sentence and its remaining lines.
+                let matchesCurrentSource = normalized.count >= 8 && sourceOverlap >= 0.82
+                let center = CGPoint(x: line.x, y: line.y)
+                let liesInKnownPiPRegion = pipRegions.contains { $0.contains(center) }
+                if matchesCurrentSource && (!showOriginal || !liesInKnownPiPRegion) {
+                    rest.append(line)
+                    continue
+                }
+
                 // Common short words can overlap by chance. Require a longer fragment
                 // and a stronger score before treating OCR as our own rendered text.
                 let fuzzyOutputFragment = normalized.count >= 10 && outputOverlap >= 0.62
                 let strongOutputMatch = normalized.count >= 6 && outputOverlap >= 0.78
                 let matchesTranslation = exactOutputFragment || fuzzyOutputFragment || strongOutputMatch
-                let matchesDisplayedOriginal = showOriginal && normalized.count >= 8 && sourceOverlap >= 0.82
+                let matchesDisplayedOriginal = showOriginal && matchesCurrentSource && liesInKnownPiPRegion
                 if matchesTranslation || matchesDisplayedOriginal {
                     mine.append(line)
                     continue
