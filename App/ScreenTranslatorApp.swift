@@ -737,6 +737,30 @@ struct SettingsView: View {
                  ? "Reports include actual OCR, source dialogue, and translated text. Check before sharing."
                  : "Text content is redacted. Coordinates, timestamps, block geometry, filter decisions, and language scores remain available.")
                 .font(.footnote).foregroundStyle(.secondary)
+            Button {
+                let report = engine.copyDetailedDiagnosticReport(
+                    includeRecognizedText: includeDiagnosticText,
+                    compact: true
+                )
+                let chatPrompt = """
+                Please diagnose this ScreenLingo live-translation issue using the report below. Base conclusions on evidence in the trace; do not assume a fix worked unless the report verifies it.
+
+                Focus on:
+                1. OCR reading ScreenLingo UI/PiP output (for example Home, Settings, History, or "pt → en") instead of only the video.
+                2. Duplicate subtitle copies at different positions producing overlapping blocks sent for translation.
+                3. PiP/self-output feedback filtering that appears ineffective.
+                4. In movie mode, suppress interface text and choose one clearest, most complete source-language subtitle block.
+                5. Concrete fixes at the correct pipeline stage and diagnostics to verify them, without regressing games, manga, or other OCR modes.
+
+                DIAGNOSTIC REPORT
+                ----------------
+                \(report)
+                """
+                UIPasteboard.general.string = chatPrompt
+                engine.status = "ChatGPT-ready diagnostic report copied"
+            } label: {
+                Label("Copy report for ChatGPT", systemImage: "text.bubble")
+            }
             Button("Copy compact report (last 60 seconds)") {
                 UIPasteboard.general.string = engine.copyDetailedDiagnosticReport(includeRecognizedText: includeDiagnosticText, compact: true)
                 engine.status = "Compact diagnostic report copied"
