@@ -230,7 +230,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private func send(kind: String, lines: [OCRLine]) {
         func encode(_ l: [OCRLine]) -> Data? {
             try? JSONEncoder().encode(Packet(kind: kind, version: AppVersion.version, frames: frames, lines: l,
-                                             ocrMs: lastOcrMs, memFreeMB: freeMB()))
+                                             ocrMs: lastOcrMs, memFreeMB: freeMB(), rev: config.revision))
         }
         var data = encode(lines)
         if let d = data, d.count > 60000 { data = encode(Array(lines.prefix(30))) }
