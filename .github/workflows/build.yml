@@ -1,7 +1,10 @@
 name: Build ScreenLingo IPA
 
 on:
-  # Build only when explicitly requested from the Actions tab.
+  # Build the latest committed branch version and allow manual builds too.
+  push:
+    branches:
+      - codex/screenlingo-v0.7.0
   workflow_dispatch:
 
 # Never spend minutes building an older commit when a newer build is queued.
