@@ -154,7 +154,7 @@ final class TranslatorEngine: ObservableObject {
     private static let profileStorageKey = "screenlingo.profiles.v1"
     private static let profileSettingKeys = [
         "source", "target", "mode", "area", "customY0", "customY1", "winSize", "theme", "textSize",
-        "pipFont", "highlightNames", "showOriginal", "speed", "autoClear", "textHoldDuration",
+        "pipFont", "highlightNames", "showOriginal", "speed", "autoClear", "clearHold", "textHoldDuration", "autoOpenPiP", "minDisplay", "haptics",
         "ocrConfidence", "languageCorrection", "rightToLeftReading", "cleanOCR", "slang",
         "speakerDetect", "langLock", "neverTranslate", "sourceFixes", "glossary", "speak", "includeDiagnosticText",
         "customY0", "customY1", "frameRot", "minTextH", "ignoreList", "dropNoise", "boost",
@@ -209,7 +209,7 @@ final class TranslatorEngine: ObservableObject {
         return style
     }
     private var autoClear: Bool { (ud.object(forKey: "autoClear") as? Bool) ?? true }
-    private var textHoldDuration: Double { max(0, min(15, ud.object(forKey: "textHoldDuration") as? Double ?? 2.0)) }
+    private var textHoldDuration: Double { max(0, min(5, ud.object(forKey: "clearHold") as? Double ?? ud.object(forKey: "textHoldDuration") as? Double ?? 1.0)) }
     private var minimumOCRConfidence: Double { ud.object(forKey: "ocrConfidence") as? Double ?? 0.30 }
     private var delayedClearWork: DispatchWorkItem?
     private var languageCorrection: Bool { (ud.object(forKey: "languageCorrection") as? Bool) ?? true }
