@@ -157,7 +157,7 @@ final class TranslatorEngine: ObservableObject {
         "ocrConfidence", "languageCorrection", "rightToLeftReading", "cleanOCR", "slang",
         "speakerDetect", "langLock", "neverTranslate", "sourceFixes", "glossary", "speak", "includeDiagnosticText",
         "customY0", "customY1", "frameRot", "minTextH", "ignoreList", "dropNoise", "boost",
-        "stability", "skipUnchanged"
+        "stability", "skipUnchanged", "adaptive", "idleMinutes"
     ]
     // Translation session plumbing
     @Published var legacyConfig: TranslationSession.Configuration?
@@ -505,7 +505,9 @@ final class TranslatorEngine: ObservableObject {
                            boost: defaults.object(forKey: "boost") as? Int ?? 1,
                            stability: defaults.object(forKey: "stability") as? Int ?? 1,
                            skipUnchanged: defaults.object(forKey: "skipUnchanged") as? Bool ?? true,
-                           rotation: rotation))
+                           rotation: rotation,
+                           adaptive: defaults.object(forKey: "adaptive") as? Bool ?? true,
+                           idleMinutes: defaults.object(forKey: "idleMinutes") as? Int ?? 0))
     }
 
     // MARK: PiP
