@@ -1475,7 +1475,10 @@ final class TranslatorEngine: ObservableObject {
         guard joined != lastHandled else { return }
         // Ignore small OCR jitter without changing the accepted baseline. Updating
         // lastHandled for a rejected candidate can make later real changes look stale.
-        if TextSim.similar(joined, lastHandled, 0.92) { return }
+        // Multi-row Movie captures need to react when one lyric row changes while the
+        // rest of the visible verse stays the same, so use a stricter duplicate gate.
+        let duplicateThreshold = mode == .movie && blocks.count > 1 ? 0.97 : 0.92
+        if TextSim.similar(joined, lastHandled, duplicateThreshold) { return }
         lastHandled = joined
         queued = blocks
         if !busy { Task { await drain() } }
