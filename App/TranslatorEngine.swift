@@ -474,17 +474,17 @@ final class TranslatorEngine: ObservableObject {
         trace("CANONICAL OCR ORDER", orderedForTrace.enumerated().map {
             String(format: "#%02d y=%.3f x=%.3f | %@", $0.offset + 1, $0.element.y, $0.element.x, $0.element.t)
         }.joined(separator: "\n"))
-        // Frame provenance marker: ReplayKit packets do not expose a reliable foreground
-        // bundle identifier here, so we distinguish positively identified ScreenLingo
-        // UI from every other/uncertain frame. The latter may be target content, the
-        // iPad Home Screen, or a swipe/transition; never label it as confirmed content.
+        // ReplayKit doesn't identify the foreground bundle. Treat origin as a
+        // heuristic, not as proof that an unknown frame is video content. This is
+        // especially important while the user swipes through ScreenLingo, Home,
+        // app switcher, or navigation transitions before/after opening the video.
         let frameIsScreenLingoUI = isScreenLingoInterface(p.lines)
         trace("FRAME ORIGIN", frameIsScreenLingoUI
-              ? "SCREENLINGO_APP_UI | this frame contains distinctive ScreenLingo controls; exclude from translation"
-              : "NON_SCREENLINGO_OR_UNKNOWN | may be target app, iPad Home Screen, or swipe/transition; ReplayKit packet has no trustworthy app identity")
+              ? "SCREENLINGO_APP_UI | distinctive app controls detected; drop frame"
+              : "NON_SCREENLINGO_OR_UNKNOWN | ReplayKit supplies no foreground app identity; may be video, Home Screen, app switcher, or transition")
         if frameIsScreenLingoUI {
-            trace("FRAME FILTER", "DROP entire ScreenLingo app UI frame before block grouping/translation")
-            recordDiagnostic("FRAME ORIGIN=SCREENLINGO_APP_UI; ignored app-owned interface frame")
+            trace("FRAME FILTER", "DROP entire ScreenLingo UI frame before grouping/translation")
+            recordDiagnostic("FRAME FILTER=SCREENLINGO_APP_UI; ignored app-owned interface frame")
             return
         }
 
@@ -495,11 +495,16 @@ final class TranslatorEngine: ObservableObject {
             let beforeUI = cand.count
             let removedUI = cand.filter { isScreenLingoChromeText($0.t) }
             cand = cand.filter { !isScreenLingoChromeText($0.t) }
-            trace("MOVIE UI FILTER", "\(beforeUI - cand.count) explicit ScreenLingo UI lines removed; \(cand.count) remain; dropped=[\(removedUI.map(\.t).joined(separator: " | "))]")
+            trace("MOVIE UI FILTER", "\(beforeUI - cand.count) ScreenLingo control/diagnostic lines removed; \(cand.count) remain; dropped=[\(removedUI.map(\.t).joined(separator: " | "))]")
         }
         let beforeOwnOutput = cand.count
         cand = removeOwnOutput(cand)
-        trace("PIP FEEDBACK", "\(beforeOwnOutput - cand.count) lines removed as own output; \(cand.count) remain")
+        trace("PIP FEEDBACK", "\(beforeOwnOutput - cand.count) likely self-output lines removed; \(cand.count) remain")
+        if mode == .movie {
+            let beforeDedupe = cand.count
+            cand = dedupeOCRLines(cand)
+            trace("OCR DEDUPE", "\(beforeDedupe) lines → \(cand.count); removed \(beforeDedupe - cand.count) near-identical OCR copies with overlapping geometry")
+        }
         let groupedBlocks = makeBlocks(cand)
         trace("BLOCK GROUPING", "\(cand.count) lines → \(groupedBlocks.count) blocks")
         for (i, block) in groupedBlocks.enumerated() {
@@ -685,7 +690,11 @@ final class TranslatorEngine: ObservableObject {
                 let width = block.compactMap(\.w).max() ?? 0
                 let centerY = block.map(\.y).reduce(0, +) / Double(max(1, block.count))
                 let subtitleZoneBonus = (centerY >= 0.08 && centerY <= 0.48) ? 8.0 : 0.0
-                return min(letters, 140) + lineBonus + min(12.0, width * 12.0) + subtitleZoneBonus
+                let words = text.split(whereSeparator: { $0.isWhitespace || $0.isPunctuation }).count
+                let sentenceBonus = (words >= 3 && text.contains(where: { ".!?¡¿。！？".contains($0) })) ? 10.0 : 0.0
+                let fragmentPenalty = (words <= 2 && letters < 15) ? 18.0 : 0.0
+                return min(letters, 140) + lineBonus + min(12.0, width * 12.0)
+                    + subtitleZoneBonus + sentenceBonus - fragmentPenalty
             }
             let ranked = blocks.filter { block in
                 let text = blockText(block)
@@ -693,17 +702,33 @@ final class TranslatorEngine: ObservableObject {
                 let words = text.split(whereSeparator: { $0.isWhitespace || $0.isPunctuation })
                 let letters = norm.unicodeScalars.filter { CharacterSet.letters.contains($0) }.count
                 let isSingleGenericLabel = words.count == 1 && letters < 13
-                let passes = !isScreenLingoChromeText(text)
-                    && isUsefulOCRText(text)
-                    && !isTargetLanguage(text)
-                    && plausiblySource(text)
-                    && !isSingleGenericLabel
+                let uiLike = isScreenLingoChromeText(text)
+                    || ["copyrawocr", "showoriginaltext", "clearwhentextends",
+                        "floatingwindow", "startcapture", "closefloatingwindow",
+                        "pausetranslating", "captureconnected", "home settings history",
+                        "movie subtitles", "ocrsees"].contains(where: { norm.contains(TextSim.norm($0)) })
+                let passesBase = !uiLike && isUsefulOCRText(text)
+                    && !isTargetLanguage(text) && plausiblySource(text) && !isSingleGenericLabel
+                let score = movieScore(block)
+                // A short/noisy fragment is not a subtitle just because it is the
+                // best remaining candidate. Wait for the next changed frame instead.
+                let passesQuality = score >= 20 && !(words.count <= 2 && letters < 10)
+                let passes = passesBase && passesQuality
                 if !passes {
-                    trace("MOVIE CANDIDATE REJECT", "\(text) | reason=\(isScreenLingoChromeText(text) ? "ScreenLingo chrome" : (isSingleGenericLabel ? "short single-word label; not credible subtitle evidence" : (!isUsefulOCRText(text) ? "low OCR usefulness" : (isTargetLanguage(text) ? "target-language feedback" : (!plausiblySource(text) ? "source-language mismatch" : "other")))) )")
+                    let reason = uiLike ? "ScreenLingo/player UI" :
+                        (isSingleGenericLabel ? "short single-word label" :
+                        (!isUsefulOCRText(text) ? "low OCR usefulness" :
+                        (isTargetLanguage(text) ? "target-language feedback" :
+                        (!plausiblySource(text) ? "source-language mismatch" :
+                        (!passesQuality ? "below subtitle quality threshold" : "other")))))
+                    trace("MOVIE CANDIDATE REJECT", "\(text) | score=\(Int(score)); reason=\(reason)")
+                } else {
+                    trace("MOVIE CANDIDATE ACCEPT", "\(text) | score=\(Int(score)); words=\(words.count); lines=\(block.count)")
                 }
                 return passes
             }.sorted { movieScore($0) > movieScore($1) }
             kept = Array(ranked.prefix(1))
+            trace("MOVIE SELECT", kept.first.map { "selected=\(blockText($0)) | score=\(Int(movieScore($0)))" } ?? "no credible subtitle; WAIT — do not translate UI/transition fragments")
             trace("MOVIE CANDIDATES", "ranked \(ranked.count) credible source-like block(s); selected \(kept.first.map { blockText($0) } ?? "[none — wait for credible subtitle text]")")
         } else if area == .smart {
             kept = blocks.filter { blockHeight($0) >= maxH * (mode == .comic ? 0.22 : 0.32) }
@@ -780,33 +805,26 @@ final class TranslatorEngine: ObservableObject {
     private func isScreenLingoInterface(_ lines: [OCRLine]) -> Bool {
         let allText = TextSim.norm(lines.map(\.t).joined(separator: " "))
         let markers = [
-            "copyreportforchatgpt",
-            "copycompactreportlast60seconds",
-            "exportfulldiagnosticreporttxt",
-            "compactreportsincludeonlythelast60seconds",
-            "includerecognizedtextinreports",
-            "refreshlanguageavailability",
-            "cleartranslationcache",
-            "cleardiagnosticeventlog",
-            "livediagnostics",
-            "processingtrace",
-            "recentdiagnosticevents",
-            "runtranslationtest",
-            "translationinput",
-            "currentoriginal",
-            "currenttranslation"
+            "copyreportforchatgpt", "copycompactreportlast60seconds",
+            "exportfulldiagnosticreporttxt", "compactreportsincludeonlythelast60seconds",
+            "includerecognizedtextinreports", "refreshlanguageavailability",
+            "cleartranslationcache", "cleardiagnosticeventlog", "livediagnostics",
+            "processingtrace", "recentdiagnosticevents", "runtranslationtest",
+            "translationinput", "currentoriginal", "currenttranslation",
+            "showoriginaltext", "clearwhentextends", "floatingwindow",
+            "startcapture", "closefloatingwindow", "pausetranslating",
+            "captureconnected", "copyrawocr", "ocrsees", "extensionmemoryleft"
         ]
         let matchedDistinctive = markers.filter { allText.contains($0) }
-        // A single highly distinctive diagnostic phrase is sufficient: OCR can miss
-        // the neighbouring controls on a scrolling/transitioning app screen.
-        if !matchedDistinctive.isEmpty {
-            return true
-        }
+        // A diagnostic label is distinctive; on the main screen, require two
+        // independent ScreenLingo controls to avoid matching unrelated video dialogue.
+        if matchedDistinctive.contains(where: {
+            ["copyreportforchatgpt", "livediagnostics", "processingtrace",
+             "translationinput", "currentoriginal", "currenttranslation",
+             "copyrawocr", "ocrsees", "extensionmemoryleft"].contains($0)
+        }) { return true }
+        if matchedDistinctive.count >= 2 { return true }
 
-        // Home/changelog/settings screens can be only partly visible during swipes.
-        // Require several navigation labels plus an app-specific/version marker;
-        // ordinary iOS Home Screen icons or generic words must not be mistaken for
-        // ScreenLingo itself.
         let navigation = ["home", "languages", "settings", "history"]
             .filter { allText.contains($0) }.count
         let hasAppChrome = allText.contains("screenlingo")
@@ -829,16 +847,22 @@ final class TranslatorEngine: ObservableObject {
             "cleardiagnosticeventlog", "includerecognizedtextinreports",
             "copyreportforchatgpt", "copycompactreportlast60seconds",
             "exportfulldiagnosticreporttxt", "retranslate", "retryfresh",
-            "changelog", "languagesettings"
+            "changelog", "languagesettings", "mode", "copyrawocr",
+            "showoriginaltext", "clearwhentextends", "floatingwindow",
+            "startcapture", "closefloatingwindow", "pausetranslating",
+            "captureconnected", "ocrsees", "extensionmemoryleft"
         ]
         if exact.contains(n) { return true }
         let phrases = [
             "reportsincludeactualocrsourcedialogueandtranslatedtext",
             "compactreportsincludeonlythelast60seconds",
             "exportthefullertracehistoryasatxtfile",
-            "checkbeforesharing"
+            "checkbeforesharing", "movie subtitles", "movie/subtitles",
+            "recommended balance between text detail",
+            "right-to-left manga reading", "text capture area",
+            "performance profile", "ocr ms", "translate ms"
         ]
-        return phrases.contains { n.contains($0) }
+        return phrases.contains { n.contains(TextSim.norm($0)) }
     }
 
     /// Reject OCR blocks that are mostly counters, coordinates, timestamps, or visual noise.
@@ -937,6 +961,39 @@ final class TranslatorEngine: ObservableObject {
             pipRegions.removeAll()
         }
         return rest
+    }
+
+    /// Removes near-identical OCR observations only when their boxes overlap spatially.
+    /// Identical dialogue at a separate position is kept here so Movie candidate ranking
+    /// can compare both regions and select one; games/comics do not use this extra filter.
+    private func dedupeOCRLines(_ lines: [OCRLine]) -> [OCRLine] {
+        var kept: [OCRLine] = []
+        for line in lines {
+            let n = TextSim.norm(line.t)
+            guard !n.isEmpty else { continue }
+            let duplicate = kept.firstIndex { existing in
+                let en = TextSim.norm(existing.t)
+                guard !en.isEmpty, TextSim.similar(n, en, 0.86) else { return false }
+                let w1 = max(existing.w ?? 0.08, 0.01)
+                let w2 = max(line.w ?? 0.08, 0.01)
+                let xOverlap = min(existing.x + w1 / 2, line.x + w2 / 2)
+                    - max(existing.x - w1 / 2, line.x - w2 / 2)
+                let yOverlap = min(existing.y + existing.h / 2, line.y + line.h / 2)
+                    - max(existing.y - existing.h / 2, line.y - line.h / 2)
+                let overlapX = xOverlap / max(0.01, min(w1, w2))
+                let overlapY = yOverlap / max(0.01, min(existing.h, line.h))
+                return overlapX >= 0.45 && overlapY >= 0.25
+            }
+            if let duplicate {
+                let old = kept[duplicate]
+                let oldQuality = old.t.count + Int((old.w ?? 0) * 20)
+                let newQuality = line.t.count + Int((line.w ?? 0) * 20)
+                if newQuality > oldQuality { kept[duplicate] = line }
+            } else {
+                kept.append(line)
+            }
+        }
+        return kept
     }
 
     private func dedupe(_ lines: [String]) -> [String] {
