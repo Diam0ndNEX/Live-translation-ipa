@@ -573,7 +573,7 @@ final class TranslatorEngine: ObservableObject {
         rotationCalibrated = false
         rotationRevision += 1
         syncConfig()
-        recordDiagnostic("Reading-order calibration reset; mode=\(UserDefaults.standard.string(forKey: \"frameRot\") ?? \"auto\")")
+                recordDiagnostic("Reading-order calibration reset; mode=\(UserDefaults.standard.string(forKey: "frameRot") ?? "auto")")
     }
 
     /// Detect when line order reads more naturally in reverse and try another frame rotation.
