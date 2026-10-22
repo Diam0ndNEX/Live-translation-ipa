@@ -728,9 +728,20 @@ final class TranslatorEngine: ObservableObject {
         }
         translateMs = Date().timeIntervalSince(t0) * 1000
         let finalOutput = outBlocks.joined(separator: "\n")
-        lastOutputQuality = Self.outputQuality(source: blocks.joined(separator: " "), output: finalOutput)
+
+        // Translation is asynchronous. While a request is awaiting Apple's translation
+        // framework, newer video frames can enqueue a different subtitle. Never let the
+        // older request overwrite the newer scene (the visible rapid "correct → wrong"
+        // oscillation). Only publish results that still match the latest accepted OCR.
+        let processedInput = blocks.joined(separator: "\n")
+        guard lastHandled == processedInput else {
+            status = "Discarded stale translation — newer screen text is being processed"
+            return
+        }
+
+        lastOutputQuality = Self.outputQuality(source: processedInput, output: finalOutput)
         status = "\(srcLangs.keys.sorted().joined(separator: "+")) → \(targetCode) ✓"
-        show(blocks.joined(separator: "\n"), finalOutput)
+        show(processedInput, finalOutput)
     }
 
     /// Translates many sentences in one call.
