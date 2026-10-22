@@ -182,8 +182,11 @@ final class TranslatorEngine: ObservableObject {
     private var showOriginal: Bool { (ud.object(forKey: "showOriginal") as? Bool) ?? false }
     private var speakEnabled: Bool { (ud.object(forKey: "speak") as? Bool) ?? false }
     private var pipStyle: PiPStyle {
-        PiPStyle.make(theme: PiPTheme(rawValue: ud.string(forKey: "theme") ?? "") ?? .dark,
-                      size: PiPTextSize(rawValue: ud.string(forKey: "textSize") ?? "") ?? .auto)
+        var style = PiPStyle.make(theme: PiPTheme(rawValue: ud.string(forKey: "theme") ?? "") ?? .dark,
+                                  size: PiPTextSize(rawValue: ud.string(forKey: "textSize") ?? "") ?? .auto,
+                                  font: PiPFont(rawValue: ud.string(forKey: "pipFont") ?? "") ?? .standard)
+        style.highlightNames = (ud.object(forKey: "highlightNames") as? Bool) ?? true
+        return style
     }
     private var autoClear: Bool { (ud.object(forKey: "autoClear") as? Bool) ?? true }
     private var textHoldDuration: Double { max(0, min(15, ud.object(forKey: "textHoldDuration") as? Double ?? 2.0)) }
