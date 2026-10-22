@@ -270,7 +270,7 @@ final class TranslatorEngine: ObservableObject {
         let target = Locale.Language(identifier: targetCode).languageCode
         let hypotheses = recognizer.languageHypotheses(withMaximum: 5)
         let scores = hypotheses.sorted { $0.value > $1.value }.map { item in
-            "\(Locale.Language(identifier: item.key.rawValue).languageCode ?? item.key.rawValue)=\(String(format: "%.2f", item.value))"
+            "\(Locale.Language(identifier: item.key.rawValue).languageCode?.identifier ?? item.key.rawValue)=\(String(format: "%.2f", item.value))"
         }.joined(separator: ", ")
         let targetScore = hypotheses.reduce(0.0) { $0 + (Locale.Language(identifier: $1.key.rawValue).languageCode == target ? $1.value : 0) }
         return "target=\(targetCode) score=\(String(format: "%.2f", targetScore)); hypotheses=[\(scores)]"
@@ -529,7 +529,6 @@ final class TranslatorEngine: ObservableObject {
                 let previousWidth = max(previous.w ?? 0.2, 0.001)
                 let overlap = min(line.x + lineWidth / 2, previous.x + previousWidth / 2)
                     - max(line.x - lineWidth / 2, previous.x - previousWidth / 2)
-                let gapX = max(0, abs(line.x - previous.x) - (lineWidth + previousWidth) / 2)
                 let verticalGap = previous.y - line.y
                 let lineHeight = max(previous.h, line.h, 0.001)
                 let sizeRatio = min(previous.h, line.h) / lineHeight

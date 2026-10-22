@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.2.5"
-    static let build = 20
+    static let version = "1.2.6"
+    static let build = 21
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Keep this aligned with MARKETING_VERSION and CURRENT_PROJECT_VERSION in project.yml.
     static let changelog: [(String, String)] = [
+        ("1.2.6", "Fix Swift compilation in diagnostic language-score formatting; remove an unused OCR geometry variable; build 21."),
         ("1.2.5", "Add a rolling 60-second OCR-to-translation trace with block geometry, filter decisions, language hypotheses, cache decisions, per-block translations, and one-tap report export; build 20."),
         ("1.2.4", "Improve multilingual live OCR by relying on Vision auto-language detection in Auto mode, stricter speech-region separation, and more conservative target-language feedback filtering; build 19."),
         ("1.2.3", "Fix live OCR updates by accepting changed capture packets immediately and grouping OCR lines before target-language filtering; build 18."),
