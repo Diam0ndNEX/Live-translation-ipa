@@ -157,6 +157,9 @@ class SampleHandler: RPBroadcastSampleHandler {
         let margin = 0.03
         let y0 = max(0, cfg.y0 - margin), y1 = min(1, cfg.y1 + margin)
         var edge = cfg.maxEdge
+        let idleMinutes = max(0, cfg.idleMinutes ?? 0)
+        let isIdle = (cfg.adaptive ?? true) && idleMinutes > 0
+            && Date().timeIntervalSince(lastUsefulTextAt) >= TimeInterval(idleMinutes * 60)
         if isIdle { edge = min(edge, 900) }                 // save power while no text is visible
         if freeMB() < 15 { edge = min(edge, 800) }          // memory getting tight
 
