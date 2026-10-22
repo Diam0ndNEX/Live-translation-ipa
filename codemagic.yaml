@@ -1,0 +1,76 @@
+workflows:
+  screenlingo-ipa:
+    name: ScreenLingo IPA (unsigned)
+    max_build_duration: 30
+    instance_type: mac_mini_m2
+    environment:
+      xcode: latest
+    # No automatic triggers: start builds manually to avoid wasting free build minutes.
+    triggering:
+      events: []
+    scripts:
+      - name: Install build tools
+        script: |
+          set -euo pipefail
+          brew install xcodegen librsvg
+
+      - name: Generate app icon and Xcode project
+        script: |
+          set -euo pipefail
+          cd "$CM_BUILD_DIR"
+          mkdir -p App/Assets.xcassets/AppIcon.appiconset
+          rsvg-convert -w 1024 -h 1024 App/ScreenLingoIcon.svg -o App/Assets.xcassets/AppIcon.appiconset/AppIcon.png
+          printf '%s\n' '{"images":[{"filename":"AppIcon.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}' > App/Assets.xcassets/AppIcon.appiconset/Contents.json
+
+          SOURCE_VERSION=$(sed -nE 's/^[[:space:]]*static let version = "([^"]+)".*/\1/p' Shared/Shared.swift | head -n 1)
+          SOURCE_BUILD=$(sed -nE 's/^[[:space:]]*static let build = ([0-9]+).*/\1/p' Shared/Shared.swift | head -n 1)
+          test -n "$SOURCE_VERSION"
+          test -n "$SOURCE_BUILD"
+
+          sed -i '' -E "s/(MARKETING_VERSION: ")[0-9]+\.[0-9]+\.[0-9]+(")/\1$SOURCE_VERSION\2/g" project.yml
+          sed -i '' -E "s/(CURRENT_PROJECT_VERSION: ")[0-9]+(")/\1$SOURCE_BUILD\2/g" project.yml
+          echo "Building ScreenLingo version $SOURCE_VERSION ($SOURCE_BUILD)"
+          xcodegen generate
+
+      - name: Build unsigned iOS app
+        script: |
+          set -euo pipefail
+          cd "$CM_BUILD_DIR"
+          xcodebuild -project ScreenLingo.xcodeproj -scheme ScreenLingo \
+            -configuration Release -sdk iphoneos -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+
+      - name: Package IPA
+        script: |
+          set -euo pipefail
+          cd "$CM_BUILD_DIR"
+          rm -rf Payload ScreenLingo.ipa
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/ScreenLingo.app Payload/ScreenLingo.app
+          /usr/bin/ditto -c -k --sequesterRsrc --keepParent Payload ScreenLingo.ipa
+          test -s ScreenLingo.ipa
+
+      - name: Verify app version and build number
+        script: |
+          set -euo pipefail
+          cd "$CM_BUILD_DIR"
+          APP="Payload/ScreenLingo.app"
+          SOURCE_VERSION=$(sed -nE 's/^[[:space:]]*static let version = "([^"]+)".*/\1/p' Shared/Shared.swift | head -n 1)
+          SOURCE_BUILD=$(sed -nE 's/^[[:space:]]*static let build = ([0-9]+).*/\1/p' Shared/Shared.swift | head -n 1)
+          APP_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist")
+          APP_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Info.plist")
+          echo "Expected: $SOURCE_VERSION ($SOURCE_BUILD)"
+          echo "Built app: $APP_VERSION ($APP_BUILD)"
+          test "$APP_VERSION" = "$SOURCE_VERSION"
+          test "$APP_BUILD" = "$SOURCE_BUILD"
+          EXT=$(find "$APP/PlugIns" -maxdepth 1 -type d -name "*.appex" -print -quit)
+          test -n "$EXT"
+          EXT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$EXT/Info.plist")
+          EXT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$EXT/Info.plist")
+          test "$EXT_VERSION" = "$SOURCE_VERSION"
+          test "$EXT_BUILD" = "$SOURCE_BUILD"
+
+    artifacts:
+      - ScreenLingo.ipa
+      - /tmp/xcodebuild_logs/*.log
+      - build/Build/Products/Release-iphoneos/**/*.app
