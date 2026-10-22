@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.4.1"
-    static let build = 29
+    static let version = "1.4.2"
+    static let build = 30
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Keep this aligned with MARKETING_VERSION and CURRENT_PROJECT_VERSION in project.yml.
     static let changelog: [(String, String)] = [
+        ("1.4.2", "Calibrate frame rotation from reading-order evidence and reject stale OCR packets after rotation changes."),
         ("1.4.1", "Fix history star controls and native TXT/CSV file export; add a smaller PiP text-size option."),
         ("1.4.0", "Add privacy dashboard, configurable local-history retention, and CSV history export; keep main branch unchanged."),
         ("1.3.2", "Improve source-vs-target language checks, retry failed batches, configurable OCR cleanup, slang expansion, speaker and protected-term handling, source corrections, glossary rules, stable language lock, settings profiles/backup, and PiP font/highlighting controls."),
@@ -54,6 +55,7 @@ struct Packet: Codable {
     var lines: [OCRLine]
     var ocrMs: Double?
     var memFreeMB: Double?
+    var rev: Int? = nil          // rotation/settings revision used for this OCR packet
 }
 
 /// App → extension (sent back over the same localhost link)
@@ -75,6 +77,7 @@ struct Config: Codable {
     var rotation: Int?
     var adaptive: Bool?
     var idleMinutes: Int?
+    var revision: Int? = nil     // echoed by the extension to discard packets from old rotations
 }
 
 enum TextSim {
