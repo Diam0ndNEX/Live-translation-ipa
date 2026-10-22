@@ -736,15 +736,29 @@ final class TranslatorEngine: ObservableObject {
         status = "Output cleared — capture is still running"
     }
 
-    /// Drops lines already in the target language.
+    /// Reject text that is probably already in the requested output language.
+    /// This must be deliberately more sensitive than source-language detection:
+    /// the PiP overlay is English in a Portuguese→English session, and letting even
+    /// one overlay block through creates a feedback loop where the translation is
+    /// repeatedly translated as if it were source dialogue.
     private func isTargetLanguage(_ s: String) -> Bool {
-        guard s.count >= 12 else { return false }
+        let text = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard text.count >= 7 else { return false }
+        let target = Locale.Language(identifier: targetCode).languageCode
+        guard let target else { return false }
         let r = NLLanguageRecognizer()
-        r.processString(s)
-        guard let d = r.dominantLanguage,
-              (r.languageHypotheses(withMaximum: 1)[d] ?? 0) > 0.8 else { return false }
-        return Locale.Language(identifier: d.rawValue).languageCode
-            == Locale.Language(identifier: targetCode).languageCode
+        r.processString(text)
+        let hypotheses = r.languageHypotheses(withMaximum: 5)
+        let targetProbability = hypotheses.reduce(0.0) { partial, item in
+            partial + (Locale.Language(identifier: item.key.rawValue).languageCode == target ? item.value : 0)
+        }
+        // The recognizer is uncertain on OCR fragments, so use combined probability
+        // rather than requiring the single dominant hypothesis to exceed 0.8.
+        if text.count >= 12 && targetProbability >= 0.34 { return true }
+        if text.count >= 7, let dominant = r.dominantLanguage,
+           Locale.Language(identifier: dominant.rawValue).languageCode == target,
+           (hypotheses[dominant] ?? 0) >= 0.48 { return true }
+        return false
     }
 
     private func drain() async {
