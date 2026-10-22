@@ -593,13 +593,17 @@ final class TranslatorEngine: ObservableObject {
                 let verticalGap = previous.y - line.y
                 let lineHeight = max(previous.h, line.h, 0.001)
                 let sizeRatio = min(previous.h, line.h) / lineHeight
+                // Compare empty space between box edges, not just center distance.
+                // Tall OCR boxes can otherwise bridge separate dialogue bubbles.
+                let edgeGap = verticalGap - (previous.h + line.h) / 2
 
                 // Vision y increases upward. Since input is top-to-bottom, the next
                 // line must be below the previous line and within a plausible line gap.
                 let centerDistance = abs(line.x - previous.x)
                 let overlapRatio = overlap / max(0.001, min(lineWidth, previousWidth))
                 let stacked = verticalGap > 0.20 * lineHeight
-                    && verticalGap < 1.45 * lineHeight
+                    && edgeGap < 0.75 * lineHeight
+                    && edgeGap > -0.35 * lineHeight
                     && (overlapRatio > 0.35 || centerDistance < 0.09)
                     // Large horizontal spans often indicate separate speech bubbles
                     // or an OCR line from the floating PiP overlay. Do not bridge them
@@ -615,7 +619,7 @@ final class TranslatorEngine: ObservableObject {
                 guard sizeRatio > 0.45, stacked else { continue }
 
                 let score = (overlap / min(lineWidth, previousWidth))
-                    - abs(verticalGap) / lineHeight * 0.1
+                    - abs(edgeGap) / lineHeight * 0.15
                     - abs(line.x - previous.x) * 0.2
                 if score > bestScore {
                     bestScore = score
@@ -837,11 +841,11 @@ final class TranslatorEngine: ObservableObject {
             pipRegionStamp = Date()
         }
 
-        if Date().timeIntervalSince(pipRegionStamp) < 8, !pipRegions.isEmpty {
-            rest.removeAll { line in
-                pipRegions.contains { $0.contains(CGPoint(x: line.x, y: line.y)) }
-            }
-        } else {
+        // Do not suppress OCR solely because it falls inside a remembered PiP rectangle.
+        // The overlay can overlap genuine source dialogue, and OCR boxes can be taller/wider
+        // than the actual glyphs. Remove only lines with a textual match to rendered output
+        // above; target-language filtering is the secondary guard against remaining feedback.
+        if Date().timeIntervalSince(pipRegionStamp) >= 8 {
             pipRegions.removeAll()
         }
         return rest
