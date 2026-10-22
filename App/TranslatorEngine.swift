@@ -1261,10 +1261,15 @@ final class TranslatorEngine: ObservableObject {
         return out.isEmpty ? [text] : out
     }
 
-    private func process(_ blocks: [String]) async {
+    private func process(_ rawBlocks: [String]) async {
         let t0 = Date()
+        // Normalize common OCR substitutions before language scoring and translation.
+        // Keep raw OCR available in diagnostics; cleaned text is used only for translation.
+        let blocks = rawBlocks.map { TextIntel.cleanOCR($0) }
         lastTranslationError = "None"
         lastTranslationInput = blocks.joined(separator: "\n")
+        trace("OCR CLEANUP", "raw=\(rawBlocks.joined(separator: " | "))")
+        trace("OCR CLEANUP", "cleaned=\(blocks.joined(separator: " | "))")
         trace("TRANSLATION START", "\(blocks.count) block(s); target=\(targetCode); input:\n" + blocks.enumerated().map { "#\($0.offset + 1) \($0.element)" }.joined(separator: "\n"))
         let target = Locale.Language(identifier: targetCode)
 
