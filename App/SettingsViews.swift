@@ -500,3 +500,4 @@ struct AboutSettings: View {
         .settingsPage("About & help")
     }
 }
+
