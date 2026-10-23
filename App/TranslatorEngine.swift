@@ -1,4 +1,4 @@
-// Screen Translator – App – v0.8.0
+// Screen Translator – App – v0.9.0
 import SwiftUI
 import Translation
 import NaturalLanguage
@@ -70,8 +70,8 @@ struct LangItem: Identifiable, Hashable {
     var id: String { code }
 }
 
-struct HistoryItem: Identifiable {
-    let id = UUID()
+struct HistoryItem: Identifiable, Codable {
+    var id = UUID()
     let original: String
     let translated: String
     var date = Date()
@@ -88,25 +88,44 @@ private struct TUnit {
 
 @MainActor
 final class TranslatorEngine: ObservableObject {
-    static let settingKeys = [
+    /// Everything a preset remembers.
+    static let presetKeys = [
         "source", "target", "mode", "area", "customY0", "customY1", "speed", "stability", "minTextH", "ignoreList",
         "frameRot", "dropNoise", "boost", "skipUnchanged", "cleanOCR", "slang", "speakerDetect", "highlightNames",
         "langLock", "neverTranslate", "sourceFixes", "glossary", "winSize", "theme", "textSize", "pipFont",
-        "showOriginal", "autoClear", "clearHold", "minDisplay", "autoOpenPiP", "haptics", "speak", "adaptive", "idleMinutes"
+        "showOriginal", "autoClear", "clearHold", "minDisplay", "autoOpenPiP", "haptics", "speak", "speechRate",
+        "autoCopy", "adaptive", "idleMinutes"
+    ]
+    /// App look & behaviour that presets do not touch.
+    static let interfaceKeys = ["accent", "keepAwake", "saveHistory", "uiHaptics",
+                                "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent"]
+    static var settingKeys: [String] { presetKeys + interfaceKeys }
+    static let defaults: [String: Any] = [
+        "source": "auto", "target": "en", "mode": "movie", "area": "smart", "customY0": 0.0, "customY1": 0.5,
+        "speed": "balanced", "stability": 2, "minTextH": 0.0, "ignoreList": "", "frameRot": "auto",
+        "dropNoise": true, "boost": 1, "skipUnchanged": true, "cleanOCR": true, "slang": true,
+        "speakerDetect": true, "highlightNames": true, "langLock": true, "neverTranslate": "", "sourceFixes": "",
+        "glossary": "", "winSize": "normal", "theme": "dark", "textSize": "auto", "pipFont": "standard",
+        "showOriginal": false, "autoClear": true, "clearHold": 1.0, "minDisplay": 0.0, "autoOpenPiP": true,
+        "haptics": false, "speak": false, "speechRate": 0.5, "autoCopy": false, "adaptive": true, "idleMinutes": 0
     ]
 
     // Settings that live in the engine
     @Published var sourceCode: String {
-        didSet { UserDefaults.standard.set(sourceCode, forKey: "source"); lastHandled = ""; lockedLang = nil; syncConfig() }
+        didSet { UserDefaults.standard.set(sourceCode, forKey: "source"); lastHandled = ""; lockedLang = nil; syncConfig(); noteRecentPair() }
     }
     @Published var targetCode: String {
         didSet {
             UserDefaults.standard.set(targetCode, forKey: "target"); lastHandled = ""; directSession = nil
+            noteRecentPair()
             Task { await refreshStatus() }
         }
     }
     @Published var paused = false { didSet { syncConfig() } }
     @Published var frozen = false
+    @Published var toastText: String?
+    @Published var detectedLang = "–"
+    @Published var recentPairs: [String] = []
     // Languages
     @Published var languages: [LangItem] = TranslatorEngine.fallbackLanguages
     @Published var langStatus: [String: LanguageAvailability.Status] = [:]
@@ -124,8 +143,7 @@ final class TranslatorEngine: ObservableObject {
     @Published var ocrMs: Double = 0
     @Published var translateMs: Double = 0
     @Published var extFreeMB: Double = 0
-    @Published var history: [HistoryItem] = []
-    @Published var profileNames: [String] = []
+    @Published var history: [HistoryItem] = [] { didSet { saveHistory() } }
     // Translation session plumbing
     @Published var legacyConfig: TranslationSession.Configuration?
     @Published var downloadConfig: TranslationSession.Configuration?
@@ -133,6 +151,7 @@ final class TranslatorEngine: ObservableObject {
     let pip = PiPRenderer()
     let server = LoopbackServer()
     let diag = Diagnostics()
+    let presets = PresetStore()
 
     private var lastHandled = ""
     private var queued: [String]?
@@ -150,6 +169,8 @@ final class TranslatorEngine: ObservableObject {
     private var directKey = ""
     private var clearTask: Task<Void, Never>?
     private var tickCount = 0
+    private var toastToken = 0
+    private var suppressRecent = false
     private let speech = AVSpeechSynthesizer()
     // Reading-order calibration
     private var orderVote = 0.0
@@ -216,7 +237,10 @@ final class TranslatorEngine: ObservableObject {
         pip.onActiveChange = { [weak self] a in
             Task { @MainActor in self?.pipActive = a; self?.diag.log(a ? "Floating window opened" : "Floating window closed") }
         }
-        profileNames = loadProfiles().keys.sorted()
+        recentPairs = ud.stringArray(forKey: "recentPairs") ?? []
+        loadHistory()
+        presets.onApplied = { [weak self] in self?.reloadSettings() }
+        presets.applyStartup()
         diag.log("App started \(AppVersion.full)")
     }
 
@@ -228,6 +252,7 @@ final class TranslatorEngine: ObservableObject {
             diag.log("Capture stopped")
         }
         captureAlive = alive
+        UIApplication.shared.isIdleTimerDisabled = alive && flag("keepAwake", true)
         if tickCount % 10 == 0, alive { syncConfig() }        // refreshes adaptive performance
         let idle = int("idleMinutes", 0)
         if idle > 0, alive, !paused, Date().timeIntervalSince(lastTextDate) > Double(idle) * 60 {
@@ -294,23 +319,65 @@ final class TranslatorEngine: ObservableObject {
     func swapLanguages() {
         guard sourceCode != "auto" else { status = "Pick a source language to swap"; return }
         let s = sourceCode
+        suppressRecent = true
         sourceCode = targetCode
         targetCode = s
+        suppressRecent = false
+        noteRecentPair()
     }
     func applyWindowSize() { pip.setSize(windowSize.size) }
-    func applyStyle() { pip.style = pipStyle; pip.rerender() }
+    func applyStyle() { pip.style = pipStyle; pip.rerender(showOriginal: showOriginal) }
 
-    /// One-tap bundles of settings for the common situations.
-    func applyPreset(_ name: String) {
-        switch name {
-        case "movie": ud.set("movie", forKey: "mode"); ud.set("smart", forKey: "area"); ud.set("balanced", forKey: "speed")
-        case "game": ud.set("game", forKey: "mode"); ud.set("full", forKey: "area"); ud.set("fast", forKey: "speed")
-        default: ud.set("comic", forKey: "mode"); ud.set("full", forKey: "area"); ud.set("sharp", forKey: "speed")
+    /// A shareable picture of one history entry.
+    func image(for h: HistoryItem) -> UIImage {
+        PiPRenderer.image(original: h.original, translated: h.translated, showOriginal: true,
+                          size: CGSize(width: 720, height: 420), style: pipStyle)
+    }
+
+    // MARK: Small helpers
+    /// Short message that slides in at the top of the screen.
+    func toast(_ text: String) {
+        toastToken += 1
+        let token = toastToken
+        toastText = text
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(2.2))
+            if self?.toastToken == token { self?.toastText = nil }
         }
-        lastHandled = ""
-        syncConfig()
-        status = "Preset applied: \(name)"
-        diag.log("Preset: \(name)")
+    }
+
+    /// Light tick under the finger (can be turned off in Settings → Interface).
+    func tap() { if flag("uiHaptics", true) { UISelectionFeedbackGenerator().selectionChanged() } }
+
+    private func noteRecentPair() {
+        guard !suppressRecent else { return }
+        let pair = "\(sourceCode)>\(targetCode)"
+        var r = recentPairs.filter { $0 != pair }
+        r.insert(pair, at: 0)
+        recentPairs = Array(r.prefix(5))
+        ud.set(recentPairs, forKey: "recentPairs")
+    }
+
+    func applyPair(_ pair: String) {
+        let p = pair.split(separator: ">", maxSplits: 1).map(String.init)
+        guard p.count == 2 else { return }
+        suppressRecent = true
+        sourceCode = p[0]
+        targetCode = p[1]
+        suppressRecent = false
+        noteRecentPair()
+        tap()
+    }
+
+    // MARK: History storage
+    private func saveHistory() {
+        guard flag("saveHistory", true) else { return }
+        if let d = try? JSONEncoder().encode(Array(history.prefix(200))) { ud.set(d, forKey: "historyData") }
+    }
+    private func loadHistory() {
+        guard flag("saveHistory", true), let d = ud.data(forKey: "historyData"),
+              let h = try? JSONDecoder().decode([HistoryItem].self, from: d) else { return }
+        history = h
     }
 
     // MARK: Packets from the extension
@@ -632,6 +699,7 @@ final class TranslatorEngine: ObservableObject {
         guard let d = dom else { return nil }
         let code = Locale.Language(identifier: d.rawValue).minimalIdentifier
         diag.s.detected = code
+        detectedLang = code
         if useLock {
             detectLog.append(code)
             if detectLog.count > 6 { detectLog.removeFirst() }
@@ -821,6 +889,7 @@ final class TranslatorEngine: ObservableObject {
             if history.count > 200 { history.removeLast() }
             if flag("speak", false) { speak(result) }
             if flag("haptics", false) { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+            if flag("autoCopy", false) { UIPasteboard.general.string = result }
         }
         renderedGrams = TextSim.grams(result).union(placeholderGrams)
         sourceGrams = TextSim.grams(text)
@@ -837,6 +906,7 @@ final class TranslatorEngine: ObservableObject {
         speech.stopSpeaking(at: .immediate)
         let u = AVSpeechUtterance(string: s)
         u.voice = AVSpeechSynthesisVoice(language: voices[targetCode] ?? targetCode)
+        u.rate = Float(num("speechRate", 0.5))
         speech.speak(u)
     }
 
@@ -913,39 +983,11 @@ final class TranslatorEngine: ObservableObject {
         await refreshStatus()
     }
 
-    // MARK: Profiles + backup
+    // MARK: Backup + bulk changes
     private func snapshot() -> [String: Any] {
         var snap: [String: Any] = [:]
         for k in Self.settingKeys { if let v = ud.object(forKey: k) { snap[k] = v } }
         return snap
-    }
-    private func loadProfiles() -> [String: [String: Any]] {
-        guard let d = ud.data(forKey: "profiles"),
-              let o = try? JSONSerialization.jsonObject(with: d) as? [String: [String: Any]] else { return [:] }
-        return o
-    }
-    func saveProfile(_ name: String) {
-        let n = name.trimmingCharacters(in: .whitespaces)
-        guard !n.isEmpty else { return }
-        var all = loadProfiles()
-        all[n] = snapshot()
-        if let d = try? JSONSerialization.data(withJSONObject: all) { ud.set(d, forKey: "profiles") }
-        profileNames = all.keys.sorted()
-        status = "Profile saved: \(n)"
-        diag.log("Profile saved: \(n)")
-    }
-    func applyProfile(_ name: String) {
-        guard let snap = loadProfiles()[name] else { return }
-        for k in Self.settingKeys { if let v = snap[k] { ud.set(v, forKey: k) } else { ud.removeObject(forKey: k) } }
-        reloadSettings()
-        status = "Profile applied: \(name)"
-        diag.log("Profile applied: \(name)")
-    }
-    func deleteProfile(_ name: String) {
-        var all = loadProfiles()
-        all[name] = nil
-        if let d = try? JSONSerialization.data(withJSONObject: all) { ud.set(d, forKey: "profiles") }
-        profileNames = all.keys.sorted()
     }
     func exportSettings() -> String {
         guard let d = try? JSONSerialization.data(withJSONObject: snapshot(), options: [.prettyPrinted, .sortedKeys]),
@@ -959,18 +1001,29 @@ final class TranslatorEngine: ObservableObject {
         reloadSettings()
         return true
     }
-    func resetAllSettings() {
-        for k in Self.settingKeys { ud.removeObject(forKey: k) }
+    /// Puts the given settings back to their defaults (used by every "Reset this page" button).
+    func resetKeys(_ keys: [String]) {
+        for k in keys { ud.removeObject(forKey: k) }
         reloadSettings()
+        toast("Reset to defaults")
     }
+    func resetAllSettings() { resetKeys(Self.settingKeys) }
     /// Re-reads everything after settings were changed in bulk.
     func reloadSettings() {
+        suppressRecent = true
         sourceCode = ud.string(forKey: "source") ?? "auto"
         targetCode = ud.string(forKey: "target") ?? "en"
+        suppressRecent = false
         lastHandled = ""
         rotationSettingChanged()
         applyStyle()
         applyWindowSize()
+        objectWillChange.send()
+    }
+    /// A picture of the current translation, for sharing.
+    func snapshotImage() -> UIImage {
+        PiPRenderer.image(original: original, translated: translated.isEmpty ? "Nothing translated yet" : translated,
+                          showOriginal: showOriginal, size: windowSize.size, style: pipStyle)
     }
 
     // MARK: Test
