@@ -1,4 +1,4 @@
-// Screen Translator – App – v0.9.0
+// Screen Translator – App – v0.11.0
 import SwiftUI
 import ReplayKit
 
@@ -273,5 +273,55 @@ struct OnboardingView: View {
             }
         }
         .foregroundStyle(.white)
+    }
+}
+
+// MARK: - Sharing
+/// Shares through a real temporary file, presented straight from UIKit.
+/// (Handing the share sheet large raw text or a UIImage inside a SwiftUI sheet can hang on "Loading…".)
+enum Sharer {
+    private static func topController() -> UIViewController? {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        var vc = scene?.windows.first(where: { $0.isKeyWindow })?.rootViewController ?? scene?.windows.first?.rootViewController
+        while let p = vc?.presentedViewController { vc = p }
+        return vc
+    }
+
+    static func stamp() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd-HHmm"
+        return f.string(from: Date())
+    }
+
+    static func present(_ items: [Any]) {
+        guard let top = topController() else { return }
+        let sheet = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        if let pop = sheet.popoverPresentationController {
+            pop.sourceView = top.view
+            pop.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.midY, width: 0, height: 0)
+            pop.permittedArrowDirections = []
+        }
+        top.present(sheet, animated: true)
+    }
+
+    /// Text goes out as a file (.txt, .csv, .json) so it opens instantly and can be saved to Files.
+    static func shareFile(text: String, name: String) {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            present([url])
+        } catch {
+            UIPasteboard.general.string = text      // last resort: at least put it on the clipboard
+        }
+    }
+
+    static func shareImage(_ image: UIImage, name: String = "translation.png") {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        if let data = image.pngData(), (try? data.write(to: url)) != nil {
+            present([url])
+        } else {
+            present([image])
+        }
     }
 }
