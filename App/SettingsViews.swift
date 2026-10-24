@@ -1,4 +1,4 @@
-// Screen Translator – App – v0.9.0
+// Screen Translator – App – v0.11.0
 import SwiftUI
 
 private extension View {
@@ -411,9 +411,23 @@ struct PerformanceSettings: View {
     @EnvironmentObject var engine: TranslatorEngine
     @AppStorage("adaptive") private var adaptive = true
     @AppStorage("idleMinutes") private var idleMinutes = 0
+    @AppStorage("translateAhead") private var translateAhead = true
+    @AppStorage("keepWarm") private var keepWarm = true
+    @AppStorage("remember") private var remember = true
 
     var body: some View {
         List {
+            Section {
+                Toggle("Translate ahead", isOn: $translateAhead)
+                Toggle("Keep the translator warm", isOn: $keepWarm)
+                Toggle("Remember translations", isOn: $remember)
+                LabeledContent("Sentences remembered", value: "\(engine.memoryCount)")
+                Button("Clear translation memory", role: .destructive) { engine.clearMemory() }
+            } header: {
+                Text("Translation speed")
+            } footer: {
+                Text("Translate ahead starts translating the moment text appears and shows it once it's confirmed, so the two waits overlap. Keeping the translator warm avoids a slow first sentence. Remembered sentences are reused instantly, even after restarting. None of this changes the wording of a translation.")
+            }
             Section {
                 Toggle("Adaptive performance", isOn: $adaptive)
                 Picker("Pause after no text for", selection: $idleMinutes) {
@@ -430,10 +444,11 @@ struct PerformanceSettings: View {
             Section {
                 Button("Reset diagnostics counters") { engine.diag.reset(); engine.toast("Counters reset") }
             }
-            ResetSection(keys: ["adaptive", "idleMinutes"])
+            ResetSection(keys: ["adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember"])
         }
         .settingsPage("Performance & power")
         .onChange(of: adaptive) { _, _ in engine.syncConfig() }
+        .onChange(of: translateAhead) { _, _ in engine.syncConfig() }
     }
 }
 
@@ -446,7 +461,13 @@ struct BackupSettings: View {
     var body: some View {
         List {
             Section {
-                ShareLink(item: engine.exportSettings()) { Label("Export all settings", systemImage: "square.and.arrow.up") }
+                Button { Sharer.shareFile(text: engine.exportSettings(), name: "screen-translator-settings.json") } label: {
+                    Label("Share all settings", systemImage: "square.and.arrow.up")
+                }
+                Button {
+                    UIPasteboard.general.string = engine.exportSettings()
+                    message = "Settings copied to the clipboard."
+                } label: { Label("Copy all settings", systemImage: "doc.on.doc") }
                 Button {
                     message = engine.importSettings(UIPasteboard.general.string ?? "")
                         ? "Settings imported from the clipboard."
