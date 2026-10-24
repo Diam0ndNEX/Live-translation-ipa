@@ -1,11 +1,136 @@
-// Screen Translator – App – v0.8.0
+// Screen Translator – App – v0.10.0
 import SwiftUI
+import Charts
 import os
 
-struct LogEntry: Identifiable {
+// MARK: - Models
+struct Sample: Identifiable {
+    let id = UUID()
+    let t: Date
+    let v: Double
+}
+
+enum EventKind: String, CaseIterable, Identifiable {
+    case capture, pip, translation, language, rotation, preset, state, error, system
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .capture: "Capture"
+        case .pip: "Window"
+        case .translation: "Translation"
+        case .language: "Language"
+        case .rotation: "Rotation"
+        case .preset: "Preset"
+        case .state: "State"
+        case .error: "Problem"
+        case .system: "System"
+        }
+    }
+    var icon: String {
+        switch self {
+        case .capture: "record.circle"
+        case .pip: "rectangle.on.rectangle"
+        case .translation: "character.bubble"
+        case .language: "globe"
+        case .rotation: "rotate.right"
+        case .preset: "square.stack.3d.up"
+        case .state: "circle.dotted"
+        case .error: "exclamationmark.triangle.fill"
+        case .system: "gearshape"
+        }
+    }
+    var color: Color {
+        switch self {
+        case .capture: Color.green
+        case .pip: Color.blue
+        case .translation: Color.cyan
+        case .language: Color.purple
+        case .rotation: Color.orange
+        case .preset: Color.pink
+        case .state: Color.gray
+        case .error: Color.red
+        case .system: Color.secondary
+        }
+    }
+    /// Sorts a plain log line into a category.
+    static func classify(_ t: String) -> EventKind {
+        let s = t.lowercased()
+        if s.contains("failed") || s.contains("couldn't") || s.contains("error") || s.contains("stopped") { return .error }
+        if s.contains("floating window") { return .pip }
+        if s.contains("capture") { return .capture }
+        if s.contains("rotation") || s.contains("reading order") { return .rotation }
+        if s.contains("preset") || s.contains("profile") { return .preset }
+        if s.contains("language") { return .language }
+        if s.contains("translat") || s.contains("cleared") { return .translation }
+        if s.contains("paused") || s.contains("now ") { return .state }
+        return .system
+    }
+}
+
+struct TimelineEvent: Identifiable {
     let id = UUID()
     let time: Date
+    let kind: EventKind
     let text: String
+    var detail: String? = nil
+}
+
+enum EngineState: String {
+    case idle, live, paused, frozen
+    var title: String { rawValue.capitalized }
+    var color: Color {
+        switch self {
+        case .idle: Color.gray
+        case .live: Color.green
+        case .paused: Color.orange
+        case .frozen: Color.blue
+        }
+    }
+}
+
+struct StateSpan: Identifiable {
+    let id = UUID()
+    let start: Date
+    var end: Date?
+    let state: EngineState
+}
+
+enum Fix: String {
+    case fastSpeed, instantStability, fixedRotation, narrowArea, openLanguages, startCapture
+    var label: String {
+        switch self {
+        case .fastSpeed: "Use Fast speed"
+        case .instantStability: "Use Instant mode"
+        case .fixedRotation: "Turn off auto-rotation"
+        case .narrowArea: "Read the bottom third only"
+        case .openLanguages: "Open Languages"
+        case .startCapture: "Go to Home"
+        }
+    }
+}
+
+struct Issue: Identifiable {
+    let id = UUID()
+    let severity: Int          // 0 tip, 1 warning, 2 problem
+    let title: String
+    let detail: String
+    let fix: Fix?
+}
+
+struct Assessment {
+    var score: Int
+    var headline: String
+    var issues: [Issue]
+}
+
+struct Summary {
+    var n = 0
+    var min = 0.0
+    var avg = 0.0
+    var p50 = 0.0
+    var p95 = 0.0
+    var max = 0.0
+    var last = 0.0
 }
 
 struct Stats {
@@ -24,29 +149,54 @@ struct Stats {
     var rotation = 0
     var calibrated = false
     var pipRegion = "–"
+    var captureDrops = 0
+    var rotationTries = 0
 }
 
+// MARK: - Recorder
 @MainActor
 final class Diagnostics: ObservableObject {
     @Published var s = Stats()
-    @Published var ocrSeries: [Double] = []
-    @Published var translateSeries: [Double] = []
-    @Published var latencySeries: [Double] = []
-    @Published var transportSeries: [Double] = []
+    @Published var ocr: [Sample] = []
+    @Published var translate: [Sample] = []
+    @Published var latency: [Sample] = []
+    @Published var transport: [Sample] = []
+    @Published var fps: [Sample] = []
+    @Published var lineCounts: [Sample] = []
+    @Published var extMem: [Sample] = []
+    @Published var appMem: [Sample] = []
+    @Published var thermal: [Sample] = []
+    @Published var battery: [Sample] = []
+    @Published var cacheRate: [Sample] = []
+    @Published var events: [TimelineEvent] = []
+    @Published var spans: [StateSpan] = []
+    @Published var langCounts: [String: Int] = [:]
     @Published var names: [String] = []
-    @Published var events: [LogEntry] = []
     let started = Date()
     private var lastFrames = 0
     private var lastFrameTime = Date()
+    private var tickN = 0
+    private var lastState: EngineState?
 
-    func log(_ t: String) {
-        events.insert(LogEntry(time: Date(), text: t), at: 0)
-        if events.count > 150 { events.removeLast() }
+    init() { UIDevice.current.isBatteryMonitoringEnabled = true }
+
+    private func add(_ kp: ReferenceWritableKeyPath<Diagnostics, [Sample]>, _ v: Double, cap: Int = 600) {
+        self[keyPath: kp].append(Sample(t: Date(), v: v))
+        let extra = self[keyPath: kp].count - cap
+        if extra > 0 { self[keyPath: kp].removeFirst(extra) }
     }
 
-    static func push(_ a: inout [Double], _ v: Double) {
-        a.append(v)
-        if a.count > 60 { a.removeFirst() }
+    // MARK: Events
+    func event(_ kind: EventKind, _ text: String, detail: String? = nil) {
+        events.append(TimelineEvent(time: Date(), kind: kind, text: text, detail: detail))
+        if events.count > 600 { events.removeFirst(events.count - 600) }
+    }
+
+    /// Plain log line; the category is worked out from the wording.
+    func log(_ t: String) {
+        let k = EventKind.classify(t)
+        if k == .rotation && t.lowercased().contains("trying") { s.rotationTries += 1 }
+        event(k, t)
     }
 
     func learn(_ name: String) {
@@ -56,85 +206,517 @@ final class Diagnostics: ObservableObject {
         if names.count > 60 { names.removeLast() }
     }
 
+    func noteLanguage(_ code: String) { langCounts[code, default: 0] += 1 }
+
+    func recordTranslate(ms: Double, sentences: Int, from: String, to: String, preview: String) {
+        add(\.translate, ms)
+        event(.translation, "Translated \(sentences) sentence\(sentences == 1 ? "" : "s") \(from) → \(to) in \(Int(ms)) ms",
+              detail: String(preview.prefix(90)))
+    }
+
+    func recordLatency(ms: Double) { add(\.latency, ms) }
+
     func reset() {
-        s = Stats(); ocrSeries = []; translateSeries = []; latencySeries = []; transportSeries = []
-        names = []; events = []
+        s = Stats()
+        ocr = []; translate = []; latency = []; transport = []; fps = []; lineCounts = []
+        extMem = []; appMem = []; thermal = []; battery = []; cacheRate = []
+        events = []; spans = []; langCounts = [:]; names = []
+        lastState = nil
     }
 
-    static func orientationName(_ v: Int) -> String {
-        let n = ["up", "up mirrored", "down", "down mirrored", "left mirrored", "right", "right mirrored", "left"]
-        return (1...8).contains(v) ? "\(n[v - 1]) (\(v))" : "\(v)"
-    }
-
-    func onPacket(_ p: Packet, transport: Double?) {
+    // MARK: Packets from the extension
+    func onPacket(_ p: Packet, transport t: Double?) {
         s.packets += 1
-        if p.kind == "ocr" { s.ocrPackets += 1 } else if p.kind == "clear" { s.clearPackets += 1 }
+        if p.kind == "ocr" {
+            s.ocrPackets += 1
+            add(\.lineCounts, Double(p.lines.count))
+        } else if p.kind == "clear" {
+            s.clearPackets += 1
+        }
         let now = Date()
         let dt = now.timeIntervalSince(lastFrameTime)
         if p.frames < lastFrames {
             lastFrames = p.frames; lastFrameTime = now
         } else if dt >= 1 {
             s.fps = Double(p.frames - lastFrames) / dt
+            add(\.fps, s.fps)
             lastFrames = p.frames; lastFrameTime = now
         }
         s.frames = p.frames
-        if let m = p.memFreeMB { s.extFreeMB = m; if m > 0 { s.minExtFreeMB = min(s.minExtFreeMB, m) } }
-        if let o = p.ocrMs, o > 0, p.kind != "ping" { Diagnostics.push(&ocrSeries, o) }
+        if let m = p.memFreeMB { s.extFreeMB = m; if m > 0 { s.minExtFreeMB = Swift.min(s.minExtFreeMB, m) } }
+        if let o = p.ocrMs, o > 0, p.kind != "ping" { add(\.ocr, o) }
         if let v = p.passes { s.passes = v }
         if let v = p.skipped { s.skippedFrames = v }
         if let w = p.bufW, let h = p.bufH { s.bufferSize = "\(w)×\(h)" }
         if let w = p.cropW, let h = p.cropH { s.cropSize = "\(w)×\(h)" }
         if let o = p.orient { s.orientation = Diagnostics.orientationName(o) }
-        if let t = transport, p.kind != "ping" { Diagnostics.push(&transportSeries, t) }
+        if let t, p.kind != "ping" { add(\.transport, t) }
     }
 
-    static func summary(_ a: [Double]) -> String {
-        guard let last = a.last else { return "–" }
-        let avg = a.reduce(0, +) / Double(a.count)
-        return "\(Int(last)) ms  (avg \(Int(avg)), max \(Int(a.max() ?? 0)))"
+    // MARK: Once a second
+    func tick(alive: Bool, paused: Bool, frozen: Bool) {
+        tickN += 1
+        let st: EngineState = !alive ? .idle : (paused ? .paused : (frozen ? .frozen : .live))
+        if st != lastState {
+            if let i = spans.indices.last { spans[i].end = Date() }
+            spans.append(StateSpan(start: Date(), end: nil, state: st))
+            if spans.count > 300 { spans.removeFirst() }
+            if let prev = lastState, prev != .idle, st == .idle { s.captureDrops += 1 }
+            event(.state, "Now \(st.title)")
+            lastState = st
+        }
+        if tickN % 2 == 0 { sampleDevice(alive: alive) }
+    }
+
+    private func sampleDevice(alive: Bool) {
+        let level: Double
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: level = 0
+        case .fair: level = 1
+        case .serious: level = 2
+        case .critical: level = 3
+        @unknown default: level = 0
+        }
+        add(\.thermal, level, cap: 900)
+        add(\.appMem, Double(os_proc_available_memory()) / 1_048_576, cap: 900)
+        let b = Double(UIDevice.current.batteryLevel)
+        if b >= 0 { add(\.battery, b * 100, cap: 900) }
+        if alive, s.extFreeMB > 0 { add(\.extMem, s.extFreeMB, cap: 900) }
+        let total = s.cacheHits + s.cacheMisses
+        if total > 0 { add(\.cacheRate, Double(s.cacheHits) / Double(total) * 100, cap: 900) }
+    }
+
+    // MARK: Maths
+    nonisolated static func summarize(_ a: [Sample]) -> Summary {
+        guard !a.isEmpty else { return Summary() }
+        let v = a.map { $0.v }.sorted()
+        func pct(_ p: Double) -> Double { v[Swift.min(v.count - 1, Int(Double(v.count - 1) * p))] }
+        return Summary(n: v.count, min: v.first ?? 0, avg: v.reduce(0, +) / Double(v.count),
+                       p50: pct(0.5), p95: pct(0.95), max: v.last ?? 0, last: a.last?.v ?? 0)
+    }
+
+    nonisolated static func orientationName(_ v: Int) -> String {
+        let n = ["up", "up mirrored", "down", "down mirrored", "left mirrored", "right", "right mirrored", "left"]
+        return (1...8).contains(v) ? "\(n[v - 1]) (\(v))" : "\(v)"
+    }
+
+    // MARK: Health + advice
+    func assessment(alive: Bool, paused: Bool) -> Assessment {
+        var issues: [Issue] = []
+        var score = 100
+        func flag(_ sev: Int, _ title: String, _ detail: String, _ fix: Fix? = nil) {
+            issues.append(Issue(severity: sev, title: title, detail: detail, fix: fix))
+        }
+        let ocrS = Diagnostics.summarize(Array(ocr.suffix(30)))
+        let latS = Diagnostics.summarize(Array(latency.suffix(30)))
+
+        if !alive {
+            flag(2, "Capture isn't running", "Open Home, tap the broadcast button and choose Translator Capture.", .startCapture)
+            score -= 45
+        } else {
+            if paused { flag(0, "Translating is paused", "Turn Pause off on the Home screen to continue."); score -= 5 }
+            if ocrS.n >= 3 {
+                if ocrS.avg > 500 {
+                    flag(2, "Reading the screen is slow (\(Int(ocrS.avg)) ms)", "A smaller area or the Fast speed makes it quicker.", .fastSpeed); score -= 20
+                } else if ocrS.avg > 300 {
+                    flag(1, "Reading is a little slow (\(Int(ocrS.avg)) ms)", "Try the Fast speed or a smaller OCR area.", .fastSpeed); score -= 10
+                }
+            }
+            if latS.n >= 3 {
+                if latS.avg > 2000 {
+                    flag(2, "Translations show up late (\(Int(latS.avg)) ms)", "Instant mode skips the extra confirmation read.", .instantStability); score -= 20
+                } else if latS.avg > 1200 {
+                    flag(1, "Slightly delayed translations (\(Int(latS.avg)) ms)", "Instant mode or the Fast speed reduces the delay.", .instantStability); score -= 10
+                }
+            }
+            if s.fps > 0 && s.fps < 15 {
+                flag(1, "Low frame rate (\(Int(s.fps)) fps)", "The phone may be busy or warm."); score -= 8
+            }
+        }
+        if s.minExtFreeMB < 12 {
+            flag(2, "The capture extension nearly ran out of memory (\(Int(s.minExtFreeMB)) MB left)", "iOS may close it. Use the Fast speed or a smaller OCR area.", .fastSpeed); score -= 20
+        } else if s.minExtFreeMB < 20 {
+            flag(1, "Memory is getting tight (\(Int(s.minExtFreeMB)) MB left)", "The Fast speed uses less memory.", .fastSpeed); score -= 8
+        }
+        switch ProcessInfo.processInfo.thermalState {
+        case .serious, .critical:
+            flag(2, "The phone is hot", "Reading slows down automatically. Let it cool down, or lower the brightness."); score -= 15
+        default: break
+        }
+        if s.translations + s.failures > 0, Double(s.failures) / Double(s.translations + s.failures) > 0.05 {
+            flag(1, "Some sentences failed to translate", "Make sure the language packs are downloaded.", .openLanguages); score -= 10
+        }
+        if s.rotationTries >= 3 {
+            flag(1, "Sentence order keeps being re-detected", "Pick a fixed frame rotation in Settings → Reading & OCR.", .fixedRotation); score -= 8
+        }
+        if s.captureDrops >= 2 {
+            flag(1, "Capture stopped \(s.captureDrops) times", "iOS closed the extension. The Fast speed is easier on memory.", .fastSpeed); score -= 8
+        }
+        score = Swift.max(0, Swift.min(100, score))
+        let headline = !alive ? "Not running" : (score >= 85 ? "Running smoothly" : (score >= 60 ? "Working, could be better" : "Needs attention"))
+        issues.sort { $0.severity > $1.severity }
+        return Assessment(score: score, headline: headline, issues: issues)
+    }
+
+    // MARK: Export
+    func csv() -> String {
+        var rows = ["series,time,value"]
+        func dump(_ name: String, _ a: [Sample]) {
+            for x in a { rows.append("\(name),\(x.t.timeIntervalSince1970),\(x.v)") }
+        }
+        dump("read_ms", ocr); dump("translate_ms", translate); dump("delay_ms", latency); dump("transfer_ms", transport)
+        dump("fps", fps); dump("lines_per_packet", lineCounts); dump("extension_free_mb", extMem)
+        dump("app_free_mb", appMem); dump("thermal_level", thermal); dump("battery_percent", battery)
+        dump("cache_hit_percent", cacheRate)
+        rows.append("")
+        rows.append("time,kind,text")
+        for e in events {
+            let clean = e.text.replacingOccurrences(of: "\"", with: "'")
+            rows.append("\(e.time.timeIntervalSince1970),\(e.kind.rawValue),\"\(clean)\"")
+        }
+        return rows.joined(separator: "\n")
     }
 
     func report(engine: TranslatorEngine) -> String {
+        let a = assessment(alive: engine.captureAlive, paused: engine.paused)
+        let o = Diagnostics.summarize(ocr), t = Diagnostics.summarize(translate)
+        let d = Diagnostics.summarize(latency), x = Diagnostics.summarize(transport)
+        func line(_ n: String, _ s: Summary) -> String {
+            "\(n): avg \(Int(s.avg)) ms, p50 \(Int(s.p50)), p95 \(Int(s.p95)), max \(Int(s.max)) (\(s.n) samples)"
+        }
         var l: [String] = []
         l.append("Screen Translator \(AppVersion.full) – diagnostics")
-        l.append("Capture: \(engine.captureAlive ? "connected" : "not connected"), extension v\(engine.extensionVersion)")
+        l.append("Health \(a.score)/100 – \(a.headline)")
+        for i in a.issues { l.append("  • \(i.title)") }
+        l.append("Capture: \(engine.captureAlive ? "connected" : "not connected"), extension v\(engine.extensionVersion), drops \(s.captureDrops)")
         l.append("Frames \(s.frames) (\(Int(s.fps)) fps), OCR passes \(s.passes), skipped \(s.skippedFrames)")
-        l.append("Buffer \(s.bufferSize), crop \(s.cropSize), orientation \(s.orientation), rotation \(s.rotation * 90)°")
-        l.append("OCR \(Diagnostics.summary(ocrSeries)); translate \(Diagnostics.summary(translateSeries))")
-        l.append("Latency \(Diagnostics.summary(latencySeries)); transport \(Diagnostics.summary(transportSeries))")
-        l.append("Extension memory free \(Int(s.extFreeMB)) MB (lowest \(Int(s.minExtFreeMB)) MB)")
-        l.append("Lines in \(s.linesIn); dropped area \(s.dropArea), small \(s.dropSmall), ignore \(s.dropIgnore), own output \(s.dropSelf), target language \(s.dropTarget), noise \(s.dropNoise), other language \(s.dropLanguage)")
-        l.append("Blocks \(s.blocksIn) → kept \(s.blocksKept); reading-order vote \(String(format: "%.1f", s.orderVote)), calibrated \(s.calibrated)")
-        l.append("Translations \(s.translations), sentences \(s.sentences), cache \(s.cacheHits)/\(s.cacheHits + s.cacheMisses), failures \(s.failures), session \(s.sessionKind)")
-        l.append("Language \(s.detected), locked \(s.lockedLang)")
-        l.append("Speakers: \(names.joined(separator: ", "))")
+        l.append("Frame \(s.bufferSize), read area \(s.cropSize), orientation \(s.orientation), rotation \(s.rotation * 90)°")
+        l.append(line("Reading", o)); l.append(line("Translating", t)); l.append(line("Total delay", d)); l.append(line("Transfer", x))
+        l.append("Extension memory free \(Int(s.extFreeMB)) MB (lowest \(s.minExtFreeMB > 9000 ? 0 : Int(s.minExtFreeMB)) MB)")
+        l.append("Lines \(s.linesIn): area \(s.dropArea), small \(s.dropSmall), ignore \(s.dropIgnore), own window \(s.dropSelf), target language \(s.dropTarget); blocks \(s.blocksIn) → \(s.blocksKept), noise \(s.dropNoise), other language \(s.dropLanguage)")
+        l.append("Order confidence \(String(format: "%.1f", s.orderVote)), calibrated \(s.calibrated), rotation tries \(s.rotationTries)")
+        l.append("Translations \(s.translations), sentences \(s.sentences), cache \(s.cacheHits)/\(s.cacheHits + s.cacheMisses), failures \(s.failures), engine \(s.sessionKind)")
+        l.append("Language \(s.detected), locked \(s.lockedLang). Speakers: \(names.joined(separator: ", "))")
         l.append("")
         l.append("Recent events:")
-        for e in events.prefix(40) { l.append("\(e.time.formatted(date: .omitted, time: .standard)) \(e.text)") }
+        for e in events.suffix(60).reversed() {
+            l.append("\(e.time.formatted(date: .omitted, time: .standard)) [\(e.kind.title)] \(e.text)")
+        }
         return l.joined(separator: "\n")
     }
 }
 
-// MARK: - Views
-struct Sparkline: View {
-    let values: [Double]
-    var color: Color = .cyan
+// MARK: - Small helpers
+private func fmt(_ v: Double) -> String { v >= 100 ? "\(Int(v))" : String(format: "%.1f", v) }
+
+private func level(_ v: Double, _ n: Int, _ warn: Double, _ bad: Double) -> Color {
+    n == 0 ? Color.white : (v > bad ? Color.red : (v > warn ? Color.orange : Color.green))
+}
+
+private struct ShareText: Identifiable {
+    let id = UUID()
+    let text: String
+}
+
+private struct BarRow: Identifiable {
+    let name: String
+    let value: Int
+    var id: String { name }
+}
+
+private struct DonutPart: Identifiable {
+    let name: String
+    let value: Int
+    let color: Color
+    var id: String { name }
+}
+
+private struct Bucket: Identifiable {
+    let date: Date
+    let count: Int
+    var id: Date { date }
+}
+
+// MARK: - Building blocks
+private struct StatTile: View {
+    let title: String
+    let value: String
+    var tint: Color = Color.white
+    var icon: String? = nil
     var body: some View {
-        GeometryReader { geo in
-            Path { p in
-                guard values.count > 1, let mx = values.max(), mx > 0 else { return }
-                for (i, v) in values.enumerated() {
-                    let x = geo.size.width * CGFloat(i) / CGFloat(values.count - 1)
-                    let y = geo.size.height * (1 - CGFloat(v / mx))
-                    if i == 0 { p.move(to: CGPoint(x: x, y: y)) } else { p.addLine(to: CGPoint(x: x, y: y)) }
-                }
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                if let icon { Image(systemName: icon).font(.caption2).foregroundStyle(tint) }
+                Text(title).font(.caption2).foregroundStyle(.secondary)
             }
-            .stroke(color, lineWidth: 1.5)
+            Text(value)
+                .font(.title3.weight(.bold).monospacedDigit())
+                .foregroundStyle(tint)
+                .minimumScaleFactor(0.6)
+                .lineLimit(1)
         }
-        .frame(height: 34)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(12)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
+private struct HealthRing: View {
+    let score: Int
+    private var color: Color { score >= 85 ? Color.green : (score >= 60 ? Color.orange : Color.red) }
+    var body: some View {
+        ZStack {
+            Circle().stroke(Color.white.opacity(0.1), lineWidth: 10)
+            Circle()
+                .trim(from: 0, to: CGFloat(score) / 100)
+                .stroke(color, style: StrokeStyle(lineWidth: 10, lineCap: .round))
+                .rotationEffect(.degrees(-90))
+            VStack(spacing: 0) {
+                Text("\(score)").font(.title.weight(.bold).monospacedDigit())
+                Text("health").font(.caption2).foregroundStyle(.secondary)
+            }
+        }
+        .frame(width: 96, height: 96)
+    }
+}
+
+private struct LineCard: View {
+    let title: String
+    let samples: [Sample]
+    var color: Color = Color.cyan
+    var unit = "ms"
+    var rule: Double? = nil
+    var markers: [TimelineEvent] = []
+
+    private func stat(_ n: String, _ v: Double) -> some View {
+        VStack(spacing: 1) {
+            Text(fmt(v)).font(.caption.weight(.semibold).monospacedDigit())
+            Text(n).font(.system(size: 9)).foregroundStyle(.secondary)
+        }
+    }
+
+    var body: some View {
+        let sm = Diagnostics.summarize(samples)
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text(title).font(.subheadline.weight(.semibold))
+                Spacer()
+                if sm.n > 0 {
+                    Text("\(fmt(sm.last)) \(unit)")
+                        .font(.subheadline.weight(.bold).monospacedDigit())
+                        .foregroundStyle(color)
+                }
+            }
+            if samples.count < 2 {
+                Text("Collecting data…").font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 90)
+            } else {
+                Chart {
+                    ForEach(samples) { s in
+                        AreaMark(x: .value("Time", s.t), y: .value(unit, s.v))
+                            .foregroundStyle(LinearGradient(colors: [color.opacity(0.35), color.opacity(0.02)],
+                                                            startPoint: .top, endPoint: .bottom))
+                            .interpolationMethod(.monotone)
+                        LineMark(x: .value("Time", s.t), y: .value(unit, s.v))
+                            .foregroundStyle(color)
+                            .interpolationMethod(.monotone)
+                    }
+                    if let r = rule {
+                        RuleMark(y: .value("Limit", r))
+                            .foregroundStyle(Color.red.opacity(0.7))
+                            .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                    }
+                    ForEach(markers) { e in
+                        RuleMark(x: .value("Event", e.time))
+                            .foregroundStyle(e.kind.color.opacity(0.55))
+                            .lineStyle(StrokeStyle(lineWidth: 1))
+                    }
+                }
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: 3)) { _ in
+                        AxisGridLine()
+                        AxisValueLabel(format: .dateTime.minute().second())
+                    }
+                }
+                .chartYAxis { AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) }
+                .frame(height: 110)
+                HStack {
+                    stat("min", sm.min)
+                    Spacer()
+                    stat("avg", sm.avg)
+                    Spacer()
+                    stat("p95", sm.p95)
+                    Spacer()
+                    stat("max", sm.max)
+                }
+            }
+        }
+        .card()
+    }
+}
+
+private struct HistogramCard: View {
+    let title: String
+    let values: [Double]
+    var color: Color = Color.cyan
+
+    private struct Bin: Identifiable {
+        let label: String
+        let count: Int
+        let order: Int
+        var id: Int { order }
+    }
+
+    private var bins: [Bin] {
+        guard values.count >= 3, let mx = values.max(), mx > 0 else { return [] }
+        let n = 8
+        let w = mx / Double(n)
+        var counts = [Int](repeating: 0, count: n)
+        for v in values { counts[Swift.min(n - 1, Int(v / w))] += 1 }
+        return (0..<n).map { Bin(label: "\(Int(Double($0) * w))", count: counts[$0], order: $0) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.subheadline.weight(.semibold))
+            if bins.isEmpty {
+                Text("Collecting data…").font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 70)
+            } else {
+                Chart(bins) { b in
+                    BarMark(x: .value("Range (ms)", b.label), y: .value("Count", b.count))
+                        .foregroundStyle(color.gradient)
+                }
+                .chartYAxis { AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) }
+                .frame(height: 120)
+            }
+        }
+        .card()
+    }
+}
+
+private struct DonutCard: View {
+    let title: String
+    let parts: [DonutPart]
+    var body: some View {
+        let shown = parts.filter { $0.value > 0 }
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.subheadline.weight(.semibold))
+            if shown.isEmpty {
+                Text("No data yet.").font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 80)
+            } else {
+                Chart(shown) { p in
+                    SectorMark(angle: .value("Count", p.value), innerRadius: .ratio(0.62), angularInset: 1.5)
+                        .foregroundStyle(by: .value("Part", p.name))
+                }
+                .chartForegroundStyleScale(domain: shown.map { $0.name }, range: shown.map { $0.color })
+                .chartLegend(position: .bottom, alignment: .center, spacing: 8)
+                .frame(height: 210)
+            }
+        }
+        .card()
+    }
+}
+
+private struct BarListCard: View {
+    let title: String
+    let rows: [BarRow]
+    var color: Color = Color.blue
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.subheadline.weight(.semibold))
+            if rows.allSatisfy({ $0.value == 0 }) {
+                Text("No data yet.").font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 60)
+            } else {
+                Chart(rows) { r in
+                    BarMark(x: .value("Count", r.value), y: .value("Item", r.name))
+                        .foregroundStyle(color.gradient)
+                        .annotation(position: .trailing) {
+                            Text("\(r.value)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                        }
+                }
+                .chartYScale(domain: rows.map { $0.name })
+                .frame(height: CGFloat(rows.count) * 34 + 20)
+            }
+        }
+        .card()
+    }
+}
+
+private struct MultiSpeedChart: View {
+    let ocr: [Sample]
+    let translate: [Sample]
+    let delay: [Sample]
+    var body: some View {
+        if ocr.count + translate.count + delay.count < 3 {
+            Text("Collecting data…").font(.caption).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: 120)
+        } else {
+            Chart {
+                ForEach(ocr) { s in
+                    LineMark(x: .value("Time", s.t), y: .value("ms", s.v), series: .value("Step", "Reading"))
+                        .foregroundStyle(by: .value("Step", "Reading"))
+                        .interpolationMethod(.monotone)
+                }
+                ForEach(translate) { s in
+                    LineMark(x: .value("Time", s.t), y: .value("ms", s.v), series: .value("Step", "Translating"))
+                        .foregroundStyle(by: .value("Step", "Translating"))
+                        .interpolationMethod(.monotone)
+                }
+                ForEach(delay) { s in
+                    LineMark(x: .value("Time", s.t), y: .value("ms", s.v), series: .value("Step", "Total delay"))
+                        .foregroundStyle(by: .value("Step", "Total delay"))
+                        .interpolationMethod(.monotone)
+                }
+            }
+            .chartForegroundStyleScale(["Reading": Color.green, "Translating": Color.cyan, "Total delay": Color.orange])
+            .chartLegend(position: .bottom)
+            .chartYAxis { AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) }
+            .chartXAxis {
+                AxisMarks(values: .automatic(desiredCount: 3)) { _ in
+                    AxisGridLine()
+                    AxisValueLabel(format: .dateTime.minute().second())
+                }
+            }
+            .frame(height: 160)
+        }
+    }
+}
+
+// MARK: - Pages
+enum DiagPage: String, CaseIterable, Identifiable {
+    case overview, speed, timeline, pipeline, language, device, log
+    var id: String { rawValue }
+    var title: String { rawValue.capitalized }
+    var icon: String {
+        switch self {
+        case .overview: "square.grid.2x2"
+        case .speed: "speedometer"
+        case .timeline: "timeline.selection"
+        case .pipeline: "arrow.triangle.branch"
+        case .language: "globe"
+        case .device: "iphone"
+        case .log: "list.bullet.rectangle"
+        }
+    }
+}
+
+enum DiagRange: Int, CaseIterable, Identifiable {
+    case oneMin = 60, fiveMin = 300, fifteenMin = 900, session = 0
+    var id: Int { rawValue }
+    var title: String {
+        switch self {
+        case .oneMin: "1 min"
+        case .fiveMin: "5 min"
+        case .fifteenMin: "15 min"
+        case .session: "Session"
+        }
+    }
+}
+
+// MARK: - Screen
 struct DiagnosticsView: View {
     @EnvironmentObject var engine: TranslatorEngine
     var body: some View { DiagnosticsBody(diag: engine.diag) }
@@ -142,12 +724,627 @@ struct DiagnosticsView: View {
 
 private struct DiagnosticsBody: View {
     @EnvironmentObject var engine: TranslatorEngine
+    @Environment(\.selectTab) private var selectTab
     @ObservedObject var diag: Diagnostics
+    @AppStorage("diagDetailed") private var detailed = false
+    @AppStorage("diagPage") private var pageRaw = DiagPage.overview.rawValue
+    @AppStorage("diagRange") private var rangeRaw = DiagRange.fiveMin.rawValue
+    @State private var visible = false
+    @State private var kinds: Set<EventKind> = []
+    @State private var query = ""
+    @State private var confirmReset = false
+    @State private var shareText: ShareText?
 
-    private func row(_ k: String, _ v: String) -> some View { LabeledContent(k, value: v) }
-    private func pct(_ n: Int, _ d: Int) -> String { d == 0 ? "–" : "\(Int(Double(n) / Double(d) * 100))%" }
+    private var page: DiagPage { DiagPage(rawValue: pageRaw) ?? .overview }
+    private var range: DiagRange { DiagRange(rawValue: rangeRaw) ?? .fiveMin }
+    private var rangeStart: Date {
+        range == .session ? diag.started : Date().addingTimeInterval(-Double(range.rawValue))
+    }
+    private func slice(_ a: [Sample]) -> [Sample] { a.filter { $0.t >= rangeStart } }
 
-    private var thermal: String {
+    private func elapsed(_ d: Date) -> String {
+        let s = Int(d.timeIntervalSince(diag.started))
+        return String(format: "+%d:%02d", s / 60, s % 60)
+    }
+
+    // MARK: Body
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                if visible {
+                    VStack(spacing: 14) {
+                        Picker("Mode", selection: $detailed) {
+                            Text("Simple").tag(false)
+                            Text("Detailed").tag(true)
+                        }
+                        .pickerStyle(.segmented)
+                        if detailed { detailedBody } else { simpleBody }
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.top, 4)
+                    .padding(.bottom, 24)
+                }
+            }
+            .scrollIndicators(.hidden)
+            .background(Theme.bg.ignoresSafeArea())
+            .navigationTitle("Diagnostics")
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { shareText = ShareText(text: diag.report(engine: engine)) } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                    .accessibilityLabel("Share report")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button { shareText = ShareText(text: diag.csv()) } label: {
+                            Label("Export data (CSV)", systemImage: "tablecells")
+                        }
+                        Button {
+                            UIPasteboard.general.string = diag.report(engine: engine)
+                            engine.toast("Report copied")
+                        } label: { Label("Copy report", systemImage: "doc.on.doc") }
+                        Button(role: .destructive) { confirmReset = true } label: {
+                            Label("Reset diagnostics", systemImage: "trash")
+                        }
+                    } label: { Image(systemName: "ellipsis.circle") }
+                }
+            }
+            .onAppear { visible = true }
+            .onDisappear { visible = false }
+            .sheet(item: $shareText) { ActivityView(items: [$0.text]) }
+            .confirmationDialog("Clear all graphs, counters and the timeline?", isPresented: $confirmReset,
+                                titleVisibility: .visible) {
+                Button("Reset diagnostics", role: .destructive) { diag.reset(); engine.toast("Diagnostics reset") }
+            }
+        }
+    }
+
+    // MARK: Simple
+    private var simpleBody: some View {
+        let a = diag.assessment(alive: engine.captureAlive, paused: engine.paused)
+        let cutoff = Date().addingTimeInterval(-120)
+        return VStack(spacing: 14) {
+            healthCard(a)
+            if !a.issues.isEmpty { suggestions(a.issues, limit: 3) }
+            liveFeed
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Speed, last 2 minutes").font(.subheadline.weight(.semibold))
+                MultiSpeedChart(ocr: diag.ocr.filter { $0.t > cutoff },
+                                translate: diag.translate.filter { $0.t > cutoff },
+                                delay: diag.latency.filter { $0.t > cutoff })
+            }
+            .card()
+            recentEvents
+        }
+    }
+
+    private var statusLine: String {
+        engine.captureAlive
+            ? "Capture connected · \(diag.s.translations) translation\(diag.s.translations == 1 ? "" : "s") this session"
+            : "Waiting for capture to start"
+    }
+
+    private func healthCard(_ a: Assessment) -> some View {
+        let o = Diagnostics.summarize(Array(diag.ocr.suffix(30)))
+        let t = Diagnostics.summarize(Array(diag.translate.suffix(30)))
+        let d = Diagnostics.summarize(Array(diag.latency.suffix(30)))
+        return VStack(spacing: 14) {
+            HStack(spacing: 16) {
+                HealthRing(score: a.score)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(a.headline).font(.title3.weight(.bold))
+                    Text(statusLine).font(.footnote).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 10) {
+                StatTile(title: "Reads in", value: o.n > 0 ? "\(Int(o.avg)) ms" : "–",
+                         tint: level(o.avg, o.n, 300, 500), icon: "text.viewfinder")
+                StatTile(title: "Translates in", value: t.n > 0 ? "\(Int(t.avg)) ms" : "–",
+                         tint: level(t.avg, t.n, 400, 800), icon: "character.bubble")
+                StatTile(title: "Total delay", value: d.n > 0 ? "\(Int(d.avg)) ms" : "–",
+                         tint: level(d.avg, d.n, 1200, 2000), icon: "timer")
+            }
+        }
+        .card()
+    }
+
+    private func apply(_ f: Fix) {
+        let ud = UserDefaults.standard
+        switch f {
+        case .fastSpeed: ud.set("fast", forKey: "speed")
+        case .instantStability: ud.set(1, forKey: "stability")
+        case .fixedRotation:
+            ud.set("0", forKey: "frameRot")
+            engine.rotationSettingChanged()
+        case .narrowArea: ud.set("bottom", forKey: "area")
+        case .openLanguages: selectTab(1); return
+        case .startCapture: selectTab(0); return
+        }
+        engine.syncConfig()
+        engine.tap()
+        engine.toast("Applied: \(f.label)")
+    }
+
+    private func suggestions(_ issues: [Issue], limit: Int) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("What to look at").font(.subheadline.weight(.semibold))
+            ForEach(Array(issues.prefix(limit))) { i in
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: i.severity == 2 ? "exclamationmark.octagon.fill"
+                          : (i.severity == 1 ? "exclamationmark.triangle.fill" : "lightbulb.fill"))
+                        .foregroundStyle(i.severity == 2 ? Color.red : (i.severity == 1 ? Color.orange : Color.yellow))
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(i.title).font(.footnote.weight(.semibold))
+                        Text(i.detail).font(.caption).foregroundStyle(.secondary)
+                        if let f = i.fix {
+                            Button(f.label) { apply(f) }
+                                .font(.caption.weight(.bold))
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+            }
+        }
+        .card()
+    }
+
+    private func feedRow(_ icon: String, _ title: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: icon).frame(width: 20).foregroundStyle(Theme.accent.start)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.caption2).foregroundStyle(.secondary)
+                Text(text).font(.footnote).lineLimit(3)
+            }
+        }
+    }
+
+    private var liveFeed: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Right now").font(.subheadline.weight(.semibold))
+            feedRow("text.viewfinder", "Reads", engine.lastRaw.isEmpty ? "Nothing yet" : engine.lastRaw)
+            feedRow("character.bubble", "Shows", engine.translated.isEmpty ? "Nothing yet" : engine.translated)
+            Text(engine.status).font(.caption2).foregroundStyle(.secondary)
+        }
+        .card()
+    }
+
+    private var recentEvents: some View {
+        let recent = Array(diag.events.filter { $0.kind != .translation }.suffix(5).reversed())
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Recent activity").font(.subheadline.weight(.semibold))
+            if recent.isEmpty {
+                Text("Nothing has happened yet.").font(.footnote).foregroundStyle(.secondary)
+            }
+            ForEach(recent) { e in eventRow(e) }
+            Button {
+                detailed = true
+                pageRaw = DiagPage.timeline.rawValue
+            } label: {
+                Label("Open the full timeline", systemImage: "timeline.selection").font(.footnote.weight(.semibold))
+            }
+        }
+        .card()
+    }
+
+    // MARK: Detailed
+    private func pageChip(_ p: DiagPage) -> some View {
+        Button { pageRaw = p.rawValue } label: {
+            Label(p.title, systemImage: p.icon)
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .foregroundStyle(page == p ? Color.white : Color.secondary)
+                .background(page == p ? Theme.accent.start.opacity(0.85) : Theme.card, in: Capsule())
+        }
+    }
+
+    private var detailedBody: some View {
+        VStack(spacing: 14) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) { ForEach(DiagPage.allCases) { p in pageChip(p) } }
+            }
+            if page == .speed || page == .timeline || page == .device {
+                Picker("Range", selection: $rangeRaw) {
+                    ForEach(DiagRange.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
+            }
+            switch page {
+            case .overview: overviewPage
+            case .speed: speedPage
+            case .timeline: timelinePage
+            case .pipeline: pipelinePage
+            case .language: languagePage
+            case .device: devicePage
+            case .log: logPage
+            }
+        }
+    }
+
+    // MARK: Overview
+    private var liveFraction: Double {
+        let now = Date()
+        let total = now.timeIntervalSince(diag.started)
+        guard total > 1 else { return 0 }
+        let live = diag.spans.filter { $0.state == .live }.reduce(0.0) { $0 + ($1.end ?? now).timeIntervalSince($1.start) }
+        return Swift.min(1, live / total)
+    }
+
+    private var overviewPage: some View {
+        let a = diag.assessment(alive: engine.captureAlive, paused: engine.paused)
+        return VStack(spacing: 14) {
+            healthCard(a)
+            pipelineStrip
+            sessionGrid
+            percentileTable
+            if !a.issues.isEmpty { suggestions(a.issues, limit: 8) }
+            liveFeed
+        }
+    }
+
+    private var arrow: some View {
+        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
+    }
+
+    private func node(_ title: String, _ icon: String, _ value: String, _ color: Color) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(color)
+                .frame(width: 34, height: 34)
+                .background(color.opacity(0.18), in: Circle())
+            Text(title).font(.system(size: 9, weight: .semibold))
+            Text(value).font(.system(size: 9).monospacedDigit()).foregroundStyle(.secondary)
+                .lineLimit(1).minimumScaleFactor(0.6)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private var pipelineStrip: some View {
+        let o = Diagnostics.summarize(Array(diag.ocr.suffix(20)))
+        let t = Diagnostics.summarize(Array(diag.translate.suffix(20)))
+        let d = Diagnostics.summarize(Array(diag.latency.suffix(20)))
+        let fpsColor: Color = !engine.captureAlive ? Color.red : (diag.s.fps >= 15 ? Color.green : Color.orange)
+        let showColor: Color = !engine.pipActive ? Color.gray : level(d.avg, d.n, 1200, 2000)
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Pipeline").font(.subheadline.weight(.semibold))
+            HStack(spacing: 6) {
+                node("Capture", "video", engine.captureAlive ? "\(Int(diag.s.fps)) fps" : "off", fpsColor)
+                arrow
+                node("Read", "text.viewfinder", o.n > 0 ? "\(Int(o.avg)) ms" : "–", level(o.avg, o.n, 300, 500))
+                arrow
+                node("Filter", "line.3.horizontal.decrease", "\(diag.s.blocksKept)/\(diag.s.blocksIn)", Color.green)
+                arrow
+                node("Translate", "character.bubble", t.n > 0 ? "\(Int(t.avg)) ms" : "–", level(t.avg, t.n, 400, 800))
+                arrow
+                node("Show", "rectangle.on.rectangle", engine.pipActive ? (d.n > 0 ? "\(Int(d.avg)) ms" : "–") : "closed", showColor)
+            }
+        }
+        .card()
+    }
+
+    private var sessionGrid: some View {
+        let s = diag.s
+        let hits = s.cacheHits + s.cacheMisses
+        return LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+            StatTile(title: "Time live", value: "\(Int(liveFraction * 100))%", tint: Color.green, icon: "dot.radiowaves.left.and.right")
+            StatTile(title: "Started", value: diag.started.formatted(date: .omitted, time: .shortened), icon: "clock")
+            StatTile(title: "Translations", value: "\(s.translations)", tint: Color.cyan, icon: "character.bubble")
+            StatTile(title: "Sentences", value: "\(s.sentences)", icon: "text.alignleft")
+            StatTile(title: "Characters", value: "\(s.chars)", icon: "textformat")
+            StatTile(title: "Cache hits", value: hits == 0 ? "–" : "\(Int(Double(s.cacheHits) / Double(hits) * 100))%",
+                     tint: Color.purple, icon: "memorychip")
+            StatTile(title: "Capture drops", value: "\(s.captureDrops)",
+                     tint: s.captureDrops > 0 ? Color.orange : Color.white, icon: "bolt.slash")
+            StatTile(title: "Failures", value: "\(s.failures)",
+                     tint: s.failures > 0 ? Color.red : Color.white, icon: "exclamationmark.triangle")
+        }
+    }
+
+    private var percentileTable: some View {
+        let rows: [(String, Summary)] = [
+            ("Reading", Diagnostics.summarize(diag.ocr)),
+            ("Translating", Diagnostics.summarize(diag.translate)),
+            ("Total delay", Diagnostics.summarize(diag.latency)),
+            ("Transfer", Diagnostics.summarize(diag.transport))
+        ]
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Timing summary (ms)").font(.subheadline.weight(.semibold))
+            Grid(alignment: .trailing, horizontalSpacing: 14, verticalSpacing: 8) {
+                GridRow {
+                    Text("").gridColumnAlignment(.leading)
+                    Text("avg")
+                    Text("p50")
+                    Text("p95")
+                    Text("max")
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                ForEach(rows, id: \.0) { r in
+                    GridRow {
+                        Text(r.0).font(.caption.weight(.semibold)).gridColumnAlignment(.leading)
+                        Text(r.1.n > 0 ? "\(Int(r.1.avg))" : "–")
+                        Text(r.1.n > 0 ? "\(Int(r.1.p50))" : "–")
+                        Text(r.1.n > 0 ? "\(Int(r.1.p95))" : "–")
+                        Text(r.1.n > 0 ? "\(Int(r.1.max))" : "–")
+                    }
+                    .font(.caption.monospacedDigit())
+                }
+            }
+        }
+        .card()
+    }
+
+    // MARK: Speed
+    private var speedPage: some View {
+        let important: Set<EventKind> = [.error, .rotation, .preset, .capture]
+        let markers = Array(diag.events.filter { important.contains($0.kind) && $0.time >= rangeStart }.suffix(6))
+        let total = Diagnostics.summarize(slice(diag.latency)).avg
+        let tr = Diagnostics.summarize(slice(diag.transport)).avg
+        let ts = Diagnostics.summarize(slice(diag.translate)).avg
+        let other = Swift.max(0, total - tr - ts)
+        return VStack(spacing: 14) {
+            LineCard(title: "Reading the screen", samples: slice(diag.ocr), color: Color.green, unit: "ms", rule: 300, markers: markers)
+            LineCard(title: "Translating", samples: slice(diag.translate), color: Color.cyan, unit: "ms", markers: markers)
+            LineCard(title: "Total delay (read → shown)", samples: slice(diag.latency), color: Color.orange, unit: "ms", rule: 1500, markers: markers)
+            LineCard(title: "Transfer extension → app", samples: slice(diag.transport), color: Color.purple, unit: "ms")
+            LineCard(title: "Frames per second", samples: slice(diag.fps), color: Color.teal, unit: "fps")
+            HistogramCard(title: "How long reading takes", values: slice(diag.ocr).map { $0.v }, color: Color.green)
+            HistogramCard(title: "How long the total delay is", values: slice(diag.latency).map { $0.v }, color: Color.orange)
+            if total > 0 {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Where the delay goes (average)").font(.subheadline.weight(.semibold))
+                    Chart {
+                        BarMark(x: .value("ms", tr), y: .value("Delay", "Delay"))
+                            .foregroundStyle(by: .value("Step", "Transfer"))
+                        BarMark(x: .value("ms", ts), y: .value("Delay", "Delay"))
+                            .foregroundStyle(by: .value("Step", "Translate"))
+                        BarMark(x: .value("ms", other), y: .value("Delay", "Delay"))
+                            .foregroundStyle(by: .value("Step", "Waiting & display"))
+                    }
+                    .chartForegroundStyleScale(["Transfer": Color.purple, "Translate": Color.cyan, "Waiting & display": Color.orange])
+                    .chartLegend(position: .bottom)
+                    .chartYAxis(.hidden)
+                    .frame(height: 90)
+                }
+                .card()
+            }
+        }
+    }
+
+    // MARK: Timeline
+    private var stateCard: some View {
+        let spans = diag.spans.filter { ($0.end ?? Date()) >= rangeStart }
+        let evs = diag.events.filter { $0.time >= rangeStart && $0.kind != .translation && $0.kind != .state }
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Session timeline").font(.subheadline.weight(.semibold))
+            if spans.isEmpty {
+                Text("Collecting data…").font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 90)
+            } else {
+                Chart {
+                    ForEach(spans) { s in
+                        RectangleMark(xStart: .value("Start", Swift.max(s.start, rangeStart)),
+                                      xEnd: .value("End", s.end ?? Date()),
+                                      y: .value("Lane", "State"), height: .fixed(26))
+                            .foregroundStyle(s.state.color.opacity(0.85))
+                    }
+                    ForEach(evs) { e in
+                        PointMark(x: .value("Time", e.time), y: .value("Lane", "Events"))
+                            .foregroundStyle(e.kind.color)
+                            .symbolSize(70)
+                    }
+                }
+                .chartXScale(domain: rangeStart...Date())
+                .chartXAxis {
+                    AxisMarks(values: .automatic(desiredCount: 4)) { _ in
+                        AxisGridLine()
+                        AxisValueLabel(format: .dateTime.hour().minute())
+                    }
+                }
+                .frame(height: 120)
+                HStack(spacing: 12) {
+                    ForEach([EngineState.live, .paused, .frozen, .idle], id: \.rawValue) { st in
+                        HStack(spacing: 4) {
+                            Circle().fill(st.color).frame(width: 8, height: 8)
+                            Text(st.title).font(.caption2).foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+        }
+        .card()
+    }
+
+    private var perMinuteCard: some View {
+        let unit: Calendar.Component = range == .oneMin ? .second : .minute
+        let tr = diag.events.filter { $0.kind == .translation && $0.time >= rangeStart && $0.text.hasPrefix("Translated") }
+        let grouped = Dictionary(grouping: tr) { Calendar.current.dateInterval(of: unit, for: $0.time)?.start ?? $0.time }
+        let buckets = grouped.map { Bucket(date: $0.key, count: $0.value.count) }.sorted { $0.date < $1.date }
+        return VStack(alignment: .leading, spacing: 8) {
+            Text(range == .oneMin ? "Translations per second" : "Translations per minute").font(.subheadline.weight(.semibold))
+            if buckets.isEmpty {
+                Text("No translations in this period.").font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 70)
+            } else {
+                Chart(buckets) { b in
+                    BarMark(x: .value("Time", b.date, unit: unit), y: .value("Translations", b.count))
+                        .foregroundStyle(Color.cyan.gradient)
+                }
+                .chartYAxis { AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) }
+                .frame(height: 120)
+            }
+        }
+        .card()
+    }
+
+    private var timelinePage: some View {
+        VStack(spacing: 14) {
+            stateCard
+            perMinuteCard
+            eventListCard(limit: 150)
+        }
+    }
+
+    private func eventRow(_ e: TimelineEvent) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(e.time, format: .dateTime.hour().minute().second())
+                    .font(.system(size: 10).monospacedDigit()).foregroundStyle(.secondary)
+                Text(elapsed(e.time))
+                    .font(.system(size: 9).monospacedDigit()).foregroundStyle(.tertiary)
+            }
+            .frame(width: 58, alignment: .leading)
+            Image(systemName: e.kind.icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(e.kind.color)
+                .frame(width: 24, height: 24)
+                .background(e.kind.color.opacity(0.16), in: Circle())
+            VStack(alignment: .leading, spacing: 2) {
+                Text(e.text).font(.caption)
+                if let d = e.detail, !d.isEmpty {
+                    Text(d).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    private func kindChip(_ title: String, _ icon: String, on: Bool, color: Color, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 10).padding(.vertical, 6)
+                .foregroundStyle(on ? Color.white : Color.secondary)
+                .background(on ? color.opacity(0.7) : Theme.card, in: Capsule())
+        }
+    }
+
+    private var kindChips: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                kindChip("All", "line.3.horizontal.decrease.circle", on: kinds.isEmpty, color: Color.gray) { kinds = [] }
+                ForEach(EventKind.allCases) { k in
+                    kindChip(k.title, k.icon, on: kinds.contains(k), color: k.color) {
+                        if kinds.contains(k) { kinds.remove(k) } else { kinds.insert(k) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func eventListCard(limit: Int) -> some View {
+        let all = Array(diag.events.reversed())
+        let shown = all.filter { e in
+            (kinds.isEmpty || kinds.contains(e.kind))
+                && (query.isEmpty || e.text.localizedCaseInsensitiveContains(query)
+                    || (e.detail ?? "").localizedCaseInsensitiveContains(query))
+        }
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("What happened").font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("\(shown.count) event\(shown.count == 1 ? "" : "s")").font(.caption).foregroundStyle(.secondary)
+            }
+            kindChips
+            if shown.isEmpty {
+                Text("Nothing matches.").font(.footnote).foregroundStyle(.secondary)
+            }
+            ForEach(Array(shown.prefix(limit))) { e in eventRow(e) }
+        }
+        .card()
+    }
+
+    // MARK: Pipeline
+    private var pipelinePage: some View {
+        let s = diag.s
+        let inArea = Swift.max(0, s.linesIn - s.dropArea)
+        let afterRules = Swift.max(0, inArea - s.dropSmall - s.dropIgnore)
+        let notOwn = Swift.max(0, afterRules - s.dropSelf)
+        let needs = Swift.max(0, notOwn - s.dropTarget)
+        let lines = [
+            BarRow(name: "Lines read", value: s.linesIn),
+            BarRow(name: "In the OCR area", value: inArea),
+            BarRow(name: "Big enough & allowed", value: afterRules),
+            BarRow(name: "Not our own window", value: notOwn),
+            BarRow(name: "Need translating", value: needs)
+        ]
+        let realBlocks = Swift.max(0, s.blocksKept - s.dropNoise - s.dropLanguage)
+        let blocks = [
+            BarRow(name: "Text blocks found", value: s.blocksIn),
+            BarRow(name: "Blocks kept", value: s.blocksKept),
+            BarRow(name: "Real text", value: realBlocks),
+            BarRow(name: "Sentences translated", value: s.sentences)
+        ]
+        let parts = [
+            DonutPart(name: "Translated", value: needs, color: Color.green),
+            DonutPart(name: "Outside area", value: s.dropArea, color: Color.gray),
+            DonutPart(name: "Too small", value: s.dropSmall, color: Color.yellow),
+            DonutPart(name: "Ignore list", value: s.dropIgnore, color: Color.orange),
+            DonutPart(name: "Own window", value: s.dropSelf, color: Color.pink),
+            DonutPart(name: "Already target", value: s.dropTarget, color: Color.blue)
+        ]
+        return VStack(spacing: 14) {
+            BarListCard(title: "Where lines go", rows: lines, color: Color.blue)
+            DonutCard(title: "What happens to every line", parts: parts)
+            BarListCard(title: "Blocks and sentences", rows: blocks, color: Color.purple)
+            LineCard(title: "Lines per read", samples: Array(diag.lineCounts.suffix(120)), color: Color.mint, unit: "lines")
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Details").font(.subheadline.weight(.semibold))
+                LabeledContent("Numbers / noise dropped", value: "\(s.dropNoise)")
+                LabeledContent("Other-language blocks dropped", value: "\(s.dropLanguage)")
+                LabeledContent("Floating window position", value: s.pipRegion)
+                LabeledContent("Unchanged frames skipped", value: "\(s.skippedFrames)")
+            }
+            .font(.footnote)
+            .card()
+        }
+    }
+
+    // MARK: Language
+    private var languagePage: some View {
+        let s = diag.s
+        let counts = diag.langCounts.sorted { $0.value > $1.value }.prefix(8).map { BarRow(name: $0.key.uppercased(), value: $0.value) }
+        let pair: String = engine.sourceCode == "auto" ? "Auto"
+            : (engine.langStatus[engine.sourceCode] == .installed ? "Ready" : "Needs pack")
+        let cache = [
+            DonutPart(name: "From memory", value: s.cacheHits, color: Color.green),
+            DonutPart(name: "Translated fresh", value: s.cacheMisses, color: Color.orange)
+        ]
+        return VStack(spacing: 14) {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                StatTile(title: "Detected", value: s.detected == "–" ? "–" : s.detected.uppercased(), icon: "sparkle.magnifyingglass")
+                StatTile(title: "Locked to", value: s.lockedLang == "–" ? "none" : s.lockedLang.uppercased(), tint: Color.purple, icon: "lock")
+                StatTile(title: "Language pack", value: pair, tint: pair == "Needs pack" ? Color.orange : Color.green, icon: "arrow.down.circle")
+                StatTile(title: "Engine", value: s.sessionKind == "–" ? "–" : (s.sessionKind.contains("iOS 26") ? "Direct" : "Hosted"), icon: "cpu")
+            }
+            BarListCard(title: "Languages detected", rows: Array(counts), color: Color.purple)
+            DonutCard(title: "Where translations come from", parts: cache)
+            LineCard(title: "Cache hit rate over time", samples: slice(diag.cacheRate), color: Color.green, unit: "%")
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Speakers learned").font(.subheadline.weight(.semibold))
+                if diag.names.isEmpty {
+                    Text("Names appear here when text looks like \"Name: line\".")
+                        .font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 80), spacing: 8)], alignment: .leading, spacing: 8) {
+                        ForEach(diag.names, id: \.self) { n in
+                            Text(n).font(.caption.weight(.semibold))
+                                .padding(.horizontal, 10).padding(.vertical, 6)
+                                .background(Theme.accent.start.opacity(0.25), in: Capsule())
+                        }
+                    }
+                }
+            }
+            .card()
+        }
+    }
+
+    // MARK: Device
+    private var thermalName: String {
         switch ProcessInfo.processInfo.thermalState {
         case .nominal: "Normal"
         case .fair: "Warm"
@@ -156,110 +1353,93 @@ private struct DiagnosticsBody: View {
         @unknown default: "Unknown"
         }
     }
-    private var battery: String {
-        let b = UIDevice.current.batteryLevel
-        return b < 0 ? "–" : "\(Int(b * 100))%"
+    private var thermalColor: Color {
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: Color.green
+        case .fair: Color.yellow
+        case .serious: Color.orange
+        case .critical: Color.red
+        @unknown default: Color.gray
+        }
     }
 
-    var body: some View {
-        NavigationStack {
-            List {
-                Section("Status") {
-                    row("Capture", engine.captureAlive ? "Connected" : "Not connected")
-                    row("Floating window", engine.pipActive ? "Open" : "Closed")
-                    row("Translating", engine.paused ? "Paused" : (engine.frozen ? "Frozen" : "Live"))
-                    LabeledContent("Session started") { Text(diag.started, style: .relative) }
-                    Text(engine.status).font(.footnote).foregroundStyle(.secondary)
+    private var thermalCard: some View {
+        let data = slice(diag.thermal)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Text("Phone temperature").font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(thermalName).font(.subheadline.weight(.bold)).foregroundStyle(thermalColor)
+            }
+            if data.count < 2 {
+                Text("Collecting data…").font(.caption).foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 80)
+            } else {
+                Chart(data) { s in
+                    AreaMark(x: .value("Time", s.t), y: .value("Level", s.v))
+                        .foregroundStyle(Color.orange.opacity(0.35))
+                        .interpolationMethod(.stepEnd)
+                    LineMark(x: .value("Time", s.t), y: .value("Level", s.v))
+                        .foregroundStyle(Color.orange)
+                        .interpolationMethod(.stepEnd)
                 }
-                Section("Capture extension") {
-                    row("Version", engine.extensionVersion)
-                    row("Frames received", "\(diag.s.frames)  (\(Int(diag.s.fps)) fps)")
-                    row("OCR passes", "\(diag.s.passes)")
-                    row("Unchanged frames skipped", "\(diag.s.skippedFrames)")
-                    row("Frame size", diag.s.bufferSize)
-                    row("Orientation from iOS", diag.s.orientation)
-                    row("Read area size", diag.s.cropSize)
-                    row("Memory free now", "\(Int(diag.s.extFreeMB)) MB")
-                    row("Memory free (lowest)", diag.s.minExtFreeMB > 9000 ? "–" : "\(Int(diag.s.minExtFreeMB)) MB")
-                    row("Packets (text / clear / total)", "\(diag.s.ocrPackets) / \(diag.s.clearPackets) / \(diag.s.packets)")
-                }
-                Section("Speed") {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Reading text: \(Diagnostics.summary(diag.ocrSeries))").font(.footnote)
-                        Sparkline(values: diag.ocrSeries, color: .green)
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Translating: \(Diagnostics.summary(diag.translateSeries))").font(.footnote)
-                        Sparkline(values: diag.translateSeries, color: .cyan)
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Read → shown on screen: \(Diagnostics.summary(diag.latencySeries))").font(.footnote)
-                        Sparkline(values: diag.latencySeries, color: .orange)
-                    }
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Extension → app transfer: \(Diagnostics.summary(diag.transportSeries))").font(.footnote)
-                        Sparkline(values: diag.transportSeries, color: .purple)
-                    }
-                }
-                Section("Reading order") {
-                    row("Frame rotation applied", "\(diag.s.rotation * 90)°")
-                    row("Order confidence", String(format: "%.1f", diag.s.orderVote))
-                    row("Calibrated", diag.s.calibrated ? "Yes" : "Not yet")
-                }
-                Section("What got filtered") {
-                    row("Lines read", "\(diag.s.linesIn)")
-                    row("Outside OCR area", "\(diag.s.dropArea)")
-                    row("Too small", "\(diag.s.dropSmall)")
-                    row("Ignore list", "\(diag.s.dropIgnore)")
-                    row("Own floating window", "\(diag.s.dropSelf)")
-                    row("Already target language", "\(diag.s.dropTarget)")
-                    row("Numbers / noise", "\(diag.s.dropNoise)")
-                    row("Other language", "\(diag.s.dropLanguage)")
-                    row("Text blocks (found / kept)", "\(diag.s.blocksIn) / \(diag.s.blocksKept)")
-                    row("Floating window position", diag.s.pipRegion)
-                }
-                Section("Translation") {
-                    row("Engine", diag.s.sessionKind)
-                    row("Detected language", diag.s.detected)
-                    row("Locked language", diag.s.lockedLang)
-                    row("Translations", "\(diag.s.translations)")
-                    row("Sentences", "\(diag.s.sentences)")
-                    row("Characters", "\(diag.s.chars)")
-                    row("Cache hit rate", pct(diag.s.cacheHits, diag.s.cacheHits + diag.s.cacheMisses))
-                    row("Batches / failures", "\(diag.s.batches) / \(diag.s.failures)")
-                }
-                Section("Speakers learned") {
-                    if diag.names.isEmpty {
-                        Text("Names appear here when text looks like \"Name: line\".").font(.footnote).foregroundStyle(.secondary)
-                    } else {
-                        Text(diag.names.joined(separator: ", ")).font(.footnote)
-                    }
-                }
-                Section("Device") {
-                    row("Temperature", thermal)
-                    row("Low Power Mode", ProcessInfo.processInfo.isLowPowerModeEnabled ? "On" : "Off")
-                    row("Battery", battery)
-                    row("App memory free", "\(Int(Double(os_proc_available_memory()) / 1_048_576)) MB")
-                }
-                Section("Event log") {
-                    if diag.events.isEmpty { Text("Nothing yet.").font(.footnote).foregroundStyle(.secondary) }
-                    ForEach(diag.events.prefix(40)) { e in
-                        HStack(alignment: .top) {
-                            Text(e.time, format: .dateTime.hour().minute().second())
-                                .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
-                            Text(e.text).font(.caption)
+                .chartYScale(domain: 0.0...3.0)
+                .chartYAxis {
+                    AxisMarks(position: .leading, values: [0.0, 1.0, 2.0, 3.0]) { v in
+                        AxisGridLine()
+                        AxisValueLabel {
+                            if let d = v.as(Double.self) {
+                                Text(["Normal", "Warm", "Hot", "Critical"][Swift.min(3, Swift.max(0, Int(d)))])
+                                    .font(.system(size: 9))
+                            }
                         }
                     }
                 }
+                .frame(height: 110)
             }
-            .scrollContentBackground(.hidden)
-            .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle("Diagnostics")
-            .onAppear { UIDevice.current.isBatteryMonitoringEnabled = true }
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { ShareLink(item: diag.report(engine: engine)) }
-                ToolbarItem(placement: .topBarTrailing) { Button("Reset") { diag.reset() } }
+        }
+        .card()
+    }
+
+    private var devicePage: some View {
+        let s = diag.s
+        let b = UIDevice.current.batteryLevel
+        return VStack(spacing: 14) {
+            LineCard(title: "Capture extension memory free", samples: slice(diag.extMem), color: Color.teal, unit: "MB", rule: 15)
+            LineCard(title: "App memory free", samples: slice(diag.appMem), color: Color.indigo, unit: "MB")
+            thermalCard
+            LineCard(title: "Battery", samples: slice(diag.battery), color: Color.green, unit: "%")
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Details").font(.subheadline.weight(.semibold))
+                LabeledContent("Capture extension", value: engine.extensionVersion == "–" ? "not seen yet" : "v\(engine.extensionVersion)")
+                LabeledContent("Frame size", value: s.bufferSize)
+                LabeledContent("Orientation from iOS", value: s.orientation)
+                LabeledContent("Read area size", value: s.cropSize)
+                LabeledContent("Rotation applied", value: "\(s.rotation * 90)°")
+                LabeledContent("Lowest extension memory", value: s.minExtFreeMB > 9000 ? "–" : "\(Int(s.minExtFreeMB)) MB")
+                LabeledContent("Low Power Mode", value: ProcessInfo.processInfo.isLowPowerModeEnabled ? "On" : "Off")
+                LabeledContent("Battery now", value: b < 0 ? "–" : "\(Int(b * 100))%")
             }
+            .font(.footnote)
+            .card()
+        }
+    }
+
+    // MARK: Log
+    private var logPage: some View {
+        VStack(spacing: 14) {
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+                TextField("Search the log", text: $query)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                if !query.isEmpty {
+                    Button { query = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
+                }
+            }
+            .padding(12)
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            eventListCard(limit: 400)
         }
     }
 }
