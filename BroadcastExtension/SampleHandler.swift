@@ -1,4 +1,4 @@
-// Screen Translator – Broadcast extension – v0.8.0
+// Screen Translator – Broadcast extension – v0.11.0
 import ReplayKit
 import Vision
 import ImageIO
@@ -16,6 +16,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var candidateKey = ""
     private var sentKey = ""
     private var candidateCount = 0
+    private var specKey = ""
     private var emptyPasses = 0
     private var lastOcrMs: Double = 0
     private var ocrSig: [UInt8] = []
@@ -225,18 +226,23 @@ class SampleHandler: RPBroadcastSampleHandler {
         if candidateCount >= need {
             sentKey = key
             candidateCount = 0
-            send(kind: "ocr", lines: Array(lines.prefix(60)))
+            send(kind: "ocr", lines: Array(lines.prefix(60)), stable: true)
+        } else if candidateCount == 1, need > 1, cfg.speculate ?? true, !TextSim.similar(key, specKey) {
+            // First sighting: the app starts translating right away but only shows it once the text is confirmed.
+            specKey = key
+            send(kind: "ocr", lines: Array(lines.prefix(60)), stable: false)
         }
     }
 
     // MARK: Send
-    private func send(kind: String, lines: [OCRLine]) {
+    private func send(kind: String, lines: [OCRLine], stable: Bool? = nil) {
         func encode(_ l: [OCRLine]) -> Data? {
             try? JSONEncoder().encode(Packet(kind: kind, version: AppVersion.version, frames: frames, lines: l,
                                              ocrMs: lastOcrMs, memFreeMB: freeMB(),
                                              ts: Date().timeIntervalSince1970, rev: config.rev,
                                              bufW: info.bw, bufH: info.bh, orient: info.orient,
-                                             cropW: info.cw, cropH: info.ch, passes: passes, skipped: skipped))
+                                             cropW: info.cw, cropH: info.ch, passes: passes, skipped: skipped,
+                                             stable: stable))
         }
         var data = encode(lines)
         if let d = data, d.count > 60000 { data = encode(Array(lines.prefix(30))) }
