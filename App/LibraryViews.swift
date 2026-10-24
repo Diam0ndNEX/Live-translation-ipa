@@ -129,7 +129,6 @@ struct HistoryView: View {
     @EnvironmentObject var engine: TranslatorEngine
     @State private var query = ""
     @State private var onlyStarred = false
-    @State private var shareItem: ShareItem?
 
     private var items: [HistoryItem] {
         engine.history.filter { h in
@@ -174,8 +173,11 @@ struct HistoryView: View {
             .navigationTitle("History")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    ShareLink(item: engine.history.map { "\($0.original)\n→ \($0.translated)" }.joined(separator: "\n\n"))
-                        .disabled(engine.history.isEmpty)
+                    Button {
+                        Sharer.shareFile(text: engine.history.map { "\($0.original)\n→ \($0.translated)" }.joined(separator: "\n\n"),
+                                         name: "translation-history-\(Sharer.stamp()).txt")
+                    } label: { Image(systemName: "square.and.arrow.up") }
+                    .disabled(engine.history.isEmpty)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -185,7 +187,6 @@ struct HistoryView: View {
                     } label: { Image(systemName: "ellipsis.circle") }
                 }
             }
-            .sheet(item: $shareItem) { ActivityView(items: [$0.image]) }
         }
     }
 
@@ -221,7 +222,7 @@ struct HistoryView: View {
             Button { UIPasteboard.general.string = h.original; engine.toast("Copied original") } label: {
                 Label("Copy original", systemImage: "doc.on.doc.fill")
             }
-            Button { shareItem = ShareItem(image: engine.image(for: h)) } label: {
+            Button { Sharer.shareImage(engine.image(for: h)) } label: {
                 Label("Share as image", systemImage: "photo")
             }
             Button { engine.toggleStar(h.id) } label: {
