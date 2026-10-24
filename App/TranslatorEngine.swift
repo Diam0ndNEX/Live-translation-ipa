@@ -1,4 +1,4 @@
-// Screen Translator – App – v0.9.0
+// Screen Translator – App – v0.10.0
 import SwiftUI
 import Translation
 import NaturalLanguage
@@ -239,7 +239,10 @@ final class TranslatorEngine: ObservableObject {
         }
         recentPairs = ud.stringArray(forKey: "recentPairs") ?? []
         loadHistory()
-        presets.onApplied = { [weak self] in self?.reloadSettings() }
+        presets.onApplied = { [weak self] in
+            self?.reloadSettings()
+            if let n = self?.presets.active?.name { self?.diag.log("Preset applied: \(n)") }
+        }
         presets.applyStartup()
         diag.log("App started \(AppVersion.full)")
     }
@@ -252,6 +255,7 @@ final class TranslatorEngine: ObservableObject {
             diag.log("Capture stopped")
         }
         captureAlive = alive
+        diag.tick(alive: alive, paused: paused, frozen: frozen)
         UIApplication.shared.isIdleTimerDisabled = alive && flag("keepAwake", true)
         if tickCount % 10 == 0, alive { syncConfig() }        // refreshes adaptive performance
         let idle = int("idleMinutes", 0)
@@ -637,6 +641,7 @@ final class TranslatorEngine: ObservableObject {
     private func performClear() {
         clearTask = nil
         guard showing else { return }
+        diag.event(.translation, "Cleared – the text ended")
         showing = false
         lastHandled = ""
         original = ""
@@ -700,6 +705,7 @@ final class TranslatorEngine: ObservableObject {
         let code = Locale.Language(identifier: d.rawValue).minimalIdentifier
         diag.s.detected = code
         detectedLang = code
+        diag.noteLanguage(code)
         if useLock {
             detectLog.append(code)
             if detectLog.count > 6 { detectLog.removeFirst() }
@@ -838,7 +844,11 @@ final class TranslatorEngine: ObservableObject {
             outBlocks.append(applyGlossary(lines.joined(separator: "\n")))
         }
         translateMs = Date().timeIntervalSince(t0) * 1000
-        Diagnostics.push(&diag.translateSeries, translateMs)
+        var sentenceCount = 0
+        for row in units { for u in row { sentenceCount += u.sentences.count } }
+        diag.recordTranslate(ms: translateMs, sentences: sentenceCount,
+                             from: srcLangs.keys.sorted().joined(separator: "+"), to: targetCode,
+                             preview: outBlocks.joined(separator: " / "))
         diag.s.translations += 1
         diag.s.chars += blocks.joined().count
         status = "\(srcLangs.keys.sorted().joined(separator: "+")) → \(targetCode) ✓"
@@ -883,7 +893,7 @@ final class TranslatorEngine: ObservableObject {
         showing = true
         lastTextDate = Date()
         lastShowDate = Date()
-        if currentTs > 0 { Diagnostics.push(&diag.latencySeries, (Date().timeIntervalSince1970 - currentTs) * 1000) }
+        if currentTs > 0 { diag.recordLatency(ms: (Date().timeIntervalSince1970 - currentTs) * 1000) }
         if history.first?.original != text {
             history.insert(HistoryItem(original: text, translated: result), at: 0)
             if history.count > 200 { history.removeLast() }
