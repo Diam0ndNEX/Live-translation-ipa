@@ -1,4 +1,4 @@
-// Screen Translator – App – v0.10.0
+// Screen Translator – App – v0.11.0
 import SwiftUI
 import Charts
 import os
@@ -96,7 +96,7 @@ struct StateSpan: Identifiable {
 }
 
 enum Fix: String {
-    case fastSpeed, instantStability, fixedRotation, narrowArea, openLanguages, startCapture
+    case fastSpeed, instantStability, fixedRotation, narrowArea, openLanguages, startCapture, translateAhead
     var label: String {
         switch self {
         case .fastSpeed: "Use Fast speed"
@@ -105,6 +105,7 @@ enum Fix: String {
         case .narrowArea: "Read the bottom third only"
         case .openLanguages: "Open Languages"
         case .startCapture: "Go to Home"
+        case .translateAhead: "Turn on translate-ahead"
         }
     }
 }
@@ -141,7 +142,7 @@ struct Stats {
     var extFreeMB = 0.0, minExtFreeMB = 9999.0
     var linesIn = 0, dropArea = 0, dropSmall = 0, dropIgnore = 0, dropSelf = 0, dropTarget = 0, dropNoise = 0, dropLanguage = 0
     var blocksIn = 0, blocksKept = 0
-    var sentences = 0, cacheHits = 0, cacheMisses = 0, batches = 0, failures = 0, translations = 0, chars = 0
+    var sentences = 0, cacheHits = 0, specHits = 0, cacheMisses = 0, batches = 0, failures = 0, translations = 0, chars = 0
     var sessionKind = "–"
     var detected = "–"
     var lockedLang = "–"
@@ -282,8 +283,8 @@ final class Diagnostics: ObservableObject {
         let b = Double(UIDevice.current.batteryLevel)
         if b >= 0 { add(\.battery, b * 100, cap: 900) }
         if alive, s.extFreeMB > 0 { add(\.extMem, s.extFreeMB, cap: 900) }
-        let total = s.cacheHits + s.cacheMisses
-        if total > 0 { add(\.cacheRate, Double(s.cacheHits) / Double(total) * 100, cap: 900) }
+        let total = s.cacheHits + s.specHits + s.cacheMisses
+        if total > 0 { add(\.cacheRate, Double(s.cacheHits + s.specHits) / Double(total) * 100, cap: 900) }
     }
 
     // MARK: Maths
@@ -309,6 +310,7 @@ final class Diagnostics: ObservableObject {
         }
         let ocrS = Diagnostics.summarize(Array(ocr.suffix(30)))
         let latS = Diagnostics.summarize(Array(latency.suffix(30)))
+        let trS = Diagnostics.summarize(Array(translate.suffix(30)))
 
         if !alive {
             flag(2, "Capture isn't running", "Open Home, tap the broadcast button and choose Translator Capture.", .startCapture)
@@ -342,6 +344,16 @@ final class Diagnostics: ObservableObject {
         case .serious, .critical:
             flag(2, "The phone is hot", "Reading slows down automatically. Let it cool down, or lower the brightness."); score -= 15
         default: break
+        }
+        if alive, trS.n >= 3, trS.avg > 400,
+           (UserDefaults.standard.object(forKey: "translateAhead") as? Bool) == false {
+            flag(1, "Translating is a big part of the delay (\(Int(trS.avg)) ms)",
+                 "Translate-ahead starts translating before the text is confirmed, so the waits overlap.", .translateAhead)
+            score -= 8
+        }
+        if s.sessionKind.contains("Hosted") {
+            flag(0, "Translations use the slower engine",
+                 "The faster direct engine needs iOS 26 and both language packs downloaded.", .openLanguages)
         }
         if s.translations + s.failures > 0, Double(s.failures) / Double(s.translations + s.failures) > 0.05 {
             flag(1, "Some sentences failed to translate", "Make sure the language packs are downloaded.", .openLanguages); score -= 10
@@ -395,7 +407,7 @@ final class Diagnostics: ObservableObject {
         l.append("Extension memory free \(Int(s.extFreeMB)) MB (lowest \(s.minExtFreeMB > 9000 ? 0 : Int(s.minExtFreeMB)) MB)")
         l.append("Lines \(s.linesIn): area \(s.dropArea), small \(s.dropSmall), ignore \(s.dropIgnore), own window \(s.dropSelf), target language \(s.dropTarget); blocks \(s.blocksIn) → \(s.blocksKept), noise \(s.dropNoise), other language \(s.dropLanguage)")
         l.append("Order confidence \(String(format: "%.1f", s.orderVote)), calibrated \(s.calibrated), rotation tries \(s.rotationTries)")
-        l.append("Translations \(s.translations), sentences \(s.sentences), cache \(s.cacheHits)/\(s.cacheHits + s.cacheMisses), failures \(s.failures), engine \(s.sessionKind)")
+        l.append("Translations \(s.translations), sentences \(s.sentences), cache \(s.cacheHits)/\(s.cacheHits + s.specHits + s.cacheMisses) (pre-translated \(s.specHits)), failures \(s.failures), engine \(s.sessionKind)")
         l.append("Language \(s.detected), locked \(s.lockedLang). Speakers: \(names.joined(separator: ", "))")
         l.append("")
         l.append("Recent events:")
@@ -411,11 +423,6 @@ private func fmt(_ v: Double) -> String { v >= 100 ? "\(Int(v))" : String(format
 
 private func level(_ v: Double, _ n: Int, _ warn: Double, _ bad: Double) -> Color {
     n == 0 ? Color.white : (v > bad ? Color.red : (v > warn ? Color.orange : Color.green))
-}
-
-private struct ShareText: Identifiable {
-    let id = UUID()
-    let text: String
 }
 
 private struct BarRow: Identifiable {
@@ -733,7 +740,6 @@ private struct DiagnosticsBody: View {
     @State private var kinds: Set<EventKind> = []
     @State private var query = ""
     @State private var confirmReset = false
-    @State private var shareText: ShareText?
 
     private var page: DiagPage { DiagPage(rawValue: pageRaw) ?? .overview }
     private var range: DiagRange { DiagRange(rawValue: rangeRaw) ?? .fiveMin }
@@ -770,14 +776,14 @@ private struct DiagnosticsBody: View {
             .navigationTitle("Diagnostics")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button { shareText = ShareText(text: diag.report(engine: engine)) } label: {
+                    Button { Sharer.shareFile(text: diag.report(engine: engine), name: "translator-report-\(Sharer.stamp()).txt") } label: {
                         Image(systemName: "square.and.arrow.up")
                     }
                     .accessibilityLabel("Share report")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        Button { shareText = ShareText(text: diag.csv()) } label: {
+                        Button { Sharer.shareFile(text: diag.csv(), name: "translator-data-\(Sharer.stamp()).csv") } label: {
                             Label("Export data (CSV)", systemImage: "tablecells")
                         }
                         Button {
@@ -792,7 +798,6 @@ private struct DiagnosticsBody: View {
             }
             .onAppear { visible = true }
             .onDisappear { visible = false }
-            .sheet(item: $shareText) { ActivityView(items: [$0.text]) }
             .confirmationDialog("Clear all graphs, counters and the timeline?", isPresented: $confirmReset,
                                 titleVisibility: .visible) {
                 Button("Reset diagnostics", role: .destructive) { diag.reset(); engine.toast("Diagnostics reset") }
@@ -861,6 +866,7 @@ private struct DiagnosticsBody: View {
         case .narrowArea: ud.set("bottom", forKey: "area")
         case .openLanguages: selectTab(1); return
         case .startCapture: selectTab(0); return
+        case .translateAhead: ud.set(true, forKey: "translateAhead")
         }
         engine.syncConfig()
         engine.tap()
@@ -1028,19 +1034,21 @@ private struct DiagnosticsBody: View {
 
     private var sessionGrid: some View {
         let s = diag.s
-        let hits = s.cacheHits + s.cacheMisses
+        let hits = s.cacheHits + s.specHits + s.cacheMisses
         return LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
             StatTile(title: "Time live", value: "\(Int(liveFraction * 100))%", tint: Color.green, icon: "dot.radiowaves.left.and.right")
             StatTile(title: "Started", value: diag.started.formatted(date: .omitted, time: .shortened), icon: "clock")
             StatTile(title: "Translations", value: "\(s.translations)", tint: Color.cyan, icon: "character.bubble")
             StatTile(title: "Sentences", value: "\(s.sentences)", icon: "text.alignleft")
             StatTile(title: "Characters", value: "\(s.chars)", icon: "textformat")
-            StatTile(title: "Cache hits", value: hits == 0 ? "–" : "\(Int(Double(s.cacheHits) / Double(hits) * 100))%",
+            StatTile(title: "Cache hits", value: hits == 0 ? "–" : "\(Int(Double(s.cacheHits + s.specHits) / Double(hits) * 100))%",
                      tint: Color.purple, icon: "memorychip")
             StatTile(title: "Capture drops", value: "\(s.captureDrops)",
                      tint: s.captureDrops > 0 ? Color.orange : Color.white, icon: "bolt.slash")
             StatTile(title: "Failures", value: "\(s.failures)",
                      tint: s.failures > 0 ? Color.red : Color.white, icon: "exclamationmark.triangle")
+            StatTile(title: "Pre-translated", value: "\(s.specHits)", tint: Color.cyan, icon: "forward.fill")
+            StatTile(title: "Remembered", value: "\(engine.memoryCount)", tint: Color.mint, icon: "externaldrive")
         }
     }
 
@@ -1312,6 +1320,7 @@ private struct DiagnosticsBody: View {
             : (engine.langStatus[engine.sourceCode] == .installed ? "Ready" : "Needs pack")
         let cache = [
             DonutPart(name: "From memory", value: s.cacheHits, color: Color.green),
+            DonutPart(name: "Pre-translated", value: s.specHits, color: Color.cyan),
             DonutPart(name: "Translated fresh", value: s.cacheMisses, color: Color.orange)
         ]
         return VStack(spacing: 14) {
