@@ -1,4 +1,4 @@
-// Screen Translator – App – v0.9.0
+// Screen Translator – App – v0.11.0
 import SwiftUI
 
 struct HomeView: View {
@@ -19,7 +19,6 @@ struct HomeView: View {
     @AppStorage("homeRecent") private var homeRecent = true
     @State private var editor: PresetEditorMode?
     @State private var showReader = false
-    @State private var shareItem: ShareItem?
 
     private var previewRatio: CGFloat {
         let s = (WindowSize(rawValue: winSize) ?? .normal).size
@@ -63,7 +62,6 @@ struct HomeView: View {
         }
         .sheet(item: $editor) { PresetEditor(store: engine.presets, mode: $0).environmentObject(engine) }
         .sheet(isPresented: $showReader) { ReaderView().environmentObject(engine) }
-        .sheet(item: $shareItem) { ActivityView(items: [$0.image]) }
     }
 
     // MARK: Header
@@ -186,7 +184,7 @@ struct HomeView: View {
                 engine.toast(engine.frozen ? "Floating window frozen" : "Live again")
             }
             tool("square.and.arrow.up", "Image") {
-                shareItem = ShareItem(image: engine.snapshotImage())
+                Sharer.shareImage(engine.snapshotImage())
             }
             tool("text.magnifyingglass", "Read") { showReader = true }
         }
