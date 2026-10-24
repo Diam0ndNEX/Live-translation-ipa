@@ -1,12 +1,13 @@
-// Screen Translator – Shared – v0.10.0
+// Screen Translator – Shared – v0.11.0
 import Foundation
 
 enum AppVersion {
-    static let version = "0.10.0"
-    static let build = 11
+    static let version = "0.11.0"
+    static let build = 12
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("0.11.0", "Faster translation with identical wording: translate-ahead (starts translating on first sight, shows when confirmed), warm translator, translation memory kept between launches, cached language-pack check. Sharing now goes through real files (fixes the endless Loading…)."),
         ("0.10.0", "Diagnostics rebuilt: Simple view (health score, plain-language fixes with one-tap buttons, live feed) and Detailed view with 7 pages. Real charts for speed, delay, frames per second, memory, temperature and battery, histograms, a session timeline of Live / Paused / Idle with event markers, translations per minute, a pipeline funnel and filter breakdown, language and cache charts, a searchable filterable event log, CSV export and a shareable report."),
         ("0.9.0", "Redesigned app. Custom presets (save, edit, duplicate, reorder, start-up preset) with icons and colours. New Home with live status badge, quick tiles and recent language pairs. Reader view, share-as-image, toasts, onboarding, keep-screen-awake, auto-copy, speech speed, saved history with search, stars and day groups, accent colours, Home sections you can hide, settings search and per-page reset."),
         ("0.8.0", "Fixes reversed sentence order (auto-detects upside-down frames and rotates them, or pick the rotation manually). Context layer: speaker names kept, chat slang expanded, OCR clean-up, noise filter, language lock, never-translate words. Live Diagnostics tab. 30+ new options, profiles, backup, history search + stars."),
@@ -48,6 +49,7 @@ struct Packet: Codable {
     var cropH: Int?
     var passes: Int?       // OCR passes so far
     var skipped: Int?      // unchanged frames skipped
+    var stable: Bool?      // false = first sighting (translate ahead), nil/true = confirmed
 }
 
 /// App → extension (sent back over the same localhost link)
@@ -63,6 +65,7 @@ struct Config: Codable {
     var rev: Int?          // bumps whenever rot changes so stale packets can be ignored
     var boost: Int?        // 0 = off, 1 = only when nothing is found, 2 = always
     var skipUnchanged: Bool?
+    var speculate: Bool?   // send an early "first sighting" so the app can translate ahead
 }
 
 enum TextSim {
