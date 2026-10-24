@@ -493,7 +493,13 @@ struct PresetManagerView: View {
             }
 
             Section {
-                ShareLink(item: store.exportJSON()) { Label("Export my presets", systemImage: "square.and.arrow.up") }
+                Button { Sharer.shareFile(text: store.exportJSON(), name: "screen-translator-presets.json") } label: {
+                    Label("Share my presets", systemImage: "square.and.arrow.up")
+                }
+                Button {
+                    UIPasteboard.general.string = store.exportJSON()
+                    message = "Presets copied to the clipboard."
+                } label: { Label("Copy my presets", systemImage: "doc.on.doc") }
                 Button {
                     let n = store.importJSON(UIPasteboard.general.string ?? "")
                     message = n > 0 ? "Imported \(n) preset\(n == 1 ? "" : "s")." : "The clipboard doesn't contain exported presets."
