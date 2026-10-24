@@ -1,4 +1,4 @@
-// Screen Translator – App – v0.9.0
+// Screen Translator – App – v0.11.0
 import SwiftUI
 import Translation
 
@@ -43,6 +43,9 @@ struct RootView: View {
         .translationTask(engine.legacyConfig) { session in await engine.runLegacy(session) }
         .translationTask(engine.downloadConfig) { session in await engine.runDownload(session) }
         .task { await engine.loadLanguages() }
-        .onChange(of: phase) { _, p in if p == .active { engine.server.start() } }
+        .onChange(of: phase) { _, p in
+            if p == .active { engine.server.start() }
+            if p == .background { engine.saveMemory(force: true) }
+        }
     }
 }
