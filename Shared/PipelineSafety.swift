@@ -17,7 +17,8 @@ enum PipelineSafety {
     static func cacheKey(source: String, target: String, text: String, protectedWords: [String]) -> String {
         // Length-prefixed metadata prevents different protected names sharing the same placeholder cache entry.
         let context = protectedWords.map { "\($0.utf8.count):\($0)" }.joined()
-        return "v2|\(source)>\(target)|\(context.utf8.count):\(context)|\(text)"
+        let version = protectedWords.isEmpty ? "v2" : "v3"
+        return "\(version)|\(source)>\(target)|\(context.utf8.count):\(context)|\(text)"
     }
 
     static func orderedTranslations(_ responses: [(String?, String)], count: Int) -> [String]? {

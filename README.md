@@ -1,33 +1,32 @@
-# ScreenLingo 0.8.0
+# ScreenLingo 0.9.0 (38)
 
-Major overhaul built on the complete main-branch integration, with on-device translation and iOS 18 support. The preceding ScreenLingo branch and its IPA remain available separately.
+Screen translation on device, with a redesigned Live screen and a new screen-and-translation icon. Built on the complete 0.8.0 workspace, reader, library and settings; previous branches and main remain unchanged.
 
-## New in this release
+## Interface
 
-- Home launchpad for live capture, text/photo translation, visual capture area and session controls.
-- Workspace for typing, pasting, importing text files and recognizing photos/screenshots on device. Large photos are downsampled with orientation preserved. Workspace OCR pauses live reading and restores it on dismissal.
-- Focus reader with persistent text size, selectable text, centered alignment, original-text toggle, speech, sharing, freeze/resume and hideable controls.
-- Visual capture-area editor with full-screen, subtitle and middle-band shortcuts.
-- Library with search across original/translated text and notes, saved entries, date filters, multi-selection, detail pages, translation cards and deletion undo.
-- TXT, spreadsheet-safe CSV and JSON exports; JSON backup restore with duplicate-ID protection.
-- Session counters, optional timed pause, timer restart and recovery controls.
-- Private sessions, diagnostic text controls and storage erasure. Private sessions skip new history entries and disk memory writes.
-- OCR confidence and correction controls, idle backoff, thermal adaptation and low-power safeguards.
-- Background memory persistence is serialized so Clear cannot be undone by an older pending save.
-- Dedicated Lyrics preset that stays in Movie mode; existing subtitle grouping and stale-output safeguards remain active.
-- Clear language-download success/failure messages.
+The Live screen now centers on the language pair, preview and capture controls. Readiness guidance appears before capture starts; output actions disable when unavailable. Quick settings and diagnostic details collapse to keep the main screen focused. Text/photo translation, the area editor, presets, recent pairs and session controls remain directly reachable. Library, Languages, Activity and Settings use native navigation. Accent changes no longer recreate the tab hierarchy.
 
-Version is **0.8.0 (37)** as requested. This intentionally changes the marketing version from the prior integration's 1.5.0; build number increases and bundle identifiers stay the same. Signing tools that enforce marketing-version ordering may require reinstalling the IPA.
+## Latency work without reducing recognition quality
 
-## Build and validation
+- OCR is scheduled from the start of its previous pass. The old code always waited another entire interval after OCR completed. The accuracy level, resolution, confidence thresholds and confirmation count are unchanged. Thermal, low-memory and power protections remain enabled.
+- Exactly repeated sentence requests are coalesced within a language batch. Responses are expanded back into their original positions. Different protected-name mappings never share requests or cache entries; no fuzzy translation-result reuse is introduced.
+- Bounded caching reuses identical language-recognition evidence without changing the source-language decision rules.
+- PiP keeps its prepared immutable pixel buffer and format for heartbeat frames, while creating a fresh timestamped sample buffer. A new text frame gets a fresh image buffer. Font fitting searches the same size grid with fewer measurements.
+- The translated frame is prepared before synchronous history saving and optional speech/clipboard effects.
+- Warm-up is throttled and isolated from active work. The warmed session is reused only while idle and in the same settings context.
+- Timing now includes the confirmation window from first OCR sighting to frame enqueue. A separate Session breakdown identifies recognition, delivery/filtering, queue, processing and rendering. Actual display and source-video timing are outside this measurement.
 
-The `codex/screenlingo-v0.8.0` branch builds an unsigned IPA in GitHub Actions. CI runs focused Swift regression checks, compiles both targets and verifies app/extension versions and identifiers before packaging `ScreenLingo-ipa`.
+## Verification
 
-Local macOS regression checks:
+CI runs regression checks for request identity and order, protected words, subtitle grouping, partial-OCR handling, export and crop rules, scheduling and font-search equivalence. A synthetic repeated-sentence fixture requires 1,200 inputs to use 120 unique requests while reconstructing identical output. This is a duplicate-heavy fixture, not a claim of a 90% speedup for all videos.
+
+The workflow builds the unsigned IPA, verifies both bundle versions, then runs the interface on an iPhone simulator and uploads an actual screenshot plus the generated icon. Download `ScreenLingo-ipa`, unzip it, then sign the IPA. The simulator preview does not verify physical-device ReplayKit/PiP or translation quality.
+
+No on-device speedup percentage is claimed. Compare the Session timing breakdown under the same language pair, video, speed profile and thermal state to measure the improvement on your phone.
+
+Local macOS pure regression checks:
 
 ```sh
-swiftc Shared/Shared.swift Shared/PipelineSafety.swift Shared/OCRGrouping.swift Shared/ExportFormat.swift Tests/main.swift -o /tmp/screenlingo-tests
+swiftc Shared/Shared.swift Shared/PipelineSafety.swift Shared/OCRGrouping.swift Shared/ExportFormat.swift Shared/LatencyTools.swift Tests/main.swift -o /tmp/screenlingo-tests
 /tmp/screenlingo-tests
 ```
-
-For device testing, cover Portuguese to English Movie subtitles, scrolling lyrics, freeze/resume, manual translation while capture is running, photo rotation, importing/exporting history, deletion undo, private sessions, timed pause and background/foreground recovery. CI compilation does not establish ReplayKit/PiP or Apple Translation runtime quality on a physical device.

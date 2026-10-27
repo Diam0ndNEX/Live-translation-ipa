@@ -30,7 +30,11 @@ enum AccentChoice: String, CaseIterable, Identifiable {
 }
 
 enum Theme {
-    static let bg = Color(red: 0.04, green: 0.05, blue: 0.09)
+    static let bg = Color(red: 0.035, green: 0.043, blue: 0.075)
+    static let surface = Color(red: 0.055, green: 0.068, blue: 0.11)
+    static var background: LinearGradient {
+        LinearGradient(colors: [accent.start.opacity(0.14), bg, bg], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
     static let card = Color.white.opacity(0.07)
     static let cardStrong = Color.white.opacity(0.12)
     static var accent: AccentChoice { AccentChoice(rawValue: UserDefaults.standard.string(forKey: "accent") ?? "") ?? .blue }
@@ -41,9 +45,10 @@ enum Theme {
 
 extension View {
     func card() -> some View {
-        self.padding(14)
+        self.padding(18)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 22).strokeBorder(Color.white.opacity(0.06), lineWidth: 1))
     }
 }
 
@@ -348,5 +353,19 @@ enum Sharer {
         } else {
             present([image])
         }
+    }
+}
+
+/// The same screen-and-arrow motif used by the application icon.
+struct BrandMark: View {
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 13).fill(LinearGradient(colors: [Color(red: 0.21, green: 0.13, blue: 0.40), Theme.bg], startPoint: .topLeading, endPoint: .bottomTrailing))
+            RoundedRectangle(cornerRadius: 9).stroke(Color.mint, lineWidth: 2).padding(8)
+            VStack(spacing: 0) {
+                Image(systemName: "arrow.right").foregroundStyle(.white)
+                Image(systemName: "arrow.left").foregroundStyle(.mint)
+            }.font(.system(size: 13, weight: .bold))
+        }.accessibilityHidden(true)
     }
 }

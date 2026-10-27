@@ -80,7 +80,8 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
     let displayLayer = AVSampleBufferDisplayLayer()
     private var pip: AVPictureInPictureController?
     private var size = CGSize(width: 720, height: 360)
-    private var lastFrame: CGImage?
+    private var frameBuffer: CVPixelBuffer?
+    private var frameFormat: CMVideoFormatDescription?
     private var heartbeat: Timer?
     private var lastOriginal = "", lastTranslated = "Waiting for screen text…"
     private var lastShowOriginal = true
@@ -113,8 +114,7 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
         render(original: "", translated: lastTranslated, showOriginal: false)
         // PiP needs a steady stream of frames or it shows a spinner / stalls.
         heartbeat = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self, let f = self.lastFrame else { return }
-            self.enqueue(f)
+            self?.enqueueCurrentFrame()
         }
     }
 
@@ -145,8 +145,8 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
         let img = PiPRenderer.image(original: original, translated: translated, showOriginal: showOriginal,
                                     size: size, style: style)
         guard let cg = img.cgImage else { return }
-        lastFrame = cg
-        enqueue(cg)
+        guard prepareFrame(cg) else { return }
+        enqueueCurrentFrame()
     }
 
     /// Draws the floating-window picture. Also used for settings previews and "share as image".
@@ -180,16 +180,13 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
 
     private static func fittingFont(_ text: String, rect: CGRect, weight: UIFont.Weight,
                                     hi: CGFloat, lo: CGFloat, style: PiPStyle) -> UIFont {
-        var fs = hi
-        while fs > lo {
-            let f = makeFont(fs, weight, style)
-            let b = (text as NSString).boundingRect(with: CGSize(width: rect.width, height: .greatestFiniteMagnitude),
-                                                    options: .usesLineFragmentOrigin,
-                                                    attributes: [.font: f], context: nil)
-            if b.height <= rect.height { return f }
-            fs -= 2
+        let size = FontSearch.size(high: Double(hi), low: Double(lo)) { value in
+            let font = makeFont(CGFloat(value), weight, style)
+            let bounds = (text as NSString).boundingRect(with: CGSize(width: rect.width, height: .greatestFiniteMagnitude),
+                                                       options: .usesLineFragmentOrigin, attributes: [.font: font], context: nil)
+            return bounds.height <= rect.height
         }
-        return makeFont(lo, weight, style)
+        return makeFont(CGFloat(size), weight, style)
     }
 
     private static func makeFont(_ size: CGFloat, _ weight: UIFont.Weight, _ style: PiPStyle) -> UIFont {
@@ -198,32 +195,39 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
         return base
     }
 
-    private func enqueue(_ cg: CGImage) {
-        guard let sb = makeSampleBuffer(cg) else { return }
+    private func enqueueCurrentFrame() {
+        guard let sb = makeSampleBuffer() else { return }
         let r = displayLayer.sampleBufferRenderer
         if r.status == .failed { r.flush() }
         r.enqueue(sb)
     }
 
-    private func makeSampleBuffer(_ cg: CGImage) -> CMSampleBuffer? {
+    private func prepareFrame(_ cg: CGImage) -> Bool {
         var pb: CVPixelBuffer?
         let attrs = [kCVPixelBufferCGImageCompatibilityKey: true,
                      kCVPixelBufferCGBitmapContextCompatibilityKey: true,
                      kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
         CVPixelBufferCreate(kCFAllocatorDefault, cg.width, cg.height, kCVPixelFormatType_32BGRA, attrs, &pb)
-        guard let pb else { return nil }
+        guard let pb else { return false }
         CVPixelBufferLockBaseAddress(pb, [])
         defer { CVPixelBufferUnlockBaseAddress(pb, []) }
         guard let ctx = CGContext(data: CVPixelBufferGetBaseAddress(pb), width: cg.width, height: cg.height,
                                   bitsPerComponent: 8, bytesPerRow: CVPixelBufferGetBytesPerRow(pb),
                                   space: CGColorSpaceCreateDeviceRGB(),
                                   bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
-                                            | CGBitmapInfo.byteOrder32Little.rawValue) else { return nil }
+                                            | CGBitmapInfo.byteOrder32Little.rawValue) else { return false }
         ctx.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
 
         var fmt: CMVideoFormatDescription?
         CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: pb, formatDescriptionOut: &fmt)
-        guard let fmt else { return nil }
+        guard let fmt else { return false }
+        frameBuffer = pb
+        frameFormat = fmt
+        return true
+    }
+
+    private func makeSampleBuffer() -> CMSampleBuffer? {
+        guard let pb = frameBuffer, let fmt = frameFormat else { return nil }
         var timing = CMSampleTimingInfo(duration: .invalid,
                                         presentationTimeStamp: CMClockGetTime(CMClockGetHostTimeClock()),
                                         decodeTimeStamp: .invalid)

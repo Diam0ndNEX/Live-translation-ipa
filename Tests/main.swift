@@ -41,3 +41,28 @@ check(ExportFormat.normalizedArea(0.8, 0.2) == 0.2...0.8, "Reversed capture slid
 check(ExportFormat.normalizedArea(-1, 2) == 0...1, "Capture area must stay within the screen")
 check(abs(ExportFormat.normalizedArea(0.5, 0.5).upperBound - 0.6) < 0.00001, "Capture area must have a usable minimum height")
 print("Export and capture-area checks passed")
+
+// Cadence removes only redundant waiting: accuracy, pass count and resolution are unchanged.
+check(CaptureCadence.remaining(startedAt: 10, now: 10.242, interval: 0.22) == 0, "An OCR pass longer than its interval must not incur a second interval")
+check(abs(CaptureCadence.remaining(startedAt: 10, now: 10.1, interval: 0.22) - 0.12) < 0.000001, "Short passes must respect their configured cadence")
+let plan = TranslationBatchPlan(["Olá.", "Olá.", "Como vai?", "Olá."])
+check(plan.unique == ["Olá.", "Como vai?"], "Only exact repeated sentences may share a request")
+check(plan.expand(["Hello.", "How are you?"]) == ["Hello.", "Hello.", "How are you?", "Hello."], "Deduplication must preserve complete sentence order")
+check(plan.expand([nil, "How are you?"]) == [nil, nil, "How are you?", nil], "Failures must fan out without partial or fabricated translations")
+check(plan.expand(["Wrong count"]) == nil, "Malformed result counts must still fail")
+let protected = TranslationBatchPlan(["Zqa chegou.", "Zqa chegou."], contexts: ["Zqa=Maria", "Zqa=Joana"])
+check(protected.unique.count == 2, "Different protected-name mappings must never be merged")
+check(TranslationBatchPlan(["Olá", "ola"]).unique.count == 2, "No fuzzy reuse or accent normalization is allowed")
+var measurements = 0
+let fitted = FontSearch.size(high: 72, low: 12) { size in measurements += 1; return size <= 30 }
+check(fitted == 30 && measurements <= 5, "Font fitting should find the same size with at most five measurements")
+for threshold in stride(from: 10.0, through: 74.0, by: 0.5) {
+    let baseline = stride(from: 72.0, through: 12.0, by: -2).first { $0 <= threshold } ?? 12
+    let optimized = FontSearch.size(high: 72, low: 12) { $0 <= threshold }
+    check(baseline == optimized, "Font search must match the original size grid exactly")
+}
+let fixture = (0..<1200).map { "Sentence \($0 % 120)." }
+let optimizedFixture = TranslationBatchPlan(fixture)
+check(optimizedFixture.unique.count == 120, "Repeated-request fixture must reduce 1200 requests to 120")
+check(optimizedFixture.expand(optimizedFixture.unique.map(Optional.some)) == fixture.map(Optional.some), "Performance fixture output must exactly match its original order")
+print("Latency checks passed: 1200 repeated requests -> 120; font measurements <= 5; cadence removes post-OCR interval")

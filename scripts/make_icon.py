@@ -1,88 +1,48 @@
 #!/usr/bin/env python3
-"""Draws the Screen Translator app icon and writes the asset catalog.
-Usage: python scripts/make_icon.py App/Assets.xcassets
-No fonts needed - everything is drawn from shapes."""
+"""Generate the ScreenLingo screen/translation mark without font or network dependencies."""
 import json
-import os
 import sys
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFilter
 
-from PIL import Image, ImageChops, ImageDraw, ImageFilter
+root = Path(sys.argv[1] if len(sys.argv) > 1 else 'App/Assets.xcassets')
+size = 2048
+mask = Image.linear_gradient('L').resize((size * 2, size * 2)).rotate(-35, resample=Image.Resampling.BICUBIC)
+mask = mask.crop((size // 2, size // 2, size // 2 + size, size // 2 + size))
+image = Image.composite(Image.new('RGB', (size, size), '#121c32'), Image.new('RGB', (size, size), '#38215e'), mask).convert('RGBA')
+glow = Image.new('RGBA', (size, size))
+draw = ImageDraw.Draw(glow)
+draw.ellipse((-400, -600, 1700, 1000), fill=(135, 80, 255, 65))
+draw.ellipse((1000, 1200, 2500, 2400), fill=(44, 230, 194, 24))
+image.alpha_composite(glow.filter(ImageFilter.GaussianBlur(180)))
 
-OUT = sys.argv[1] if len(sys.argv) > 1 else "App/Assets.xcassets"
-S = 2048  # drawn at 2x, saved at 1024 for smooth edges
+# A single luminous screen, rather than the old stack of document cards.
+shadow = Image.new('RGBA', (size, size))
+ImageDraw.Draw(shadow).rounded_rectangle((345, 395, 1703, 1660), radius=270, fill=(0, 0, 0, 170))
+image.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(80)))
+draw = ImageDraw.Draw(image)
+draw.rounded_rectangle((290, 320, 1758, 1670), radius=280, fill='#1a2038', outline='#87f4d7', width=70)
+# The open lower corner makes the screen read as a speech bubble.
+draw.polygon([(1310, 1630), (1550, 1820), (1550, 1570)], fill='#87f4d7')
+draw.polygon([(1350, 1570), (1480, 1680), (1480, 1570)], fill='#1a2038')
 
+# Two opposing, generous translation arrows. Readable at home-screen size.
+white = '#f5f7ff'
+mint = '#87f4d7'
+draw.rounded_rectangle((570, 710, 1300, 835), radius=62, fill=white)
+draw.polygon([(1220, 565), (1455, 772), (1220, 980)], fill=white)
+draw.rounded_rectangle((745, 1095, 1475, 1220), radius=62, fill=mint)
+draw.polygon([(830, 950), (595, 1157), (830, 1365)], fill=mint)
+# Small screen status indicator is decorative; it never implies a live recording.
+draw.rounded_rectangle((860, 1450, 1188, 1494), radius=22, fill='#51566e')
 
-def rr(draw, box, radius, fill):
-    draw.rounded_rectangle(box, radius=radius, fill=fill)
-
-
-def shadow(base, box, radius, blur, offset=(0, 40), alpha=110):
-    layer = Image.new("RGBA", base.size, (0, 0, 0, 0))
-    x0, y0, x1, y1 = box
-    ImageDraw.Draw(layer).rounded_rectangle(
-        (x0 + offset[0], y0 + offset[1], x1 + offset[0], y1 + offset[1]),
-        radius=radius, fill=(10, 10, 40, alpha))
-    layer = layer.filter(ImageFilter.GaussianBlur(blur))
-    base.alpha_composite(layer)
-
-
-# --- background: diagonal blue -> indigo gradient -------------------------
-top = Image.new("RGB", (S, S), (64, 140, 255))
-bottom = Image.new("RGB", (S, S), (118, 80, 250))
-big = Image.linear_gradient("L").resize((S * 2, S * 2))      # larger than the icon so rotated corners stay filled
-big = big.rotate(35, resample=Image.BICUBIC)
-mask = big.crop((S // 2, S // 2, S // 2 + S, S // 2 + S))
-img = Image.composite(bottom, top, mask).convert("RGBA")
-
-# soft light blob top-left for depth
-glow = Image.new("RGBA", (S, S), (0, 0, 0, 0))
-ImageDraw.Draw(glow).ellipse((-500, -600, 1100, 900), fill=(255, 255, 255, 60))
-img.alpha_composite(glow.filter(ImageFilter.GaussianBlur(160)))
-
-# --- back card: the screen with the original text ---------------------------
-back = (230, 330, 1560, 1250)
-shadow(img, back, 150, 50)
-d = ImageDraw.Draw(img)
-rr(d, back, 150, (255, 255, 255, 240))
-bar = (112, 134, 198, 255)
-for (y, width) in [(500, 960), (660, 1040), (820, 700), (980, 880)]:
-    rr(d, (360, y, 360 + width, y + 92), 46, bar)
-
-# --- front card: the floating PiP window with the translation ---------------
-front = (760, 880, 1860, 1700)
-shadow(img, front, 140, 60, offset=(0, 50), alpha=150)
-d = ImageDraw.Draw(img)
-rr(d, front, 140, (14, 20, 46, 255))
-rr(d, (front[0] + 14, front[1] + 14, front[2] - 14, front[3] - 14), 128, (20, 28, 64, 255))
-for (y, width, col) in [(1030, 760, (255, 255, 255, 255)),
-                        (1190, 860, (84, 222, 255, 255)),
-                        (1350, 560, (255, 255, 255, 255))]:
-    rr(d, (880, y, 880 + width, y + 96), 48, col)
-
-# --- translate badge ----------------------------------------------------------
-cx, cy, r = 1730, 930, 160
-shadow(img, (cx - r, cy - r, cx + r, cy + r), r, 24, offset=(0, 20), alpha=130)
-d = ImageDraw.Draw(img)
-d.ellipse((cx - r, cy - r, cx + r, cy + r), fill=(255, 255, 255, 255))
-blue = (58, 108, 255, 255)
-# right arrow (top)
-rr(d, (cx - 85, cy - 52, cx + 40, cy - 22), 15, blue)
-d.polygon([(cx + 30, cy - 82), (cx + 30, cy + 8), (cx + 92, cy - 37)], fill=blue)
-# left arrow (bottom)
-rr(d, (cx - 40, cy + 22, cx + 85, cy + 52), 15, blue)
-d.polygon([(cx - 30, cy - 8), (cx - 30, cy + 82), (cx - 92, cy + 37)], fill=blue)
-
-icon = img.resize((1024, 1024), Image.LANCZOS).convert("RGB")   # no alpha: required for app icons
-
-iconset = os.path.join(OUT, "AppIcon.appiconset")
-os.makedirs(iconset, exist_ok=True)
-icon.save(os.path.join(iconset, "icon-1024.png"))
-with open(os.path.join(OUT, "Contents.json"), "w") as f:
-    json.dump({"info": {"author": "xcode", "version": 1}}, f, indent=2)
-with open(os.path.join(iconset, "Contents.json"), "w") as f:
-    json.dump({
-        "images": [{"filename": "icon-1024.png", "idiom": "universal",
-                    "platform": "ios", "size": "1024x1024"}],
-        "info": {"author": "xcode", "version": 1},
-    }, f, indent=2)
-print("wrote", iconset)
+iconset = root / 'AppIcon.appiconset'
+iconset.mkdir(parents=True, exist_ok=True)
+icon = image.resize((1024, 1024), Image.Resampling.LANCZOS).convert('RGB')
+icon.save(iconset / 'icon-1024.png')
+(root / 'Contents.json').write_text(json.dumps({'info': {'author': 'xcode', 'version': 1}}, indent=2))
+(iconset / 'Contents.json').write_text(json.dumps({
+    'images': [{'filename': 'icon-1024.png', 'idiom': 'universal', 'platform': 'ios', 'size': '1024x1024'}],
+    'info': {'author': 'xcode', 'version': 1}
+}, indent=2))
+print('Generated ScreenLingo icon:', iconset)

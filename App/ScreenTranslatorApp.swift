@@ -16,17 +16,16 @@ struct RootView: View {
 
     var body: some View {
         TabView(selection: $tab) {
-            HomeView().tabItem { Label("Home", systemImage: "house.fill") }.tag(0)
+            HomeView().tabItem { Label("Live", systemImage: "captions.bubble.fill") }.tag(0)
             LanguagesView().tabItem { Label("Languages", systemImage: "globe") }.tag(1)
-            HistoryView().tabItem { Label("History", systemImage: "clock") }.tag(2)
-            DiagnosticsView().tabItem { Label("Diagnostics", systemImage: "waveform.path.ecg") }.tag(3)
+            HistoryView().tabItem { Label("Library", systemImage: "books.vertical.fill") }.tag(2)
+            DiagnosticsView().tabItem { Label("Activity", systemImage: "waveform.path.ecg") }.tag(3)
             SettingsView().tabItem { Label("Settings", systemImage: "gearshape.fill") }.tag(4)
         }
-        .id(accent)                                   // rebuild so a new accent colour shows everywhere
         .environmentObject(engine)
         .environment(\.selectTab, { tab = $0 })
         .preferredColorScheme(.dark)
-        .tint(Theme.accent.start)
+        .tint((AccentChoice(rawValue: accent) ?? .blue).start)
         .overlay(alignment: .top) {
             if let t = engine.toastText {
                 ToastView(text: t)

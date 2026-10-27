@@ -8,10 +8,13 @@ import os
 
 class SampleHandler: RPBroadcastSampleHandler {
     private var conn: NWConnection?
+    private let recognitionLock = NSLock()
     private var frames = 0
     private var passes = 0
     private var skipped = 0
     private var lastRun = Date.distantPast
+    private var readStartedAt = 0.0
+    private var candidateStartedAt = 0.0
     private var lastPing = Date.distantPast
     private var candidateKey = ""
     private var sentKey = ""
@@ -59,7 +62,8 @@ class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: Frames
     override func processSampleBuffer(_ sampleBuffer: CMSampleBuffer, with type: RPSampleBufferType) {
-        guard type == .video else { return }
+        guard type == .video, recognitionLock.try() else { return }
+        defer { recognitionLock.unlock() }
         frames += 1
         let now = Date()
         if now.timeIntervalSince(lastPing) > 2 { lastPing = now; send(kind: "ping", lines: []) }
@@ -71,7 +75,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             lastOCRConfig = cfg
         }
         let idleFactor = (cfg.idleBackoff ?? true) && now.timeIntervalSince(lastUsefulText) > 8 ? 2.5 : 1.0
-        guard !cfg.paused, now.timeIntervalSince(lastRun) >= cfg.interval * idleFactor,
+        guard !cfg.paused, CaptureCadence.remaining(startedAt: lastRun.timeIntervalSince1970, now: now.timeIntervalSince1970, interval: cfg.interval * idleFactor) <= 0,
               let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
         // Skip frames that look identical to the last one we read (saves battery, keeps things fast)
@@ -94,8 +98,11 @@ class SampleHandler: RPBroadcastSampleHandler {
         info.bw = CVPixelBufferGetWidth(pb)
         info.bh = CVPixelBufferGetHeight(pb)
         info.orient = Int(orientation.rawValue)
+        // Count the interval from the start of OCR, not after OCR has already finished.
+        // The lock also prevents overlapping callbacks from mutating confirmation state.
+        lastRun = now
+        readStartedAt = now.timeIntervalSince1970
         autoreleasepool { recognize(pb, orientation, cfg) }
-        lastRun = Date()
     }
 
     // MARK: Cheap change detection
@@ -231,7 +238,8 @@ class SampleHandler: RPBroadcastSampleHandler {
         let need = max(1, cfg.stability ?? 2)
         let key = lines.map(\.t).joined(separator: "\n")
         if PipelineSafety.isDuplicate(key.components(separatedBy: "\n"), previous: sentKey.components(separatedBy: "\n")) { candidateKey = key; candidateCount = 0; return }
-        if TextSim.similar(key, candidateKey) { candidateCount += 1 } else { candidateKey = key; candidateCount = 1 }
+        if TextSim.similar(key, candidateKey) { candidateCount += 1 }
+        else { candidateKey = key; candidateCount = 1; candidateStartedAt = readStartedAt }
         if candidateCount >= need {
             sentKey = key
             candidateCount = 0
@@ -251,7 +259,8 @@ class SampleHandler: RPBroadcastSampleHandler {
                                              ts: Date().timeIntervalSince1970, rev: revision ?? config.rev,
                                              bufW: info.bw, bufH: info.bh, orient: info.orient,
                                              cropW: info.cw, cropH: info.ch, passes: passes, skipped: skipped,
-                                             stable: stable))
+                                             stable: stable, firstSeenAt: kind == "ocr" ? candidateStartedAt : nil,
+                                             readStartedAt: kind == "ocr" ? readStartedAt : nil))
         }
         var data = encode(lines)
         if let d = data, d.count > 60000 { data = encode(Array(lines.prefix(30))) }

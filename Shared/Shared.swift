@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "0.8.0"
-    static let build = 37
+    static let version = "0.9.0"
+    static let build = 38
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("0.9.0", "New screen-and-translation icon and redesigned Live interface. Start-based OCR cadence removes redundant waiting while preserving accuracy and confirmation passes. Exact request coalescing, bounded language-evidence caching, faster font fitting, reusable heartbeat frames and display-before-history ordering reduce repeated work. Added honest first-sighting-to-enqueue timing and protected-name cache isolation."),
         ("0.8.0", "Major workspace overhaul: photo/text translation, visual capture-area editor, focus reader, session controls, searchable history with notes, CSV/JSON export and restore, undo deletion, private sessions, OCR tuning and idle power saving."),
         ("1.5.0", "Integrated the latest main redesign, custom presets, diagnostics charts, translation memory and translate-ahead. Preserved ScreenLingo identity, small text, lyric rows and fragment protection. Fixed stale output, batch validation, frozen output and legacy timeouts."),
         ("0.11.0", "Faster translation with identical wording: translate-ahead (starts translating on first sight, shows when confirmed), warm translator, translation memory kept between launches, cached language-pack check. Sharing now goes through real files (fixes the endless Loading…)."),
@@ -52,6 +53,8 @@ struct Packet: Codable {
     var passes: Int?       // OCR passes so far
     var skipped: Int?      // unchanged frames skipped
     var stable: Bool?      // false = first sighting (translate ahead), nil/true = confirmed
+    var firstSeenAt: Double? = nil
+    var readStartedAt: Double? = nil
 }
 
 /// App → extension (sent back over the same localhost link)

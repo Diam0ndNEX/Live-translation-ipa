@@ -66,6 +66,17 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                if query.isEmpty {
+                    Section {
+                        HStack(spacing: 14) {
+                            BrandMark().frame(width: 52, height: 52)
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text("Make it yours").font(.system(.title3, design: .rounded, weight: .bold))
+                                Text("ScreenLingo \(AppVersion.full)").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }.padding(.vertical, 6)
+                    }
+                }
                 if show("Presets", "save profile custom switch") {
                     Section { PresetsLinkRow(store: engine.presets) }
                 }

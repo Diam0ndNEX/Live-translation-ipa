@@ -165,6 +165,7 @@ final class TranslatorEngine: ObservableObject {
     let server = LoopbackServer()
     let diag = Diagnostics()
     let presets = PresetStore()
+    let latency = LatencyMonitor()
 
     private var contextRevision = 0
     private var generation = 0
@@ -174,6 +175,14 @@ final class TranslatorEngine: ObservableObject {
     private var queued: [String]?
     private var queuedTs: Double = 0
     private var currentTs: Double = 0
+    private var queuedPacket: Packet?
+    private var currentPacket: Packet?
+    private var queuedAt = Date()
+    private var currentQueuedAt = Date()
+    private var processingStarted = Date()
+    private var savedRequests = 0
+    private var warming = false
+    private var languageCache: [String: (NLLanguage?, [NLLanguage: Double])] = [:]
     private var busy = false
     private var showing = false
     private var pendingTexts: [String] = []
@@ -282,7 +291,7 @@ final class TranslatorEngine: ObservableObject {
             status = "Capture stopped – iOS may have closed the capture extension. Tap the broadcast icon again (try Speed: Fast)."
             diag.log("Capture stopped")
         }
-        captureAlive = alive
+        if captureAlive != alive { captureAlive = alive }
         if alive, let started = sessionStarted, int("sessionLimit", 0) > 0,
            Date().timeIntervalSince(started) >= Double(int("sessionLimit", 0)) * 60, !paused {
             paused = true
@@ -385,6 +394,8 @@ final class TranslatorEngine: ObservableObject {
         contextRevision += 1
         generation += 1
         queued = nil
+        queuedPacket = nil
+        queuedTs = Date().timeIntervalSince1970
         specQueued = nil
         lastHandled = ""
         lastSpecText = ""
@@ -421,6 +432,7 @@ final class TranslatorEngine: ObservableObject {
         frozen = false
         invalidatePending()
         queuedTs = Date().timeIntervalSince1970
+        queuedPacket = nil
         enqueue([trimmed])
     }
 
@@ -554,11 +566,11 @@ final class TranslatorEngine: ObservableObject {
         let now = Date()
         let wasAlive = captureAlive
         lastPacketDate = now
-        captureAlive = true
-        frames = p.frames
-        extensionVersion = p.version
-        if let t = p.ocrMs { ocrMs = t }
-        if let m = p.memFreeMB { extFreeMB = m }
+        if !captureAlive { captureAlive = true }
+        if frames != p.frames { frames = p.frames }
+        if extensionVersion != p.version { extensionVersion = p.version }
+        if let t = p.ocrMs, t != ocrMs { ocrMs = t }
+        if let m = p.memFreeMB, m != extFreeMB { extFreeMB = m }
         diag.onPacket(p, transport: p.ts.map { max(0, now.timeIntervalSince1970 - $0) * 1000 })
 
         if !wasAlive {
@@ -599,7 +611,8 @@ final class TranslatorEngine: ObservableObject {
         latestBlocks = texts
         clearTask?.cancel()
         clearTask = nil
-        queuedTs = p.ts ?? now.timeIntervalSince1970
+        queuedTs = p.firstSeenAt ?? p.ts ?? now.timeIntervalSince1970
+        queuedPacket = p
         enqueue(texts.map { String($0.prefix(400)) })
     }
 
@@ -746,12 +759,21 @@ final class TranslatorEngine: ObservableObject {
         return out
     }
 
+    private func languageEvidence(_ text: String, limit: Int) -> (NLLanguage?, [NLLanguage: Double]) {
+        let key = "\(limit)|\(text)"
+        if let hit = languageCache[key] { return hit }
+        let recognizer = NLLanguageRecognizer()
+        recognizer.processString(text)
+        let evidence = (recognizer.dominantLanguage, recognizer.languageHypotheses(withMaximum: limit))
+        if languageCache.count >= 128 { languageCache.removeAll(keepingCapacity: true) }
+        languageCache[key] = evidence
+        return evidence
+    }
+
     /// With a chosen source language, skips blocks that are clearly written in another language.
     private func plausiblySource(_ text: String) -> Bool {
         guard sourceCode != "auto", text.count >= 8 else { return true }
-        let rec = NLLanguageRecognizer()
-        rec.processString(text)
-        let hyp = rec.languageHypotheses(withMaximum: 3)
+        let hyp = languageEvidence(text, limit: 3).1
         guard let top = hyp.max(by: { $0.value < $1.value }), top.value > 0.8 else { return true }
         let src = Locale.Language(identifier: sourceCode).languageCode
         let ps = hyp.filter { Locale.Language(identifier: $0.key.rawValue).languageCode == src }.map(\.value).max() ?? 0
@@ -802,6 +824,7 @@ final class TranslatorEngine: ObservableObject {
         generation += 1
         lastHandled = joined
         queued = blocks
+        queuedAt = Date()
         if !busy { Task { await drain() } }
     }
 
@@ -831,10 +854,8 @@ final class TranslatorEngine: ObservableObject {
     /// Drops lines already in the target language.
     private func isTargetLanguage(_ s: String) -> Bool {
         guard s.count >= 12 else { return false }
-        let r = NLLanguageRecognizer()
-        r.processString(s)
-        guard let d = r.dominantLanguage,
-              (r.languageHypotheses(withMaximum: 1)[d] ?? 0) > 0.8 else { return false }
+        let evidence = languageEvidence(s, limit: 1)
+        guard let d = evidence.0, (evidence.1[d] ?? 0) > 0.8 else { return false }
         return Locale.Language(identifier: d.rawValue).languageCode
             == Locale.Language(identifier: targetCode).languageCode
     }
@@ -851,6 +872,8 @@ final class TranslatorEngine: ObservableObject {
                 guard let b = queued else { continue }
                 queued = nil
                 currentTs = queuedTs
+                currentPacket = queuedPacket
+                currentQueuedAt = queuedAt
                 await process(b, display: true)
             } else if let sp = specQueued {
                 specQueued = nil
@@ -862,9 +885,8 @@ final class TranslatorEngine: ObservableObject {
     // MARK: Translation
     private func detectSource(_ text: String, record: Bool = true) -> Locale.Language? {
         if sourceCode != "auto" { return Locale.Language(identifier: sourceCode) }
-        let rec = NLLanguageRecognizer()
-        rec.processString(text)
-        let hyp = rec.languageHypotheses(withMaximum: 5)
+        let evidence = languageEvidence(text, limit: 5)
+        let hyp = evidence.1
         let useLock = flag("langLock", true)
         if useLock, let locked = lockedLang {
             let p = hyp[NLLanguage(rawValue: locked)] ?? 0
@@ -881,7 +903,7 @@ final class TranslatorEngine: ObservableObject {
         let installed = Set(languages.filter { langStatus[$0.code] == .installed }.map {
             $0.code == "zh" ? NLLanguage.simplifiedChinese : NLLanguage(rawValue: $0.code)
         })
-        var dom = rec.dominantLanguage
+        var dom = evidence.0
         if let best = hyp.filter({ installed.contains($0.key) }).max(by: { $0.value < $1.value }), best.value > 0.15 {
             dom = best.key
         }
@@ -939,6 +961,7 @@ final class TranslatorEngine: ObservableObject {
         if display { isTranslating = true }
         defer { if display { isTranslating = false } }
         let t0 = Date()
+        if display { processingStarted = t0; savedRequests = 0 }
         let workGeneration = generation
         let workContext = contextRevision
         let destination = targetCode
@@ -948,7 +971,7 @@ final class TranslatorEngine: ObservableObject {
         let never = list("neverTranslate", lower: false)
 
         var units: [[TUnit]] = []
-        var pending: [String: [(b: Int, u: Int, s: Int, text: String)]] = [:]
+        var pending: [String: [(b: Int, u: Int, s: Int, text: String, key: String)]] = [:]
         var srcLangs: [String: Locale.Language] = [:]
         var translatedAny = false
         func isCurrent() -> Bool {
@@ -956,9 +979,8 @@ final class TranslatorEngine: ObservableObject {
         }
 
         /// Remembers a finished sentence. Early (translate-ahead) results are marked so we can show how often they pay off.
-        func store(_ id: String, _ sentence: String, _ out: String) {
+        func store(_ key: String, _ out: String) {
             guard isCurrent() else { return }
-            let key = PipelineSafety.cacheKey(source: id, target: destination, text: sentence, protectedWords: never)
             cache[key] = out
             memoryDirty = true
             memoryCount = cache.count
@@ -984,7 +1006,7 @@ final class TranslatorEngine: ObservableObject {
                 if display { diag.s.sentences += sentences.count }
                 var outs: [String?] = []
                 for (si, s) in sentences.enumerated() {
-                    let key = PipelineSafety.cacheKey(source: id, target: destination, text: s, protectedWords: never)
+                    let key = PipelineSafety.cacheKey(source: id, target: destination, text: s, protectedWords: prot.tokens.map { "\($0.0)=\($0.1)" })
                     if let hit = cache[key] {
                         outs.append(hit); translatedAny = true
                         if display {
@@ -993,7 +1015,7 @@ final class TranslatorEngine: ObservableObject {
                     } else {
                         outs.append(nil)
                         if display { diag.s.cacheMisses += 1 }
-                        pending[id, default: []].append((bi, ui, si, s))
+                        pending[id, default: []].append((bi, ui, si, s, key))
                     }
                 }
                 row.append(TUnit(label: d.label, sentences: sentences, out: outs, tokens: prot.tokens))
@@ -1014,35 +1036,31 @@ final class TranslatorEngine: ObservableObject {
             if availability == .supported && display { status = "Language pack missing – open the Languages tab" }
             if display { diag.s.batches += 1 }
             let installed = availability == .installed
-            var results = await translateBatch(items.map { $0.text }, source: src, target: target, installed: installed)
+            let plan = TranslationBatchPlan(items.map { $0.text }, contexts: items.map { $0.key })
+            if display { savedRequests += items.count - plan.unique.count }
+            let batch = await translateBatch(plan.unique, source: src, target: target, installed: installed)
             guard isCurrent() else { return }
-            if results == nil || results?.count != items.count {
-                // One bad sentence shouldn't lose the whole batch: retry them one by one.
-                diag.log("Batch failed – retrying sentence by sentence")
-                var singles: [String?] = []
-                for it in items {
+            var uniqueResults: [String?]
+            if let batch, batch.count == plan.unique.count {
+                uniqueResults = batch.map(Optional.some)
+            } else {
+                diag.log("Batch failed – retrying unique sentences")
+                uniqueResults = []
+                for sentence in plan.unique {
                     guard isCurrent() else { return }
-                    if let r = await translateBatch([it.text], source: src, target: target, installed: installed), r.count == 1 {
-                        singles.append(r[0])
-                    } else {
-                        singles.append(nil)
-                        if display { diag.s.failures += 1 }
-                    }
-                }
-                results = nil
-                for (k, it) in items.enumerated() {
-                    if let v = singles[k] {
-                        units[it.b][it.u].out[it.s] = v
-                        store(id, it.text, v)
-                        translatedAny = true
-                    } else { failed = true }
+                    let result = await translateBatch([sentence], source: src, target: target, installed: installed)
+                    uniqueResults.append(result?.count == 1 ? result?.first : nil)
                 }
             }
-            if let r = results {
-                translatedAny = true
-                for (k, it) in items.enumerated() {
-                    units[it.b][it.u].out[it.s] = r[k]
-                    store(id, it.text, r[k])
+            guard isCurrent(), let results = plan.expand(uniqueResults) else { return }
+            for (index, item) in items.enumerated() {
+                if let value = results[index] {
+                    units[item.b][item.u].out[item.s] = value
+                    store(item.key, value)
+                    translatedAny = true
+                } else {
+                    failed = true
+                    if display { diag.s.failures += 1 }
                 }
             }
         }
@@ -1120,7 +1138,25 @@ final class TranslatorEngine: ObservableObject {
         showing = true
         lastTextDate = Date()
         lastShowDate = Date()
-        if currentTs > 0 { diag.recordLatency(ms: (Date().timeIntervalSince1970 - currentTs) * 1000) }
+        let renderStart = Date()
+        pip.setSize(windowSize.size)
+        pip.style = pipStyle
+        pip.render(original: text, translated: result, showOriginal: showOriginal)
+        let presented = Date()
+        let packet = currentPacket
+        let sent = packet?.ts ?? currentQueuedAt.timeIntervalSince1970
+        let first = packet?.firstSeenAt ?? currentTs
+        let read = packet?.readStartedAt ?? sent
+        let total = currentTs > 0 ? max(0, presented.timeIntervalSince1970 - currentTs) * 1000 : 0
+        latency.last = LatencyBreakdown(
+            recognition: packet?.ocrMs ?? 0,
+            confirmation: max(0, read - first) * 1000,
+            delivery: max(0, currentQueuedAt.timeIntervalSince1970 - read - (packet?.ocrMs ?? 0) / 1000) * 1000,
+            queue: max(0, processingStarted.timeIntervalSince(currentQueuedAt)) * 1000,
+            translation: translateMs,
+            rendering: presented.timeIntervalSince(renderStart) * 1000,
+            total: total, requestsSaved: savedRequests)
+        if total > 0 { diag.recordLatency(ms: total) }
         if history.first?.original != text {
             sessionTranslations += 1; sessionCharacters += text.count
             if !flag("privateSession", false) {
@@ -1135,9 +1171,6 @@ final class TranslatorEngine: ObservableObject {
         }
         renderedGrams = TextSim.grams(result).union(placeholderGrams)
         sourceGrams = TextSim.grams(text)
-        pip.setSize(windowSize.size)
-        pip.style = pipStyle
-        pip.render(original: text, translated: result, showOriginal: showOriginal)
     }
 
     func speak(_ s: String) {
@@ -1207,7 +1240,10 @@ final class TranslatorEngine: ObservableObject {
 
     /// Loads the translation models before they're needed so the first real sentence isn't slow.
     func prewarm() async {
-        guard flag("keepWarm", true), !paused, !busy else { return }
+        guard flag("keepWarm", true), !paused, !busy, !warming,
+              Date().timeIntervalSince(lastWarm) > 25 else { return }
+        warming = true
+        defer { warming = false }
         let code: String
         if sourceCode != "auto" { code = sourceCode }
         else if let l = lockedLang { code = l }
@@ -1225,7 +1261,14 @@ final class TranslatorEngine: ObservableObject {
         guard #available(iOS 26.0, *) else { return }
         lastWarm = Date()
         let t0 = Date()
-        _ = await translateBatch([word], source: src, target: target, installed: true)
+        let workContext = contextRevision
+        let destination = targetCode
+        let session = TranslationSession(installedSource: src, target: target)
+        _ = await runBatch(session, [word])
+        if !busy, workContext == contextRevision, directSession == nil {
+            directSession = session
+            directKey = "\(src.minimalIdentifier)>\(destination)"
+        }
         let ms = Date().timeIntervalSince(t0) * 1000
         if ms > 300 { diag.event(.translation, "Warmed up the translator in \(Int(ms)) ms") }
     }
@@ -1239,6 +1282,8 @@ final class TranslatorEngine: ObservableObject {
         lastHandled = ""
         let blocks = original.components(separatedBy: "\n")
         diag.log("Retranslating current text")
+        queuedPacket = nil
+        queuedTs = Date().timeIntervalSince1970
         enqueue(blocks)
     }
 
@@ -1295,8 +1340,17 @@ final class TranslatorEngine: ObservableObject {
         let target = Locale.Language(identifier: destination)
         let av = LanguageAvailability()
         var out: [String: LanguageAvailability.Status] = [:]
-        for l in languages {
-            out[l.code] = await av.status(from: Locale.Language(identifier: l.code), to: target)
+        // Read the active pair first so readiness does not wait behind every other language.
+        var seen = Set<String>()
+        let preferred = sourceCode == "auto" ? [] : [sourceCode]
+        let codes = (preferred + languages.map(\.code)).filter { seen.insert($0).inserted }
+        for code in codes {
+            let source = Locale.Language(identifier: code)
+            let availability = await av.status(from: source, to: target)
+            guard destination == targetCode else { return }
+            out[code] = availability
+            availCache["\(source.minimalIdentifier)>\(target.minimalIdentifier)"] = (Date(), availability)
+            if code == sourceCode { langStatus[code] = availability }
         }
         guard destination == targetCode else { return }
         langStatus = out
@@ -1382,6 +1436,7 @@ final class TranslatorEngine: ObservableObject {
         lastHandled = ""
         status = "Testing…"
         queuedTs = Date().timeIntervalSince1970
+        queuedPacket = nil
         enqueue([samples[key] ?? samples["en"]!])
     }
 

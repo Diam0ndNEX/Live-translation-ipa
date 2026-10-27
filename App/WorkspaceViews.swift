@@ -18,7 +18,13 @@ struct TranslationWorkspace: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    Label("Text & photos", systemImage: "text.viewfinder").font(.largeTitle.bold())
+                    HStack(spacing: 12) {
+                        BrandMark().frame(width: 44, height: 44)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Translate anything").font(.system(.title2, design: .rounded, weight: .bold))
+                            Text("Text · photos · screenshots").font(.caption).foregroundStyle(.secondary)
+                        }
+                    }
                     Text("Translate a screenshot, a photo or your own text. Live screen reading resumes when you close this workspace.")
                         .foregroundStyle(.secondary)
                     HStack {
@@ -60,7 +66,7 @@ struct TranslationWorkspace: View {
                     .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || recognizing || engine.isTranslating)
                     if !engine.translated.isEmpty {
                         VStack(alignment: .leading, spacing: 14) {
-                            Text("Translation").font(.caption.bold()).foregroundStyle(.secondary)
+                            Label("YOUR TRANSLATION", systemImage: "sparkles").font(.caption.bold()).foregroundStyle(.mint)
                             Text(engine.translated).font(.title3).textSelection(.enabled)
                             HStack {
                                 Button { UIPasteboard.general.string = engine.translated; engine.toast("Copied") } label: { Label("Copy", systemImage: "doc.on.doc") }
@@ -209,6 +215,7 @@ struct SessionControls: View {
                     LabeledContent("Characters", value: "\(engine.sessionCharacters)")
                     Text(engine.status).font(.footnote).foregroundStyle(.secondary)
                 }
+                LatencyDetail(monitor: engine.latency)
                 Section("Session controls") {
                     Toggle("Pause live translation", isOn: $engine.paused)
                     Toggle("Private session", isOn: $privateSession)

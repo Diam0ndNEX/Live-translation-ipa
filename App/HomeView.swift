@@ -1,8 +1,7 @@
-// Screen Translator – App – v0.11.0
 import SwiftUI
 
 struct HomeView: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EnvironmentObject private var engine: TranslatorEngine
     @Environment(\.selectTab) private var selectTab
     @AppStorage("mode") private var mode = TranslateMode.movie.rawValue
     @AppStorage("area") private var area = OCRArea.smart.rawValue
@@ -10,55 +9,53 @@ struct HomeView: View {
     @AppStorage("winSize") private var winSize = WindowSize.normal.rawValue
     @AppStorage("showOriginal") private var showOriginal = false
     @AppStorage("autoClear") private var autoClear = true
-    @AppStorage("speak") private var speak = false
-    @AppStorage("autoCopy") private var autoCopy = false
     @AppStorage("homePresets") private var homePresets = true
     @AppStorage("homeTools") private var homeTools = true
     @AppStorage("homeQuick") private var homeQuick = true
     @AppStorage("homeStatus") private var homeStatus = true
     @AppStorage("homeRecent") private var homeRecent = true
+    @State private var destination: HomeDestination?
     @State private var editor: PresetEditorMode?
-    @State private var showReader = false
-    @State private var showWorkspace = false
-    @State private var showArea = false
-    @State private var showSession = false
+    @State private var showDetails = false
+    @State private var showQuick = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var previewRatio: CGFloat {
-        let s = (WindowSize(rawValue: winSize) ?? .normal).size
-        return s.width / s.height
+    private var state: String {
+        if !engine.captureAlive { return "Ready when you are" }
+        if engine.paused { return "Translation paused" }
+        if engine.frozen { return "Holding this translation" }
+        return engine.isTranslating ? "Translating…" : "Reading your screen"
     }
-
-    private var state: (text: String, color: Color) {
-        if !engine.captureAlive { return ("Idle", .gray) }
-        if engine.paused { return ("Paused", .orange) }
-        if engine.frozen { return ("Frozen", .blue) }
-        return ("Live", .green)
+    private var stateColor: Color { engine.captureAlive && !engine.paused ? .mint : .secondary }
+    private var packReady: Bool {
+        engine.sourceCode == "auto" ? engine.langStatus.values.contains(.installed) : engine.langStatus[engine.sourceCode] == .installed
+    }
+    private var previewRatio: CGFloat {
+        let size = (WindowSize(rawValue: winSize) ?? .normal).size
+        return size.width / size.height
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 14) {
+                VStack(alignment: .leading, spacing: 22) {
                     header
-                    languageSection
-                    launchPad
-                    hero
-                    if homeTools { tools }
-                    startSection
-                    checklist
+                    languageCard
+                    liveCard
+                    if homeTools { outputTools }
+                    if homeStatus { LatencyReadout(monitor: engine.latency) }
+                    if !engine.captureAlive { readiness }
+                    toolsSection
                     if homePresets {
                         PresetChips(store: engine.presets, onNew: { editor = .new }, onEdit: { editor = .edit($0) })
                     }
-                    if homeQuick { quickSection }
-                    if homeStatus { statusSection }
-                }
-                .padding(.horizontal, 16)
-                .padding(.bottom, 28)
+                    if homeQuick { quickControls }
+                    if homeRecent && !engine.recentPairs.isEmpty { recentPairs }
+                    if homeStatus { details }
+                }.padding(.horizontal, 20).padding(.top, 12).padding(.bottom, 28)
             }
+            .background(Theme.background.ignoresSafeArea())
             .scrollIndicators(.hidden)
-            .background {
-                LinearGradient(colors: [Theme.accent.start.opacity(0.16), Theme.bg, Theme.bg], startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea()
-            }
             .toolbar(.hidden, for: .navigationBar)
             .onChange(of: speed) { _, _ in engine.syncConfig() }
             .onChange(of: area) { _, _ in engine.syncConfig() }
@@ -66,328 +63,224 @@ struct HomeView: View {
             .onChange(of: winSize) { _, _ in engine.applyWindowSize() }
             .onChange(of: showOriginal) { _, _ in engine.applyStyle() }
         }
+        .sheet(item: $destination) { destination in
+            switch destination {
+            case .workspace: TranslationWorkspace().environmentObject(engine)
+            case .reader: ReaderView().environmentObject(engine)
+            case .area: CaptureAreaEditor().environmentObject(engine)
+            case .session: SessionControls().environmentObject(engine)
+            }
+        }
         .sheet(item: $editor) { PresetEditor(store: engine.presets, mode: $0).environmentObject(engine) }
-        .sheet(isPresented: $showReader) { ReaderView().environmentObject(engine) }
-        .sheet(isPresented: $showWorkspace) { TranslationWorkspace().environmentObject(engine) }
-        .sheet(isPresented: $showArea) { CaptureAreaEditor().environmentObject(engine) }
-        .sheet(isPresented: $showSession) { SessionControls().environmentObject(engine) }
     }
 
-    private var launchPad: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Button { showWorkspace = true } label: {
-                HStack(spacing: 14) {
-                    Image(systemName: "text.viewfinder").font(.title)
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Translate text & photos").font(.headline)
-                        Text("Paste, type or choose a screenshot").font(.subheadline).opacity(0.8)
-                    }
-                    Spacer()
-                    Image(systemName: "arrow.up.right")
-                }.padding(20).background(Theme.gradient, in: RoundedRectangle(cornerRadius: 24))
-            }.foregroundStyle(.white)
-            HStack(spacing: 12) {
-                Button { showArea = true } label: { Label("Capture area", systemImage: "viewfinder") }
-                Spacer()
-                Button { showSession = true } label: { Label("Session", systemImage: "timer") }
-            }.font(.subheadline.weight(.semibold)).buttonStyle(.bordered)
-        }
-    }
-
-    // MARK: Header
     private var header: some View {
-        HStack(alignment: .center) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("ScreenLingo").font(.title.bold())
-                Text("Your screen. Your language.").font(.caption).foregroundStyle(.secondary)
+        HStack(spacing: 12) {
+            BrandMark().frame(width: 46, height: 46)
+            VStack(alignment: .leading, spacing: 1) {
+                Text("ScreenLingo").font(.system(.title2, design: .rounded, weight: .bold))
+                Text("UNDERSTAND EVERY MOMENT").font(.system(size: 9, weight: .semibold)).tracking(1.5).foregroundStyle(.secondary)
             }
-            Spacer()
-            Button { selectTab(3) } label: {
-                HStack(spacing: 6) {
-                    Circle().fill(state.color).frame(width: 8, height: 8)
-                    Text(state.text).font(.caption.weight(.semibold))
-                }
-                .padding(.horizontal, 12).padding(.vertical, 7)
-                .background(Theme.card, in: Capsule())
-                .foregroundStyle(.white)
-            }
-            .accessibilityLabel("Status \(state.text). Open diagnostics")
+            Spacer(minLength: 4)
+            Button { destination = .session } label: {
+                Image(systemName: "slider.horizontal.3").font(.headline)
+                    .frame(width: 44, height: 44).background(Theme.card, in: Circle())
+            }.accessibilityLabel("Session controls")
         }
-        .padding(.top, 8)
     }
 
-    // MARK: Languages
-    private func shortName(_ code: String) -> String { code == "auto" ? "AUTO" : code.uppercased() }
-
-    private var languageSection: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
+    private var languageCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("TRANSLATE").font(.caption2.bold()).tracking(1.5).foregroundStyle(.secondary)
+                Spacer()
+                Button { selectTab(1) } label: {
+                    Label(packReady ? "Offline ready" : "Get language packs", systemImage: packReady ? "checkmark.shield" : "arrow.down.circle")
+                        .font(.caption.weight(.medium)).foregroundStyle(packReady ? Color.mint : Theme.accent.start)
+                }.buttonStyle(.plain)
+            }
+            HStack(spacing: 10) {
                 LangMenu(code: $engine.sourceCode, items: engine.languages, allowAuto: true)
                 Button { engine.swapLanguages(); engine.tap() } label: {
-                    Image(systemName: "arrow.left.arrow.right")
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(width: 40, height: 40)
-                        .background(Theme.card, in: Circle())
-                }
-                .foregroundStyle(.white)
-                .accessibilityLabel("Swap languages")
+                    Image(systemName: "arrow.left.arrow.right").frame(width: 44, height: 44)
+                        .background(Theme.cardStrong, in: Circle())
+                }.accessibilityLabel("Swap source and target languages")
+                    .disabled(engine.sourceCode == "auto")
                 LangMenu(code: $engine.targetCode, items: engine.languages)
             }
-            let current = "\(engine.sourceCode)>\(engine.targetCode)"
-            let others = engine.recentPairs.filter { $0 != current }
-            if (homeRecent && !others.isEmpty) || (engine.sourceCode == "auto" && engine.detectedLang != "–") {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        if engine.sourceCode == "auto" && engine.detectedLang != "–" {
-                            Label("Detected \(shortName(engine.detectedLang))\(engine.lockedLang != nil ? " 🔒" : "")",
-                                  systemImage: "sparkle.magnifyingglass")
-                                .font(.caption2.weight(.semibold))
-                                .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(Theme.accent.start.opacity(0.25), in: Capsule())
-                        }
-                        if homeRecent {
-                            ForEach(others, id: \.self) { pair in
-                                let p = pair.split(separator: ">").map(String.init)
-                                Button { engine.applyPair(pair) } label: {
-                                    Text(p.count == 2 ? "\(shortName(p[0])) → \(shortName(p[1]))" : pair)
-                                        .font(.caption2.weight(.semibold))
-                                        .padding(.horizontal, 10).padding(.vertical, 6)
-                                        .background(Theme.card, in: Capsule())
-                                        .foregroundStyle(.white)
-                                }
-                            }
-                        }
-                    }
-                }
+            if engine.sourceCode == "auto", engine.detectedLang != "–" {
+                Label("Detected \(engine.detectedLang.uppercased())\(engine.lockedLang != nil ? " · locked" : "")", systemImage: "sparkle.magnifyingglass")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-        }
+        }.card()
     }
 
-    // MARK: Live preview
-    /// Doubles as a live preview AND keeps the PiP layer on screen (required for PiP to start).
-    private var hero: some View {
-        ZStack(alignment: .topLeading) {
+    private var liveCard: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                HStack(spacing: 7) {
+                    Circle().fill(stateColor).frame(width: 7, height: 7)
+                    Text(state).font(.subheadline.weight(.medium))
+                }
+                Spacer()
+                Button { destination = .reader } label: {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right").frame(width: 44, height: 44)
+                }.accessibilityLabel("Open focus reader")
+            }.padding(.leading, 18).padding(.trailing, 6)
             PiPPreview(layer: engine.pip.displayLayer)
                 .aspectRatio(previewRatio, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).stroke(Color.white.opacity(0.1)))
-            Text(state.text.uppercased())
-                .font(.system(size: 10, weight: .heavy))
-                .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(state.color.opacity(0.9), in: Capsule())
-                .foregroundStyle(.white)
-                .padding(10)
+                .overlay {
+                    if engine.translated.isEmpty && !engine.captureAlive {
+                        VStack(spacing: 10) {
+                            Image(systemName: "captions.bubble").font(.system(size: 32, weight: .light)).foregroundStyle(.mint)
+                            Text("A little window. A whole new language.")
+                                .font(.system(.headline, design: .rounded)).multilineTextAlignment(.center)
+                            Text("Your live translation will appear here.").font(.footnote).foregroundStyle(.secondary)
+                        }.padding(20).frame(maxWidth: .infinity, maxHeight: .infinity).background(Theme.surface)
+                    }
+                }
+            Divider().overlay(Color.white.opacity(0.06))
+            captureBar.padding(14)
         }
-        .overlay(alignment: .bottomTrailing) {
-            Button { showReader = true } label: {
-                Image(systemName: "arrow.up.left.and.arrow.down.right").padding(12).background(.ultraThinMaterial, in: Circle())
-            }.padding(10).accessibilityLabel("Open focus reader")
-        }
-        .accessibilityLabel("Live preview. Tap for the full-screen reader")
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 28))
+        .clipShape(RoundedRectangle(cornerRadius: 28))
+        .overlay(RoundedRectangle(cornerRadius: 28).strokeBorder(Color.white.opacity(0.1), lineWidth: 1))
     }
 
-    // MARK: Tools under the preview
-    private func tool(_ icon: String, _ title: String, _ action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
-                Image(systemName: icon).font(.system(size: 16, weight: .semibold))
-                Text(title).font(.caption.weight(.semibold))
+    private var captureBar: some View {
+        HStack(spacing: 14) {
+            BroadcastPicker(onTap: { if !engine.pipActive { engine.startPiP() } }).frame(width: 50, height: 50)
+                .background(Theme.gradient, in: Circle())
+                .accessibilityLabel(engine.captureAlive ? "Open screen broadcast controls" : "Start screen capture")
+            VStack(alignment: .leading, spacing: 3) {
+                Text(engine.captureAlive ? "Screen capture connected" : "Start live translation").font(.subheadline.bold())
+                Text(engine.captureAlive ? "Switch to your video or app" : "Tap the broadcast button to begin").font(.caption).foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 10)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .foregroundStyle(.white)
-        }
-    }
-
-    private var tools: some View {
-        HStack(spacing: 8) {
-            tool("doc.on.doc", "Copy") {
-                UIPasteboard.general.string = engine.translated
+            Spacer(minLength: 0)
+            Button {
+                if engine.captureAlive { engine.paused.toggle() }
+                else if engine.pipActive { engine.pip.stop() }
+                else { engine.startPiP() }
                 engine.tap()
-                engine.toast(engine.translated.isEmpty ? "Nothing to copy yet" : "Copied")
-            }
-            tool("arrow.clockwise", "Retry") {
-                engine.retranslate()
-                engine.tap()
-                engine.toast("Retranslating…")
-            }
-            tool(engine.frozen ? "play.fill" : "pause.fill", engine.frozen ? "Resume" : "Freeze") {
-                engine.toggleFrozenOutput()
-                engine.tap()
-                engine.toast(engine.frozen ? "Floating window frozen" : "Live again")
-            }
-            tool("square.and.arrow.up", "Image") {
-                Sharer.shareImage(engine.snapshotImage())
-            }
-            tool("text.magnifyingglass", "Read") { showReader = true }
+            } label: {
+                Image(systemName: engine.captureAlive ? (engine.paused ? "play.fill" : "pause.fill") : "pip.enter")
+                    .frame(width: 44, height: 44).background(Theme.cardStrong, in: Circle())
+            }.accessibilityLabel(engine.captureAlive ? (engine.paused ? "Resume translation" : "Pause translation") : "Open or close floating window")
         }
     }
 
-    // MARK: Start
-    private var startSection: some View {
-        VStack(spacing: 10) {
+    private var outputTools: some View {
+        HStack(spacing: 10) {
+            action("doc.on.doc", "Copy", enabled: !engine.translated.isEmpty) {
+                UIPasteboard.general.string = engine.translated; engine.toast("Translation copied")
+            }
+            action(engine.frozen ? "play.fill" : "pause.rectangle", engine.frozen ? "Unfreeze" : "Freeze", enabled: !engine.translated.isEmpty) { engine.toggleFrozenOutput() }
+            action("arrow.clockwise", "Retry", enabled: !engine.original.isEmpty) { engine.retranslate() }
+            action("square.and.arrow.up", "Share", enabled: !engine.translated.isEmpty) { Sharer.shareImage(engine.snapshotImage()) }
+        }
+    }
+    private func action(_ symbol: String, _ title: String, enabled: Bool, perform: @escaping () -> Void) -> some View {
+        Button { engine.tap(); perform() } label: {
+            VStack(spacing: 7) {
+                Image(systemName: symbol).font(.body.weight(.medium))
+                Text(title).font(.caption.weight(.medium))
+            }.frame(maxWidth: .infinity, minHeight: 68).background(Theme.card, in: RoundedRectangle(cornerRadius: 18))
+        }.buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.4)
+    }
+
+    private var readiness: some View {
+        Button { selectTab(packReady ? 0 : 1) } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: packReady ? "info.circle" : "arrow.down.circle.fill").foregroundStyle(.mint)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(packReady ? "Ready for your next video" : "One download. Then offline.").font(.subheadline.bold())
+                    Text(packReady ? "Tap Broadcast, choose ScreenLingo Capture, then Start Broadcast. Open your video when the floating window is ready." : "Download your language pair in Languages. Translation stays on your phone.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            }.card()
+        }.buttonStyle(.plain)
+    }
+
+    private var toolsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Beyond live capture").font(.system(.title3, design: .rounded, weight: .bold))
             HStack(spacing: 12) {
-                Button {
-                    if engine.pipActive { engine.pip.stop() } else { engine.startPiP() }
-                    engine.tap()
-                } label: {
-                    VStack(spacing: 6) {
-                        Image(systemName: engine.pipActive ? "rectangle.badge.minus" : "rectangle.on.rectangle").font(.title2)
-                        Text(engine.pipActive ? "Close window" : "Floating window").font(.footnote.weight(.semibold))
-                    }
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity, minHeight: 96)
-                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                }
-                VStack(spacing: 2) {
-                    BroadcastPicker(onTap: { engine.startPiP() }).frame(width: 60, height: 60)
-                    Text(engine.captureAlive ? "Capture running" : "Start capture")
-                        .font(.footnote.weight(.semibold)).foregroundStyle(.white)
-                }
-                .frame(maxWidth: .infinity, minHeight: 96)
-                .background(Theme.gradient, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            }
-            if !engine.captureAlive {
-                Text("Tap the broadcast icon, choose ScreenLingo Capture, then Start Broadcast. The floating window opens with it.")
-                    .font(.caption2).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                HomeToolTile(symbol: "text.viewfinder", title: "Text & photos", subtitle: "Paste · import · translate", tint: .mint) { destination = .workspace }
+                HomeToolTile(symbol: "viewfinder", title: "Capture area", subtitle: "Choose where to read", tint: .purple) { destination = .area }
             }
         }
     }
 
-    // MARK: Setup checklist (until everything runs)
-    private var packReady: Bool {
-        engine.sourceCode == "auto"
-            ? engine.langStatus.values.contains(.installed)
-            : engine.langStatus[engine.sourceCode] == .installed
-    }
-
-    private func checkRow(_ title: String, ok: Bool, action: (() -> Void)? = nil) -> some View {
-        Button { action?() } label: {
-            HStack(spacing: 8) {
-                Image(systemName: ok ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(ok ? Color.green : Color.secondary)
-                Text(title).font(.footnote).foregroundStyle(.white)
-                Spacer()
-                if !ok && action != nil { Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary) }
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
-    @ViewBuilder private var checklist: some View {
-        if !(packReady && engine.pipActive && engine.captureAlive) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Setup").font(.caption.bold()).foregroundStyle(.secondary)
-                checkRow("Language pack downloaded", ok: packReady) { selectTab(1) }
-                checkRow("Floating window open", ok: engine.pipActive) { engine.startPiP() }
-                checkRow("Screen capture running", ok: engine.captureAlive)
-            }
-            .card()
-        }
-    }
-
-    // MARK: Quick settings
-    private func tile<P: View>(_ icon: String, _ tint: Color, _ title: String, _ value: String,
-                               @ViewBuilder picker: () -> P) -> some View {
-        Menu {
-            picker()
+    private var quickControls: some View {
+        DisclosureGroup(isExpanded: $showQuick) {
+            VStack(spacing: 14) {
+                Picker("Content", selection: $mode) { ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) } }
+                Picker("OCR area", selection: $area) { ForEach(OCRArea.allCases) { Text($0.title).tag($0.rawValue) } }
+                Picker("Reading profile", selection: $speed) { ForEach(SpeedPreset.allCases) { Text($0.title).tag($0.rawValue) } }
+                Picker("Window", selection: $winSize) { ForEach(WindowSize.allCases) { Text($0.title).tag($0.rawValue) } }
+                Toggle("Show original text", isOn: $showOriginal)
+                Toggle("Clear when text ends", isOn: $autoClear)
+            }.font(.subheadline).padding(.top, 14)
         } label: {
-            HStack(spacing: 10) {
-                Image(systemName: icon)
-                    .foregroundStyle(tint)
-                    .frame(width: 30, height: 30)
-                    .background(tint.opacity(0.18), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(title).font(.caption2).foregroundStyle(.secondary)
-                    Text(value).font(.footnote.weight(.semibold)).foregroundStyle(.white).lineLimit(1)
-                }
-                Spacer(minLength: 0)
+            HStack {
+                Label("Quick settings", systemImage: "slider.horizontal.3").font(.subheadline.weight(.semibold))
+                Spacer()
+                Text(SpeedPreset(rawValue: speed)?.title ?? "Balanced").font(.caption).foregroundStyle(.secondary)
             }
-            .padding(10)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        }
+        }.card()
     }
 
-    private func chipToggle(_ icon: String, _ title: String, _ isOn: Binding<Bool>) -> some View {
-        Button { isOn.wrappedValue.toggle(); engine.tap() } label: {
-            Label(title, systemImage: icon)
-                .font(.caption.weight(.semibold))
-                .padding(.horizontal, 12).padding(.vertical, 8)
-                .foregroundStyle(isOn.wrappedValue ? Color.white : Color.secondary)
-                .background(isOn.wrappedValue ? Theme.accent.start.opacity(0.85) : Theme.card, in: Capsule())
-        }
-    }
-
-    private var quickSection: some View {
-        VStack(spacing: 10) {
-            HStack(spacing: 10) {
-                tile("film", .blue, "Mode", TranslateMode(rawValue: mode)?.title ?? mode) {
-                    Picker("Mode", selection: $mode) {
-                        ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) }
-                    }
-                }
-                tile("viewfinder", .purple, "Reads", OCRArea(rawValue: area)?.title ?? area) {
-                    Picker("Area", selection: $area) {
-                        ForEach(OCRArea.allCases) { Text($0.title).tag($0.rawValue) }
-                    }
-                }
-            }
-            HStack(spacing: 10) {
-                tile("speedometer", .green, "Speed", SpeedPreset(rawValue: speed)?.title ?? speed) {
-                    Picker("Speed", selection: $speed) {
-                        ForEach(SpeedPreset.allCases) { Text($0.title).tag($0.rawValue) }
-                    }
-                }
-                tile("rectangle.expand.vertical", .orange, "Window", WindowSize(rawValue: winSize)?.title ?? winSize) {
-                    Picker("Window", selection: $winSize) {
-                        ForEach(WindowSize.allCases) { Text($0.title).tag($0.rawValue) }
-                    }
-                }
-            }
+    private var recentPairs: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("RECENT LANGUAGES").font(.caption2.bold()).tracking(1.4).foregroundStyle(.secondary)
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
-                    chipToggle("text.quote", "Original", $showOriginal)
-                    chipToggle("eraser", "Auto-clear", $autoClear)
-                    chipToggle("speaker.wave.2", "Speak", $speak)
-                    chipToggle("doc.on.clipboard", "Auto-copy", $autoCopy)
+                    ForEach(engine.recentPairs, id: \.self) { pair in
+                        Button { engine.applyPair(pair) } label: {
+                            Text(pair.replacingOccurrences(of: ">", with: " → ").uppercased())
+                                .font(.caption.weight(.medium)).padding(.horizontal, 14).padding(.vertical, 12)
+                                .background(Theme.card, in: Capsule())
+                        }.buttonStyle(.plain)
+                    }
                 }
             }
         }
     }
 
-    // MARK: Status
-    private var statusSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Circle().fill(engine.captureAlive ? Color.green : Color.red).frame(width: 9, height: 9)
-                Text(engine.captureAlive ? "Capture connected" : "Capture not connected")
-                    .font(.subheadline.weight(.semibold))
-                Spacer()
-                Button("Details") { selectTab(3) }.font(.caption.weight(.bold))
-            }
-            if engine.captureAlive {
-                Text("\(engine.frames) frames · \(engine.ocrCount) updates · read \(Int(engine.ocrMs)) ms · translate \(Int(engine.translateMs)) ms")
-                    .font(.caption2).foregroundStyle(.secondary)
-            }
-            Text(engine.status).font(.footnote).foregroundStyle(.secondary)
-            if !engine.lastRaw.isEmpty {
-                Text("OCR sees: \(engine.lastRaw)").font(.caption).foregroundStyle(.secondary).lineLimit(3)
-            }
-            if engine.extensionVersion != "–" && engine.extensionVersion != AppVersion.version {
-                Text("⚠️ Capture extension is v\(engine.extensionVersion), app is v\(AppVersion.version). Reinstall the IPA.")
-                    .font(.footnote).foregroundStyle(.orange)
-            }
-            Divider().overlay(Color.white.opacity(0.08))
-            HStack {
-                Toggle("Pause translating", isOn: $engine.paused).font(.footnote)
-                Button { engine.runTest(); engine.toast("Testing translation…") } label: {
-                    Label("Test", systemImage: "checkmark.seal").font(.footnote.weight(.semibold))
+    private var details: some View {
+        DisclosureGroup(isExpanded: $showDetails) {
+            VStack(alignment: .leading, spacing: 12) {
+                Text(engine.status).font(.footnote).textSelection(.enabled)
+                if !engine.lastRaw.isEmpty { Text("OCR · \(engine.lastRaw)").font(.caption).foregroundStyle(.secondary) }
+                Button("Open activity & diagnostics") { selectTab(3) }.font(.subheadline)
+                Button("Test language pair") { engine.runTest() }.font(.subheadline)
+            }.padding(.top, 12)
+        } label: { Label("Status & troubleshooting", systemImage: "waveform.path.ecg").font(.subheadline.weight(.medium)) }.card()
+    }
+}
+
+private enum HomeDestination: String, Identifiable {
+    case workspace, reader, area, session
+    var id: String { rawValue }
+}
+
+private struct HomeToolTile: View {
+    let symbol: String
+    let title: String
+    let subtitle: String
+    let tint: Color
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 14) {
+                Image(systemName: symbol).font(.title2).foregroundStyle(tint)
+                    .frame(width: 44, height: 44).background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title).font(.subheadline.bold())
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            }
-        }
-        .card()
+            }.frame(maxWidth: .infinity, alignment: .leading).padding(17)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: 22))
+        }.buttonStyle(.plain)
     }
 }

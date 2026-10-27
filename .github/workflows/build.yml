@@ -1,7 +1,7 @@
 name: Build ScreenLingo IPA
 on:
   push:
-    branches: [codex/screenlingo-v0.7.0, codex/screenlingo-v0.8.0]
+    branches: [codex/screenlingo-v0.7.0, codex/screenlingo-v0.8.0, codex/screenlingo-v0.9.0]
   workflow_dispatch:
 concurrency:
   group: screenlingo-ipa-${{ github.ref }}
@@ -19,7 +19,7 @@ jobs:
           xcode-version: latest-stable
       - name: Check pipeline regressions
         run: |
-          swiftc Shared/Shared.swift Shared/PipelineSafety.swift Shared/OCRGrouping.swift Shared/ExportFormat.swift Tests/main.swift -o /tmp/pipeline-tests
+          swiftc Shared/Shared.swift Shared/PipelineSafety.swift Shared/OCRGrouping.swift Shared/ExportFormat.swift Shared/LatencyTools.swift Tests/main.swift -o /tmp/pipeline-tests
           /tmp/pipeline-tests
       - name: Generate app icon
         run: |
@@ -62,5 +62,13 @@ jobs:
         with:
           name: ScreenLingo-ipa
           path: ScreenLingo.ipa
+          if-no-files-found: error
+          retention-days: 90
+      - name: Preview interface on iPhone simulator
+        run: bash scripts/preview_interface.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ScreenLingo-interface-preview
+          path: interface-preview
           if-no-files-found: error
           retention-days: 90
