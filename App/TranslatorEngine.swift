@@ -910,20 +910,20 @@ final class TranslatorEngine: ObservableObject {
     }
 
     // MARK: Translation
-    private func detectSource(_ text: String, record: Bool = true) -> Locale.Language? {
-        if sourceCode != "auto" { return Locale.Language(identifier: sourceCode) }
+    private func detectSource(_ text: String, record: Bool = true) -> (language: Locale.Language, origin: SourceLanguageOrigin)? {
+        if sourceCode != "auto" { return (Locale.Language(identifier: sourceCode), .selected) }
         let evidence = languageEvidence(text, limit: 5)
         let hyp = evidence.1
         let useLock = flag("langLock", true)
         if useLock, let locked = lockedLang {
             let p = hyp[NLLanguage(rawValue: locked)] ?? 0
-            if p > 0.1 || text.count < 12 { mismatchStreak = 0; return Locale.Language(identifier: locked) }
+            if p > 0.1 || text.count < 12 { mismatchStreak = 0; return (Locale.Language(identifier: locked), .locked) }
             mismatchStreak += 1
             if mismatchStreak >= 3 {
                 lockedLang = nil; detectLog = []; mismatchStreak = 0
                 diag.log("Language lock released")
             } else {
-                return Locale.Language(identifier: locked)
+                return (Locale.Language(identifier: locked), .locked)
             }
         }
         // Prefer a language whose pack is installed when the detector is torn between candidates
@@ -936,9 +936,6 @@ final class TranslatorEngine: ObservableObject {
         }
         guard let d = dom else { return nil }
         let code = Locale.Language(identifier: d.rawValue).minimalIdentifier
-        diag.s.detected = code
-        detectedLang = code
-        if record { diag.noteLanguage(code) }
         if useLock && record {
             detectLog.append(code)
             if detectLog.count > 6 { detectLog.removeFirst() }
@@ -948,7 +945,7 @@ final class TranslatorEngine: ObservableObject {
                 diag.log("Language locked to \(top.key)")
             }
         }
-        return Locale.Language(identifier: d.rawValue)
+        return (Locale.Language(identifier: d.rawValue), .detected)
     }
 
     private func pairStatus(_ src: Locale.Language, _ target: Locale.Language) async -> LanguageAvailability.Status {
@@ -1017,11 +1014,16 @@ final class TranslatorEngine: ObservableObject {
         for (bi, raw) in blocks.enumerated() {
             var text = cleanOn ? TextIntel.cleanOCR(raw) : raw
             for (from, to) in fixes { text = text.replacingOccurrences(of: from, with: to, options: [.caseInsensitive]) }
-            guard let src = detectSource(text, record: display), src.languageCode != target.languageCode else {
+            guard let choice = detectSource(text, record: display), choice.language.languageCode != target.languageCode else {
                 units.append([TUnit(label: nil, sentences: [text], out: [text], tokens: [])])
                 continue
             }
+            let src = choice.language
             let id = src.minimalIdentifier
+            if display {
+                diag.recordSourceLanguage(id, origin: choice.origin)
+                if choice.origin != .selected, detectedLang != id { detectedLang = id }
+            }
             srcLangs[id] = src
             if slangOn { text = TextIntel.expandSlang(text, lang: src.languageCode?.identifier ?? id) }
             let parts = speakerOn ? TextIntel.splitDialogue(text) : [(label: String?.none, text: text)]

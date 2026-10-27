@@ -144,25 +144,10 @@ struct FeedbackStorageSettings: View {
                 Picker("Translation memory limit", selection: $memory) { Text("1000 sentences").tag(1000); Text("3000 sentences").tag(3000); Text("6000 sentences").tag(6000) }
                 Picker("Diagnostic samples per series", selection: $samples) { Text("300").tag(300); Text("600").tag(600); Text("1200").tag(1200) }
             } header: { Text("Storage budgets") } footer: {
-                Text("Higher limits use more memory in the main app. They do not increase the capture extension's allowance. Lowering a limit trims older entries when you leave this page; export your library first if needed.")
-            }
-            Section {
-                MemoryAllowanceExplanation()
+                Text("Higher limits use more memory in the main app. Lowering a limit trims older entries when you leave this page; export your library first if needed.")
             }
             Section { Button("Reset feedback & budgets", role: .destructive) { engine.resetKeys(["hapticStrength", "autoCopyFormat", "interruptSpeech", "historyCapacity", "memoryCapacity", "diagSamples"]) } }
         }.navigationTitle("Feedback & storage").navigationBarTitleDisplayMode(.inline)
             .onDisappear { engine.applyStorageSettings() }
-    }
-}
-
-struct MemoryAllowanceExplanation: View {
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Label("What extension memory means", systemImage: "memorychip").font(.headline)
-            Text("This is the extension's remaining per-process memory allowance, not total free phone RAM. iOS sets that allowance and can change it. It is not a score and does not need to reach 100 MB. Stable headroom is expected when OCR buffers are reused and temporary images are released.")
-                .font(.footnote).foregroundStyle(.secondary)
-            Link("Apple: available process memory", destination: URL(string: "https://developer.apple.com/documentation/os/os_proc_available_memory")!)
-                .font(.footnote)
-        }
     }
 }

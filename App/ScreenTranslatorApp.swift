@@ -41,8 +41,12 @@ struct RootView: View {
         }
         .translationTask(engine.legacyConfig) { session in await engine.runLegacy(session) }
         .translationTask(engine.downloadConfig) { session in await engine.runDownload(session) }
-        .task { await engine.loadLanguages() }
+        .task {
+            engine.diag.noteExecutionPhase(phase == .active ? "active" : (phase == .background ? "background" : "inactive"), pipActive: engine.pipActive)
+            await engine.loadLanguages()
+        }
         .onChange(of: phase) { _, p in
+            engine.diag.noteExecutionPhase(p == .active ? "active" : (p == .background ? "background" : "inactive"), pipActive: engine.pipActive)
             if p == .active { engine.server.start() }
             if p == .background { engine.saveMemory(force: true) }
         }

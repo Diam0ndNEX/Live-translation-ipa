@@ -146,6 +146,8 @@ struct Stats {
     var sentences = 0, cacheHits = 0, specHits = 0, cacheMisses = 0, batches = 0, failures = 0, translations = 0, chars = 0
     var sessionKind = "–"
     var detected = "–"
+    var sourceUsed = "–"
+    var sourceOrigin = "–"
     var lockedLang = "–"
     var orderVote = 0.0
     var rotation = 0
@@ -173,7 +175,10 @@ final class Diagnostics: ObservableObject {
     @Published var cacheRate: [Sample] = []
     @Published var events: [TimelineEvent] = []
     @Published var spans: [StateSpan] = []
-    @Published var langCounts: [String: Int] = [:]
+    @Published var sourceUsage = SourceLanguageUsage()
+    @Published private(set) var executionPhase = "starting"
+    private var lastPacketAt: Date?
+    private var lastDeviceSampleAt: Date?
     @Published var names: [String] = []
     let started = Date()
     private var lastFrames = 0
@@ -212,7 +217,18 @@ final class Diagnostics: ObservableObject {
         if names.count > 60 { names.removeLast() }
     }
 
-    func noteLanguage(_ code: String) { langCounts[code, default: 0] += 1 }
+    func recordSourceLanguage(_ code: String, origin: SourceLanguageOrigin) {
+        sourceUsage.record(code, origin: origin)
+        s.sourceUsed = code
+        s.sourceOrigin = origin.title
+        if origin != .selected { s.detected = code }
+    }
+
+    func noteExecutionPhase(_ phase: String, pipActive: Bool) {
+        guard executionPhase != phase else { return }
+        executionPhase = phase
+        event(.state, "App entered \(phase) (PiP \(pipActive ? "active" : "inactive"))")
+    }
 
     func recordTranslate(ms: Double, sentences: Int, from: String, to: String, preview: String) {
         add(\.translate, ms)
@@ -233,12 +249,13 @@ final class Diagnostics: ObservableObject {
         pipeline = []
         ocr = []; translate = []; latency = []; transport = []; fps = []; lineCounts = []
         extMem = []; appMem = []; thermal = []; battery = []; cacheRate = []
-        events = []; spans = []; langCounts = [:]; names = []
+        events = []; spans = []; sourceUsage = SourceLanguageUsage(); names = []
         lastState = nil
     }
 
     // MARK: Packets from the extension
     func onPacket(_ p: Packet, transport t: Double?) {
+        lastPacketAt = Date()
         s.packets += 1
         if p.kind == "ocr" {
             s.ocrPackets += 1
@@ -282,6 +299,7 @@ final class Diagnostics: ObservableObject {
     }
 
     private func sampleDevice(alive: Bool) {
+        lastDeviceSampleAt = Date()
         let level: Double
         switch ProcessInfo.processInfo.thermalState {
         case .nominal: level = 0
@@ -404,6 +422,12 @@ final class Diagnostics: ObservableObject {
             let v = sample.stages
             rows.append("\(sample.date.timeIntervalSince1970),\(v.confirmation),\(v.recognition),\(v.delivery),\(v.queue),\(v.translation),\(v.displayHold),\(v.rendering),\(v.total)")
         }
+        rows.append("")
+        rows.append("source_language,confirmed_blocks")
+        for (code, count) in sourceUsage.counts.sorted(by: { $0.key < $1.key }) { rows.append("\(code),\(count)") }
+        rows.append("")
+        rows.append("source_choice_mode,confirmed_blocks")
+        for mode in SourceLanguageOrigin.allCases { rows.append("\(mode.rawValue),\(sourceUsage.origins[mode, default: 0])") }
         return rows.joined(separator: "\n")
     }
 
@@ -426,7 +450,11 @@ final class Diagnostics: ObservableObject {
         l.append("Lines \(s.linesIn): area \(s.dropArea), small \(s.dropSmall), ignore \(s.dropIgnore), own window \(s.dropSelf), target language \(s.dropTarget); blocks \(s.blocksIn) → \(s.blocksKept), noise \(s.dropNoise), other language \(s.dropLanguage)")
         l.append("Order confidence \(String(format: "%.1f", s.orderVote)), calibrated \(s.calibrated), rotation tries \(s.rotationTries)")
         l.append("Translations \(s.translations), sentences \(s.sentences), cache \(s.cacheHits)/\(s.cacheHits + s.specHits + s.cacheMisses) (pre-translated \(s.specHits)), failures \(s.failures), engine \(s.sessionKind)")
-        l.append("Language \(s.detected), locked \(s.lockedLang).")
+        l.append("Configured source \(engine.sourceCode), last source used \(s.sourceUsed) (\(s.sourceOrigin)), automatic detector \(engine.sourceCode == "auto" ? "enabled" : "off – source selected"), locked \(s.lockedLang).")
+        l.append("Source language inputs: " + sourceUsage.counts.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ", "))
+        l.append("Source choice modes: " + SourceLanguageOrigin.allCases.map { "\($0.title)=\(sourceUsage.origins[$0, default: 0])" }.joined(separator: ", "))
+        l.append("Execution phase \(executionPhase), PiP \(engine.pipActive ? "active" : "inactive"); last packet \(lastPacketAt?.ISO8601Format() ?? "none"), last device sample \(lastDeviceSampleAt?.ISO8601Format() ?? "none").")
+        l.append("Settings: mode=\(UserDefaults.standard.string(forKey: "mode") ?? "movie"), area=\(UserDefaults.standard.string(forKey: "area") ?? "smart"), speed=\(UserDefaults.standard.string(forKey: "speed") ?? "balanced"), configured rotation=\(UserDefaults.standard.string(forKey: "frameRot") ?? "auto"), confirmation reads=\((UserDefaults.standard.object(forKey: "stability") as? Int) ?? 2)")
         if UserDefaults.standard.bool(forKey: "diagIncludeText"), !UserDefaults.standard.bool(forKey: "privateSession") {
             l.append("Speakers: \(names.joined(separator: ", "))")
         }
@@ -435,7 +463,6 @@ final class Diagnostics: ObservableObject {
             l.append("Latest paired timing (ms): confirmation \(Int(latest.confirmation)), OCR \(Int(latest.recognition)), delivery/filtering \(Int(latest.delivery)), queue \(Int(latest.queue)), processing \(Int(latest.translation)), readability hold \(Int(latest.displayHold)), frame preparation \(Int(latest.rendering)), total \(Int(latest.total))")
             l.append("Total measures first OCR sighting to frame enqueue; it does not measure physical screen presentation. Confirmation and translation-ahead can overlap.")
         }
-        l.append("Memory values are remaining per-process allowance, not total free phone RAM.")
         l.append("Recent events:")
         for e in events.suffix(60).reversed() {
             l.append("\(e.time.formatted(date: .omitted, time: .standard)) [\(e.kind.title)] \(e.text)")
@@ -1321,7 +1348,7 @@ private struct DiagnosticsBody: View {
     // MARK: Language
     private var languagePage: some View {
         let s = diag.s
-        let counts = diag.langCounts.sorted { $0.value > $1.value }.prefix(8).map { BarRow(name: $0.key.uppercased(), value: $0.value) }
+        let counts = diag.sourceUsage.counts.sorted { $0.value > $1.value }.prefix(8).map { BarRow(name: $0.key.uppercased(), value: $0.value) }
         let pair: String = engine.sourceCode == "auto" ? "Auto"
             : (engine.langStatus[engine.sourceCode] == .installed ? "Ready" : "Needs pack")
         let cache = [
@@ -1331,12 +1358,21 @@ private struct DiagnosticsBody: View {
         ]
         return VStack(spacing: 14) {
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
-                StatTile(title: "Detected", value: s.detected == "–" ? "–" : s.detected.uppercased(), icon: "sparkle.magnifyingglass")
+                StatTile(title: "Source used", value: s.sourceUsed == "–" ? "–" : s.sourceUsed.uppercased(), icon: "sparkle.magnifyingglass")
                 StatTile(title: "Locked to", value: s.lockedLang == "–" ? "none" : s.lockedLang.uppercased(), tint: Color.purple, icon: "lock")
                 StatTile(title: "Language pack", value: pair, tint: pair == "Needs pack" ? Color.orange : Color.green, icon: "arrow.down.circle")
                 StatTile(title: "Engine", value: s.sessionKind == "–" ? "–" : (s.sessionKind.contains("iOS 26") ? "Direct" : "Hosted"), icon: "cpu")
             }
-            BarListCard(title: "Languages detected", rows: Array(counts), color: Color.purple)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(engine.sourceCode == "auto" ? "Source: Automatic" : "Source: \(engine.sourceCode.uppercased()) selected")
+                    .font(.subheadline.weight(.semibold))
+                Text(engine.sourceCode == "auto" ? "Detected and locked sources are counted when confirmed input is processed." : "Automatic detection is off. Selected-language inputs still count in the graph.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }.card()
+            BarListCard(title: "Source languages used · session", rows: Array(counts), color: Color.purple)
+            BarListCard(title: "How the source was chosen", rows: SourceLanguageOrigin.allCases.map {
+                BarRow(name: $0.title, value: diag.sourceUsage.origins[$0, default: 0])
+            }, color: Color.teal)
             DonutCard(title: "Where translations come from", parts: cache)
             LineCard(title: "Cache hit rate over time", samples: slice(diag.cacheRate), color: Color.green, unit: "%")
             VStack(alignment: .leading, spacing: 10) {
@@ -1420,7 +1456,6 @@ private struct DiagnosticsBody: View {
         let s = diag.s
         let b = UIDevice.current.batteryLevel
         return VStack(spacing: 14) {
-            MemoryAllowanceExplanation().card()
             LineCard(title: "Extension memory headroom", samples: slice(diag.extMem), color: Color.teal, unit: "MB", rule: 15)
             LineCard(title: "Main app memory headroom", samples: slice(diag.appMem), color: Color.indigo, unit: "MB")
             thermalCard
