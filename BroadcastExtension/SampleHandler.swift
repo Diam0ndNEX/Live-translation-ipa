@@ -44,7 +44,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
         let c = NWConnection(host: NWEndpoint.Host("127.0.0.1"),
                              port: NWEndpoint.Port(rawValue: Loopback.port)!, using: .udp)
-        c.start(queue: .global(qos: .utility))
+        c.start(queue: .global(qos: .userInitiated))
         conn = c
         listen()
         send(kind: "ping", lines: [])

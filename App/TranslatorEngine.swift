@@ -271,7 +271,7 @@ final class TranslatorEngine: ObservableObject {
     init() {
         sourceCode = UserDefaults.standard.string(forKey: "source") ?? "auto"
         targetCode = UserDefaults.standard.string(forKey: "target") ?? "en"
-        server.onPacket = { [weak self] p in Task { @MainActor in self?.handle(p) } }
+        server.onPacket = { [weak self] packet in self?.handle(packet) }
         server.start()
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
@@ -1529,8 +1529,8 @@ final class TranslatorEngine: ObservableObject {
 final class LoopbackServer {
     private var listener: NWListener?
     private var peer: NWConnection?
-    private let queue = DispatchQueue(label: "loopback.server")
-    var onPacket: ((Packet) -> Void)?
+    private let queue = DispatchQueue(label: "loopback.server", qos: .userInitiated)
+    var onPacket: (@MainActor (Packet) -> Void)?
 
     func start() {
         stop()
@@ -1564,7 +1564,8 @@ final class LoopbackServer {
     private func receive(on c: NWConnection) {
         c.receiveMessage { [weak self] data, _, _, error in
             if let data, let p = try? JSONDecoder().decode(Packet.self, from: data) {
-                DispatchQueue.main.async { self?.onPacket?(p) }
+                // One actor handoff, rather than dispatching to main and then creating another main-actor task.
+                Task(priority: .userInitiated) { @MainActor [weak self] in self?.onPacket?(p) }
             }
             if error == nil { self?.receive(on: c) }
         }
