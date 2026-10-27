@@ -113,7 +113,7 @@ struct PipelineSimulatorView: View {
             }
             Section("PiP result preview") {
                 if result.displayAccepted {
-                    VStack(alignment:alignment,spacing:10) {
+                    VStack(alignment:horizontalAlignment,spacing:10) {
                         if PipelineSimulation.bool(options,"showOriginal") { Text(input.text).font(.caption).foregroundStyle(.secondary) }
                         Text(result.output).font(.headline).multilineTextAlignment(textAlignment)
                     }
@@ -124,6 +124,9 @@ struct PipelineSimulatorView: View {
                 } else { Text("No replacement caption: follow the stopped or rejected stage above.").font(.footnote) }
             }
         }
+    }
+    private var horizontalAlignment: HorizontalAlignment {
+        switch options["pipAlignment"] { case "center": return .center; case "right":return .trailing; default:return .leading }
     }
     private var alignment: Alignment {
         switch options["pipAlignment"] { case "center": return .center; case "right":return .trailing; default:return .leading }
