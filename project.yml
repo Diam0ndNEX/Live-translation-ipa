@@ -6,8 +6,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.0"
-    MARKETING_VERSION: "1.2.1"
-    CURRENT_PROJECT_VERSION: "42"
+    MARKETING_VERSION: "1.3.0"
+    CURRENT_PROJECT_VERSION: "43"
 targets:
   ScreenLingo:
     type: application
@@ -28,8 +28,8 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.diam0ndnex.screenlingo
         PRODUCT_NAME: ScreenLingo
-        MARKETING_VERSION: "1.2.1"
-        CURRENT_PROJECT_VERSION: "42"
+        MARKETING_VERSION: "1.3.0"
+        CURRENT_PROJECT_VERSION: "43"
         INFOPLIST_KEY_CFBundleShortVersionString: "$(MARKETING_VERSION)"
         INFOPLIST_KEY_CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -51,7 +51,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.diam0ndnex.screenlingo.broadcast
         PRODUCT_NAME: ScreenLingoCapture
-        MARKETING_VERSION: "1.2.1"
-        CURRENT_PROJECT_VERSION: "42"
+        MARKETING_VERSION: "1.3.0"
+        CURRENT_PROJECT_VERSION: "43"
         INFOPLIST_KEY_CFBundleShortVersionString: "$(MARKETING_VERSION)"
         INFOPLIST_KEY_CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"

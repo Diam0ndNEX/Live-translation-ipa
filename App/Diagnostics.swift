@@ -153,6 +153,13 @@ struct Stats {
     var rotation = 0
     var calibrated = false
     var pipRegion = "–"
+    var savedHits = 0
+    var specModelRequests = 0
+    var specStarted = 0, specCompleted = 0, specDiscarded = 0, specSkipped = 0
+    var specProcessingMs = 0.0, specDiscardedMs = 0.0
+    var languageConfidence = 0.0, ocrConfidence = 0.0
+    var recognitionReason = "–", confirmationReason = "–"
+    var unchangedSkipped = 0, cadenceSkipped = 0, pausedSkipped = 0, emptyReads = 0, retryCount = 0
     var captureDrops = 0
     var rotationTries = 0
 }
@@ -175,6 +182,27 @@ final class Diagnostics: ObservableObject {
     @Published var cacheRate: [Sample] = []
     @Published var events: [TimelineEvent] = []
     @Published var spans: [StateSpan] = []
+    @Published private(set) var subtitleTraces: [SubtitleTrace] = []
+    private(set) var recorderCosts = RecorderCosts()
+    private var recorderDepth = 0
+    private struct CostToken { let start: Double; let outer: Bool; let detailed: Bool }
+    private func beginRecorder() -> CostToken? {
+        guard enabled else { return nil }
+        recorderDepth += 1
+        return CostToken(start: ProcessInfo.processInfo.systemUptime, outer: recorderDepth == 1, detailed: detailedCollection)
+    }
+    private func endRecorder(_ token: CostToken?) {
+        guard let token else { return }
+        recorderDepth -= 1
+        if token.outer { recorderCosts.record(ms: (ProcessInfo.processInfo.systemUptime-token.start)*1000, detailed: token.detailed) }
+    }
+    func trace(_ candidate: String?, stage: String, detail: String, at time: Date = Date()) {
+        let recorderToken = beginRecorder(); defer { endRecorder(recorderToken) }
+        guard detailedCollection, let candidate else { return }
+        subtitleTraces.append(SubtitleTrace(candidate: candidate, stage: stage, time: time, detail: detail))
+        if subtitleTraces.count > 300 { subtitleTraces.removeFirst(subtitleTraces.count - 300) }
+    }
+
     @Published var sourceUsage = SourceLanguageUsage()
     @Published private(set) var executionPhase = "starting"
     private var lastPacketAt: Date?
@@ -193,7 +221,9 @@ final class Diagnostics: ObservableObject {
 
     func collectionChanged() {
         // A new collection interval must never be mistaken for continuous history.
+        let costs = recorderCosts
         reset()
+        recorderCosts = costs
         UIDevice.current.isBatteryMonitoringEnabled = detailedCollection
     }
 
@@ -216,6 +246,7 @@ final class Diagnostics: ObservableObject {
 
     // MARK: Events
     func event(_ kind: EventKind, _ text: String, detail: String? = nil) {
+        let recorderToken = beginRecorder(); defer { endRecorder(recorderToken) }
         guard detailedCollection else { return }
         events.append(TimelineEvent(time: Date(), kind: kind, text: text, detail: detail))
         let limit = max(300, min(1200, (UserDefaults.standard.object(forKey: "diagSamples") as? Int) ?? 600))
@@ -238,11 +269,12 @@ final class Diagnostics: ObservableObject {
     }
 
     func recordSourceLanguage(_ code: String, origin: SourceLanguageOrigin) {
+        let recorderToken = beginRecorder(); defer { endRecorder(recorderToken) }
         guard enabled else { return }
         sourceUsage.record(code, origin: origin)
         s.sourceUsed = code
         s.sourceOrigin = origin.title
-        if origin != .selected { s.detected = code }
+        if origin != .selected { s.detected = code } else { s.languageConfidence = 0 }
     }
 
     func noteExecutionPhase(_ phase: String, pipActive: Bool) {
@@ -252,6 +284,7 @@ final class Diagnostics: ObservableObject {
     }
 
     func recordTranslate(ms: Double, sentences: Int, from: String, to: String, preview: String) {
+        let recorderToken = beginRecorder(); defer { endRecorder(recorderToken) }
         guard detailedCollection else { return }
         add(\.translate, ms)
         event(.translation, "Translated \(sentences) sentence\(sentences == 1 ? "" : "s") \(from) → \(to) in \(Int(ms)) ms",
@@ -261,6 +294,7 @@ final class Diagnostics: ObservableObject {
     func recordLatency(ms: Double) { add(\.latency, ms) }
 
     func recordPipeline(_ stages: LatencyBreakdown) {
+        let recorderToken = beginRecorder(); defer { endRecorder(recorderToken) }
         guard detailedCollection else { return }
         pipeline.append(PipelineMeasurement(date: Date(), stages: stages))
         let limit = max(300, min(1200, (UserDefaults.standard.object(forKey: "diagSamples") as? Int) ?? 600))
@@ -269,6 +303,7 @@ final class Diagnostics: ObservableObject {
 
     func reset() {
         started = Date()
+        subtitleTraces = []; recorderCosts = RecorderCosts()
         lastFrames = 0; lastFrameTime = Date(); tickN = 0
         lastPacketAt = nil; lastDeviceSampleAt = nil
         s = Stats()
@@ -281,8 +316,17 @@ final class Diagnostics: ObservableObject {
 
     // MARK: Packets from the extension
     func onPacket(_ p: Packet, transport t: Double?) {
+        let recorderToken = beginRecorder(); defer { endRecorder(recorderToken) }
         guard enabled else { return }
         lastPacketAt = Date()
+        s.recognitionReason = p.recognitionReason ?? "legacy"
+        s.confirmationReason = p.confirmationReason ?? "legacy"
+        if !p.lines.isEmpty { s.ocrConfidence = p.lines.map { $0.confidence ?? 0 }.min() ?? 0 }
+        s.unchangedSkipped = p.unchangedSkipped ?? s.unchangedSkipped
+        s.cadenceSkipped = p.cadenceSkipped ?? s.cadenceSkipped
+        s.pausedSkipped = p.pausedSkipped ?? s.pausedSkipped
+        s.emptyReads = p.emptyReads ?? s.emptyReads
+        s.retryCount = p.retryCount ?? s.retryCount
         s.packets += 1
         if p.kind == "ocr" {
             s.ocrPackets += 1
@@ -312,6 +356,7 @@ final class Diagnostics: ObservableObject {
 
     // MARK: Once a second
     func tick(alive: Bool, paused: Bool, frozen: Bool) {
+        let recorderToken = beginRecorder(); defer { endRecorder(recorderToken) }
         guard enabled else { return }
         tickN += 1
         let st: EngineState = !alive ? .idle : (paused ? .paused : (frozen ? .frozen : .live))
@@ -341,8 +386,8 @@ final class Diagnostics: ObservableObject {
         let b = Double(UIDevice.current.batteryLevel)
         if b >= 0 { add(\.battery, b * 100, cap: 900) }
         if alive, s.extFreeMB > 0 { add(\.extMem, s.extFreeMB, cap: 900) }
-        let total = s.cacheHits + s.specHits + s.cacheMisses
-        if total > 0 { add(\.cacheRate, Double(s.cacheHits + s.specHits) / Double(total) * 100, cap: 900) }
+        let total = s.cacheHits + s.savedHits + s.specHits + s.cacheMisses
+        if total > 0 { add(\.cacheRate, Double(s.cacheHits + s.savedHits + s.specHits) / Double(total) * 100, cap: 900) }
     }
 
     // MARK: Maths
@@ -456,6 +501,21 @@ final class Diagnostics: ObservableObject {
         rows.append("")
         rows.append("source_choice_mode,confirmed_blocks")
         for mode in SourceLanguageOrigin.allCases { rows.append("\(mode.rawValue),\(sourceUsage.origins[mode, default: 0])") }
+        rows.append("")
+        rows.append("candidate,stage,time,detail")
+        for item in subtitleTraces {
+            rows.append(ExportFormat.csv([[item.candidate, item.stage, item.time.ISO8601Format(), item.detail]]))
+        }
+        rows.append("")
+        rows.append("metric,value")
+        for (name, value) in [("session_cache_hits", Double(s.cacheHits)), ("saved_memory_hits", Double(s.savedHits)),
+            ("speculative_hits", Double(s.specHits)), ("fresh_requests", Double(s.cacheMisses)),
+            ("speculative_attempts", Double(s.specStarted)), ("speculative_completed", Double(s.specCompleted)),
+            ("speculative_discarded", Double(s.specDiscarded)), ("speculative_skipped", Double(s.specSkipped)),
+            ("discarded_speculative_ms", s.specDiscardedMs), ("language_confidence", s.languageConfidence),
+            ("recorder_simple_ms", recorderCosts.simpleMs), ("recorder_detailed_ms", recorderCosts.detailedMs)] {
+            rows.append("\(name),\(value)")
+        }
         return rows.joined(separator: "\n")
     }
 
@@ -478,8 +538,13 @@ final class Diagnostics: ObservableObject {
         l.append("Extension memory free \(Int(s.extFreeMB)) MB (lowest \(s.minExtFreeMB > 9000 ? 0 : Int(s.minExtFreeMB)) MB)")
         l.append("Lines \(s.linesIn): area \(s.dropArea), small \(s.dropSmall), ignore \(s.dropIgnore), own window \(s.dropSelf), target language \(s.dropTarget); blocks \(s.blocksIn) → \(s.blocksKept), noise \(s.dropNoise), other language \(s.dropLanguage)")
         l.append("Order confidence \(String(format: "%.1f", s.orderVote)), calibrated \(s.calibrated), rotation tries \(s.rotationTries)")
-        l.append("Translations \(s.translations), sentences \(s.sentences), cache \(s.cacheHits)/\(s.cacheHits + s.specHits + s.cacheMisses) (pre-translated \(s.specHits)), failures \(s.failures), engine \(s.sessionKind)")
+        l.append("Translations \(s.translations), sentences \(s.sentences), cache \(s.cacheHits + s.savedHits)/\(s.cacheHits + s.savedHits + s.specHits + s.cacheMisses) (pre-translated \(s.specHits)), failures \(s.failures), engine \(s.sessionKind)")
         l.append("Configured source \(engine.sourceCode), last source used \(s.sourceUsed) (\(s.sourceOrigin)), automatic detector \(engine.sourceCode == "auto" ? "enabled" : "off – source selected"), locked \(s.lockedLang).")
+        l.append("Cache origins: session \(s.cacheHits), saved memory \(s.savedHits), speculative \(s.specHits), fresh requests \(s.cacheMisses).")
+        l.append("Speculative model requests \(s.specModelRequests); pipeline attempts \(s.specStarted), completed \(s.specCompleted), superseded/cancelled \(s.specDiscarded), declined \(s.specSkipped), unconsumed results \(engine.unconsumedSpeculation); processing \(Int(s.specProcessingMs)) ms, discarded work \(Int(s.specDiscardedMs)) ms. Attempts count pipeline jobs; cache hits count sentences.")
+        l.append("OCR confidence \(Int(s.ocrConfidence*100))%, source evidence \(s.sourceOrigin == "Selected" ? "manual selection" : "\(Int(s.languageConfidence*100))%"); recognition: \(s.recognitionReason); confirmation: \(s.confirmationReason).")
+        l.append("Frame skips: unchanged \(s.unchangedSkipped), cadence \(s.cadenceSkipped), paused \(s.pausedSkipped); consecutive empty reads \(s.emptyReads), contrast retries \(s.retryCount).")
+        l.append("Instrumented recorder elapsed self-time, app lifetime: simple \(String(format: "%.2f", recorderCosts.simpleMs)) ms / \(recorderCosts.simpleCalls) calls; detailed \(String(format: "%.2f", recorderCosts.detailedMs)) ms / \(recorderCosts.detailedCalls) calls. Excludes async chart drawing, translation and OCR; workloads may differ.")
         l.append("Source language inputs: " + sourceUsage.counts.sorted { $0.key < $1.key }.map { "\($0.key)=\($0.value)" }.joined(separator: ", "))
         l.append("Source choice modes: " + SourceLanguageOrigin.allCases.map { "\($0.title)=\(sourceUsage.origins[$0, default: 0])" }.joined(separator: ", "))
         l.append("Execution phase \(executionPhase), PiP \(engine.pipActive ? "active" : "inactive"); last packet \(lastPacketAt?.ISO8601Format() ?? "none"), last device sample \(lastDeviceSampleAt?.ISO8601Format() ?? "none").")
@@ -912,6 +977,7 @@ private struct DiagnosticsBody: View {
         let cutoff = Date().addingTimeInterval(-120)
         return VStack(spacing: 14) {
             healthCard(a)
+            adaptivePipelineCard
             if !a.issues.isEmpty { suggestions(a.issues, limit: 3) }
             liveFeed
             if collectDetails {
@@ -1074,7 +1140,10 @@ private struct DiagnosticsBody: View {
             case .overview: overviewPage
             case .speed: speedPage
             case .timeline: timelinePage
-            case .pipeline: pipelinePage
+            case .pipeline:
+                pipelinePage
+                adaptivePipelineCard
+                subtitleLifecycleCard
             case .language: languagePage
             case .device: devicePage
             case .log: logPage
@@ -1096,6 +1165,7 @@ private struct DiagnosticsBody: View {
         return VStack(spacing: 14) {
             healthCard(a)
             pipelineStrip
+            adaptivePipelineCard
             sessionGrid
             percentileTable
             if !a.issues.isEmpty { suggestions(a.issues, limit: 8) }
@@ -1146,14 +1216,14 @@ private struct DiagnosticsBody: View {
 
     private var sessionGrid: some View {
         let s = diag.s
-        let hits = s.cacheHits + s.specHits + s.cacheMisses
+        let hits = s.cacheHits + s.savedHits + s.specHits + s.cacheMisses
         return LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
             StatTile(title: "Time live", value: "\(Int(liveFraction * 100))%", tint: Color.green, icon: "dot.radiowaves.left.and.right")
             StatTile(title: "Started", value: diag.started.formatted(date: .omitted, time: .shortened), icon: "clock")
             StatTile(title: "Translations", value: "\(s.translations)", tint: Color.cyan, icon: "character.bubble")
             StatTile(title: "Sentences", value: "\(s.sentences)", icon: "text.alignleft")
             StatTile(title: "Characters", value: "\(s.chars)", icon: "textformat")
-            StatTile(title: "Cache hits", value: hits == 0 ? "–" : "\(Int(Double(s.cacheHits + s.specHits) / Double(hits) * 100))%",
+            StatTile(title: "Cache hits", value: hits == 0 ? "–" : "\(Int(Double(s.cacheHits + s.savedHits + s.specHits) / Double(hits) * 100))%",
                      tint: Color.purple, icon: "memorychip")
             StatTile(title: "Capture drops", value: "\(s.captureDrops)",
                      tint: s.captureDrops > 0 ? Color.orange : Color.white, icon: "bolt.slash")
@@ -1358,6 +1428,34 @@ private struct DiagnosticsBody: View {
     }
 
     // MARK: Pipeline
+    private var subtitleLifecycleCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Per-subtitle timeline").font(.headline)
+            if diag.subtitleTraces.isEmpty { Text("Waiting for tracked candidates. Enable Detailed diagnostics and subtitle tracking.").font(.caption).foregroundStyle(.secondary) }
+            ForEach(Array(diag.subtitleTraces.suffix(18))) { item in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(String(item.candidate.suffix(12))) · \(item.stage) · \(item.time.formatted(date: .omitted, time: .standard))").font(.caption.monospaced())
+                    Text(item.detail).font(.caption2).foregroundStyle(.secondary)
+                }
+            }
+            Text("Times measure app processing and frame enqueue, not physical screen presentation. Full bounded timeline is in CSV.").font(.caption).foregroundStyle(.secondary)
+        }.card()
+    }
+
+    private var adaptivePipelineCard: some View {
+        let s = diag.s
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Recognition & work accounting").font(.headline)
+            Text("OCR: \(Int(s.ocrConfidence*100))% · Source: \(s.sourceOrigin == "Selected" ? "selected" : "\(Int(s.languageConfidence*100))% confidence")").font(.footnote)
+            Text("\(s.recognitionReason) · \(s.confirmationReason)").font(.caption).foregroundStyle(.secondary)
+            Text("Cache sentences · session \(s.cacheHits) · saved \(s.savedHits) · pre-translated \(s.specHits)").font(.footnote)
+            Text("Speculative jobs · started \(s.specStarted) · completed \(s.specCompleted) · discarded \(s.specDiscarded) · declined \(s.specSkipped)").font(.footnote)
+            Text("Discarded work: \(Int(s.specDiscardedMs)) ms. Unconsumed cached results: \(engine.unconsumedSpeculation). Completed results may still be reused later.").font(.caption).foregroundStyle(.secondary)
+            Text("Skipped frames · unchanged \(s.unchangedSkipped) · cadence \(s.cadenceSkipped) · paused \(s.pausedSkipped)").font(.caption)
+            Text("Recorder self-time · simple \(String(format: "%.1f", diag.recorderCosts.simpleMs)) ms · detailed \(String(format: "%.1f", diag.recorderCosts.detailedMs)) ms. Excludes chart drawing and model work; these are different workloads.").font(.caption).foregroundStyle(.secondary)
+        }.card()
+    }
+
     private var pipelinePage: some View {
         let s = diag.s
         let inArea = Swift.max(0, s.linesIn - s.dropArea)
@@ -1410,8 +1508,9 @@ private struct DiagnosticsBody: View {
         let pair: String = engine.sourceCode == "auto" ? "Auto"
             : (engine.langStatus[engine.sourceCode] == .installed ? "Ready" : "Needs pack")
         let cache = [
-            DonutPart(name: "From memory", value: s.cacheHits, color: Color.green),
+            DonutPart(name: "Session cache", value: s.cacheHits, color: Color.green),
             DonutPart(name: "Pre-translated", value: s.specHits, color: Color.cyan),
+            DonutPart(name: "Saved memory", value: s.savedHits, color: Color.purple),
             DonutPart(name: "Translated fresh", value: s.cacheMisses, color: Color.orange)
         ]
         return VStack(spacing: 14) {

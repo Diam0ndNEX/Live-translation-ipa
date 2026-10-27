@@ -25,6 +25,15 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var lastOcrMs: Double = 0
     private var lastUsefulText = Date()
     private var ocrSig: [UInt8] = []
+    private var tracker = SubtitleTracker()
+    private let captureID = UUID().uuidString
+    private var candidateID: String?
+    private var recognitionReason = "fixed preset"
+    private var confirmationReason = "fixed reads"
+    private var unchangedSkipped = 0, cadenceSkipped = 0, pausedSkipped = 0, retryCount = 0
+    private var feedback = RecognitionFeedback()
+    private var lastChanged = Date()
+    private var lastRecognizedKey = ""
     private var info = (bw: 0, bh: 0, orient: 1, cw: 0, ch: 0)
 
     private let cfgLock = NSLock()
@@ -69,21 +78,30 @@ class SampleHandler: RPBroadcastSampleHandler {
         if now.timeIntervalSince(lastPing) > 2 { lastPing = now; send(kind: "ping", lines: []) }
 
         let cfg = config
-        if cfg != lastOCRConfig {
+        if cfg.resetsRecognition(comparedTo: lastOCRConfig) {
             candidateKey = ""; sentKey = ""; specKey = ""; candidateCount = 0
             ocrSig = []; emptyPasses = 0
-            lastOCRConfig = cfg
+            tracker.reset(); candidateID = nil
         }
+        lastOCRConfig = cfg
+        feedback.unchangedSeconds = now.timeIntervalSince(lastChanged)
+        let plan = AdaptiveRecognition.plan(baseEdge: cfg.maxEdge, interval: cfg.interval,
+            enabled: cfg.adaptiveOCR ?? false, cool: cfg.smartCool ?? false,
+            pressure: cfg.pressure ?? false, feedback: feedback)
+        recognitionReason = plan.reason
         let idleFactor = (cfg.idleBackoff ?? true) && now.timeIntervalSince(lastUsefulText) > 8 ? 2.5 : 1.0
-        guard !cfg.paused, CaptureCadence.remaining(startedAt: lastRun.timeIntervalSince1970, now: now.timeIntervalSince1970, interval: cfg.interval * idleFactor) <= 0,
-              let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        guard !cfg.paused else { pausedSkipped += 1; return }
+        guard CaptureCadence.remaining(startedAt: lastRun.timeIntervalSince1970, now: now.timeIntervalSince1970,
+                                       interval: plan.interval * idleFactor) <= 0 else { cadenceSkipped += 1; return }
+        guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
         // Skip frames that look identical to the last one we read (saves battery, keeps things fast)
         if (cfg.skipUnchanged ?? true) && candidateCount == 0 {
             let sig = signature(pb)
+            if !sig.isEmpty, sig.count == ocrSig.count { feedback.motion = meanDiff(sig, ocrSig) }
             if !sig.isEmpty, sig.count == ocrSig.count, now.timeIntervalSince(lastRun) < 2.0,
                meanDiff(sig, ocrSig) <= 1.5 {
-                skipped += 1
+                skipped += 1; unchangedSkipped += 1
                 return
             }
             ocrSig = sig
@@ -102,7 +120,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         // The lock also prevents overlapping callbacks from mutating confirmation state.
         lastRun = now
         readStartedAt = now.timeIntervalSince1970
-        autoreleasepool { recognize(pb, orientation, cfg) }
+        autoreleasepool { recognize(pb, orientation, cfg, edge: plan.edge) }
     }
 
     // MARK: Cheap change detection
@@ -173,7 +191,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             let b = obs.boundingBox
             let y = y0 + Double(b.midY) * span
             guard y < 0.96 else { return nil }
-            return OCRLine(t: c.string, x: Double(b.midX), y: y, h: Double(b.height) * span, w: Double(b.width))
+            return OCRLine(t: c.string, x: Double(b.midX), y: y, h: Double(b.height) * span, w: Double(b.width), confidence: Double(c.confidence))
         }
         lines.sort { $0.y != $1.y ? $0.y > $1.y : $0.x < $1.x }
         return lines
@@ -186,14 +204,14 @@ class SampleHandler: RPBroadcastSampleHandler {
             .applyingFilter("CISharpenLuminance", parameters: [kCIInputSharpnessKey: 0.8])
     }
 
-    private func recognize(_ pb: CVPixelBuffer, _ orientation: CGImagePropertyOrientation, _ cfg: Config) {
+    private func recognize(_ pb: CVPixelBuffer, _ orientation: CGImagePropertyOrientation, _ cfg: Config, edge plannedEdge: Double) {
         let t0 = CFAbsoluteTimeGetCurrent()
         passes += 1
 
         // Only read the chosen area, at reduced size: this is the big speed-up.
         let margin = 0.03
         let y0 = max(0, cfg.y0 - margin), y1 = min(1, cfg.y1 + margin)
-        var edge = cfg.maxEdge
+        var edge = plannedEdge
         if freeMB() < 15 { edge = min(edge, 800) }          // memory getting tight
 
         // iOS's orientation hint first, then the app's extra quarter-turns (fixes upside-down frames)
@@ -218,6 +236,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             emptyPasses += 1
             // Fallback for hard text (thin, outlined, low contrast): boost contrast and retry
             if boost == 1 && emptyPasses % 3 == 0 && freeMB() > 20 {
+                retryCount += 1
                 lines = ocr(enhanced(img), cfg, y0, y1)
             }
         } else {
@@ -225,11 +244,18 @@ class SampleHandler: RPBroadcastSampleHandler {
             lastUsefulText = Date()
         }
         lastOcrMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
+        feedback.processingMs = lastOcrMs
+        feedback.failures = lines.isEmpty ? feedback.failures + 1 : 0
+        feedback.confidence = lines.map { $0.confidence ?? 0 }.min() ?? 0
+        let heights = lines.map(\.h).sorted()
+        feedback.textHeight = heights.isEmpty ? 0 : heights[min(heights.count-1, Int(Double(heights.count-1)*0.8))]
+        let recognizedKey = lines.map(\.t).joined(separator: "\n")
+        if recognizedKey != lastRecognizedKey { lastChanged = Date(); lastRecognizedKey = recognizedKey }
 
         if lines.isEmpty {
             if emptyPasses >= 4 {
                 if !sentKey.isEmpty { send(kind: "clear", lines: [], revision: cfg.rev) }
-                sentKey = ""; candidateKey = ""; candidateCount = 0
+                sentKey = ""; candidateKey = ""; candidateCount = 0; tracker.reset(); candidateID = nil
             }
             return
         }
@@ -237,6 +263,27 @@ class SampleHandler: RPBroadcastSampleHandler {
         // Stability: send once the same text was read N times in a row (skips half-faded text).
         let need = max(1, cfg.stability ?? 2)
         let key = lines.map(\.t).joined(separator: "\n")
+        if cfg.subtitleTracking == true || cfg.adaptiveConfirmation == true {
+            let decision = tracker.observe(lines, at: readStartedAt, required: need,
+                adaptive: cfg.adaptiveConfirmation ?? false, spatial: cfg.subtitleTracking ?? false,
+                deadline: cfg.confirmationDeadline ?? 0.6, minimumConfidence: cfg.confidence ?? 0.3)
+            candidateID = "\(captureID):\(cfg.rev ?? 0):\(decision.id)"
+            confirmationReason = decision.reason
+            candidateStartedAt = decision.firstSeen
+            candidateCount = decision.ready || decision.duplicate ? 0 : 1
+            guard !decision.duplicate else { return }
+            if decision.ready {
+                sentKey = key
+                send(kind: "ocr", lines: Array(lines.prefix(60)), stable: true, revision: cfg.rev)
+            } else if key != specKey {
+                specKey = key
+                // Candidate notice is always sent, even when selective speculation later declines it.
+                send(kind: "ocr", lines: Array(lines.prefix(60)), stable: false, revision: cfg.rev)
+            }
+            return
+        }
+        candidateID = nil
+        confirmationReason = "fixed reads"
         if PipelineSafety.isDuplicate(key.components(separatedBy: "\n"), previous: sentKey.components(separatedBy: "\n")) { candidateKey = key; candidateCount = 0; return }
         // A new confirmation run can resemble the previous subtitle. Reset timing
         // when the count restarts, even if the fuzzy comparison still matches.
@@ -263,7 +310,11 @@ class SampleHandler: RPBroadcastSampleHandler {
                                              bufW: info.bw, bufH: info.bh, orient: info.orient,
                                              cropW: info.cw, cropH: info.ch, passes: passes, skipped: skipped,
                                              stable: stable, firstSeenAt: kind == "ocr" ? candidateStartedAt : nil,
-                                             readStartedAt: kind == "ocr" ? readStartedAt : nil))
+                                             readStartedAt: kind == "ocr" ? readStartedAt : nil,
+                                             candidateID: kind == "ocr" ? candidateID : nil,
+                                             recognitionReason: recognitionReason, confirmationReason: confirmationReason,
+                                             unchangedSkipped: unchangedSkipped, cadenceSkipped: cadenceSkipped, pausedSkipped: pausedSkipped,
+                                             emptyReads: feedback.failures, retryCount: retryCount))
         }
         var data = encode(lines)
         if let d = data, d.count > 60000 { data = encode(Array(lines.prefix(30))) }

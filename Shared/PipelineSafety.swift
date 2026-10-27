@@ -14,10 +14,11 @@ enum PipelineSafety {
         return zip(blocks, previous).allSatisfy { TextSim.similar($0.0, $0.1, 0.97) }
     }
 
-    static func cacheKey(source: String, target: String, text: String, protectedWords: [String]) -> String {
+    static func cacheKey(source: String, target: String, text: String, protectedWords: [String], rules: String = "") -> String {
         // Length-prefixed metadata prevents different protected names sharing the same placeholder cache entry.
         let context = protectedWords.map { "\($0.utf8.count):\($0)" }.joined()
         let version = protectedWords.isEmpty ? "v2" : "v3"
+        if !rules.isEmpty { return "v4|\(rules)|\(source)>\(target)|\(context.utf8.count):\(context)|\(text)" }
         return "\(version)|\(source)>\(target)|\(context.utf8.count):\(context)|\(text)"
     }
 

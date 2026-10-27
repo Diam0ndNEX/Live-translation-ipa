@@ -17,7 +17,7 @@ struct LanguagesView: View {
     private var available: [LangItem] { filtered.filter { engine.langStatus[$0.code] == .supported } }
 
     private var pairStatus: (text: String, color: Color) {
-        if engine.sourceCode == "auto" { return ("Auto-detect uses any language you've downloaded", .secondary) }
+        if engine.sourceCode == "auto" { return ("Auto-detect identifies the source; its translation pair needs downloaded packs", .secondary) }
         switch engine.langStatus[engine.sourceCode] {
         case .installed: return ("Ready – works offline", .green)
         case .supported: return ("Needs a download", .orange)

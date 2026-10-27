@@ -1,40 +1,43 @@
-# ScreenLingo v1.2.1 · build 42
+# ScreenLingo v1.3.0 · build 43
 
-## Multilingual fixes
+This release upgrades recognition, candidate tracking, speculative work, memory, presentation and diagnostic accounting. It preserves Fast/Balanced/Sharp and the fixed Instant/Normal/Careful read controls. New strategies are in **Settings → Smart pipeline**, saved with presets and backups.
 
-The supplied v1.2 trace records a source lock to English while English was the target, followed by no further live translations. It also records seven rotation retries and two capture interruptions. The trace omits source sentences, so it cannot establish translation accuracy or the causes of capture interruptions.
+## Behavior and controls
 
-- Automatic mode can never lock to its target. Installed packs no longer override stronger language evidence. Clear language changes route immediately while lock release still requires three confirmed mismatches. Speculative reads never mutate language-lock history.
-- OCR stays multilingual in Automatic mode, including while the translation source is locked. Explicitly selected sources bypass NaturalLanguage guess-based rejection; PiP self-output filtering remains in place.
-- Source/target changes clear detector history and advance the capture revision so static text is reconfirmed and old-pair packets cannot enter the new pipeline.
-- Capitalization-based rotation voting is disabled for predominantly uncased scripts (including Korean, Japanese, Chinese and Arabic). Accurate OCR, confirmation counts and translation wording are unchanged.
-- Missing-pack speculation no longer starts a hosted download request ahead of confirmed work. Language selection/resolution and translation errors are recorded in detailed events without source text.
-- Diagnostic collection toggles moved into a sliders menu beside the three dots. The Simple/Detailed view selector is in the same menu; collection controls are also available in Settings → Performance & power.
+| Control | Default | Behavior |
+|---|---|---|
+| Auto reading preset | Available | Adapts detail/frequency from recent confidence, text height, OCR cost, motion, empty reads and unchanged text |
+| Adaptive detail in Balanced | On | Uses 1000-pixel detail for exceptionally clear large text; requests up to 2000 for small/uncertain text; Fast/Sharp retain their base profiles |
+| Confidence-aware confirmation | Off | Optional immediate release for exceptionally clear text; uncertain text receives further checks; a configurable deadline requires two matching, sufficiently confident reads |
+| Subtitle tracking | On | Tracks the complete visible subtitle/lyric group by content, geometry and lifetime; a changed candidate invalidates older pending work |
+| Merge duplicate copies | On | Coalesces duplicate whole regions and keeps a stable spatial anchor; repeated lyric rows within a region remain intact |
+| Selective pre-translation | On | Declines early text below the configurable confidence floor; existing Translate ahead remains the master control |
+| Stable caption transitions | On | Cancels superseded work where supported and prevents outdated candidates from storing results or reaching PiP; the previous valid caption remains until replacement/normal auto-clear |
+| Smart Cool controller | On | Applies when Cool Mode is enabled; changes frequency before detail and permits only exceptionally clear speculation under nominal thermal/low workload conditions |
+| Automatic recovery | On | Resets source evidence after repeated engine failures; missing packs are surfaced, not treated as evidence of a wrong language |
 
-## Previous v1.1 changes
+The fixed-pipeline button disables adaptive detail/confirmation, tracking, duplicate merging, selective speculation, stable transitions and Smart Cool behavior. It leaves the safety fixes and versioned persistence active. Auto always adapts; select Fast/Balanced/Sharp for fixed-profile comparison.
 
-- Fixed the empty language graph when a source is explicitly selected. Confirmed source inputs now count for selected, automatically detected and locked source languages. Chart labels distinguish usage from detection; a selected Portuguese source is never reported as an automatic detection.
-- Speculative sightings and target-language passthroughs do not inflate the language counters. Reset clears language and selection-mode totals together.
-- Reports and CSV exports include source-language and source-choice counts. Text reports include configured source, last source used, app phase, PiP state, packet/sample times and capture settings.
-- With detailed collection enabled, foreground, inactive and background transitions are recorded alongside the existing capture/PiP events, making future background traces easier to interpret.
-- Removed the requested memory explanation from the interface and report.
+Runtime pressure/frequency changes no longer reset OCR confirmation. Language, crop, rotation, recognition rules and explicit capture revisions still require fresh confirmation. Automatic OCR stays multilingual and never inherits a hard translation-language lock. Target languages cannot acquire a source lock.
 
-OCR recognition accuracy, resolution and confirmation requirements retain their configured values.
+## Memory and work accounting
 
-## How diagnostic graphs get their data
+- Session cache, saved-memory retrieval and speculative hits are separate sentence counters. A saved entry's first retrieval is a saved-memory hit; later reuse is session cache.
+- Persistent memory uses a versioned envelope in Application Support. Rule fingerprints namespace the cache for source clean-up, slang, protected names, speaker splitting, glossary and source fixes; source/target and protected token context remain part of each key.
+- Only confirmed non-private input with an explicit or sufficiently confident source can promote an entry to persistent storage. Unconfirmed speculative results remain session-only. Failed/empty responses are never stored.
+- Previous unversioned cache files are left untouched and are not trusted as rule-versioned entries. Clearing memory invalidates in-flight work and uses actor-serialized revisions to prevent stale saves restoring cleared entries.
+- Speculative pipeline attempts/completions/discards and model request counts are separate from sentence-level cache hits. Elapsed discarded work includes pipeline processing; completed but unconsumed entries may still be useful later and are not automatically called wasted.
 
-The ReplayKit extension counts incoming video frames, OCR passes/skips and OCR durations and sends timestamped packets to the main app over localhost UDP. The app records packet delivery, processing, source usage, caching and presentation timings during the real pipeline. When detailed collection is enabled, a timer samples the iOS battery, thermal and process-memory APIs every two timer ticks while the app is executing. Swift Charts draws the bounded arrays of samples; opening the diagnostics screen is not required to collect them.
+## Diagnostics
 
-The project uses the Audio/AirPlay/Picture in Picture background mode with the visible PiP translation window. Live Activities are not the mechanism that runs the translator. Background execution remains controlled by iOS: if the app is suspended, its timers and graph collection stop executing until it resumes. ReplayKit's broadcast extension has its own lifecycle. A pre-1.1 trace cannot establish foreground/background timing because those transitions were not recorded.
+Simple collection keeps summaries and lightweight work counters. Detailed collection adds bounded graph samples, events and a 300-entry per-candidate lifecycle log (first arrival, confirmation, processing, cache origin, readiness, supersession and frame enqueue). The Pipeline page and CSV expose it without exporting source sentences. Collection/view controls stay in the sliders menu beside the three dots.
 
-## Supplied v1.0 trace
+Confidence, recognition/confirmation reasons, unchanged/cadence/paused frame skips, empty reads and contrast retry counts are included. Instrumented recorder self-time is measured separately for simple and detailed collection; nested calls are not double-counted. It excludes asynchronous chart rendering, OCR and translation, and different workloads must not be treated as a controlled overhead benchmark.
 
-Across 143 paired displayed results, average total time was 878 ms: confirmation 148 ms, final OCR 113 ms, delivery/filtering 90 ms, queue 260 ms, processing 282 ms, readability hold about 0 ms and frame preparation 1.4 ms. The trace recorded no translation failures and no capture drops, but six automatic rotation attempts. Without source text or images, the export cannot establish whether those rotations or the translated wording were correct.
+PiP timing ends at sample-buffer enqueue. Physical display presentation is not measured. Translation APIs support cancellation cooperatively; obsolete results are rejected even if a model finishes after cancellation. The iOS 18 hosted bridge releases cancelled requests instead of holding confirmed work behind its timeout. Prewarming snapshots its language pair before any suspension to prevent old-session reuse after a target change.
 
-## Build and verification
+## Evidence and verification
 
-The `codex/screenlingo-v1.2.1` branch builds the unsigned IPA after focused Swift regression checks and verifies both bundle versions. Main and previous branches remain unchanged. The simulator preview remains an optional manual workflow input.
+The available 14:39 v1.2.0 export recorded an English source lock with English as the target, seven rotation attempts and two capture interruptions. Source sentences were omitted, so it does not establish semantic accuracy or the cause of capture interruptions. A newer Auto export was requested but was not attached when this upgrade began; no new device performance or heat improvements are claimed from that earlier trace.
 
-Regression coverage includes manually selected Portuguese, automatic detection, locked sources, unresolved-source placeholders, reconciled counters and reset, alongside the existing pipeline, timing, grouping, export and stale-output checks. Regression coverage also checks Cool mode cadence and optional work, session speaker extraction, deduplication, privacy, reset and collection policy. Physical-device verification is still needed to measure temperature and verify the new controls during a broadcast.
-
-Multilingual regression checks cover target-lock prevention, confirmed versus speculative lock state, language switching, explicit-source authority, OCR hint independence, pair reset and uncased-script rotation. Device testing is still needed to verify recognition and responsiveness against real multilingual video.
+CI compiles and runs the existing pipeline/grouping/export/timing/language checks plus adaptive detail, confirmation, candidate identity, duplicate-region, privacy, rule-versioning and real memory persistence/revision checks, then builds the iOS app and ReplayKit extension and verifies both bundle versions. Repeatable on-device video comparisons are still needed to quantify recognition coverage, latency and thermal/battery changes.

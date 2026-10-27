@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.2.1"
-    static let build = 42
+    static let version = "1.3.0"
+    static let build = 43
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("1.3.0", "Adaptive Auto/Balanced recognition, optional confidence-aware confirmation, spatial subtitle tracking, selective cancellable speculation and stable candidate-aware presentation. Versioned rule-aware memory in Application Support, separate cache origins, smarter Cool Mode and detailed subtitle/workload diagnostics with measured recorder self-time. Fixed runtime pressure changes resetting OCR confirmation."),
         ("1.2.1", "Fixed Automatic locking to the target language and feeding its lock back into OCR. Explicit sources bypass language-guess vetoes, confident language changes route immediately, and speculative reads cannot alter locks. Fresh OCR after language changes, uncased-script rotation protection and a toolbar menu for diagnostic collection."),
         ("1.2.0", "Session speaker labels no longer require diagnostic export consent. Added Cool mode, independent diagnostic collection switches and clearer automatic language-lock guidance."),
         ("1.1.0", "Fixed source-language graphs for selected and locked sources. Diagnostics now distinguish selected, detected and locked input, record foreground/background transitions, and export source counts and runtime context. Removed the memory explanation."),
@@ -37,6 +38,7 @@ struct OCRLine: Codable {
     var y: Double      // normalized mid Y of the FULL frame (0 = bottom, 1 = top)
     var h: Double      // normalized height (full frame)
     var w: Double?     // normalized width
+    var confidence: Double? = nil
 }
 
 /// Extension → app
@@ -59,6 +61,14 @@ struct Packet: Codable {
     var stable: Bool?      // false = first sighting (translate ahead), nil/true = confirmed
     var firstSeenAt: Double? = nil
     var readStartedAt: Double? = nil
+    var candidateID: String? = nil
+    var recognitionReason: String? = nil
+    var confirmationReason: String? = nil
+    var unchangedSkipped: Int? = nil
+    var cadenceSkipped: Int? = nil
+    var pausedSkipped: Int? = nil
+    var emptyReads: Int? = nil
+    var retryCount: Int? = nil
 }
 
 /// App → extension (sent back over the same localhost link)
@@ -78,6 +88,14 @@ struct Config: Codable, Equatable {
     var confidence: Double? = nil
     var correction: Bool? = nil
     var idleBackoff: Bool? = nil
+    var adaptiveOCR: Bool? = nil
+    var adaptiveConfirmation: Bool? = nil
+    var subtitleTracking: Bool? = nil
+    var confirmationDeadline: Double? = nil
+    var smartCool: Bool? = nil
+    var pressure: Bool? = nil
+    var selectiveSpeculation: Bool? = nil
+    var speculationConfidence: Double? = nil
 }
 
 enum TextSim {

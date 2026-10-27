@@ -53,6 +53,7 @@ struct SettingsView: View {
 
     private var anyMatch: Bool {
         show("Presets", "save profile custom switch")
+            || show("Smart pipeline", "adaptive auto confidence tracking speculative memory cool latency")
             || show("Reading & OCR", "mode area custom rotation order speed stability ignore noise contrast frames words small")
             || show("Understanding & rules", "clean slang speaker language lock never translate glossary fixes names")
             || show("Floating window", "size theme colour font text original auto open clear hold display vibrate speak voice copy preview")
@@ -99,6 +100,9 @@ struct SettingsView: View {
                     }
                 } header: { Text("Personalize") }
                 Section {
+                    if show("Smart pipeline", "adaptive auto confidence tracking speculative memory cool latency") {
+                        NavigationLink { SmartPipelineSettings() } label: { Label("Smart pipeline", systemImage: "sparkles") }
+                    }
                     if show("Reading & OCR", "mode area custom rotation order speed stability ignore noise contrast frames words small") {
                         NavigationLink { ReadingSettings() } label: { Label("Reading & OCR", systemImage: "viewfinder") }
                     }
@@ -488,7 +492,7 @@ struct PerformanceSettings: View {
             }
             Section {
                 Toggle("Cool mode", isOn: $coolMode)
-                Text("Reads at least twice as far apart (minimum 0.45 seconds), skips translate-ahead and idle warm-ups. OCR accuracy, resolution and confirmation checks stay the same. Updates can arrive later and very brief captions may be missed. Your speed settings are restored when switched off.").font(.footnote).foregroundStyle(.secondary)
+                Text("Smart Cool Mode adapts OCR frequency to workload and permits only very clear pre-translation when processing is quick and the phone is cool. Disable its controller in Smart pipeline to use fixed intervals instead. Idle warm-ups are off. Updates can arrive later and brief captions may be missed.").font(.footnote).foregroundStyle(.secondary)
                 Toggle("Adaptive performance", isOn: $adaptive)
                 Toggle("Reduce OCR work when no text is visible", isOn: $idleBackoff)
                 Picker("Pause after no text for", selection: $idleMinutes) {

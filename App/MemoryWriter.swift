@@ -7,7 +7,8 @@ actor MemoryWriter {
         guard revision > latestRevision else { return true }
         latestRevision = revision
         do {
-            let data = try JSONEncoder().encode(snapshot)
+            let data = try JSONEncoder().encode(MemoryEnvelope(entries: snapshot))
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: url, options: .atomic)
             return true
         } catch { return false }
