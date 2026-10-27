@@ -1,37 +1,18 @@
-// ScreenLingo – Shared – v0.7.0
+// Screen Translator – Shared – v0.11.0
 import Foundation
 
 enum AppVersion {
-    static let version = "1.4.7"
-    static let build = 35
+    static let version = "1.5.0"
+    static let build = 36
     static var full: String { "v\(version) (build \(build))" }
-    // Newest first. Keep this aligned with MARKETING_VERSION and CURRENT_PROJECT_VERSION in project.yml.
+    // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
-        ("1.4.7", "Translate coherent multi-row lyrics together in Movie mode; add quick setup, accessible output actions, and freeze/resume for PiP."),
-        ("1.4.6", "Group slightly offset OCR boxes from the same Movie subtitle row and ignore repeated ScreenLingo History UI captures."),
-        ("1.4.5", "Protect original subtitle fragments from PiP feedback filtering when source and translated text share names or phrases."),
-        ("1.4.4", "Keep side-by-side subtitle OCR boxes grouped in Movie mode to prevent partial subtitle selection and translation flicker."),
-        ("1.4.3", "Require stable OCR across consecutive frames and reject recent truncated fragments to prevent translation and History flicker."),
-        ("1.4.2", "Calibrate frame rotation from reading-order evidence and reject stale OCR packets after rotation changes."),
-        ("1.4.1", "Fix history star controls and native TXT/CSV file export; add a smaller PiP text-size option."),
-        ("1.4.0", "Add privacy dashboard, configurable local-history retention, and CSV history export; keep main branch unchanged."),
-        ("1.3.2", "Improve source-vs-target language checks, retry failed batches, configurable OCR cleanup, slang expansion, speaker and protected-term handling, source corrections, glossary rules, stable language lock, settings profiles/backup, and PiP font/highlighting controls."),
-        ("1.3.1", "Prevent spatial-only PiP feedback suppression from deleting genuine source text; improve OCR dialogue grouping using box-edge spacing."),
-        ("1.3.0", "Unify OCR row ordering across block grouping and translation; improve deterministic bounding-box row clustering and add canonical OCR-order diagnostics; build 25."),
-        ("1.2.9", "Ignore captured ScreenLingo settings/diagnostics screens and retain full diagnostic trace history for .txt export; build 24."),
-        ("1.2.8", "Add age-filtered 60-second compact reports, privacy redaction, and full diagnostic .txt export; synchronize app/extension version metadata; build 23."),
-        ("1.2.7", "Fix spatially overbroad self-output suppression, reject system privacy-sheet OCR/noise, and compact diagnostic reports; build 22."),
-        ("1.2.6", "Fix Swift compilation in diagnostic language-score formatting; remove an unused OCR geometry variable; build 21."),
-        ("1.2.5", "Add a rolling 60-second OCR-to-translation trace with block geometry, filter decisions, language hypotheses, cache decisions, per-block translations, and one-tap report export; build 20."),
-        ("1.2.4", "Improve multilingual live OCR by relying on Vision auto-language detection in Auto mode, stricter speech-region separation, and more conservative target-language feedback filtering; build 19."),
-        ("1.2.3", "Fix live OCR updates by accepting changed capture packets immediately and grouping OCR lines before target-language filtering; build 18."),
-        ("1.2.2", "Move the loopback UDP channel to a fresh port after persistent address-in-use failures; keep app and capture extension synchronized."),
-        ("1.2.1", "Fix duplicate UDP listener startup on app activation, prevent port rebind races, and improve capture connection recovery diagnostics."),
-        ("1.2.0", "Comic-context translation, stable OCR reading order, centered dialogue grouping, right-to-left manga support, block-order diagnostics, output truncation checks, and app/extension version 1.2.0 build 15."),
-        ("1.1.0", "Improved comic dialogue ordering, richer live diagnostics, history search/export, quick output actions, cache controls, and explicit bundle version metadata."),
-        ("0.8.0", "ScreenLingo bundle identity, advanced controls, live OCR tuning, and safer capture preferences."),
-        ("0.7.1", "ScreenLingo branding, version metadata, and icon support."),
-        ("0.7.0", "ScreenLingo refresh: persistent translation history, safer iOS 18 translation timeouts, refreshed branding, and clearer copy/clear history actions."),
+        ("1.5.0", "Integrated the latest main redesign, custom presets, diagnostics charts, translation memory and translate-ahead. Preserved ScreenLingo identity, small text, lyric rows and fragment protection. Fixed stale output, batch validation, frozen output and legacy timeouts."),
+        ("0.11.0", "Faster translation with identical wording: translate-ahead (starts translating on first sight, shows when confirmed), warm translator, translation memory kept between launches, cached language-pack check. Sharing now goes through real files (fixes the endless Loading…)."),
+        ("0.10.0", "Diagnostics rebuilt: Simple view (health score, plain-language fixes with one-tap buttons, live feed) and Detailed view with 7 pages. Real charts for speed, delay, frames per second, memory, temperature and battery, histograms, a session timeline of Live / Paused / Idle with event markers, translations per minute, a pipeline funnel and filter breakdown, language and cache charts, a searchable filterable event log, CSV export and a shareable report."),
+        ("0.9.0", "Redesigned app. Custom presets (save, edit, duplicate, reorder, start-up preset) with icons and colours. New Home with live status badge, quick tiles and recent language pairs. Reader view, share-as-image, toasts, onboarding, keep-screen-awake, auto-copy, speech speed, saved history with search, stars and day groups, accent colours, Home sections you can hide, settings search and per-page reset."),
+        ("0.8.0", "Fixes reversed sentence order (auto-detects upside-down frames and rotates them, or pick the rotation manually). Context layer: speaker names kept, chat slang expanded, OCR clean-up, noise filter, language lock, never-translate words. Live Diagnostics tab. 30+ new options, profiles, backup, history search + stars."),
+        ("0.7.0", "App icon. Correct version shown when signing (was 1.0). Big new Settings screen: custom OCR area, ignore small text, ignore list, glossary, stability, floating-window font, hold time, auto-open. Quick presets (Movie/Game/Comic), setup checklist, export history."),
         ("0.6.0", "Fixes mixed-up sentence order: text is grouped into blocks (bubble vs background), each block read in proper order and translated sentence by sentence in one batch. Ignores background text in another language. Floating-window appearance + text size, speak translation aloud."),
         ("0.5.0", "Much faster: OCR only reads your chosen area at reduced size, with the source language as a hint. Stops reading its own floating window (learns where it is). Speed presets, translation cache, auto-clear when text ends, pause, history tab, live OCR/translate timing + memory in diagnostics."),
         ("0.4.1", "Start section has a visible broadcast icon + separate floating-window button. Fixed build error."),
@@ -42,7 +23,7 @@ enum AppVersion {
     ]
 }
 
-enum Loopback { static let port: UInt16 = 48723 }
+enum Loopback { static let port: UInt16 = 48721 }
 
 struct OCRLine: Codable {
     var t: String      // text
@@ -60,29 +41,32 @@ struct Packet: Codable {
     var lines: [OCRLine]
     var ocrMs: Double?
     var memFreeMB: Double?
-    var rev: Int? = nil          // rotation/settings revision used for this OCR packet
+    var ts: Double?        // when the extension sent it (seconds since 1970)
+    var rev: Int?          // settings revision the extension was using
+    var bufW: Int?
+    var bufH: Int?
+    var orient: Int?       // raw RPVideoSampleOrientationKey value
+    var cropW: Int?
+    var cropH: Int?
+    var passes: Int?       // OCR passes so far
+    var skipped: Int?      // unchanged frames skipped
+    var stable: Bool?      // false = first sighting (translate ahead), nil/true = confirmed
 }
 
 /// App → extension (sent back over the same localhost link)
-struct Config: Codable {
+struct Config: Codable, Equatable {
     var lang: String       // "auto" or a language code (used as OCR language hint)
     var y0: Double         // OCR area, 0 = bottom
     var y1: Double         // 1 = top
     var maxEdge: Double    // longest image side OCR works at (smaller = faster)
     var interval: Double   // minimum seconds between OCR passes
     var paused: Bool
-    var minimumConfidence: Double
-    var languageCorrection: Bool
-    var minimumTextHeight: Double?
-    var ignoreList: [String]?
-    var dropNoise: Bool?
-    var boost: Int?
-    var stability: Int?
+    var stability: Int?    // how many identical reads before text is sent (1 = instant)
+    var rot: Int?          // extra clockwise quarter-turns applied to the frame (0...3)
+    var rev: Int?          // bumps whenever rot changes so stale packets can be ignored
+    var boost: Int?        // 0 = off, 1 = only when nothing is found, 2 = always
     var skipUnchanged: Bool?
-    var rotation: Int?
-    var adaptive: Bool?
-    var idleMinutes: Int?
-    var revision: Int? = nil     // echoed by the extension to discard packets from old rotations
+    var speculate: Bool?   // send an early "first sighting" so the app can translate ahead
 }
 
 enum TextSim {

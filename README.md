@@ -1,46 +1,28 @@
 # ScreenLingo
 
-ScreenLingo is a native iOS screen translator built with SwiftUI, Apple Vision OCR, and Apple's on-device Translation framework.
+On-device screen translation for iOS 18 and later, with ReplayKit capture, Apple Translation language packs and a floating Picture in Picture window.
 
-## Highlights
+## Version 1.5.0 (36)
 
-- Live screen text capture through a ReplayKit broadcast extension.
-- On-device OCR and translation with supported Apple language packs.
-- Floating Picture-in-Picture translation window with quick freeze/resume controls.
-- Dedicated modes for subtitles, games/apps, and comics, with Movie mode able to translate aligned multi-row lyrics together.
-- Configurable OCR area and Fast / Balanced / Sharp performance profiles.
-- Adjustable OCR confidence threshold and optional language-aware recognition correction.
-- Customizable PiP size, appearance, text size, and optional original-text display.
-- Optional speech output, pause, automatic clearing, and local translation history.
-- Live diagnostics for OCR latency, translation latency, frame counts, extension memory, thermal state, Low Power Mode, and battery.
-- Local-only privacy controls with automatic history retention (7/30/90 days or forever).
-- Searchable translation history with starred entries and text/CSV export.
-- Custom ScreenLingo app icon and consistent app/extension version metadata.
+This branch incorporates the complete main-branch app at `a91907a`: the redesigned Home, language library, reader, custom presets, configurable interface, file-based sharing, detailed diagnostics, translation memory and translate-ahead.
 
-## Identity
+ScreenLingo keeps its bundle identifier, app name, smaller text option, history migration, starred entries and retention settings. Integration fixes protect against partial OCR replacing complete subtitles, stale asynchronous results, malformed translation batches, overlapping hosted translation requests and frozen output being cleared. Movie mode keeps aligned lyric rows and joins adjacent subtitle fragments while comic bubbles remain separate. Frame skipping no longer delays the second OCR pass needed for confirmation.
 
-- Display name: `ScreenLingo`
-- Bundle identifier: `com.diam0ndnex.screenlingo`
-- Broadcast extension identifier: `com.diam0ndnex.screenlingo.broadcast`
-- Version: `1.4.7` (build `35`)
+## Build
 
-The bundle identifier has changed from the previous placeholder ID. iOS treats it as a different app identity; to replace an older installation cleanly, uninstall the old Screen Translator build first. This may remove its local app data, so export anything important before uninstalling.
+Push this branch (`codex/screenlingo-v0.7.0`) or run **Build ScreenLingo IPA** manually in GitHub Actions. The workflow runs focused Swift regression checks, builds the app, verifies app/extension identity and version metadata, and uploads `ScreenLingo-ipa`.
 
-## Build an unsigned IPA
+For local macOS builds, generate the icon with `scripts/make_icon.py` (Pillow required), run `xcodegen generate`, then build the `ScreenLingo` scheme. The app and extension versions are set in `project.yml` and `Shared/Shared.swift` and checked against the packaged product by CI.
 
-1. Open the **Actions** tab.
-2. Run **Build ScreenLingo IPA**.
-3. When it succeeds, download the `ScreenLingo-ipa` artifact.
-4. Sign and install the IPA using your preferred sideloading tool.
+Regression checks on macOS:
 
-The workflow generates the icon asset from `App/ScreenLingoIcon.svg`, generates the Xcode project with XcodeGen, builds the app and broadcast extension, then packages the unsigned IPA.
+```sh
+swiftc Shared/Shared.swift Shared/PipelineSafety.swift Shared/OCRGrouping.swift Tests/main.swift -o /tmp/screenlingo-tests
+/tmp/screenlingo-tests
+```
 
-## Privacy and limitations
+## Device checks
 
-OCR and translation are handled on-device using Apple frameworks. Language-pair availability depends on iOS and installed language packs. ScreenLingo cannot guarantee identical accuracy for every font, animation, language pair, or game UI; use Sharp for small text and Fast for lower latency.
+Download the source/target packs in Languages, start capture from Home, and switch to the video. Test Portuguese to English in Movie mode with several visible lyric rows, a scrolling row change and two-line subtitles. Freeze should preserve the window until resumed; Pause should reject unfinished translation work. Changing the target language during translation must not show the previous pair's result. Confirm history, stars and saved settings survive an upgrade using the same signing identity.
 
-Translation history and settings are stored locally on-device. History can be automatically pruned after 7, 30, or 90 days, or retained indefinitely. Text and CSV exports are created locally; review exported files before sharing because they may contain recognized screen text. Diagnostic reports can redact recognized text. This project does not send recognized text to a third-party translation server.
-
-## Development
-
-The Xcode project is generated from `project.yml`. The app and ReplayKit extension share packet/config models in `Shared/Shared.swift`. Version metadata in `Shared/Shared.swift` and `project.yml` must stay synchronized.
+An iOS build and device tests are required to verify Apple's Translation, ReplayKit and PiP runtime behavior; syntax checks alone do not establish those outcomes.

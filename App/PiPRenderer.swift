@@ -1,4 +1,4 @@
-// Screen Translator – App – v0.8.0
+// Screen Translator – App – v0.9.0
 import AVKit
 import UIKit
 import SwiftUI
@@ -43,7 +43,7 @@ struct PiPStyle {
     static func make(theme: PiPTheme, size: PiPTextSize, font: PiPFont = .standard) -> PiPStyle {
         let hi: CGFloat, lo: CGFloat
         switch size {
-        case .small: hi = 30; lo = 10
+        case .small: hi = 32; lo = 12
         case .auto: hi = 44; lo = 16
         case .large: hi = 56; lo = 24
         case .huge: hi = 72; lo = 32
@@ -135,27 +135,39 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
         render(original: lastOriginal, translated: lastTranslated, showOriginal: lastShowOriginal)
     }
 
-    func rerender() { render(original: lastOriginal, translated: lastTranslated, showOriginal: lastShowOriginal) }
+    func rerender(showOriginal: Bool? = nil) {
+        render(original: lastOriginal, translated: lastTranslated, showOriginal: showOriginal ?? lastShowOriginal)
+    }
 
     // MARK: Rendering
     func render(original: String, translated: String, showOriginal: Bool) {
         lastOriginal = original; lastTranslated = translated; lastShowOriginal = showOriginal
+        let img = PiPRenderer.image(original: original, translated: translated, showOriginal: showOriginal,
+                                    size: size, style: style)
+        guard let cg = img.cgImage else { return }
+        lastFrame = cg
+        enqueue(cg)
+    }
+
+    /// Draws the floating-window picture. Also used for settings previews and "share as image".
+    static func image(original: String, translated: String, showOriginal: Bool,
+                      size: CGSize, style: PiPStyle) -> UIImage {
         let fmt = UIGraphicsImageRendererFormat()
         fmt.scale = 1; fmt.opaque = true
-        let img = UIGraphicsImageRenderer(size: size, format: fmt).image { ctx in
+        return UIGraphicsImageRenderer(size: size, format: fmt).image { ctx in
             style.bg.setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
             let w = size.width - 48
             var y: CGFloat = 16
             if showOriginal && !original.isEmpty {
                 let r = CGRect(x: 24, y: y, width: w, height: size.height * 0.27)
-                let f = fittingFont(original, rect: r, weight: .regular, hi: 22, lo: 12)
+                let f = fittingFont(original, rect: r, weight: .regular, hi: 22, lo: 12, style: style)
                 NSAttributedString(string: original, attributes: [.font: f, .foregroundColor: style.secondary])
                     .draw(with: r, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], context: nil)
                 y = r.maxY + 10
             }
             let r2 = CGRect(x: 24, y: y, width: w, height: size.height - y - 16)
-            let f2 = fittingFont(translated, rect: r2, weight: .bold, hi: style.hi, lo: style.lo)
+            let f2 = fittingFont(translated, rect: r2, weight: .bold, hi: style.hi, lo: style.lo, style: style)
             let att = NSMutableAttributedString(string: translated, attributes: [.font: f2, .foregroundColor: style.fg])
             if style.highlightNames, let rx = PiPRenderer.labelRegex {
                 for m in rx.matches(in: translated, range: NSRange(location: 0, length: (translated as NSString).length)) {
@@ -164,25 +176,23 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
             }
             att.draw(with: r2, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], context: nil)
         }
-        guard let cg = img.cgImage else { return }
-        lastFrame = cg
-        enqueue(cg)
     }
 
-    private func fittingFont(_ text: String, rect: CGRect, weight: UIFont.Weight, hi: CGFloat, lo: CGFloat) -> UIFont {
+    private static func fittingFont(_ text: String, rect: CGRect, weight: UIFont.Weight,
+                                    hi: CGFloat, lo: CGFloat, style: PiPStyle) -> UIFont {
         var fs = hi
         while fs > lo {
-            let f = makeFont(fs, weight)
+            let f = makeFont(fs, weight, style)
             let b = (text as NSString).boundingRect(with: CGSize(width: rect.width, height: .greatestFiniteMagnitude),
                                                     options: .usesLineFragmentOrigin,
                                                     attributes: [.font: f], context: nil)
             if b.height <= rect.height { return f }
             fs -= 2
         }
-        return makeFont(lo, weight)
+        return makeFont(lo, weight, style)
     }
 
-    private func makeFont(_ size: CGFloat, _ weight: UIFont.Weight) -> UIFont {
+    private static func makeFont(_ size: CGFloat, _ weight: UIFont.Weight, _ style: PiPStyle) -> UIFont {
         let base = UIFont.systemFont(ofSize: size, weight: weight)
         if let d = base.fontDescriptor.withDesign(style.design) { return UIFont(descriptor: d, size: size) }
         return base

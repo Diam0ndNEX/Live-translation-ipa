@@ -1,4 +1,4 @@
-// ScreenLingo – Broadcast extension – v0.7.0
+// Screen Translator – Broadcast extension – v0.11.0
 import ReplayKit
 import Vision
 import ImageIO
@@ -9,20 +9,22 @@ import os
 class SampleHandler: RPBroadcastSampleHandler {
     private var conn: NWConnection?
     private var frames = 0
+    private var passes = 0
+    private var skipped = 0
     private var lastRun = Date.distantPast
-    private var lastUsefulTextAt = Date()
     private var lastPing = Date.distantPast
     private var candidateKey = ""
-    private var candidateCount = 0
-    private var candidateLines: [OCRLine] = []
     private var sentKey = ""
-    private var lastSentAt = Date.distantPast
+    private var candidateCount = 0
+    private var specKey = ""
+    private var lastOCRConfig: Config?
     private var emptyPasses = 0
     private var lastOcrMs: Double = 0
-    private var heartbeat: DispatchSourceTimer?
+    private var ocrSig: [UInt8] = []
+    private var info = (bw: 0, bh: 0, orient: 1, cw: 0, ch: 0)
 
     private let cfgLock = NSLock()
-    private var _config = Config(lang: "auto", y0: 0, y1: 1, maxEdge: 1400, interval: 0.25, paused: false, minimumConfidence: 0.30, languageCorrection: true, minimumTextHeight: nil, ignoreList: nil, dropNoise: nil, boost: nil, stability: nil, skipUnchanged: nil, rotation: nil, adaptive: true, idleMinutes: 0)
+    private var _config = Config(lang: "auto", y0: 0, y1: 1, maxEdge: 1400, interval: 0.25, paused: false)
     private var config: Config {
         get { cfgLock.lock(); defer { cfgLock.unlock() }; return _config }
         set { cfgLock.lock(); _config = newValue; cfgLock.unlock() }
@@ -41,27 +43,10 @@ class SampleHandler: RPBroadcastSampleHandler {
         c.start(queue: .global(qos: .utility))
         conn = c
         listen()
-        // The first UDP datagram can be lost if the host app's listener is still
-        // starting. Keep announcing the extension independently of video frames,
-        // so the app can recover from startup races and temporarily unavailable frames.
         send(kind: "ping", lines: [])
-        let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
-        timer.schedule(deadline: .now() + 0.5, repeating: 1.0, leeway: .milliseconds(100))
-        timer.setEventHandler { [weak self] in
-            guard let self else { return }
-            self.send(kind: "ping", lines: [])
-        }
-        heartbeat = timer
-        timer.resume()
     }
 
-    override func broadcastFinished() {
-        heartbeat?.setEventHandler {}
-        heartbeat?.cancel()
-        heartbeat = nil
-        conn?.cancel()
-        conn = nil
-    }
+    override func broadcastFinished() { conn?.cancel() }
 
     /// The app sends settings back over the same link.
     private func listen() {
@@ -79,12 +64,24 @@ class SampleHandler: RPBroadcastSampleHandler {
         if now.timeIntervalSince(lastPing) > 2 { lastPing = now; send(kind: "ping", lines: []) }
 
         let cfg = config
-        let idleMinutes = max(0, cfg.idleMinutes ?? 0)
-        let isIdle = (cfg.adaptive ?? true) && idleMinutes > 0
-            && now.timeIntervalSince(lastUsefulTextAt) >= TimeInterval(idleMinutes * 60)
-        let effectiveInterval = isIdle ? max(cfg.interval, 0.9) : cfg.interval
-        guard !cfg.paused, now.timeIntervalSince(lastRun) >= effectiveInterval,
+        if cfg != lastOCRConfig {
+            candidateKey = ""; sentKey = ""; specKey = ""; candidateCount = 0
+            ocrSig = []; emptyPasses = 0
+            lastOCRConfig = cfg
+        }
+        guard !cfg.paused, now.timeIntervalSince(lastRun) >= cfg.interval,
               let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+
+        // Skip frames that look identical to the last one we read (saves battery, keeps things fast)
+        if (cfg.skipUnchanged ?? true) && candidateCount == 0 {
+            let sig = signature(pb)
+            if !sig.isEmpty, sig.count == ocrSig.count, now.timeIntervalSince(lastRun) < 2.0,
+               meanDiff(sig, ocrSig) <= 1.5 {
+                skipped += 1
+                return
+            }
+            ocrSig = sig
+        }
 
         var orientation = CGImagePropertyOrientation.up
         if let n = CMGetAttachment(sampleBuffer, key: RPVideoSampleOrientationKey as CFString,
@@ -92,8 +89,39 @@ class SampleHandler: RPBroadcastSampleHandler {
            let o = CGImagePropertyOrientation(rawValue: n.uint32Value) {
             orientation = o
         }
+        info.bw = CVPixelBufferGetWidth(pb)
+        info.bh = CVPixelBufferGetHeight(pb)
+        info.orient = Int(orientation.rawValue)
         autoreleasepool { recognize(pb, orientation, cfg) }
         lastRun = Date()
+    }
+
+    // MARK: Cheap change detection
+    private func signature(_ pb: CVPixelBuffer) -> [UInt8] {
+        CVPixelBufferLockBaseAddress(pb, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
+        let planar = CVPixelBufferIsPlanar(pb)
+        guard let base = planar ? CVPixelBufferGetBaseAddressOfPlane(pb, 0) : CVPixelBufferGetBaseAddress(pb) else { return [] }
+        let w = planar ? CVPixelBufferGetWidthOfPlane(pb, 0) : CVPixelBufferGetWidth(pb)
+        let h = planar ? CVPixelBufferGetHeightOfPlane(pb, 0) : CVPixelBufferGetHeight(pb)
+        let stride = planar ? CVPixelBufferGetBytesPerRowOfPlane(pb, 0) : CVPixelBufferGetBytesPerRow(pb)
+        let bpp = planar ? 1 : 4
+        guard w > 8, h > 8 else { return [] }
+        var out: [UInt8] = []
+        out.reserveCapacity(576)
+        for gy in 0..<24 {
+            let row = base.advanced(by: ((gy * (h - 1)) / 23) * stride)
+            for gx in 0..<24 {
+                out.append(row.load(fromByteOffset: ((gx * (w - 1)) / 23) * bpp, as: UInt8.self))
+            }
+        }
+        return out
+    }
+
+    private func meanDiff(_ a: [UInt8], _ b: [UInt8]) -> Double {
+        var d = 0
+        for i in 0..<a.count { d += abs(Int(a[i]) - Int(b[i])) }
+        return Double(d) / Double(max(1, a.count))
     }
 
     // MARK: OCR
@@ -111,16 +139,14 @@ class SampleHandler: RPBroadcastSampleHandler {
     private func makeRequest(_ cfg: Config, span: Double) -> VNRecognizeTextRequest {
         let r = VNRecognizeTextRequest()
         r.recognitionLevel = .accurate
-        r.usesLanguageCorrection = cfg.languageCorrection
-        r.minimumTextHeight = Float(max(0, min(0.1, cfg.minimumTextHeight ?? (0.01 / max(0.1, span)))))
+        r.usesLanguageCorrection = true
+        r.minimumTextHeight = Float(min(0.1, 0.01 / max(0.1, span)))
         if let langs = visionLanguages(for: cfg.lang) {
             r.automaticallyDetectsLanguage = false
             r.recognitionLanguages = langs
         } else {
-            // Let Vision choose its language model when the user selected Auto.
-            // Supplying every supported language at once creates a huge, unordered
-            // candidate set and can bias OCR toward English on multilingual frames.
             r.automaticallyDetectsLanguage = true
+            if !recognitionLanguages.isEmpty { r.recognitionLanguages = recognitionLanguages }
         }
         return r
     }
@@ -132,15 +158,9 @@ class SampleHandler: RPBroadcastSampleHandler {
         let handler = VNImageRequestHandler(ciImage: img, options: [:])
         guard (try? handler.perform([req])) != nil, let results = req.results else { return [] }
 
-        let ignored = (cfg.ignoreList ?? []).map { $0.lowercased() }.filter { !$0.isEmpty }
         var lines = results.compactMap { obs -> OCRLine? in
-            guard let c = obs.topCandidates(1).first, c.confidence >= Float(cfg.minimumConfidence), c.string.count >= 2,
+            guard let c = obs.topCandidates(1).first, c.confidence >= 0.3, c.string.count >= 2,
                   c.string.contains(where: { $0.isLetter || $0.isNumber }) else { return nil }
-            let normalized = c.string.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            if ignored.contains(where: { normalized.contains($0) }) { return nil }
-            let letters = c.string.filter(\.isLetter).count
-            let digits = c.string.filter(\.isNumber).count
-            if (cfg.dropNoise ?? false) && (letters < 2 || (digits > 0 && letters * 2 < digits)) { return nil }
             let b = obs.boundingBox
             let y = y0 + Double(b.midY) * span
             guard y < 0.96 else { return nil }
@@ -152,20 +172,23 @@ class SampleHandler: RPBroadcastSampleHandler {
 
     private func freeMB() -> Double { Double(os_proc_available_memory()) / 1_048_576 }
 
+    private func enhanced(_ i: CIImage) -> CIImage {
+        i.applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 0.0, kCIInputContrastKey: 1.8])
+            .applyingFilter("CISharpenLuminance", parameters: [kCIInputSharpnessKey: 0.8])
+    }
+
     private func recognize(_ pb: CVPixelBuffer, _ orientation: CGImagePropertyOrientation, _ cfg: Config) {
         let t0 = CFAbsoluteTimeGetCurrent()
+        passes += 1
 
         // Only read the chosen area, at reduced size: this is the big speed-up.
         let margin = 0.03
         let y0 = max(0, cfg.y0 - margin), y1 = min(1, cfg.y1 + margin)
         var edge = cfg.maxEdge
-        let idleMinutes = max(0, cfg.idleMinutes ?? 0)
-        let isIdle = (cfg.adaptive ?? true) && idleMinutes > 0
-            && Date().timeIntervalSince(lastUsefulTextAt) >= TimeInterval(idleMinutes * 60)
-        if isIdle { edge = min(edge, 900) }                 // save power while no text is visible
         if freeMB() < 15 { edge = min(edge, 800) }          // memory getting tight
 
-        let extra = [CGImagePropertyOrientation.up, .right, .down, .left][((cfg.rotation ?? 0) % 4 + 4) % 4]
+        // iOS's orientation hint first, then the app's extra quarter-turns (fixes upside-down frames)
+        let extra = [CGImagePropertyOrientation.up, .right, .down, .left][(cfg.rot ?? 0) & 3]
         let base = CIImage(cvPixelBuffer: pb).oriented(orientation).oriented(extra)
         let ext = base.extent
         let crop = CGRect(x: ext.minX, y: ext.minY + ext.height * y0,
@@ -177,17 +200,16 @@ class SampleHandler: RPBroadcastSampleHandler {
             let s = edge / longEdge
             img = img.transformed(by: CGAffineTransform(scaleX: s, y: s))
         }
+        info.cw = Int(img.extent.width)
+        info.ch = Int(img.extent.height)
 
         let boost = cfg.boost ?? 1
-        let boosted = img
-            .applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 0.0, kCIInputContrastKey: 1.8])
-            .applyingFilter("CISharpenLuminance", parameters: [kCIInputSharpnessKey: 0.8])
-        var lines = boost == 2 ? ocr(boosted, cfg, y0, y1) : ocr(img, cfg, y0, y1)
+        var lines = ocr(boost == 2 ? enhanced(img) : img, cfg, y0, y1)
         if lines.isEmpty {
             emptyPasses += 1
-            // Fallback for hard text (thin, outlined, low contrast): retry when configured.
+            // Fallback for hard text (thin, outlined, low contrast): boost contrast and retry
             if boost == 1 && emptyPasses % 3 == 0 && freeMB() > 20 {
-                lines = ocr(boosted, cfg, y0, y1)
+                lines = ocr(enhanced(img), cfg, y0, y1)
             }
         } else {
             emptyPasses = 0
@@ -196,72 +218,37 @@ class SampleHandler: RPBroadcastSampleHandler {
 
         if lines.isEmpty {
             if emptyPasses >= 4 {
-                if !sentKey.isEmpty { send(kind: "clear", lines: []) }
-                sentKey = ""; candidateKey = ""; candidateLines = []; lastSentAt = .distantPast
+                if !sentKey.isEmpty { send(kind: "clear", lines: [], revision: cfg.rev) }
+                sentKey = ""; candidateKey = ""; candidateCount = 0
             }
             return
         }
 
-        lastUsefulTextAt = Date()
-
-        // Require at least two consecutive OCR passes even if "Fast" is selected.
-        // A single Vision frame can drop the beginning/end of a subtitle; publishing
-        // each changed frame makes the translator and History oscillate between variants.
-        let key = lines.map(\.t).joined(separator: " ")
-        let keyNorm = TextSim.norm(key)
-        let sentNorm = TextSim.norm(sentKey)
-        let skipUnchanged = cfg.skipUnchanged ?? true
-        if skipUnchanged && !sentKey.isEmpty && TextSim.similar(key, sentKey, 0.97) {
-            candidateKey = ""
+        // Stability: send once the same text was read N times in a row (skips half-faded text).
+        let need = max(1, cfg.stability ?? 2)
+        let key = lines.map(\.t).joined(separator: "\n")
+        if PipelineSafety.isDuplicate(key.components(separatedBy: "\n"), previous: sentKey.components(separatedBy: "\n")) { candidateKey = key; candidateCount = 0; return }
+        if TextSim.similar(key, candidateKey) { candidateCount += 1 } else { candidateKey = key; candidateCount = 1 }
+        if candidateCount >= need {
+            sentKey = key
             candidateCount = 0
-            candidateLines = []
-            return
+            send(kind: "ocr", lines: Array(lines.prefix(60)), stable: true, revision: cfg.rev)
+        } else if candidateCount == 1, need > 1, cfg.speculate ?? true, !TextSim.similar(key, specKey) {
+            // First sighting: the app starts translating right away but only shows it once the text is confirmed.
+            specKey = key
+            send(kind: "ocr", lines: Array(lines.prefix(60)), stable: false, revision: cfg.rev)
         }
-
-        // Reject a substantially shorter OCR reading that is contained inside the
-        // last accepted text while that text is still fresh. This catches fragments
-        // that are not necessarily a suffix, before they can trigger translation/history.
-        let recentAcceptedText = Date().timeIntervalSince(lastSentAt) < 2.5
-        let looksLikeTruncatedFragment = recentAcceptedText
-            && sentNorm.count >= keyNorm.count + 8
-            && keyNorm.count >= 8
-            && Double(keyNorm.count) / Double(max(1, sentNorm.count)) < 0.82
-            && sentNorm.contains(keyNorm)
-        if looksLikeTruncatedFragment {
-            candidateKey = ""
-            candidateCount = 0
-            candidateLines = []
-            return
-        }
-
-        // "Instant" used to mean one frame, which is too unstable for live OCR.
-        // Keep the speed control but enforce a minimum two-pass confirmation.
-        let required = max(2, min(3, cfg.stability ?? 2))
-        if TextSim.similar(key, candidateKey, 0.97) {
-            candidateCount += 1
-            // Keep the matching lines from this pass; only near-identical candidates
-            // reach this branch, so the selected frame remains internally consistent.
-            candidateLines = lines
-        } else {
-            candidateKey = key
-            candidateCount = 1
-            candidateLines = lines
-        }
-        guard candidateCount >= required else { return }
-        let acceptedLines = candidateLines.isEmpty ? lines : candidateLines
-        sentKey = acceptedLines.map(\.t).joined(separator: " ")
-        lastSentAt = Date()
-        candidateKey = ""
-        candidateCount = 0
-        candidateLines = []
-        send(kind: "ocr", lines: Array(acceptedLines.prefix(60)))
     }
 
     // MARK: Send
-    private func send(kind: String, lines: [OCRLine]) {
+    private func send(kind: String, lines: [OCRLine], stable: Bool? = nil, revision: Int? = nil) {
         func encode(_ l: [OCRLine]) -> Data? {
             try? JSONEncoder().encode(Packet(kind: kind, version: AppVersion.version, frames: frames, lines: l,
-                                             ocrMs: lastOcrMs, memFreeMB: freeMB(), rev: config.revision))
+                                             ocrMs: lastOcrMs, memFreeMB: freeMB(),
+                                             ts: Date().timeIntervalSince1970, rev: revision ?? config.rev,
+                                             bufW: info.bw, bufH: info.bh, orient: info.orient,
+                                             cropW: info.cw, cropH: info.ch, passes: passes, skipped: skipped,
+                                             stable: stable))
         }
         var data = encode(lines)
         if let d = data, d.count > 60000 { data = encode(Array(lines.prefix(30))) }

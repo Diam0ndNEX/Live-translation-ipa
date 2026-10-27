@@ -96,9 +96,7 @@ enum TextIntel {
     private static let wordRegex = try! NSRegularExpression(pattern: #"\p{L}+"#)
 
     static func expandSlang(_ text: String, lang: String) -> String {
-        let normalized = lang.lowercased()
-        let base = normalized.split(separator: "-").first.map(String.init) ?? normalized
-        guard let map = slang[normalized] ?? slang[base] else { return text }
+        guard let map = slang[lang] else { return text }
         let ns = text as NSString
         var out = ""
         var cursor = 0

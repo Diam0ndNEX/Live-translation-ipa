@@ -1,36 +1,103 @@
-// Screen Translator – App – v0.8.0
+// Screen Translator – App – v0.11.0
 import SwiftUI
 
 private extension View {
     func settingsPage(_ title: String) -> some View {
         self.scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+private struct ResetSection: View {
+    @EnvironmentObject var engine: TranslatorEngine
+    let keys: [String]
+    @State private var confirm = false
+    var body: some View {
+        Section {
+            Button("Reset this page to defaults", role: .destructive) { confirm = true }
+        }
+        .confirmationDialog("Reset every setting on this page?", isPresented: $confirm, titleVisibility: .visible) {
+            Button("Reset", role: .destructive) { engine.resetKeys(keys) }
+        }
+    }
+}
+
+private struct PresetsLinkRow: View {
+    @ObservedObject var store: PresetStore
+    var body: some View {
+        NavigationLink { PresetManagerView(store: store) } label: {
+            HStack {
+                Label("Presets", systemImage: "square.stack.3d.up.fill")
+                Spacer()
+                if let a = store.active {
+                    Text(store.isModified ? "\(a.name) · modified" : a.name).font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    Text("\(store.all.count) available").font(.footnote).foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 }
 
 // MARK: - Settings home
 struct SettingsView: View {
     @EnvironmentObject var engine: TranslatorEngine
+    @State private var query = ""
+
+    private func show(_ title: String, _ keywords: String) -> Bool {
+        query.isEmpty || (title + " " + keywords).localizedCaseInsensitiveContains(query)
+    }
+
+    private var anyMatch: Bool {
+        show("Presets", "save profile custom switch")
+            || show("Reading & OCR", "mode area custom rotation order speed stability ignore noise contrast frames words small")
+            || show("Understanding & rules", "clean slang speaker language lock never translate glossary fixes names")
+            || show("Floating window", "size theme colour font text original auto open clear hold display vibrate speak voice copy preview")
+            || show("Interface", "accent colour home sections haptics keep awake history save")
+            || show("Performance & power", "adaptive battery idle pause thermal hot")
+            || show("Backup & reset", "export import backup restore reset")
+            || show("About & help", "version changelog help how")
+    }
 
     var body: some View {
         NavigationStack {
             List {
+                if show("Presets", "save profile custom switch") {
+                    Section { PresetsLinkRow(store: engine.presets) }
+                }
                 Section {
-                    NavigationLink { ReadingSettings() } label: { Label("Reading & OCR", systemImage: "viewfinder") }
-                    NavigationLink { IntelligenceSettings() } label: { Label("Understanding & rules", systemImage: "brain") }
-                    NavigationLink { WindowSettings() } label: { Label("Floating window", systemImage: "rectangle.on.rectangle") }
-                    NavigationLink { PerformanceSettings() } label: { Label("Performance & power", systemImage: "bolt.fill") }
-                    NavigationLink { ProfilesSettings() } label: { Label("Profiles & backup", systemImage: "square.stack.3d.up") }
-                    NavigationLink { PrivacySettings() } label: { Label("Privacy & history", systemImage: "hand.raised") }
-                    NavigationLink { AboutSettings() } label: { Label("About & help", systemImage: "info.circle") }
+                    if show("Reading & OCR", "mode area custom rotation order speed stability ignore noise contrast frames words small") {
+                        NavigationLink { ReadingSettings() } label: { Label("Reading & OCR", systemImage: "viewfinder") }
+                    }
+                    if show("Understanding & rules", "clean slang speaker language lock never translate glossary fixes names") {
+                        NavigationLink { IntelligenceSettings() } label: { Label("Understanding & rules", systemImage: "brain") }
+                    }
+                    if show("Floating window", "size theme colour font text original auto open clear hold display vibrate speak voice copy preview") {
+                        NavigationLink { WindowSettings() } label: { Label("Floating window", systemImage: "rectangle.on.rectangle") }
+                    }
+                    if show("Interface", "accent colour home sections haptics keep awake history save") {
+                        NavigationLink { InterfaceSettings() } label: { Label("Interface", systemImage: "paintbrush.fill") }
+                    }
+                    if show("Performance & power", "adaptive battery idle pause thermal hot") {
+                        NavigationLink { PerformanceSettings() } label: { Label("Performance & power", systemImage: "bolt.fill") }
+                    }
+                    if show("Backup & reset", "export import backup restore reset") {
+                        NavigationLink { BackupSettings() } label: { Label("Backup & reset", systemImage: "externaldrive.fill") }
+                    }
+                    if show("About & help", "version changelog help how") {
+                        NavigationLink { AboutSettings() } label: { Label("About & help", systemImage: "info.circle") }
+                    }
                 } footer: {
                     Text(AppVersion.full)
                 }
             }
+            .overlay { if !anyMatch { ContentUnavailableView.search(text: query) } }
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
+            .searchable(text: $query, prompt: "Search settings")
             .navigationTitle("Settings")
         }
     }
@@ -91,7 +158,7 @@ struct ReadingSettings: View {
             } header: {
                 Text("Sentence order")
             } footer: {
-                Text("If sentences come out in the wrong order, the capture is probably rotated. Automatic detects this by checking which direction the lines read naturally. Pick a fixed rotation if you want to force it.")
+                Text("If sentences come out in the wrong order, the capture is probably rotated. Automatic detects this by checking which direction the lines read naturally. Pick a fixed rotation to force it.")
             }
 
             Section {
@@ -99,7 +166,7 @@ struct ReadingSettings: View {
                     ForEach(SpeedPreset.allCases) { Text($0.title).tag($0.rawValue) }
                 }
                 Picker("Wait for stable text", selection: $stability) {
-                    Text("Fast (stable)").tag(1)
+                    Text("Instant").tag(1)
                     Text("Normal").tag(2)
                     Text("Careful").tag(3)
                 }
@@ -112,8 +179,11 @@ struct ReadingSettings: View {
             } header: {
                 Text("Speed & quality")
             } footer: {
-                Text("Fast still confirms two OCR passes to prevent flicker. Normal and Careful wait for more consistent frames. Always boosting contrast can help thin or outlined fonts but is slower.")
+                Text("Instant is fastest but may translate half-faded text. Always boosting contrast helps thin or outlined fonts but is slower.")
             }
+
+            ResetSection(keys: ["mode", "area", "customY0", "customY1", "frameRot", "speed", "stability",
+                                "minTextH", "ignoreList", "dropNoise", "boost", "skipUnchanged"])
         }
         .settingsPage("Reading & OCR")
         .onChange(of: key) { _, _ in engine.syncConfig() }
@@ -123,6 +193,7 @@ struct ReadingSettings: View {
 
 // MARK: - Understanding & rules
 struct IntelligenceSettings: View {
+    @EnvironmentObject var engine: TranslatorEngine
     @AppStorage("cleanOCR") private var cleanOCR = true
     @AppStorage("slang") private var slang = true
     @AppStorage("speakerDetect") private var speakerDetect = true
@@ -171,8 +242,10 @@ struct IntelligenceSettings: View {
             } footer: {
                 Text("One per line: word=replacement. Example: Lord Subaru=Subaru")
             }
+            ResetSection(keys: ["cleanOCR", "slang", "speakerDetect", "langLock", "neverTranslate", "sourceFixes", "glossary"])
         }
         .settingsPage("Understanding & rules")
+        .onDisappear { engine.reloadSettings() }
     }
 }
 
@@ -191,14 +264,32 @@ struct WindowSettings: View {
     @AppStorage("minDisplay") private var minDisplay = 0.0
     @AppStorage("haptics") private var haptics = false
     @AppStorage("speak") private var speak = false
+    @AppStorage("speechRate") private var speechRate = 0.5
+    @AppStorage("autoCopy") private var autoCopy = false
 
     private var styleKey: String { "\(theme)|\(textSize)|\(pipFont)|\(highlightNames)" }
 
+    private var previewImage: UIImage {
+        var st = PiPStyle.make(theme: PiPTheme(rawValue: theme) ?? .dark,
+                               size: PiPTextSize(rawValue: textSize) ?? .auto,
+                               font: PiPFont(rawValue: pipFont) ?? .standard)
+        st.highlightNames = highlightNames
+        return PiPRenderer.image(original: "Rem: O-o Subaru é filho de um Deus?",
+                                 translated: "Rem: W-wait, is Subaru the son of a God? Why didn't he ever tell us?",
+                                 showOriginal: showOriginal,
+                                 size: (WindowSize(rawValue: winSize) ?? .normal).size, style: st)
+    }
+
     var body: some View {
         List {
+            Section("Preview") {
+                Image(uiImage: previewImage)
+                    .resizable()
+                    .scaledToFit()
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .listRowInsets(EdgeInsets())
+            }
             Section("Look") {
-                Text("iOS controls the floating PiP window itself. These options control the content layout and make text easier to fit inside it.")
-                    .font(.footnote).foregroundStyle(.secondary)
                 Picker("Window size", selection: $winSize) {
                     ForEach(WindowSize.allCases) { Text($0.title).tag($0.rawValue) }
                 }
@@ -235,12 +326,96 @@ struct WindowSettings: View {
             }
             Section("Feedback") {
                 Toggle("Vibrate on new translation", isOn: $haptics)
+                Toggle("Copy every translation to the clipboard", isOn: $autoCopy)
                 Toggle("Speak translation aloud", isOn: $speak)
+                if speak {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Speaking speed").font(.subheadline)
+                        Slider(value: $speechRate, in: 0.3...0.65)
+                    }
+                }
             }
+            ResetSection(keys: ["winSize", "theme", "textSize", "pipFont", "highlightNames", "showOriginal", "autoOpenPiP",
+                                "autoClear", "clearHold", "minDisplay", "haptics", "speak", "speechRate", "autoCopy"])
         }
         .settingsPage("Floating window")
         .onChange(of: styleKey) { _, _ in engine.applyStyle() }
+        .onChange(of: showOriginal) { _, _ in engine.applyStyle() }
         .onChange(of: winSize) { _, _ in engine.applyWindowSize() }
+    }
+}
+
+// MARK: - Interface
+struct InterfaceSettings: View {
+    @EnvironmentObject var engine: TranslatorEngine
+    @AppStorage("accent") private var accent = AccentChoice.blue.rawValue
+    @AppStorage("homePresets") private var homePresets = true
+    @AppStorage("homeTools") private var homeTools = true
+    @AppStorage("homeQuick") private var homeQuick = true
+    @AppStorage("homeStatus") private var homeStatus = true
+    @AppStorage("homeRecent") private var homeRecent = true
+    @AppStorage("uiHaptics") private var uiHaptics = true
+    @AppStorage("keepAwake") private var keepAwake = true
+    @AppStorage("saveHistory") private var saveHistory = true
+    @AppStorage("historyRetentionDays") private var historyRetentionDays = 0
+    @State private var confirmClear = false
+
+    var body: some View {
+        List {
+            Section("Accent colour") {
+                HStack(spacing: 14) {
+                    ForEach(AccentChoice.allCases) { a in
+                        Circle()
+                            .fill(LinearGradient(colors: [a.start, a.end], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .frame(width: 34, height: 34)
+                            .overlay(Circle().stroke(Color.white, lineWidth: accent == a.rawValue ? 3 : 0))
+                            .onTapGesture { accent = a.rawValue; engine.tap() }
+                            .accessibilityLabel(a.title)
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+            Section {
+                Toggle("Presets", isOn: $homePresets)
+                Toggle("Tools under the preview", isOn: $homeTools)
+                Toggle("Quick settings", isOn: $homeQuick)
+                Toggle("Recent language pairs", isOn: $homeRecent)
+                Toggle("Status & diagnostics summary", isOn: $homeStatus)
+            } header: {
+                Text("Home screen")
+            } footer: {
+                Text("Hide what you don't use for a calmer Home screen.")
+            }
+            Section("Behaviour") {
+                Toggle("Tap feedback (haptics)", isOn: $uiHaptics)
+                Toggle("Keep screen awake while capturing", isOn: $keepAwake)
+            }
+            Section {
+                Toggle("Remember history between launches", isOn: $saveHistory)
+                Picker("Keep unstarred history", selection: $historyRetentionDays) {
+                    Text("Forever").tag(0)
+                    Text("1 day").tag(1)
+                    Text("7 days").tag(7)
+                    Text("30 days").tag(30)
+                }
+                Button("Clear all history", role: .destructive) { confirmClear = true }
+            } header: {
+                Text("History")
+            }
+            ResetSection(keys: ["accent", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent",
+                                "uiHaptics", "keepAwake", "saveHistory", "historyRetentionDays"])
+        }
+        .settingsPage("Interface")
+        .onChange(of: saveHistory) { _, on in
+            if !on {
+                UserDefaults.standard.removeObject(forKey: "historyData")
+                UserDefaults.standard.removeObject(forKey: "screenlingo.history.v1")
+            }
+        }
+        .onChange(of: historyRetentionDays) { _, _ in engine.applyHistoryRetention() }
+        .confirmationDialog("Delete every translation in History?", isPresented: $confirmClear, titleVisibility: .visible) {
+            Button("Clear all history", role: .destructive) { engine.history.removeAll(); engine.toast("History cleared") }
+        }
     }
 }
 
@@ -249,9 +424,23 @@ struct PerformanceSettings: View {
     @EnvironmentObject var engine: TranslatorEngine
     @AppStorage("adaptive") private var adaptive = true
     @AppStorage("idleMinutes") private var idleMinutes = 0
+    @AppStorage("translateAhead") private var translateAhead = true
+    @AppStorage("keepWarm") private var keepWarm = true
+    @AppStorage("remember") private var remember = true
 
     var body: some View {
         List {
+            Section {
+                Toggle("Translate ahead", isOn: $translateAhead)
+                Toggle("Keep the translator warm", isOn: $keepWarm)
+                Toggle("Remember translations", isOn: $remember)
+                LabeledContent("Sentences remembered", value: "\(engine.memoryCount)")
+                Button("Clear translation memory", role: .destructive) { engine.clearMemory() }
+            } header: {
+                Text("Translation speed")
+            } footer: {
+                Text("Translate ahead starts translating the moment text appears and shows it once it's confirmed, so the two waits overlap. Keeping the translator warm avoids a slow first sentence. Remembered sentences are reused instantly, even after restarting. None of this changes the wording of a translation.")
+            }
             Section {
                 Toggle("Adaptive performance", isOn: $adaptive)
                 Picker("Pause after no text for", selection: $idleMinutes) {
@@ -266,45 +455,32 @@ struct PerformanceSettings: View {
                 Text("Adaptive performance reads less often when the phone gets hot, Low Power Mode is on, or the capture extension is running low on memory. Auto-pause saves battery during long gaps.")
             }
             Section {
-                Button("Reset diagnostics counters") { engine.clearDiagnosticEvents() }
+                Button("Reset diagnostics counters") { engine.diag.reset(); engine.toast("Counters reset") }
             }
+            ResetSection(keys: ["adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember"])
         }
         .settingsPage("Performance & power")
         .onChange(of: adaptive) { _, _ in engine.syncConfig() }
+        .onChange(of: translateAhead) { _, _ in engine.syncConfig() }
     }
 }
 
-// MARK: - Profiles & backup
-struct ProfilesSettings: View {
+// MARK: - Backup & reset
+struct BackupSettings: View {
     @EnvironmentObject var engine: TranslatorEngine
-    @State private var name = ""
     @State private var message = ""
+    @State private var confirmReset = false
 
     var body: some View {
         List {
             Section {
-                TextField("Profile name (e.g. Anime night)", text: $name)
-                Button("Save current settings as profile") {
-                    engine.saveProfile(name)
-                    name = ""
+                Button { Sharer.shareFile(text: engine.exportSettings(), name: "screen-translator-settings.json") } label: {
+                    Label("Share all settings", systemImage: "square.and.arrow.up")
                 }
-                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
-            } header: {
-                Text("Save")
-            } footer: {
-                Text("A profile remembers every setting, including languages. Swipe a profile to delete it.")
-            }
-            Section("Your profiles") {
-                if engine.profileNames.isEmpty {
-                    Text("None yet.").font(.footnote).foregroundStyle(.secondary)
-                }
-                ForEach(engine.profileNames, id: \.self) { p in
-                    Button(p) { engine.applyProfile(p) }
-                        .swipeActions { Button("Delete", role: .destructive) { engine.deleteProfile(p) } }
-                }
-            }
-            Section {
-                ShareLink(item: engine.exportSettings()) { Label("Export settings", systemImage: "square.and.arrow.up") }
+                Button {
+                    UIPasteboard.general.string = engine.exportSettings()
+                    message = "Settings copied to the clipboard."
+                } label: { Label("Copy all settings", systemImage: "doc.on.doc") }
                 Button {
                     message = engine.importSettings(UIPasteboard.general.string ?? "")
                         ? "Settings imported from the clipboard."
@@ -312,59 +488,27 @@ struct ProfilesSettings: View {
                 } label: { Label("Import settings from clipboard", systemImage: "square.and.arrow.down") }
                 if !message.isEmpty { Text(message).font(.footnote).foregroundStyle(.secondary) }
             } header: {
-                Text("Backup")
+                Text("Settings backup")
             } footer: {
-                Text("Export, then copy the text somewhere safe. To restore, copy it again and tap Import.")
-            }
-        }
-        .settingsPage("Profiles & backup")
-    }
-}
-
-// MARK: - Privacy & history
-struct PrivacySettings: View {
-    @EnvironmentObject var engine: TranslatorEngine
-    @AppStorage("historyRetentionDays") private var retentionDays = 0
-    @AppStorage("includeDiagnosticText") private var includeDiagnosticText = false
-    @State private var showRetentionInfo = false
-
-    var body: some View {
-        List {
-            Section {
-                Picker("Keep translation history", selection: $retentionDays) {
-                    Text("Forever").tag(0)
-                    Text("7 days").tag(7)
-                    Text("30 days").tag(30)
-                    Text("90 days").tag(90)
-                }
-            } header: {
-                Text("Local history")
-            } footer: {
-                Text("Older entries are removed automatically when history is loaded or next saved. History stays on this device and is not uploaded by ScreenLingo.")
+                Text("Export, copy the text somewhere safe, and import it again to restore. Presets have their own export on the Presets page.")
             }
             Section {
-                Toggle("Include recognized text in diagnostic reports", isOn: $includeDiagnosticText)
-            } header: {
-                Text("Diagnostics")
+                Button("Reset every setting", role: .destructive) { confirmReset = true }
             } footer: {
-                Text("Turn this off before sharing reports if the screen may contain private messages, account details, or other sensitive text.")
-            }
-            Section("Data controls") {
-                LabeledContent("Storage", value: "On this device")
-                LabeledContent("Translation service", value: "Apple on-device")
-                Text("Exported history and diagnostic reports can contain screen text. Review them before sharing.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Text("Presets and history are kept.")
             }
         }
-        .settingsPage("Privacy & history")
-        .onChange(of: retentionDays) { _, _ in engine.applyHistoryRetention() }
+        .settingsPage("Backup & reset")
+        .confirmationDialog("Reset every setting to its default?", isPresented: $confirmReset, titleVisibility: .visible) {
+            Button("Reset every setting", role: .destructive) { engine.resetAllSettings() }
+        }
     }
 }
 
 // MARK: - About
 struct AboutSettings: View {
     @EnvironmentObject var engine: TranslatorEngine
-    @State private var confirmReset = false
+    @AppStorage("onboarded") private var onboarded = true
 
     var body: some View {
         List {
@@ -374,8 +518,9 @@ struct AboutSettings: View {
                                value: engine.extensionVersion == "–" ? "not seen yet" : "v\(engine.extensionVersion)")
             }
             Section("How to use") {
-                Text("1. Languages tab → download your source and target packs.\n2. Home → Start. Allow the floating window, then Start Broadcast.\n3. Switch to your app. If nothing shows, use Test translation, and check the Diagnostics tab.")
+                Text("1. Languages tab → download your source and target packs.\n2. Home → tap the broadcast icon, choose ScreenLingo Capture, Start Broadcast.\n3. Switch to your app. If nothing shows, use Test on the Home screen and check the Diagnostics tab.")
                     .font(.footnote)
+                Button("Show the welcome tour again") { onboarded = false }
             }
             Section("Changelog") {
                 ForEach(AppVersion.changelog, id: \.0) { v in
@@ -385,13 +530,7 @@ struct AboutSettings: View {
                     }
                 }
             }
-            Section {
-                Button("Reset all settings", role: .destructive) { confirmReset = true }
-            }
         }
         .settingsPage("About & help")
-        .confirmationDialog("Reset every setting to its default?", isPresented: $confirmReset, titleVisibility: .visible) {
-            Button("Reset all settings", role: .destructive) { engine.resetAllSettings() }
-        }
     }
 }

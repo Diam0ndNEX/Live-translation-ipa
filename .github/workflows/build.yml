@@ -1,132 +1,63 @@
 name: Build ScreenLingo IPA
-
 on:
-  # Build the latest committed branch version and allow manual builds too.
   push:
-    branches:
-      - codex/screenlingo-v0.7.0
+    branches: [codex/screenlingo-v0.7.0]
   workflow_dispatch:
-
-# Never spend minutes building an older commit when a newer build is queued.
 concurrency:
   group: screenlingo-ipa-${{ github.ref }}
   cancel-in-progress: true
-
 permissions:
-  contents: write
-
+  contents: read
 jobs:
   build:
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
-
-      - name: Install build tools
-        run: brew install xcodegen librsvg
-
-      - name: Generate app icon and project
+      - name: Check pipeline regressions
         run: |
-          set -euo pipefail
-          mkdir -p App/Assets.xcassets/AppIcon.appiconset
-          rsvg-convert -w 1024 -h 1024 App/ScreenLingoIcon.svg -o App/Assets.xcassets/AppIcon.appiconset/AppIcon.png
-          printf '%s\n' '{"images":[{"filename":"AppIcon.png","idiom":"universal","platform":"ios","size":"1024x1024"}],"info":{"author":"xcode","version":1}}' > App/Assets.xcassets/AppIcon.appiconset/Contents.json
-
-          SOURCE_VERSION=$(sed -nE 's/^[[:space:]]*static let version = "([^"]+)".*/\1/p' Shared/Shared.swift | head -n 1)
-          SOURCE_BUILD=$(sed -nE 's/^[[:space:]]*static let build = ([0-9]+).*/\1/p' Shared/Shared.swift | head -n 1)
-          test -n "$SOURCE_VERSION"
-          test -n "$SOURCE_BUILD"
-
-          export SOURCE_VERSION SOURCE_BUILD
-          python3 - <<'PY'
-          import os
-          import re
-          from pathlib import Path
-
-          path = Path("project.yml")
-          content = path.read_text()
-          content, version_count = re.subn(
-              r'(?m)^(\s*MARKETING_VERSION:\s*")[^"]*(".*)$',
-              lambda match: match.group(1) + os.environ["SOURCE_VERSION"] + match.group(2),
-              content,
-              count=1,
-          )
-          content, build_count = re.subn(
-              r'(?m)^(\s*CURRENT_PROJECT_VERSION:\s*")[^"]*(".*)$',
-              lambda match: match.group(1) + os.environ["SOURCE_BUILD"] + match.group(2),
-              content,
-              count=1,
-          )
-          if version_count != 1 or build_count != 1:
-              raise SystemExit(f"Expected one version and build setting; found {version_count} and {build_count}")
-          path.write_text(content)
-          PY
-          echo "Synchronized project version to $SOURCE_VERSION ($SOURCE_BUILD)"
-          xcodegen generate
-
+          swiftc Shared/Shared.swift Shared/PipelineSafety.swift Shared/OCRGrouping.swift Tests/main.swift -o /tmp/pipeline-tests
+          /tmp/pipeline-tests
+      - name: Generate app icon
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+          pip install pillow
+          python scripts/make_icon.py App/Assets.xcassets
+      - run: brew install xcodegen && xcodegen generate
       - name: Build
         run: |
           set -euo pipefail
           xcodebuild -project ScreenLingo.xcodeproj -scheme ScreenLingo \
             -configuration Release -sdk iphoneos -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
-
+      - name: Verify app and extension metadata
+        run: |
+          python3 - <<'PY'
+          import plistlib, re
+          from pathlib import Path
+          source = Path('Shared/Shared.swift').read_text()
+          version = re.search(r'static let version = "([^"]+)"', source)[1]
+          build = re.search(r'static let build = (\d+)', source)[1]
+          app = Path('build/Build/Products/Release-iphoneos/ScreenLingo.app')
+          extensions = list((app / 'PlugIns').glob('*.appex'))
+          assert len(extensions) == 1, 'Expected one capture extension'
+          for bundle in [app, *extensions]:
+              with (bundle / 'Info.plist').open('rb') as f:
+                  info = plistlib.load(f)
+              assert info['CFBundleShortVersionString'] == version, info
+              assert info['CFBundleVersion'] == build, info
+              assert info['CFBundleIdentifier'].startswith('com.diam0ndnex.screenlingo'), info
+          print(f'Verified app and extension: {version} ({build})')
+          PY
       - name: Package IPA
         run: |
-          set -euo pipefail
-          mkdir -p Payload
-          cp -R build/Build/Products/Release-iphoneos/ScreenLingo.app Payload/ScreenLingo.app
-          zip -r ScreenLingo.ipa Payload
-
-      - name: Verify packaged app and extension versions
-        run: |
-          set -euo pipefail
-          APP="Payload/ScreenLingo.app"
-          SOURCE_VERSION=$(sed -nE 's/^[[:space:]]*static let version = "([^"]+)".*/\1/p' Shared/Shared.swift | head -n 1)
-          SOURCE_BUILD=$(sed -nE 's/^[[:space:]]*static let build = ([0-9]+).*/\1/p' Shared/Shared.swift | head -n 1)
-          test -n "$SOURCE_VERSION"
-          test -n "$SOURCE_BUILD"
-
-          PROJECT_VERSION=$(sed -nE 's/^[[:space:]]*MARKETING_VERSION: "([^"]+)".*/\1/p' project.yml | head -n 1)
-          PROJECT_BUILD=$(sed -nE 's/^[[:space:]]*CURRENT_PROJECT_VERSION: "([^"]+)".*/\1/p' project.yml | head -n 1)
-          echo "Source version: $SOURCE_VERSION ($SOURCE_BUILD)"
-          echo "Project version: $PROJECT_VERSION ($PROJECT_BUILD)"
-          test "$PROJECT_VERSION" = "$SOURCE_VERSION"
-          test "$PROJECT_BUILD" = "$SOURCE_BUILD"
-
-          APP_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$APP/Info.plist")
-          APP_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$APP/Info.plist")
-          echo "Main app version: $APP_VERSION ($APP_BUILD)"
-          test "$APP_VERSION" = "$SOURCE_VERSION"
-          test "$APP_BUILD" = "$SOURCE_BUILD"
-
-          EXT=$(find "$APP/PlugIns" -maxdepth 1 -type d -name "*.appex" -print -quit)
-          test -n "$EXT"
-          EXT_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$EXT/Info.plist")
-          EXT_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "$EXT/Info.plist")
-          echo "Capture extension version: $EXT_VERSION ($EXT_BUILD)"
-          test "$EXT_VERSION" = "$SOURCE_VERSION"
-          test "$EXT_BUILD" = "$SOURCE_BUILD"
-
-      # Release assets do not expire automatically like workflow artifacts.
-      - name: Publish permanent IPA release asset
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: screenlingo-build-${{ github.run_number }}
-          name: ScreenLingo build ${{ github.run_number }}
-          body: |
-            Automatically generated unsigned ScreenLingo IPA.
-            Source commit: ${{ github.sha }}
-          files: ScreenLingo.ipa
-          draft: false
-          prerelease: true
-          make_latest: false
-
-      # Convenient short-term artifact alongside the permanent release asset.
+          mkdir Payload
+          cp -R build/Build/Products/Release-iphoneos/ScreenLingo.app Payload/
+          zip -qr ScreenLingo.ipa Payload
       - uses: actions/upload-artifact@v4
         with:
           name: ScreenLingo-ipa
