@@ -1,7 +1,7 @@
 name: Build ScreenLingo IPA
 on:
   push:
-    branches: [codex/screenlingo-v0.7.0, codex/screenlingo-v0.8.0, codex/screenlingo-v0.9.0, codex/screenlingo-v1.0.0, codex/screenlingo-v1.1.0, codex/screenlingo-v1.2.0]
+    branches: [codex/screenlingo-v0.7.0, codex/screenlingo-v0.8.0, codex/screenlingo-v0.9.0, codex/screenlingo-v1.0.0, codex/screenlingo-v1.1.0, codex/screenlingo-v1.2.0, codex/screenlingo-v1.2.1]
   workflow_dispatch:
     inputs:
       interface_preview:
@@ -25,7 +25,7 @@ jobs:
           xcode-version: latest-stable
       - name: Check pipeline regressions
         run: |
-          swiftc Shared/Shared.swift Shared/PipelineSafety.swift Shared/OCRGrouping.swift Shared/ExportFormat.swift Shared/LatencyTools.swift Shared/PresentationSchedule.swift Shared/SourceLanguageUsage.swift Shared/RuntimePolicy.swift App/TextIntelligence.swift Tests/main.swift -o /tmp/pipeline-tests
+          swiftc Shared/Shared.swift Shared/PipelineSafety.swift Shared/OCRGrouping.swift Shared/ExportFormat.swift Shared/LatencyTools.swift Shared/PresentationSchedule.swift Shared/SourceLanguageUsage.swift Shared/RuntimePolicy.swift Shared/LanguageRouting.swift App/TextIntelligence.swift Tests/main.swift -o /tmp/pipeline-tests
           /tmp/pipeline-tests
       - name: Generate app icon
         run: |

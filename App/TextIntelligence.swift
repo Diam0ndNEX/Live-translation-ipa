@@ -7,6 +7,10 @@ enum TextIntel {
     /// How natural it is to read `lines` in this order (higher = better). Used to detect upside-down frames.
     static func orderScore(_ lines: [String]) -> Double {
         guard lines.count >= 2 else { return 0 }
+        let letters = lines.joined().filter(\.isLetter)
+        let cased = letters.filter { $0.isUppercase || $0.isLowercase }.count
+        // Capitalization cannot establish reading direction for uncased scripts.
+        guard cased >= 12, cased * 2 >= letters.count else { return 0 }
         var score = 0.0
         for i in 0..<(lines.count - 1) {
             let a = lines[i].trimmingCharacters(in: .whitespaces)

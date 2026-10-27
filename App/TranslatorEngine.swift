@@ -123,11 +123,11 @@ final class TranslatorEngine: ObservableObject {
 
     // Settings that live in the engine
     @Published var sourceCode: String {
-        didSet { UserDefaults.standard.set(sourceCode, forKey: "source"); invalidatePending(); lockedLang = nil; directSession = nil; syncConfig(); noteRecentPair() }
+        didSet { UserDefaults.standard.set(sourceCode, forKey: "source"); languageSelectionChanged(); directSession = nil; noteRecentPair() }
     }
     @Published var targetCode: String {
         didSet {
-            UserDefaults.standard.set(targetCode, forKey: "target"); invalidatePending(); directSession = nil; langStatus = [:]; availCache.removeAll()
+            UserDefaults.standard.set(targetCode, forKey: "target"); languageSelectionChanged(); directSession = nil; langStatus = [:]; availCache.removeAll()
             noteRecentPair()
             Task { await refreshStatus(); await prewarm() }
         }
@@ -225,8 +225,7 @@ final class TranslatorEngine: ObservableObject {
     private var rotRev = 0
     private var calibrated = false
     // Language lock
-    private var detectLog: [String] = []
-    private var mismatchStreak = 0
+    private var languageRouter = SourceLanguageRouter()
 
     // Self-reading protection: what the PiP window currently shows, and where it is on screen
     private let placeholderGrams = TextSim.grams("Waiting for screen text… Listening…")
@@ -340,6 +339,21 @@ final class TranslatorEngine: ObservableObject {
         syncConfig()
     }
 
+    private func languageSelectionChanged() {
+        invalidatePending()
+        languageRouter.reset()
+        lockedLang = nil
+        detectedLang = "–"
+        latestBlocks = []
+        // Re-evaluate automatic rotation from ReplayKit orientation, not the previous language's guess.
+        autoRot = 0; trial = 0; orderVote = 0; votesSinceChange = 0; calibrated = false
+        if diag.enabled { diag.s.orderVote = 0; diag.s.calibrated = false }
+        // Reject in-flight OCR for the old pair and request fresh confirmation of static text.
+        rotRev += 1
+        syncConfig()
+        diag.event(.language, "Source selection changed: \(sourceCode) → \(targetCode)")
+    }
+
     private var runtimePolicy: RuntimePolicy {
         RuntimePolicy(coolMode: flag("coolMode", false), diagnosticsEnabled: flag("diagnosticsEnabled", true),
                       detailedRequested: flag("detailedCollection", false))
@@ -375,7 +389,7 @@ final class TranslatorEngine: ObservableObject {
         }
         interval = runtimePolicy.captureInterval(interval)
         if diag.enabled { diag.s.rotation = effectiveRot }
-        server.send(Config(lang: lockedLang ?? sourceCode, y0: r.lowerBound, y1: r.upperBound,
+        server.send(Config(lang: SourceLanguageRouter.captureLanguage(selected: sourceCode, locked: lockedLang), y0: r.lowerBound, y1: r.upperBound,
                            maxEdge: maxEdge, interval: interval, paused: paused || manualMode,
                            stability: int("stability", 2), rot: effectiveRot, rev: rotRev,
                            boost: int("boost", 1), skipUnchanged: flag("skipUnchanged", true),
@@ -446,7 +460,7 @@ final class TranslatorEngine: ObservableObject {
 
     func beginWorkspace() {
         manualMode = true
-        lockedLang = nil; detectLog = []; mismatchStreak = 0
+        lockedLang = nil; languageRouter.reset()
         clearOutput()
         invalidatePending()
         syncConfig()
@@ -693,7 +707,6 @@ final class TranslatorEngine: ObservableObject {
             if TextSim.norm(t).count < 2 { continue }
             if flag("dropNoise", true) && TextIntel.isNoise(t) { if count && diag.enabled { diag.s.dropNoise += 1 }; continue }
             if isTargetLanguage(t) { if count && diag.enabled { diag.s.dropTarget += b.count }; continue }
-            if !plausiblySource(t) { if count && diag.enabled { diag.s.dropLanguage += 1 }; continue }
             texts.append(t)
         }
         return dedupe(texts).map { String($0.prefix(400)) }
@@ -821,16 +834,6 @@ final class TranslatorEngine: ObservableObject {
         return evidence
     }
 
-    /// With a chosen source language, skips blocks that are clearly written in another language.
-    private func plausiblySource(_ text: String) -> Bool {
-        guard sourceCode != "auto", text.count >= 8 else { return true }
-        let hyp = languageEvidence(text, limit: 3).1
-        guard let top = hyp.max(by: { $0.value < $1.value }), top.value > 0.8 else { return true }
-        let src = Locale.Language(identifier: sourceCode).languageCode
-        let ps = hyp.filter { Locale.Language(identifier: $0.key.rawValue).languageCode == src }.map(\.value).max() ?? 0
-        return ps > 0.15
-    }
-
     /// Removes lines that are the floating window's own text, and learns where that window sits.
     private func removeOwnOutput(_ lines: [OCRLine]) -> [OCRLine] {
         var mine: [OCRLine] = []
@@ -903,13 +906,13 @@ final class TranslatorEngine: ObservableObject {
         pip.render(original: "", translated: "Listening…", showOriginal: false)
     }
 
-    /// Drops lines already in the target language.
-    private func isTargetLanguage(_ s: String) -> Bool {
-        guard s.count >= 12 else { return false }
-        let evidence = languageEvidence(s, limit: 1)
-        guard let d = evidence.0, (evidence.1[d] ?? 0) > 0.8 else { return false }
-        return Locale.Language(identifier: d.rawValue).languageCode
-            == Locale.Language(identifier: targetCode).languageCode
+    /// Only strong, long Automatic-mode evidence may discard target-language background text.
+    private func isTargetLanguage(_ text: String) -> Bool {
+        guard sourceCode == "auto" else { return false }
+        let evidence = languageEvidence(text, limit: 5).1
+        return SourceLanguageRouter.shouldDropTarget(selected: sourceCode, target: targetCode,
+            hypotheses: Dictionary(uniqueKeysWithValues: evidence.map { ($0.key.rawValue, $0.value) }),
+            letters: text.filter(\.isLetter).count)
     }
 
     private func drain() async {
@@ -935,40 +938,18 @@ final class TranslatorEngine: ObservableObject {
     // MARK: Translation
     private func detectSource(_ text: String, record: Bool = true) -> (language: Locale.Language, origin: SourceLanguageOrigin)? {
         if sourceCode != "auto" { return (Locale.Language(identifier: sourceCode), .selected) }
-        let evidence = languageEvidence(text, limit: 5)
-        let hyp = evidence.1
-        let useLock = flag("langLock", true)
-        if useLock, let locked = lockedLang {
-            let p = hyp[NLLanguage(rawValue: locked)] ?? 0
-            if p > 0.1 || text.count < 12 { mismatchStreak = 0; return (Locale.Language(identifier: locked), .locked) }
-            mismatchStreak += 1
-            if mismatchStreak >= 3 {
-                lockedLang = nil; detectLog = []; mismatchStreak = 0
-                diag.log("Language lock released")
-            } else {
-                return (Locale.Language(identifier: locked), .locked)
-            }
+        let evidence = languageEvidence(text, limit: 5).1
+        let previous = languageRouter.locked
+        let choice = languageRouter.resolve(
+            hypotheses: Dictionary(uniqueKeysWithValues: evidence.map { ($0.key.rawValue, $0.value) }),
+            target: targetCode, letters: text.filter(\.isLetter).count,
+            useLock: flag("langLock", true), record: record)
+        if record, previous != languageRouter.locked {
+            lockedLang = languageRouter.locked
+            diag.log(lockedLang.map { "Language locked to \($0)" } ?? "Language lock released")
         }
-        // Prefer a language whose pack is installed when the detector is torn between candidates
-        let installed = Set(languages.filter { langStatus[$0.code] == .installed }.map {
-            $0.code == "zh" ? NLLanguage.simplifiedChinese : NLLanguage(rawValue: $0.code)
-        })
-        var dom = evidence.0
-        if let best = hyp.filter({ installed.contains($0.key) }).max(by: { $0.value < $1.value }), best.value > 0.15 {
-            dom = best.key
-        }
-        guard let d = dom else { return nil }
-        let code = Locale.Language(identifier: d.rawValue).minimalIdentifier
-        if useLock && record {
-            detectLog.append(code)
-            if detectLog.count > 6 { detectLog.removeFirst() }
-            if detectLog.count >= 4, let top = Dictionary(grouping: detectLog, by: { $0 }).max(by: { $0.value.count < $1.value.count }),
-               top.value.count >= 4 {
-                lockedLang = top.key
-                diag.log("Language locked to \(top.key)")
-            }
-        }
-        return (Locale.Language(identifier: d.rawValue), .detected)
+        guard let choice else { return nil }
+        return (Locale.Language(identifier: choice.code), choice.origin)
     }
 
     private func pairStatus(_ src: Locale.Language, _ target: Locale.Language) async -> LanguageAvailability.Status {
@@ -1021,6 +1002,8 @@ final class TranslatorEngine: ObservableObject {
         var pending: [String: [(b: Int, u: Int, s: Int, text: String, key: String)]] = [:]
         var srcLangs: [String: Locale.Language] = [:]
         var translatedAny = false
+        var unresolvedSource = false
+        var failureReason: String? = nil
         func isCurrent() -> Bool {
             workContext == contextRevision && (!display || workGeneration == generation)
         }
@@ -1037,13 +1020,21 @@ final class TranslatorEngine: ObservableObject {
         for (bi, raw) in blocks.enumerated() {
             var text = cleanOn ? TextIntel.cleanOCR(raw) : raw
             for (from, to) in fixes { text = text.replacingOccurrences(of: from, with: to, options: [.caseInsensitive]) }
-            guard let choice = detectSource(text, record: display), choice.language.languageCode != target.languageCode else {
+            guard let choice = detectSource(text, record: display) else {
+                unresolvedSource = true
+                units.append([TUnit(label: nil, sentences: [text], out: [text], tokens: [])])
+                continue
+            }
+            guard choice.language.languageCode != target.languageCode else {
                 units.append([TUnit(label: nil, sentences: [text], out: [text], tokens: [])])
                 continue
             }
             let src = choice.language
             let id = src.minimalIdentifier
             if display {
+                if diag.s.sourceUsed != id || diag.s.sourceOrigin != choice.origin.title {
+                    diag.event(.language, "Source resolved: \(id) (\(choice.origin.title))")
+                }
                 diag.recordSourceLanguage(id, origin: choice.origin)
                 if choice.origin != .selected, detectedLang != id { detectedLang = id }
             }
@@ -1085,10 +1076,16 @@ final class TranslatorEngine: ObservableObject {
             let availability = await pairStatus(src, target)
             guard isCurrent() else { return }
             if availability == .unsupported {
-                if display { status = "\(id) → \(targetCode) isn't supported" }
+                failureReason = "\(id) → \(targetCode) isn't supported"
+                if display { status = failureReason ?? "Unsupported language pair"; diag.event(.language, status) }
                 failed = true; continue
             }
-            if availability == .supported && display { status = "Language pack missing – open the Languages tab" }
+            if availability == .supported {
+                if !display { continue }
+                failureReason = "Download the \(id) → \(targetCode) language packs in Languages"
+                status = failureReason ?? "Language pack missing"
+                diag.event(.language, status)
+            }
             if display && diag.enabled { diag.s.batches += 1 }
             let installed = availability == .installed
             let plan = TranslationBatchPlan(items.map { $0.text }, contexts: items.map { $0.key })
@@ -1124,15 +1121,16 @@ final class TranslatorEngine: ObservableObject {
 
         guard translatedAny else {
             if display {
-                status = failed ? "Translation failed – download the language packs (Languages tab)"
-                                : "Text is already in the target language"
+                lastHandled = ""
+                status = failed ? (failureReason ?? "Translation failed – check the language packs in Languages")
+                    : (unresolvedSource ? "Could not identify the source – choose a source language in Languages" : "Text is already in the target language")
             }
             return
         }
         if !display { return }          // translate-ahead: the result now waits in the cache
         guard !failed else {
             lastHandled = ""
-            status = "Translation incomplete – keeping the previous result. Tap Retry."
+            status = failureReason ?? "Translation incomplete – keeping the previous result. Tap Retry."
             return
         }
         var outBlocks: [String] = []
@@ -1183,8 +1181,13 @@ final class TranslatorEngine: ObservableObject {
 
     private func runBatch(_ session: TranslationSession, _ texts: [String]) async -> [String]? {
         let reqs = texts.enumerated().map { TranslationSession.Request(sourceText: $0.element, clientIdentifier: String($0.offset)) }
-        guard let res = try? await session.translations(from: reqs) else { return nil }
-        return PipelineSafety.orderedTranslations(res.map { ($0.clientIdentifier, $0.targetText) }, count: texts.count)
+        do {
+            let res = try await session.translations(from: reqs)
+            return PipelineSafety.orderedTranslations(res.map { ($0.clientIdentifier, $0.targetText) }, count: texts.count)
+        } catch {
+            diag.event(.error, "Translation engine failed: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     private struct PresentationTiming {

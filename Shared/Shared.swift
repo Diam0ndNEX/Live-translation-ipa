@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.2.0"
-    static let build = 41
+    static let version = "1.2.1"
+    static let build = 42
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("1.2.1", "Fixed Automatic locking to the target language and feeding its lock back into OCR. Explicit sources bypass language-guess vetoes, confident language changes route immediately, and speculative reads cannot alter locks. Fresh OCR after language changes, uncased-script rotation protection and a toolbar menu for diagnostic collection."),
         ("1.2.0", "Session speaker labels no longer require diagnostic export consent. Added Cool mode, independent diagnostic collection switches and clearer automatic language-lock guidance."),
         ("1.1.0", "Fixed source-language graphs for selected and locked sources. Diagnostics now distinguish selected, detected and locked input, record foreground/background transitions, and export source counts and runtime context. Removed the memory explanation."),
         ("1.0.0", "Nonblocking readability holds: translation works before optional display waits, and stale pending results are cancelled safely. Replaced residual waiting/display estimates with matched stage measurements. Added timing, caption layout, reader/photo, feedback and storage controls; clarified per-process memory headroom. Existing OCR quality and confirmation defaults remain unchanged."),

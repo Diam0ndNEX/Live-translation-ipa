@@ -843,7 +843,6 @@ private struct DiagnosticsBody: View {
             ScrollView {
                 if visible {
                     VStack(spacing: 14) {
-                        DiagnosticsCollectionControls()
                         if collectionEnabled {
                         Picker("Mode", selection: $detailed) {
                             Text("Simple").tag(false)
@@ -852,7 +851,7 @@ private struct DiagnosticsBody: View {
                         .pickerStyle(.segmented)
                         if detailed { detailedBody } else { simpleBody }
                         if detailed && !collectDetails {
-                            Text("Graphs and events are off. Language counters and session speaker labels still work. Enable Detailed diagnostics to collect graph samples.").font(.footnote).foregroundStyle(.secondary)
+                            Text("Graphs and events are off. Language counters and session speaker labels still work. Enable Detailed diagnostics in the toolbar settings menu to collect graph samples.").font(.footnote).foregroundStyle(.secondary)
                         }
                         } else {
                             Text("Diagnostics collection is off. Translation and capture continue.").foregroundStyle(.secondary).card()
@@ -872,6 +871,13 @@ private struct DiagnosticsBody: View {
                         Image(systemName: "square.and.arrow.up")
                     }
                     .accessibilityLabel("Share report")
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Toggle("Simple diagnostics", isOn: $collectionEnabled)
+                        Toggle("Detailed diagnostics", isOn: $collectDetails).disabled(!collectionEnabled)
+                    } label: { Image(systemName: "slider.horizontal.3") }
+                    .accessibilityLabel("Diagnostic collection settings")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
@@ -1415,7 +1421,7 @@ private struct DiagnosticsBody: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(engine.sourceCode == "auto" ? "Source: Automatic" : "Source: \(engine.sourceCode.uppercased()) selected")
                     .font(.subheadline.weight(.semibold))
-                Text(engine.sourceCode == "auto" ? "With language lock enabled, four matching detections within the last six readings lock the source. Three mismatches release it. Short lines keep the lock to avoid switching languages." : "Automatic detection is off. Selected-language inputs still count in the graph.")
+                Text(engine.sourceCode == "auto" ? "With language lock enabled, four confident matching detections within six qualifying readings lock the source. Clear language changes translate immediately; three mismatches release the lock. The target language is never locked." : "Automatic detection is off. Selected-language inputs still count in the graph.")
                     .font(.caption).foregroundStyle(.secondary)
             }.card()
             BarListCard(title: "Source languages used · session", rows: Array(counts), color: Color.purple)

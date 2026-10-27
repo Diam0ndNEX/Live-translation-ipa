@@ -1,9 +1,15 @@
-# ScreenLingo v1.2.0 · build 41
+# ScreenLingo v1.2.1 · build 42
 
-- Fixed the session speaker list: visible `Name: dialogue` labels are now recorded without opting into diagnostic text exports. This is text-label recognition, not voice identification. Names remain session-only; private sessions suppress them, and exports still require explicit text consent.
-- Cool mode in Settings → Performance & power reduces OCR frequency (double the configured interval, minimum 450 ms), disables speculative translation and idle prewarming. It preserves recognition resolution, accuracy, correction and confirmation requirements. This trades update speed and brief-caption coverage for less work; actual temperature savings need device testing.
-- Simple diagnostics collects summary counters. Detailed diagnostics additionally enables bounded graph samples, device sampling and event history. Both off stops collection; capture/translation safety timers continue. Collection changes clear the previous session so graphs cannot imply continuous coverage.
-- Automatic source language lock stabilizes repeated language detections: four matching detections in a six-entry window engage it; three mismatches release it. Explicit source selection bypasses this feature.
+## Multilingual fixes
+
+The supplied v1.2 trace records a source lock to English while English was the target, followed by no further live translations. It also records seven rotation retries and two capture interruptions. The trace omits source sentences, so it cannot establish translation accuracy or the causes of capture interruptions.
+
+- Automatic mode can never lock to its target. Installed packs no longer override stronger language evidence. Clear language changes route immediately while lock release still requires three confirmed mismatches. Speculative reads never mutate language-lock history.
+- OCR stays multilingual in Automatic mode, including while the translation source is locked. Explicitly selected sources bypass NaturalLanguage guess-based rejection; PiP self-output filtering remains in place.
+- Source/target changes clear detector history and advance the capture revision so static text is reconfirmed and old-pair packets cannot enter the new pipeline.
+- Capitalization-based rotation voting is disabled for predominantly uncased scripts (including Korean, Japanese, Chinese and Arabic). Accurate OCR, confirmation counts and translation wording are unchanged.
+- Missing-pack speculation no longer starts a hosted download request ahead of confirmed work. Language selection/resolution and translation errors are recorded in detailed events without source text.
+- Diagnostic collection toggles moved into a sliders menu beside the three dots. The Simple/Detailed view selector remains on the page; collection controls are also available in Settings → Performance & power.
 
 ## Previous v1.1 changes
 
@@ -13,7 +19,7 @@
 - With detailed collection enabled, foreground, inactive and background transitions are recorded alongside the existing capture/PiP events, making future background traces easier to interpret.
 - Removed the requested memory explanation from the interface and report.
 
-Translation selection, source filtering, OCR quality and rotation behavior retain the 1.0 implementation.
+OCR recognition accuracy, resolution and confirmation requirements retain their configured values.
 
 ## How diagnostic graphs get their data
 
@@ -27,6 +33,8 @@ Across 143 paired displayed results, average total time was 878 ms: confirmation
 
 ## Build and verification
 
-The `codex/screenlingo-v1.2.0` branch builds the unsigned IPA after focused Swift regression checks and verifies both bundle versions. Main and previous branches remain unchanged. The simulator preview remains an optional manual workflow input.
+The `codex/screenlingo-v1.2.1` branch builds the unsigned IPA after focused Swift regression checks and verifies both bundle versions. Main and previous branches remain unchanged. The simulator preview remains an optional manual workflow input.
 
 Regression coverage includes manually selected Portuguese, automatic detection, locked sources, unresolved-source placeholders, reconciled counters and reset, alongside the existing pipeline, timing, grouping, export and stale-output checks. Regression coverage also checks Cool mode cadence and optional work, session speaker extraction, deduplication, privacy, reset and collection policy. Physical-device verification is still needed to measure temperature and verify the new controls during a broadcast.
+
+Multilingual regression checks cover target-lock prevention, confirmed versus speculative lock state, language switching, explicit-source authority, OCR hint independence, pair reset and uncased-script rotation. Device testing is still needed to verify recognition and responsiveness against real multilingual video.

@@ -126,3 +126,46 @@ print("Cool mode and session speaker checks passed")
 
 for n in 0..<100 { speakers.record("Speaker \(n)", enabled: true, privateSession: false) }
 check(speakers.names.count == 60, "Session speaker storage stays bounded")
+
+// Reproduce the trace's en → en lock failure without depending on ML heuristics.
+var router = SourceLanguageRouter()
+for _ in 0..<8 {
+    let choice = router.resolve(hypotheses: ["en": 0.99, "pt": 0.01], target: "en", letters: 40, useLock: true, record: true)
+    check(choice?.code == "en" && router.locked == nil, "Target-language sightings can never acquire a source lock")
+}
+for _ in 0..<4 {
+    _ = router.resolve(hypotheses: ["pt": 0.92, "en": 0.08], target: "en", letters: 32, useLock: true, record: false)
+}
+check(router.locked == nil, "Speculative sightings cannot acquire locks")
+for _ in 0..<4 {
+    _ = router.resolve(hypotheses: ["pt": 0.92, "en": 0.08], target: "en", letters: 32, useLock: true, record: true)
+}
+check(router.locked == "pt", "Confirmed consistent sources acquire a lock")
+let ambiguous = router.resolve(hypotheses: ["en": 0.6, "pt": 0.4], target: "en", letters: 20, useLock: true, record: true)
+check(ambiguous?.code == "pt" && ambiguous?.origin == .locked, "A plausible established source stabilizes ambiguous target-language guesses")
+check(SourceLanguageRouter.captureLanguage(selected: "auto", locked: router.locked) == "auto", "Locked translation sources must preserve multilingual OCR")
+let changed = router.resolve(hypotheses: ["ko": 0.97, "pt": 0.02, "en": 0.01], target: "en", letters: 8, useLock: true, record: false)
+check(changed?.code == "ko" && router.locked == "pt", "Clear short language changes route immediately without speculative mutation")
+for _ in 0..<2 {
+    let switched = router.resolve(hypotheses: ["ko": 0.97, "pt": 0.02], target: "en", letters: 20, useLock: true, record: true)
+    check(switched?.code == "ko", "Release hysteresis must never force the previous language onto clear new input")
+}
+check(router.locked == "pt", "Two confirmed mismatches retain lock hysteresis")
+_ = router.resolve(hypotheses: ["ko": 0.97, "pt": 0.02], target: "en", letters: 20, useLock: true, record: true)
+check(router.locked == nil, "Three confirmed mismatches release a lock; speculative mismatch did not count")
+let actual = router.resolve(hypotheses: ["ko": 0.78, "pt": 0.20, "en": 0.02], target: "en", letters: 24, useLock: false, record: true)
+check(actual?.code == "ko", "A lower-probability installed source must not displace the strongest language evidence")
+for source in ["pt", "es", "fr", "de", "ja", "ko", "zh-Hant", "ar"] {
+    check(!SourceLanguageRouter.shouldDropTarget(selected: source, target: "en", hypotheses: ["en": 0.99], letters: 50), "Explicit source selection survives language-guess vetoes")
+    check(SourceLanguageRouter.captureLanguage(selected: source, locked: "pt") == source, "Explicit OCR hint must honor the selected language")
+}
+check(!SourceLanguageRouter.shouldDropTarget(selected: "auto", target: "en", hypotheses: ["en": 0.99], letters: 10), "Short source phrases must not be discarded on a language guess")
+check(SourceLanguageRouter.shouldDropTarget(selected: "auto", target: "en", hypotheses: ["en": 0.99, "pt": 0.01], letters: 50), "Strong long target-language evidence still filters background text")
+router.reset()
+check(router.locked == nil, "Changing the selected pair clears source-lock history")
+check(TextIntel.orderScore(["안녕하세요", "오늘은 좋은 날입니다."]) == 0, "Capitalization heuristics must not rotate Korean")
+check(TextIntel.orderScore(["こんにちは", "今日はいい天気です。"]) == 0, "Capitalization heuristics must not rotate Japanese")
+check(TextIntel.orderScore(["你好", "今天天气很好。"]) == 0, "Capitalization heuristics must not rotate Chinese")
+check(TextIntel.orderScore(["مرحبا", "كيف حالك اليوم؟"]) == 0, "Capitalization heuristics must not rotate Arabic")
+check(TextIntel.orderScore(["Hello my friend", "how are you today?"]) > TextIntel.orderScore(["how are you today?", "Hello my friend"]), "Cased-language reading-order evidence remains available")
+print("Multilingual source routing regression checks passed")
