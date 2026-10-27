@@ -844,11 +844,6 @@ private struct DiagnosticsBody: View {
                 if visible {
                     VStack(spacing: 14) {
                         if collectionEnabled {
-                        Picker("Mode", selection: $detailed) {
-                            Text("Simple").tag(false)
-                            Text("Detailed").tag(true)
-                        }
-                        .pickerStyle(.segmented)
                         if detailed { detailedBody } else { simpleBody }
                         if detailed && !collectDetails {
                             Text("Graphs and events are off. Language counters and session speaker labels still work. Enable Detailed diagnostics in the toolbar settings menu to collect graph samples.").font(.footnote).foregroundStyle(.secondary)
@@ -874,10 +869,18 @@ private struct DiagnosticsBody: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        Toggle("Simple diagnostics", isOn: $collectionEnabled)
-                        Toggle("Detailed diagnostics", isOn: $collectDetails).disabled(!collectionEnabled)
+                        Section("View") {
+                            Picker("Diagnostic view", selection: $detailed) {
+                                Text("Simple").tag(false)
+                                Text("Detailed").tag(true)
+                            }
+                        }
+                        Section("Collection") {
+                            Toggle("Simple diagnostics", isOn: $collectionEnabled)
+                            Toggle("Detailed diagnostics", isOn: $collectDetails).disabled(!collectionEnabled)
+                        }
                     } label: { Image(systemName: "slider.horizontal.3") }
-                    .accessibilityLabel("Diagnostic collection settings")
+                    .accessibilityLabel("Diagnostic settings")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {

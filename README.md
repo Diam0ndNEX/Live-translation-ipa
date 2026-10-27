@@ -9,7 +9,7 @@ The supplied v1.2 trace records a source lock to English while English was the t
 - Source/target changes clear detector history and advance the capture revision so static text is reconfirmed and old-pair packets cannot enter the new pipeline.
 - Capitalization-based rotation voting is disabled for predominantly uncased scripts (including Korean, Japanese, Chinese and Arabic). Accurate OCR, confirmation counts and translation wording are unchanged.
 - Missing-pack speculation no longer starts a hosted download request ahead of confirmed work. Language selection/resolution and translation errors are recorded in detailed events without source text.
-- Diagnostic collection toggles moved into a sliders menu beside the three dots. The Simple/Detailed view selector remains on the page; collection controls are also available in Settings → Performance & power.
+- Diagnostic collection toggles moved into a sliders menu beside the three dots. The Simple/Detailed view selector is in the same menu; collection controls are also available in Settings → Performance & power.
 
 ## Previous v1.1 changes
 
