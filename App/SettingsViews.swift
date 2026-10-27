@@ -1,7 +1,7 @@
 // Screen Translator – App – v0.11.0
 import SwiftUI
 
-private extension View {
+extension View {
     func settingsPage(_ title: String) -> some View {
         self.scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
@@ -11,7 +11,7 @@ private extension View {
     }
 }
 
-private struct ResetSection: View {
+struct ResetSection: View {
     @EnvironmentObject var engine: TranslatorEngine
     let keys: [String]
     @State private var confirm = false
@@ -53,6 +53,7 @@ struct SettingsView: View {
 
     private var anyMatch: Bool {
         show("Presets", "save profile custom switch")
+            || show("Pipeline simulator", "simulation stages diagram timeline settings lab")
             || show("Smart pipeline", "adaptive auto confidence tracking speculative memory cool latency")
             || show("Reading & OCR", "mode area custom rotation order speed stability ignore noise contrast frames words small")
             || show("Understanding & rules", "clean slang speaker language lock never translate glossary fixes names")
@@ -100,6 +101,9 @@ struct SettingsView: View {
                     }
                 } header: { Text("Personalize") }
                 Section {
+                    if show("Pipeline simulator", "simulation stages diagram timeline settings lab") {
+                        NavigationLink { PipelineSimulatorView() } label: { Label("Pipeline simulator", systemImage: "point.3.connected.trianglepath.dotted") }
+                    }
                     if show("Smart pipeline", "adaptive auto confidence tracking speculative memory cool latency") {
                         NavigationLink { SmartPipelineSettings() } label: { Label("Smart pipeline", systemImage: "sparkles") }
                     }

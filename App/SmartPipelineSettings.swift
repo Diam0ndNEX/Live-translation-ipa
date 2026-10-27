@@ -11,8 +11,10 @@ struct SmartPipelineSettings: View {
     @AppStorage("confirmationDeadline") private var deadline = 0.6
     @AppStorage("steadyCaptions") private var steady = true
     @AppStorage("smartCool") private var smartCool = true
+    @AppStorage("contextualLanguage") private var contextualLanguage = true
+    @AppStorage("continuousRotation") private var continuousRotation = false
     @AppStorage("languageRecovery") private var recovery = true
-    private var signature: String { "\(adaptiveOCR)|\(adaptiveConfirmation)|\(tracking)|\(deduplicate)|\(selective)|\(speculativeConfidence)|\(deadline)|\(steady)|\(smartCool)|\(recovery)" }
+    private var signature: String { "\(adaptiveOCR)|\(adaptiveConfirmation)|\(tracking)|\(deduplicate)|\(selective)|\(speculativeConfidence)|\(deadline)|\(steady)|\(smartCool)|\(recovery)|\(contextualLanguage)|\(continuousRotation)" }
     var body: some View {
         List {
             Section {
@@ -34,6 +36,10 @@ struct SmartPipelineSettings: View {
                 LabeledContent("Minimum speculative confidence", value: "\(Int(speculativeConfidence*100))%")
                 Slider(value: $speculativeConfidence, in: 0.65...0.98, step: 0.01).disabled(!selective)
                 Text("Uses the existing Translate ahead switch. Low-confidence early reads are declined, and superseded requests are cancelled where the translation engine supports cancellation. Completed but unused results stay session-only until confirmed input uses them.").font(.footnote).foregroundStyle(.secondary)
+                Toggle("Use recent context for ambiguous sources", isOn: $contextualLanguage)
+                Text("Confident recent source text can assist an ambiguous reading for up to eight seconds. A clear new language bypasses this context.").font(.footnote).foregroundStyle(.secondary)
+                Toggle("Recheck settled rotation continuously", isOn: $continuousRotation)
+                Text("Off holds a settled rotation until the device orientation or rotation setting changes, and caps unsuccessful probes. On permits renewed calibration when reading-order evidence reverses.").font(.footnote).foregroundStyle(.secondary)
                 Toggle("Recover Automatic after repeated failures", isOn: $recovery)
                 Text("Clears source evidence and requests fresh OCR after repeated translation failures. It does not guess whether a successfully returned sentence is semantically correct.").font(.footnote).foregroundStyle(.secondary)
             } header: { Text("Translation") }
@@ -48,7 +54,7 @@ struct SmartPipelineSettings: View {
                     selective = false; steady = false; smartCool = false
                 }
             }
-            ResetSection(keys: ["adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "deduplicateCopies", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "steadyCaptions", "smartCool", "languageRecovery"])
+            ResetSection(keys: ["adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "deduplicateCopies", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "steadyCaptions", "smartCool", "languageRecovery", "contextualLanguage", "continuousRotation"])
         }
         .settingsPage("Smart pipeline")
         .onChange(of: signature) { _, _ in engine.pipelineSettingsChanged() }

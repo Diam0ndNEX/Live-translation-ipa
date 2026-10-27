@@ -243,3 +243,30 @@ _ = await memoryWriter.save([contextA: "stale"], to: memoryFile, revision: 2)
 check(!FileManager.default.fileExists(atPath: memoryFile.path), "A stale asynchronous save cannot resurrect cleared memory")
 try? FileManager.default.removeItem(at: memoryDirectory)
 print("Persistence, privacy and candidate-lifetime regression checks passed")
+
+var rotationBudget = RotationBudget()
+check(!RotationBudget.sufficientEvidence(vote:-4.9,samples:20), "Weak case-order votes cannot trigger rotation cycles")
+check(RotationBudget.sufficientEvidence(vote:-7,samples:3), "Strong sustained order evidence can start bounded probes")
+check(rotationBudget.next() == 2 && rotationBudget.next() == 1 && rotationBudget.next() == 3 && rotationBudget.next() == 0, "Rotation search visits alternatives once then returns to capture orientation")
+check(rotationBudget.exhausted && rotationBudget.next() == nil, "Failed orientation probes cannot repeat indefinitely")
+var sourceContext = LanguageContext()
+sourceContext.record("Olá meu amigo, como você está hoje?",code:"pt",confidence:0.95,now:10)
+check(sourceContext.mayAssist(["pt":0.4,"en":0.6],now:12), "Recent reliable source context can stabilize an ambiguous reading")
+check(!sourceContext.mayAssist(["ko":0.97,"pt":0.02],now:12), "A clear language switch cannot be overridden by prior context")
+check(!sourceContext.mayAssist(["pt":0.4,"en":0.6],now:20), "Old source context expires instead of locking new content")
+let simulationOptions = ["source":"pt","target":"en","speed":"fast","stability":"2","subtitleTracking":"true","adaptiveConfirmation":"false","privateSession":"false"]
+let simulation = PipelineSimulation.run(options:simulationOptions,input:SimulationInput())
+check(simulation.displayAccepted && simulation.steps.count >= 12 && simulation.totalMs > 0, "In-app simulation traverses the complete pipeline without model calls")
+var frozenSimulation = SimulationInput();frozenSimulation.frozen=true
+check(!PipelineSimulation.run(options:simulationOptions,input:frozenSimulation).displayAccepted, "Frozen simulation cannot publish a modeled caption")
+var pausedSimulation = SimulationInput();pausedSimulation.paused=true
+check(PipelineSimulation.run(options:simulationOptions,input:pausedSimulation).steps.count == 2, "Paused capture simulation stops before OCR")
+var missingPackSimulation = SimulationInput();missingPackSimulation.packReady=false
+check(!PipelineSimulation.run(options:simulationOptions,input:missingPackSimulation).displayAccepted, "Missing model packs block fresh simulated translation")
+var supersededSimulation = SimulationInput();supersededSimulation.superseded=true
+check(!PipelineSimulation.run(options:simulationOptions,input:supersededSimulation).displayAccepted, "A newer unconfirmed candidate rejects outdated simulated work")
+var privateOptions=simulationOptions;privateOptions["privateSession"]="true"
+let privateSimulation=PipelineSimulation.run(options:privateOptions,input:SimulationInput())
+check(privateSimulation.steps.contains { $0.title == "History, persistent memory & feedback" && $0.state == "session only" }, "Simulator explains private retention without writing history or memory")
+check(PipelineSimulation.optionGroups.flatMap { $0.1 }.contains("contextualLanguage"), "Source-context control is represented in the simulator")
+print("Bounded rotation, context recovery and in-app simulation regression checks passed")

@@ -157,6 +157,7 @@ struct Stats {
     var specModelRequests = 0
     var specStarted = 0, specCompleted = 0, specDiscarded = 0, specSkipped = 0
     var specProcessingMs = 0.0, specDiscardedMs = 0.0
+    var languageContextUsed = false
     var languageConfidence = 0.0, ocrConfidence = 0.0
     var recognitionReason = "–", confirmationReason = "–"
     var unchangedSkipped = 0, cadenceSkipped = 0, pausedSkipped = 0, emptyReads = 0, retryCount = 0
@@ -889,6 +890,7 @@ private struct DiagnosticsBody: View {
     @State private var kinds: Set<EventKind> = []
     @State private var query = ""
     @State private var confirmReset = false
+    @State private var showSimulator = false
 
     private var page: DiagPage { DiagPage(rawValue: pageRaw) ?? .overview }
     private var range: DiagRange { DiagRange(rawValue: rangeRaw) ?? .fiveMin }
@@ -934,6 +936,7 @@ private struct DiagnosticsBody: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        Button { showSimulator = true } label: { Label("Pipeline simulator", systemImage: "point.3.connected.trianglepath.dotted") }
                         Section("View") {
                             Picker("Diagnostic view", selection: $detailed) {
                                 Text("Simple").tag(false)
@@ -962,6 +965,7 @@ private struct DiagnosticsBody: View {
                     } label: { Image(systemName: "ellipsis.circle") }
                 }
             }
+            .sheet(isPresented: $showSimulator) { NavigationStack { PipelineSimulatorView().environmentObject(engine) } }
             .onAppear { visible = true }
             .onDisappear { visible = false }
             .confirmationDialog("Clear all graphs, counters and the timeline?", isPresented: $confirmReset,
@@ -1447,6 +1451,7 @@ private struct DiagnosticsBody: View {
         return VStack(alignment: .leading, spacing: 10) {
             Text("Recognition & work accounting").font(.headline)
             Text("OCR: \(Int(s.ocrConfidence*100))% · Source: \(s.sourceOrigin == "Selected" ? "selected" : "\(Int(s.languageConfidence*100))% confidence")").font(.footnote)
+            Text(s.languageContextUsed ? "Recent source context assisted this ambiguous reading" : "Source evidence uses the current reading").font(.caption).foregroundStyle(.secondary)
             Text("\(s.recognitionReason) · \(s.confirmationReason)").font(.caption).foregroundStyle(.secondary)
             Text("Cache sentences · session \(s.cacheHits) · saved \(s.savedHits) · pre-translated \(s.specHits)").font(.footnote)
             Text("Speculative jobs · started \(s.specStarted) · completed \(s.specCompleted) · discarded \(s.specDiscarded) · declined \(s.specSkipped)").font(.footnote)

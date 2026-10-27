@@ -173,3 +173,36 @@ enum CandidateValidity {
         !enabled || (allowLegacy && work == nil) || work == active
     }
 }
+
+struct RotationBudget {
+    private var attempt = 0
+    private(set) var exhausted = false
+    static func sufficientEvidence(vote: Double, samples: Int) -> Bool { vote < -6 && samples >= 3 }
+    mutating func next() -> Int? {
+        guard !exhausted else { return nil }
+        let rotation = [2, 1, 3, 0][attempt]
+        attempt += 1
+        exhausted = attempt == 4
+        return rotation
+    }
+    mutating func reset() { self = RotationBudget() }
+}
+struct LanguageContext {
+    private(set) var text = ""
+    private(set) var code = ""
+    private var updated = -Double.infinity
+    mutating func reset() { self = LanguageContext() }
+    mutating func record(_ value: String, code language: String, confidence: Double, now: Double) {
+        guard confidence >= 0.85, value.filter(\.isLetter).count >= 16 else { return }
+        if code != language || now - updated > 8 { text = "" }
+        if !text.contains(value) { text = String((text + " " + value).suffix(512)) }
+        code = language; updated = now
+    }
+    func mayAssist(_ hypotheses: [String: Double], now: Double) -> Bool {
+        guard !text.isEmpty, now - updated < 8 else { return false }
+        let ranked = hypotheses.values.sorted(by: >)
+        let first = ranked.first ?? 0, second = ranked.dropFirst().first ?? 0
+        let support = hypotheses.filter { SourceLanguageRouter.sameLanguage($0.key, code) }.values.max() ?? 0
+        return (first < 0.65 || first - second < 0.25) && support >= 0.15
+    }
+}

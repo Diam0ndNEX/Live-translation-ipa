@@ -25,7 +25,7 @@ jobs:
           xcode-version: latest-stable
       - name: Check pipeline regressions
         run: |
-          swiftc Shared/*.swift App/TextIntelligence.swift App/MemoryWriter.swift Tests/main.swift -o /tmp/pipeline-tests
+          swiftc Shared/*.swift App/TextIntelligence.swift App/MemoryWriter.swift App/PipelineSimulation.swift Tests/main.swift -o /tmp/pipeline-tests
           /tmp/pipeline-tests
       - name: Generate app icon
         run: |

@@ -97,7 +97,7 @@ final class TranslatorEngine: ObservableObject {
         "langLock", "neverTranslate", "sourceFixes", "glossary", "winSize", "theme", "textSize", "pipFont",
         "showOriginal", "autoClear", "clearHold", "minDisplay", "autoOpenPiP", "haptics", "speak", "speechRate",
         "autoCopy", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember",
-        "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode", "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "smartCool", "steadyCaptions", "languageRecovery", "deduplicateCopies"
+        "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode", "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "smartCool", "steadyCaptions", "languageRecovery", "deduplicateCopies", "continuousRotation", "contextualLanguage"
     ]
     /// App look & behaviour that presets do not touch.
     static let interfaceKeys = ["accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "memoryCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
@@ -119,7 +119,7 @@ final class TranslatorEngine: ObservableObject {
         "photoOCREdge": 2400, "photoAutoTranslate": false,
         "adaptiveOCR": true, "adaptiveConfirmation": false, "subtitleTracking": true, "selectiveSpeculation": true,
         "speculationConfidence": 0.85, "confirmationDeadline": 0.6, "smartCool": true, "steadyCaptions": true,
-        "languageRecovery": true, "deduplicateCopies": true,
+        "languageRecovery": true, "deduplicateCopies": true, "continuousRotation": false, "contextualLanguage": true,
         "coolMode": false, "diagnosticsEnabled": true, "detailedCollection": false, "showSessionSpeakers": true,
         "privateSession": false, "diagIncludeText": false, "sessionLimit": 0, "readerSize": 28.0,
         "readerOriginal": true, "readerAlignment": false, "ocrConfidence": 0.3, "ocrCorrection": true, "idleBackoff": true
@@ -127,10 +127,11 @@ final class TranslatorEngine: ObservableObject {
 
     // Settings that live in the engine
     @Published var sourceCode: String {
-        didSet { UserDefaults.standard.set(sourceCode, forKey: "source"); languageSelectionChanged(); directSession = nil; noteRecentPair() }
+        didSet { guard oldValue != sourceCode else { return }; UserDefaults.standard.set(sourceCode, forKey: "source"); languageSelectionChanged(); directSession = nil; noteRecentPair() }
     }
     @Published var targetCode: String {
         didSet {
+            guard oldValue != targetCode else { return }
             UserDefaults.standard.set(targetCode, forKey: "target"); languageSelectionChanged(); directSession = nil; langStatus = [:]; availCache.removeAll()
             noteRecentPair()
             Task { await refreshStatus(); await prewarm() }
@@ -239,6 +240,10 @@ final class TranslatorEngine: ObservableObject {
     private var calibrated = false
     // Language lock
     private var languageRouter = SourceLanguageRouter()
+    private var languageContext = LanguageContext()
+    private var rotationBudget = RotationBudget()
+    private var lastConfiguredRotation = "auto"
+    private var lastCaptureOrientation: Int?
 
     // Self-reading protection: what the PiP window currently shows, and where it is on screen
     private let placeholderGrams = TextSim.grams("Waiting for screen text… Listening…")
@@ -297,6 +302,7 @@ final class TranslatorEngine: ObservableObject {
         if ud.object(forKey: "displayPolicy") == nil {
             ud.set(PresentationSchedule.inferredPolicy(saved: nil, minimum: num("minDisplay", 0)), forKey: "displayPolicy")
         }
+        lastConfiguredRotation = frameRotMode
         recentPairs = ud.stringArray(forKey: "recentPairs") ?? []
         loadHistory()
         loadMemory()
@@ -346,6 +352,8 @@ final class TranslatorEngine: ObservableObject {
 
     /// Called when the user changes the frame-rotation setting.
     func rotationSettingChanged() {
+        rotationBudget.reset()
+        lastConfiguredRotation = frameRotMode
         autoRot = 0; trial = 0; orderVote = 0; votesSinceChange = 0; calibrated = false
         rotRev += 1
         invalidatePending()
@@ -354,7 +362,7 @@ final class TranslatorEngine: ObservableObject {
 
     private func languageSelectionChanged() {
         invalidatePending()
-        languageRouter.reset()
+        languageRouter.reset(); languageContext.reset(); rotationBudget.reset()
         languageFailures = 0
         lockedLang = nil
         detectedLang = "–"
@@ -386,7 +394,7 @@ final class TranslatorEngine: ObservableObject {
             diag.s.lockedLang = lockedLang ?? "–"
             diag.s.rotation = effectiveRot
             diag.s.orderVote = orderVote
-            diag.s.calibrated = calibrated
+            diag.s.calibrated = calibrated && !rotationBudget.exhausted
         }
     }
 
@@ -683,6 +691,13 @@ final class TranslatorEngine: ObservableObject {
             // Capture just started: make sure the floating window is up too.
             if flag("autoOpenPiP", true), !pip.isActive, UIApplication.shared.applicationState == .active { startPiP() }
         }
+        if let orientation = p.orient {
+            if let previous = lastCaptureOrientation, previous != orientation, frameRotMode == "auto" {
+                rotationSettingChanged()
+                diag.log("Capture orientation changed; restarting bounded calibration")
+            }
+            lastCaptureOrientation = orientation
+        }
         if p.kind == "ping" { syncConfig(); return }          // keeps the extension's settings fresh
         if paused || manualMode { return }
         if let rev = p.rev, rev != rotRev { return }
@@ -795,6 +810,7 @@ final class TranslatorEngine: ObservableObject {
     // MARK: Reading-order calibration
     /// Reads each text block forwards and backwards; if backwards reads more naturally, the frame is upside down.
     private func updateOrderVote(_ lines: [OCRLine]) {
+        guard !calibrated || flag("continuousRotation", false) else { return }
         var diff = 0.0
         for b in makeBlocks(lines) where b.count >= 2 {
             let fwd = readingOrder(b).map(\.t)
@@ -805,14 +821,19 @@ final class TranslatorEngine: ObservableObject {
         votesSinceChange += 1
         if diag.enabled { diag.s.orderVote = orderVote }
         guard frameRotMode == "auto" else { return }
-        if orderVote < -4 && votesSinceChange >= 2 {
-            trial = (trial + 1) % 4
-            autoRot = [0, 2, 1, 3][trial]
+        if RotationBudget.sufficientEvidence(vote: orderVote, samples: votesSinceChange) {
+            if calibrated && flag("continuousRotation", false) { rotationBudget.reset() }
+            guard let nextRotation = rotationBudget.next() else { return }
+            autoRot = nextRotation
             rotRev += 1
             invalidatePending()
             orderVote = 0; votesSinceChange = 0; calibrated = false
             if diag.enabled { diag.s.calibrated = false }
-            diag.log("Reading order looks reversed → trying rotation \(autoRot * 90)°")
+            if rotationBudget.exhausted {
+                calibrated = true
+                if diag.enabled { diag.s.calibrated = false }
+                diag.log("Rotation probes exhausted; holding capture orientation until device orientation or settings change")
+            } else { diag.log("Reading order looks reversed → trying rotation \(autoRot * 90)°") }
             syncConfig()
         } else if orderVote > 4 && !calibrated {
             calibrated = true
@@ -1023,7 +1044,17 @@ final class TranslatorEngine: ObservableObject {
 
     private func detectSource(_ text: String, record: Bool = true) -> (language: Locale.Language, origin: SourceLanguageOrigin)? {
         if sourceCode != "auto" { return (Locale.Language(identifier: sourceCode), .selected) }
-        let evidence = languageEvidence(text, limit: 5).1
+        var evidence = languageEvidence(text, limit: 5).1
+        var usedContext = false
+        let now = Date().timeIntervalSince1970
+        let rawHypotheses = Dictionary(uniqueKeysWithValues: evidence.map { ($0.key.rawValue, $0.value) })
+        if flag("contextualLanguage", true), languageContext.mayAssist(rawHypotheses, now: now) {
+            let combined = languageEvidence(languageContext.text + " " + text, limit: 5).1
+            if let best = combined.max(by: { $0.value < $1.value }), best.value >= 0.8,
+               SourceLanguageRouter.sameLanguage(best.key.rawValue, languageContext.code) {
+                evidence = combined; usedContext = true
+            }
+        }
         let previous = languageRouter.locked
         let choice = languageRouter.resolve(
             hypotheses: Dictionary(uniqueKeysWithValues: evidence.map { ($0.key.rawValue, $0.value) }),
@@ -1036,6 +1067,11 @@ final class TranslatorEngine: ObservableObject {
         guard let choice else { return nil }
         if record && diag.enabled {
             diag.s.languageConfidence = evidence.filter { SourceLanguageRouter.sameLanguage($0.key.rawValue, choice.code) }.values.max() ?? 0
+            diag.s.languageContextUsed = usedContext
+        }
+        if record, !SourceLanguageRouter.sameLanguage(choice.code, targetCode) {
+            let currentConfidence = languageEvidence(text, limit: 5).1.filter { SourceLanguageRouter.sameLanguage($0.key.rawValue, choice.code) }.values.max() ?? 0
+            languageContext.record(text, code: choice.code, confidence: currentConfidence, now: now)
         }
         return (Locale.Language(identifier: choice.code), choice.origin)
     }
@@ -1245,7 +1281,7 @@ final class TranslatorEngine: ObservableObject {
                 if failed, failureReason == nil, !Task.isCancelled, sourceCode == "auto", flag("languageRecovery", true) {
                     languageFailures += 1
                     if languageFailures >= 2 {
-                        languageRouter.reset(); lockedLang = nil; languageCache.removeAll(); languageFailures = 0
+                        languageRouter.reset(); languageContext.reset(); lockedLang = nil; languageCache.removeAll(); languageFailures = 0
                         diag.event(.language, "Automatic source recovery after repeated translation failures")
                         rotRev += 1; syncConfig()
                     }
@@ -1684,7 +1720,8 @@ final class TranslatorEngine: ObservableObject {
         targetCode = ud.string(forKey: "target") ?? "en"
         suppressRecent = false
         invalidatePending()
-        rotationSettingChanged()
+        if lastConfiguredRotation != frameRotMode { rotationSettingChanged() }
+        else { rotRev += 1; syncConfig() }
         applyStyle()
         applyWindowSize()
         applyHistoryRetention()
