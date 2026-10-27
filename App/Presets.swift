@@ -127,6 +127,9 @@ final class PresetStore: ObservableObject {
                 ud.removeObject(forKey: k)
             }
         }
+        if p.settings["displayPolicy"] == nil, let minimum = p.settings["minDisplay"] as? Double {
+            ud.set(PresentationSchedule.inferredPolicy(saved: nil, minimum: minimum), forKey: "displayPolicy")
+        }
         activeID = p.id.uuidString
         onApplied?()
     }

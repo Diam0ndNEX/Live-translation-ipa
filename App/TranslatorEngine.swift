@@ -282,7 +282,7 @@ final class TranslatorEngine: ObservableObject {
             Task { @MainActor in self?.pipActive = a; self?.diag.log(a ? "Floating window opened" : "Floating window closed") }
         }
         if ud.object(forKey: "displayPolicy") == nil {
-            ud.set(num("minDisplay", 0) > 0 ? "readable" : "immediate", forKey: "displayPolicy")
+            ud.set(PresentationSchedule.inferredPolicy(saved: nil, minimum: num("minDisplay", 0)), forKey: "displayPolicy")
         }
         recentPairs = ud.stringArray(forKey: "recentPairs") ?? []
         loadHistory()
@@ -1470,6 +1470,10 @@ final class TranslatorEngine: ObservableObject {
         for k in Self.settingKeys {
             guard let v = o[k], !(v is NSNull), v is String || v is NSNumber else { continue }
             ud.set(v, forKey: k)
+        }
+        if let minimum = o["minDisplay"] as? NSNumber {
+            ud.set(PresentationSchedule.inferredPolicy(saved: o["displayPolicy"] as? String,
+                minimum: minimum.doubleValue), forKey: "displayPolicy")
         }
         reloadSettings()
         return true

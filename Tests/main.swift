@@ -78,3 +78,8 @@ check(!PresentationSchedule.isCurrent(generation: 2, context: 3, currentGenerati
 check(!PresentationSchedule.isCurrent(generation: 2, context: 3, currentGeneration: 2, currentContext: 3, frozen: false, paused: true, manual: false), "Pause must prevent delayed live output")
 check(PresentationSchedule.isCurrent(generation: 2, context: 3, currentGeneration: 2, currentContext: 3, frozen: false, paused: true, manual: true), "Workspace translation remains possible while live capture is paused")
 print("Presentation checks passed: hold overlaps processing; stale, frozen and paused output rejected")
+
+check(PresentationSchedule.inferredPolicy(saved: nil, minimum: 1.5) == "readable", "Legacy comic/preset holds must migrate to readable mode")
+check(PresentationSchedule.inferredPolicy(saved: nil, minimum: 0) == "immediate", "Legacy zero hold must remain immediate")
+check(PresentationSchedule.inferredPolicy(saved: "immediate", minimum: 2) == "immediate", "An explicit immediate preference must survive backup and restore")
+print("Legacy timing preference migration checks passed")
