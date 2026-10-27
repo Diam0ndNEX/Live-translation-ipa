@@ -118,7 +118,10 @@ struct TranslationWorkspace: View {
             let request = VNRecognizeTextRequest()
             request.recognitionLevel = .accurate
             request.usesLanguageCorrection = true
-            if language != "auto" {
+            request.automaticallyDetectsLanguage = language == "auto"
+            if language == "auto" {
+                request.recognitionLanguages = try request.supportedRecognitionLanguages()
+            } else {
                 let supported = try request.supportedRecognitionLanguages()
                 let base = language.split(separator: "-").first.map(String.init) ?? language
                 if let match = supported.first(where: { $0 == language || $0.hasPrefix(base + "-") }) {
