@@ -176,7 +176,13 @@ struct ReaderView: View {
     @AppStorage("readerSize") private var size = 28.0
     @AppStorage("readerOriginal") private var showOriginal = true
     @AppStorage("readerAlignment") private var centered = false
+    @AppStorage("readerFont") private var font = "rounded"
+    @AppStorage("readerSpacing") private var spacing = 8.0
+    @AppStorage("readerWidth") private var width = "full"
     @State private var focus = false
+    private var readerDesign: Font.Design {
+        switch font { case "serif": return .serif; case "mono": return .monospaced; case "standard": return .default; default: return .rounded }
+    }
 
     var body: some View {
         NavigationStack {
@@ -186,8 +192,8 @@ struct ReaderView: View {
                         ContentUnavailableView("Ready to read", systemImage: "text.book.closed",
                             description: Text("Start capture or translate text from Home."))
                     } else {
-                        Text(engine.translated).font(.system(size: size, weight: .medium, design: .rounded))
-                            .lineSpacing(8).textSelection(.enabled)
+                        Text(engine.translated).font(.system(size: size, weight: .medium, design: readerDesign))
+                            .lineSpacing(max(0, min(16, spacing))).textSelection(.enabled)
                         if showOriginal, !engine.original.isEmpty {
                             Divider()
                             Text(engine.original).font(.system(size: max(15, size * 0.65)))
@@ -196,7 +202,8 @@ struct ReaderView: View {
                     }
                 }
                 .multilineTextAlignment(centered ? .center : .leading)
-                .frame(maxWidth: .infinity, alignment: centered ? .center : .leading).padding(24)
+                .frame(maxWidth: width == "narrow" ? 560 : .infinity, alignment: centered ? .center : .leading)
+                .frame(maxWidth: .infinity).padding(24)
             }
             .background(Theme.bg.ignoresSafeArea())
             .navigationTitle("Focus reader").navigationBarTitleDisplayMode(.inline)

@@ -16,14 +16,16 @@ struct HomeView: View {
     @AppStorage("homeRecent") private var homeRecent = true
     @State private var destination: HomeDestination?
     @State private var editor: PresetEditorMode?
-    @State private var showDetails = false
-    @State private var showQuick = false
+    @AppStorage("homeDetailsExpanded") private var showDetails = false
+    @AppStorage("homeQuickExpanded") private var showQuick = false
+    @AppStorage("homeMetrics") private var homeMetrics = true
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var state: String {
         if !engine.captureAlive { return "Ready when you are" }
         if engine.paused { return "Translation paused" }
         if engine.frozen { return "Holding this translation" }
+        if engine.waitingToDisplay { return "Holding for readability" }
         return engine.isTranslating ? "Translating…" : "Reading your screen"
     }
     private var stateColor: Color { engine.captureAlive && !engine.paused ? .mint : .secondary }
@@ -43,7 +45,7 @@ struct HomeView: View {
                     languageCard
                     liveCard
                     if homeTools { outputTools }
-                    if homeStatus { LatencyReadout(monitor: engine.latency) }
+                    if homeStatus && homeMetrics { LatencyReadout(monitor: engine.latency) }
                     if !engine.captureAlive { readiness }
                     toolsSection
                     if homePresets {

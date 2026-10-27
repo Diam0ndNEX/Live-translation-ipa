@@ -1,32 +1,27 @@
-# ScreenLingo 0.9.0 (38)
+# ScreenLingo 1.0.0 (39)
 
-Screen translation on device, with a redesigned Live screen and a new screen-and-translation icon. Built on the complete 0.8.0 workspace, reader, library and settings; previous branches and main remain unchanged.
+## Waiting and display latency
 
-## Interface
+Translation work no longer waits behind minimum display time. It starts as soon as confirmed input reaches the queue. Readable mode schedules only the remaining hold after translation finishes, without blocking the processing queue. Immediate mode has no optional readability hold. Both keep complete-result validation, OCR confirmation, source filtering, protected terms and stale-result checks. Existing nonzero minimum-display preferences migrate to Readable mode.
 
-The Live screen now centers on the language pair, preview and capture controls. Readiness guidance appears before capture starts; output actions disable when unavailable. Quick settings and diagnostic details collapse to keep the main screen focused. Text/photo translation, the area editor, presets, recent pairs and session controls remain directly reachable. Library, Languages, Activity and Settings use native navigation. Accent changes no longer recreate the tab hierarchy.
+A pending result is cancelled on newer accepted OCR, language/settings changes, clear, pause or freeze. Timing metadata is captured with the result so delayed presentation does not inherit a later packet's timings.
 
-## Latency work without reducing recognition quality
+The old diagnostics chart computed “Waiting & display” by subtracting unrelated average translation and transfer times from average total time. That remainder also contained OCR, confirmation and other work. Version 1.0 replaces it with matched displayed-result records for confirmation, final OCR, delivery/filtering, queue, processing, optional readability hold and frame preparation. CSV and text reports include these stages. Total ends at frame enqueue; it does not measure physical screen presentation.
 
-- OCR is scheduled from the start of its previous pass. The old code always waited another entire interval after OCR completed. The accuracy level, resolution, confidence thresholds and confirmation count are unchanged. Thermal, low-memory and power protections remain enabled.
-- Exactly repeated sentence requests are coalesced within a language batch. Responses are expanded back into their original positions. Different protected-name mappings never share requests or cache entries; no fuzzy translation-result reuse is introduced.
-- Bounded caching reuses identical language-recognition evidence without changing the source-language decision rules.
-- PiP keeps its prepared immutable pixel buffer and format for heartbeat frames, while creating a fresh timestamped sample buffer. A new text frame gets a fresh image buffer. Font fitting searches the same size grid with fewer measurements.
-- The translated frame is prepared before synchronous history saving and optional speech/clipboard effects.
-- Warm-up is throttled and isolated from active work. The warmed session is reused only while idle and in the same settings context.
-- Timing now includes the confirmation window from first OCR sighting to frame enqueue. A separate Session breakdown identifies recognition, delivery/filtering, queue, processing and rendering. Actual display and source-video timing are outside this measurement.
+## New settings
 
-## Verification
+Four grouped settings pages cover timing/responsiveness, caption layout, reader/workspace, and feedback/storage. Controls include immediate/readable display, minimum visible time, translate-ahead, idle heartbeat, caption weight/alignment/spacing/padding/scale/original-text allocation/speaker colour, reader font/spacing/width, photo OCR resolution/automatic translation, Live timing visibility/expanded panels, haptic strength, clipboard format, speech interruption, history capacity, translation-memory capacity and diagnostic sample capacity. Caption and timing preferences participate in presets and backup.
 
-CI runs regression checks for request identity and order, protected words, subtitle grouping, partial-OCR handling, export and crop rules, scheduling and font-search equivalence. A synthetic repeated-sentence fixture requires 1,200 inputs to use 120 unique requests while reconstructing identical output. This is a duplicate-heavy fixture, not a claim of a 90% speedup for all videos.
+Defaults retain previous OCR accuracy, resolution, confirmation count and translation model. Optional photo resolution changes are explicit user choices, separate from live capture. A heartbeat repeats an idle frame; fresh translations always enqueue immediately.
 
-The workflow builds the unsigned IPA, verifies both bundle versions, then runs the interface on an iPhone simulator and uploads an actual screenshot plus the generated icon. Download `ScreenLingo-ipa`, unzip it, then sign the IPA. The simulator preview does not verify physical-device ReplayKit/PiP or translation quality.
+## Memory
 
-No on-device speedup percentage is claimed. Compare the Session timing breakdown under the same language pair, video, speed profile and thermal state to measure the improvement on your phone.
+The memory API reports the extension's remaining per-process allowance, not free phone RAM. iOS may change that allowance. Stable headroom is expected with bounded buffers and temporary-image cleanup. It is not a score that should reach 100 MB. The diagnostics and storage screens link Apple's API explanation.
 
-Local macOS pure regression checks:
+## Build and checks
 
-```sh
-swiftc Shared/Shared.swift Shared/PipelineSafety.swift Shared/OCRGrouping.swift Shared/ExportFormat.swift Shared/LatencyTools.swift Tests/main.swift -o /tmp/screenlingo-tests
-/tmp/screenlingo-tests
-```
+The `codex/screenlingo-v1.0.0` branch runs Swift regression checks, builds both iOS targets, verifies versions/identifiers and uploads `ScreenLingo-ipa`. Unzip it before signing. Main and previous release branches remain unchanged.
+
+The iPhone simulator screenshot is now an optional manual workflow input. The 0.9 UI was successfully launched and captured, and the user confirmed its appearance on device. Normal IPA builds avoid repeating the expensive simulator startup.
+
+Regression checks cover request identities/order/failures, protected-name isolation, subtitle grouping, partial input, CSV/crop rules, OCR cadence, font-size equivalence, overlapping readability holds and pending-result invalidation. Physical-device speed and translation quality still need like-for-like testing with the same video, language pair, settings and thermal state. No universal speedup percentage is claimed.

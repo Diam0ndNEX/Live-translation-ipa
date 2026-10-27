@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "0.9.0"
-    static let build = 38
+    static let version = "1.0.0"
+    static let build = 39
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("1.0.0", "Nonblocking readability holds: translation works before optional display waits, and stale pending results are cancelled safely. Replaced residual waiting/display estimates with matched stage measurements. Added timing, caption layout, reader/photo, feedback and storage controls; clarified per-process memory headroom. Existing OCR quality and confirmation defaults remain unchanged."),
         ("0.9.0", "New screen-and-translation icon and redesigned Live interface. Start-based OCR cadence removes redundant waiting while preserving accuracy and confirmation passes. Exact request coalescing, bounded language-evidence caching, faster font fitting, reusable heartbeat frames and display-before-history ordering reduce repeated work. Added honest first-sighting-to-enqueue timing and protected-name cache isolation."),
         ("0.8.0", "Major workspace overhaul: photo/text translation, visual capture-area editor, focus reader, session controls, searchable history with notes, CSV/JSON export and restore, undo deletion, private sessions, OCR tuning and idle power saving."),
         ("1.5.0", "Integrated the latest main redesign, custom presets, diagnostics charts, translation memory and translate-ahead. Preserved ScreenLingo identity, small text, lyric rows and fragment protection. Fixed stale output, batch validation, frozen output and legacy timeouts."),

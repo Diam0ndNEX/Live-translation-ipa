@@ -13,6 +13,8 @@ struct TranslationWorkspace: View {
     @State private var recognizing = false
     @State private var errorText: String?
     @State private var ocrTask: Task<Void, Never>?
+    @AppStorage("photoOCREdge") private var photoEdge = 2400
+    @AppStorage("photoAutoTranslate") private var photoAutoTranslate = false
 
     var body: some View {
         NavigationStack {
@@ -114,12 +116,13 @@ struct TranslationWorkspace: View {
         recognizing = true; errorText = nil
         defer { recognizing = false }
         let language = engine.sourceCode
+        let edge = max(1600, min(3200, photoEdge))
         let task = Task.detached(priority: .userInitiated) { () throws -> String in
             guard let source = CGImageSourceCreateWithData(data as CFData, nil),
                   let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
                     kCGImageSourceCreateThumbnailWithTransform: true,
-                    kCGImageSourceThumbnailMaxPixelSize: 2400
+                    kCGImageSourceThumbnailMaxPixelSize: edge
                   ] as CFDictionary) else { throw CocoaError(.fileReadCorruptFile) }
             let request = VNRecognizeTextRequest()
             request.recognitionLevel = .accurate
@@ -147,6 +150,7 @@ struct TranslationWorkspace: View {
             guard !Task.isCancelled else { return }
             input = String(text.prefix(12000))
             if text.isEmpty { errorText = "No readable text found. Try a sharper image." }
+            else if photoAutoTranslate { engine.translateText(input) }
         } catch { if !Task.isCancelled { errorText = error.localizedDescription } }
     }
 }

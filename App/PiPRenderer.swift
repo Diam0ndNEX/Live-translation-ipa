@@ -39,6 +39,11 @@ struct PiPStyle {
     var design: UIFontDescriptor.SystemDesign
     var accent = UIColor(red: 0.35, green: 0.85, blue: 1, alpha: 1)   // speaker names
     var highlightNames = true
+    var weight: UIFont.Weight = .bold
+    var alignment: NSTextAlignment = .left
+    var lineSpacing: CGFloat = 0
+    var padding: CGFloat = 24
+    var originalFraction: CGFloat = 0.27
 
     static func make(theme: PiPTheme, size: PiPTextSize, font: PiPFont = .standard) -> PiPStyle {
         let hi: CGFloat, lo: CGFloat
@@ -70,6 +75,28 @@ struct PiPStyle {
         case .contrast:
             st = PiPStyle(bg: .black, fg: .white, secondary: .white, hi: hi, lo: lo, design: d)
             st.accent = .yellow
+        }
+        let settings = UserDefaults.standard
+        let scale = max(0.75, min(1.5, (settings.object(forKey: "pipScale") as? Double) ?? 1))
+        st.hi *= CGFloat(scale); st.lo *= CGFloat(scale)
+        switch settings.string(forKey: "pipWeight") ?? "bold" {
+        case "regular": st.weight = .regular
+        case "medium": st.weight = .medium
+        default: st.weight = .bold
+        }
+        switch settings.string(forKey: "pipAlignment") ?? "left" {
+        case "center": st.alignment = .center
+        case "right": st.alignment = .right
+        default: st.alignment = .left
+        }
+        st.lineSpacing = CGFloat(max(0, min(16, (settings.object(forKey: "pipLineSpacing") as? Double) ?? 0)))
+        st.padding = CGFloat(max(12, min(48, (settings.object(forKey: "pipPadding") as? Double) ?? 24)))
+        st.originalFraction = CGFloat(max(0.15, min(0.4, (settings.object(forKey: "originalFraction") as? Double) ?? 0.27)))
+        switch settings.string(forKey: "speakerAccent") ?? "blue" {
+        case "mint": st.accent = .systemMint
+        case "purple": st.accent = .systemPurple
+        case "amber": st.accent = .systemOrange
+        default: break
         }
         return st
     }
@@ -113,9 +140,15 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
 
         render(original: "", translated: lastTranslated, showOriginal: false)
         // PiP needs a steady stream of frames or it shows a spinner / stalls.
-        heartbeat = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            self?.enqueueCurrentFrame()
-        }
+        configureHeartbeat()
+    }
+
+    func configureHeartbeat() {
+        heartbeat?.invalidate()
+        let interval = max(0.5, min(2, (UserDefaults.standard.object(forKey: "heartbeatInterval") as? Double) ?? 1))
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in self?.enqueueCurrentFrame() }
+        RunLoop.main.add(timer, forMode: .common)
+        heartbeat = timer
     }
 
     @discardableResult
@@ -157,18 +190,18 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
         return UIGraphicsImageRenderer(size: size, format: fmt).image { ctx in
             style.bg.setFill()
             ctx.fill(CGRect(origin: .zero, size: size))
-            let w = size.width - 48
+            let w = size.width - style.padding * 2
             var y: CGFloat = 16
             if showOriginal && !original.isEmpty {
-                let r = CGRect(x: 24, y: y, width: w, height: size.height * 0.27)
+                let r = CGRect(x: style.padding, y: y, width: w, height: size.height * style.originalFraction)
                 let f = fittingFont(original, rect: r, weight: .regular, hi: 22, lo: 12, style: style)
-                NSAttributedString(string: original, attributes: [.font: f, .foregroundColor: style.secondary])
+                NSAttributedString(string: original, attributes: [.font: f, .foregroundColor: style.secondary, .paragraphStyle: paragraphStyle(style)])
                     .draw(with: r, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], context: nil)
                 y = r.maxY + 10
             }
-            let r2 = CGRect(x: 24, y: y, width: w, height: size.height - y - 16)
-            let f2 = fittingFont(translated, rect: r2, weight: .bold, hi: style.hi, lo: style.lo, style: style)
-            let att = NSMutableAttributedString(string: translated, attributes: [.font: f2, .foregroundColor: style.fg])
+            let r2 = CGRect(x: style.padding, y: y, width: w, height: size.height - y - 16)
+            let f2 = fittingFont(translated, rect: r2, weight: style.weight, hi: style.hi, lo: style.lo, style: style)
+            let att = NSMutableAttributedString(string: translated, attributes: [.font: f2, .foregroundColor: style.fg, .paragraphStyle: paragraphStyle(style)])
             if style.highlightNames, let rx = PiPRenderer.labelRegex {
                 for m in rx.matches(in: translated, range: NSRange(location: 0, length: (translated as NSString).length)) {
                     att.addAttribute(.foregroundColor, value: style.accent, range: m.range(at: 1))
@@ -180,13 +213,21 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
 
     private static func fittingFont(_ text: String, rect: CGRect, weight: UIFont.Weight,
                                     hi: CGFloat, lo: CGFloat, style: PiPStyle) -> UIFont {
+        let paragraph = paragraphStyle(style)
         let size = FontSearch.size(high: Double(hi), low: Double(lo)) { value in
             let font = makeFont(CGFloat(value), weight, style)
             let bounds = (text as NSString).boundingRect(with: CGSize(width: rect.width, height: .greatestFiniteMagnitude),
-                                                       options: .usesLineFragmentOrigin, attributes: [.font: font], context: nil)
+                                                       options: .usesLineFragmentOrigin, attributes: [.font: font, .paragraphStyle: paragraph], context: nil)
             return bounds.height <= rect.height
         }
         return makeFont(CGFloat(size), weight, style)
+    }
+
+    private static func paragraphStyle(_ style: PiPStyle) -> NSParagraphStyle {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = style.alignment
+        paragraph.lineSpacing = style.lineSpacing
+        return paragraph
     }
 
     private static func makeFont(_ size: CGFloat, _ weight: UIFont.Weight, _ style: PiPStyle) -> UIFont {

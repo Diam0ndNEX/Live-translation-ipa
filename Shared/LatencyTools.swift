@@ -50,6 +50,7 @@ struct LatencyBreakdown: Equatable {
     var delivery = 0.0
     var queue = 0.0
     var translation = 0.0
+    var displayHold = 0.0
     var rendering = 0.0
     var total = 0.0
     var requestsSaved = 0

@@ -95,12 +95,11 @@ final class TranslatorEngine: ObservableObject {
         "frameRot", "dropNoise", "boost", "skipUnchanged", "cleanOCR", "slang", "speakerDetect", "highlightNames",
         "langLock", "neverTranslate", "sourceFixes", "glossary", "winSize", "theme", "textSize", "pipFont",
         "showOriginal", "autoClear", "clearHold", "minDisplay", "autoOpenPiP", "haptics", "speak", "speechRate",
-        "autoCopy", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember"
+        "autoCopy", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember",
+        "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff"
     ]
     /// App look & behaviour that presets do not touch.
-    static let interfaceKeys = ["accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics",
-                                "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText",
-                                "sessionLimit", "readerSize", "readerOriginal", "readerAlignment", "ocrConfidence", "ocrCorrection", "idleBackoff"]
+    static let interfaceKeys = ["accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "memoryCapacity", "diagSamples", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
     static var settingKeys: [String] { presetKeys + interfaceKeys }
     static let defaults: [String: Any] = [
         "source": "auto", "target": "en", "mode": "movie", "area": "smart", "customY0": 0.0, "customY1": 0.5,
@@ -111,6 +110,12 @@ final class TranslatorEngine: ObservableObject {
         "showOriginal": false, "autoClear": true, "clearHold": 1.0, "minDisplay": 0.0, "autoOpenPiP": true,
         "haptics": false, "speak": false, "speechRate": 0.5, "autoCopy": false, "adaptive": true, "idleMinutes": 0,
         "translateAhead": true, "keepWarm": true, "remember": true,
+        "displayPolicy": "immediate", "pipWeight": "bold", "pipAlignment": "left", "pipLineSpacing": 0.0,
+        "pipPadding": 24.0, "originalFraction": 0.27, "pipScale": 1.0, "speakerAccent": "blue", "heartbeatInterval": 1.0,
+        "readerFont": "rounded", "readerSpacing": 8.0, "readerWidth": "full", "historyCapacity": 500,
+        "memoryCapacity": 3000, "diagSamples": 600, "homeMetrics": true, "homeQuickExpanded": false,
+        "homeDetailsExpanded": false, "hapticStrength": "light", "autoCopyFormat": "translation", "interruptSpeech": true,
+        "photoOCREdge": 2400, "photoAutoTranslate": false,
         "privateSession": false, "diagIncludeText": false, "sessionLimit": 0, "readerSize": 28.0,
         "readerOriginal": true, "readerAlignment": false, "ocrConfidence": 0.3, "ocrCorrection": true, "idleBackoff": true
     ]
@@ -134,6 +139,9 @@ final class TranslatorEngine: ObservableObject {
     @Published private(set) var sessionCharacters = 0
     @Published private(set) var downloadMessage = ""
     @Published var isTranslating = false
+    @Published private(set) var waitingToDisplay = false
+    private var presentationTask: Task<Void, Never>?
+    private var presentationID = UUID()
     private var undoHistory: [HistoryItem]?
     @Published var toastText: String?
     @Published var detectedLang = "–"
@@ -273,6 +281,9 @@ final class TranslatorEngine: ObservableObject {
         pip.onActiveChange = { [weak self] a in
             Task { @MainActor in self?.pipActive = a; self?.diag.log(a ? "Floating window opened" : "Floating window closed") }
         }
+        if ud.object(forKey: "displayPolicy") == nil {
+            ud.set(num("minDisplay", 0) > 0 ? "readable" : "immediate", forKey: "displayPolicy")
+        }
         recentPairs = ud.stringArray(forKey: "recentPairs") ?? []
         loadHistory()
         loadMemory()
@@ -381,7 +392,7 @@ final class TranslatorEngine: ObservableObject {
         noteRecentPair()
     }
     func applyWindowSize() { pip.setSize(windowSize.size) }
-    func applyStyle() { pip.style = pipStyle; pip.rerender(showOriginal: showOriginal) }
+    func applyStyle() { pip.style = pipStyle; pip.rerender(showOriginal: showOriginal); pip.configureHeartbeat() }
 
     /// A shareable picture of one history entry.
     func image(for h: HistoryItem) -> UIImage {
@@ -393,6 +404,7 @@ final class TranslatorEngine: ObservableObject {
     private func invalidatePending() {
         contextRevision += 1
         generation += 1
+        cancelPresentation()
         queued = nil
         queuedPacket = nil
         queuedTs = Date().timeIntervalSince1970
@@ -486,9 +498,23 @@ final class TranslatorEngine: ObservableObject {
         guard data.count < 5_000_000, let entries = try? JSONDecoder().decode([HistoryItem].self, from: data) else { return false }
         var ids = Set(history.map(\.id))
         history += entries.filter { ids.insert($0.id).inserted }
-        history = Array(history.sorted { $0.date > $1.date }.prefix(500))
+        history = Array(history.sorted { $0.date > $1.date }.prefix(historyCapacity))
         applyHistoryRetention()
         return true
+    }
+
+    func timingSettingsChanged() {
+        invalidatePending()
+        pip.configureHeartbeat()
+        syncConfig()
+        if !paused, !manualMode { enqueue(latestBlocks) }
+    }
+
+    func applyStorageSettings() {
+        if history.count > historyCapacity { history = Array(history.prefix(historyCapacity)) }
+        if cache.count > max(500, min(6000, int("memoryCapacity", 3000))) { trimCache(); memoryDirty = true }
+        memoryCount = cache.count
+        saveMemory()
     }
 
     // MARK: Small helpers
@@ -526,12 +552,14 @@ final class TranslatorEngine: ObservableObject {
         tap()
     }
 
+    private var historyCapacity: Int { max(100, min(1000, int("historyCapacity", 500))) }
+
     // MARK: History storage
     private func saveHistory() {
         guard flag("saveHistory", true), !flag("privateSession", false) else { return }
         let days = int("historyRetentionDays", 0)
         let cutoff = days > 0 ? Date().addingTimeInterval(-Double(days) * 86400) : Date.distantPast
-        let retained = Array(history.filter { $0.starred || $0.date >= cutoff }.prefix(500))
+        let retained = Array(history.filter { $0.starred || $0.date >= cutoff }.prefix(historyCapacity))
         if let d = try? JSONEncoder().encode(retained) { ud.set(d, forKey: "historyData") }
     }
     private func loadHistory() {
@@ -822,6 +850,7 @@ final class TranslatorEngine: ObservableObject {
         guard !blocks.isEmpty, joined != lastHandled else { return }
         if PipelineSafety.isDuplicate(blocks, previous: lastHandled.components(separatedBy: "\n")) { return }
         generation += 1
+        cancelPresentation()
         lastHandled = joined
         queued = blocks
         queuedAt = Date()
@@ -867,8 +896,6 @@ final class TranslatorEngine: ObservableObject {
         // Confirmed text always goes first, and only the newest of it; early sightings fill the cache when idle.
         while queued != nil || specQueued != nil {
             if queued != nil {
-                let wait = num("minDisplay", 0) - Date().timeIntervalSince(lastShowDate)
-                if wait > 0 { try? await Task.sleep(for: .seconds(wait)) }
                 guard let b = queued else { continue }
                 queued = nil
                 currentTs = queuedTs
@@ -1065,7 +1092,7 @@ final class TranslatorEngine: ObservableObject {
             }
         }
         guard isCurrent(), (!paused || manualMode) else { return }
-        if cache.count > 3000 { trimCache() }
+        if cache.count > max(500, min(6000, int("memoryCapacity", 3000))) { trimCache() }
 
         guard translatedAny else {
             if display {
@@ -1100,7 +1127,11 @@ final class TranslatorEngine: ObservableObject {
         diag.s.translations += 1
         diag.s.chars += blocks.joined().count
         status = "\(srcLangs.keys.sorted().joined(separator: "+")) → \(targetCode) ✓"
-        show(blocks.joined(separator: "\n"), outBlocks.joined(separator: "\n"))
+        let timing = PresentationTiming(packet: currentPacket, firstSeen: currentTs,
+            queuedAt: currentQueuedAt, processingAt: processingStarted, processingMs: translateMs,
+            savedRequests: savedRequests, readyAt: Date())
+        schedulePresentation(blocks.joined(separator: "\n"), outBlocks.joined(separator: "\n"),
+                             generation: workGeneration, context: workContext, timing: timing)
     }
 
     /// Translates many sentences in one call.
@@ -1128,7 +1159,41 @@ final class TranslatorEngine: ObservableObject {
         return PipelineSafety.orderedTranslations(res.map { ($0.clientIdentifier, $0.targetText) }, count: texts.count)
     }
 
-    private func show(_ text: String, _ result: String) {
+    private struct PresentationTiming {
+        let packet: Packet?
+        let firstSeen: Double
+        let queuedAt: Date
+        let processingAt: Date
+        let processingMs: Double
+        let savedRequests: Int
+        let readyAt: Date
+    }
+
+    private func cancelPresentation() {
+        presentationTask?.cancel(); presentationTask = nil
+        presentationID = UUID()
+        if waitingToDisplay { waitingToDisplay = false }
+    }
+
+    private func schedulePresentation(_ text: String, _ result: String, generation: Int, context: Int, timing: PresentationTiming) {
+        cancelPresentation()
+        let delay = PresentationSchedule.remaining(policy: ud.string(forKey: "displayPolicy") ?? "immediate",
+            minimum: num("minDisplay", 0), lastShown: lastShowDate.timeIntervalSince1970, now: Date().timeIntervalSince1970)
+        guard delay > 0 else { show(text, result, timing: timing); return }
+        waitingToDisplay = true
+        let ticket = presentationID
+        presentationTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(delay))
+            guard let self, !Task.isCancelled, ticket == self.presentationID else { return }
+            self.waitingToDisplay = false
+            guard PresentationSchedule.isCurrent(generation: generation, context: context,
+                currentGeneration: self.generation, currentContext: self.contextRevision,
+                frozen: self.frozen, paused: self.paused, manual: self.manualMode) else { return }
+            self.show(text, result, timing: timing)
+        }
+    }
+
+    private func show(_ text: String, _ result: String, timing: PresentationTiming) {
         clearTask?.cancel()
         clearTask = nil
         guard !frozen, (!paused || manualMode),
@@ -1143,19 +1208,21 @@ final class TranslatorEngine: ObservableObject {
         pip.style = pipStyle
         pip.render(original: text, translated: result, showOriginal: showOriginal)
         let presented = Date()
-        let packet = currentPacket
-        let sent = packet?.ts ?? currentQueuedAt.timeIntervalSince1970
-        let first = packet?.firstSeenAt ?? currentTs
+        let packet = timing.packet
+        let sent = packet?.ts ?? timing.queuedAt.timeIntervalSince1970
+        let first = packet?.firstSeenAt ?? timing.firstSeen
         let read = packet?.readStartedAt ?? sent
-        let total = currentTs > 0 ? max(0, presented.timeIntervalSince1970 - currentTs) * 1000 : 0
+        let total = timing.firstSeen > 0 ? max(0, presented.timeIntervalSince1970 - timing.firstSeen) * 1000 : 0
         latency.last = LatencyBreakdown(
             recognition: packet?.ocrMs ?? 0,
             confirmation: max(0, read - first) * 1000,
-            delivery: max(0, currentQueuedAt.timeIntervalSince1970 - read - (packet?.ocrMs ?? 0) / 1000) * 1000,
-            queue: max(0, processingStarted.timeIntervalSince(currentQueuedAt)) * 1000,
-            translation: translateMs,
+            delivery: max(0, timing.queuedAt.timeIntervalSince1970 - read - (packet?.ocrMs ?? 0) / 1000) * 1000,
+            queue: max(0, timing.processingAt.timeIntervalSince(timing.queuedAt)) * 1000,
+            translation: timing.processingMs,
+            displayHold: max(0, renderStart.timeIntervalSince(timing.readyAt)) * 1000,
             rendering: presented.timeIntervalSince(renderStart) * 1000,
-            total: total, requestsSaved: savedRequests)
+            total: total, requestsSaved: timing.savedRequests)
+        diag.recordPipeline(latency.last)
         if total > 0 { diag.recordLatency(ms: total) }
         if history.first?.original != text {
             sessionTranslations += 1; sessionCharacters += text.count
@@ -1163,11 +1230,17 @@ final class TranslatorEngine: ObservableObject {
                 history.insert(HistoryItem(original: text, translated: result,
                                            sourceLanguage: sourceCode == "auto" ? detectedLang : sourceCode,
                                            targetLanguage: targetCode), at: 0)
-                if history.count > 500 { history.removeLast() }
+                if history.count > historyCapacity { history.removeLast() }
             }
             if flag("speak", false) { speak(result) }
-            if flag("haptics", false) { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
-            if flag("autoCopy", false) { UIPasteboard.general.string = result }
+            if flag("haptics", false) {
+                let strength = ud.string(forKey: "hapticStrength") ?? "light"
+                UIImpactFeedbackGenerator(style: strength == "strong" ? .heavy : (strength == "medium" ? .medium : .light)).impactOccurred()
+            }
+            if flag("autoCopy", false) {
+                let format = ud.string(forKey: "autoCopyFormat") ?? "translation"
+                UIPasteboard.general.string = format == "original" ? text : (format == "bilingual" ? text + "\n" + result : result)
+            }
         }
         renderedGrams = TextSim.grams(result).union(placeholderGrams)
         sourceGrams = TextSim.grams(text)
@@ -1178,6 +1251,7 @@ final class TranslatorEngine: ObservableObject {
                       "fr": "fr-FR", "de": "de-DE", "it": "it-IT", "ja": "ja-JP", "ko": "ko-KR", "ru": "ru-RU",
                       "ar": "ar-SA", "tr": "tr-TR", "hi": "hi-IN", "id": "id-ID", "nl": "nl-NL", "pl": "pl-PL",
                       "th": "th-TH", "vi": "vi-VN", "uk": "uk-UA"]
+        if speech.isSpeaking, !flag("interruptSpeech", true) { return }
         speech.stopSpeaking(at: .immediate)
         let u = AVSpeechUtterance(string: s)
         u.voice = AVSpeechSynthesisVoice(language: voices[targetCode] ?? targetCode)
@@ -1219,6 +1293,7 @@ final class TranslatorEngine: ObservableObject {
 
     func clearMemory() {
         cache.removeAll()
+        languageCache.removeAll()
         specKeys.removeAll()
         memoryDirty = false
         memoryCount = 0
@@ -1229,7 +1304,8 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func trimCache() {
-        let extra = cache.count - 2000
+        let limit = max(500, min(6000, int("memoryCapacity", 3000)))
+        let extra = cache.count - limit * 2 / 3
         guard extra > 0 else { return }
         for k in cache.keys.prefix(extra) { cache[k] = nil }
     }

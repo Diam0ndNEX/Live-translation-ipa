@@ -60,6 +60,10 @@ struct SettingsView: View {
             || show("Performance & power", "adaptive battery idle pause thermal hot")
             || show("Privacy & storage", "private session history memory diagnostic text delete")
             || show("Backup & reset", "export import backup restore reset")
+            || show("Timing & responsiveness", "waiting display delay latency heartbeat immediate readable")
+            || show("Caption layout", "alignment weight spacing padding scale original speaker colour")
+            || show("Reader & workspace", "font width photo resolution automatic home timing expanded")
+            || show("Feedback & storage", "haptic clipboard speech limits memory history samples")
             || show("About & help", "version changelog help how")
     }
 
@@ -80,6 +84,20 @@ struct SettingsView: View {
                 if show("Presets", "save profile custom switch") {
                     Section { PresetsLinkRow(store: engine.presets) }
                 }
+                Section {
+                    if show("Timing & responsiveness", "waiting display delay latency heartbeat immediate readable") {
+                        NavigationLink { ResponsivenessSettings() } label: { Label("Timing & responsiveness", systemImage: "timer") }
+                    }
+                    if show("Caption layout", "alignment weight spacing padding scale original speaker colour") {
+                        NavigationLink { CaptionAppearanceSettings() } label: { Label("Caption layout", systemImage: "textformat.size") }
+                    }
+                    if show("Reader & workspace", "font width photo resolution automatic home timing expanded") {
+                        NavigationLink { ReaderWorkspaceSettings() } label: { Label("Reader & workspace", systemImage: "text.book.closed") }
+                    }
+                    if show("Feedback & storage", "haptic clipboard speech limits memory history samples") {
+                        NavigationLink { FeedbackStorageSettings() } label: { Label("Feedback & storage", systemImage: "slider.horizontal.3") }
+                    }
+                } header: { Text("Personalize") }
                 Section {
                     if show("Reading & OCR", "mode area custom rotation order speed stability ignore noise contrast frames words small") {
                         NavigationLink { ReadingSettings() } label: { Label("Reading & OCR", systemImage: "viewfinder") }
@@ -347,7 +365,7 @@ struct WindowSettings: View {
             } header: {
                 Text("Behaviour")
             } footer: {
-                Text("A minimum display time stops fast-changing text from flickering past before you can read it.")
+                Text("Minimum display time applies in Readable mode under Timing & responsiveness. Immediate mode shows fully confirmed results as soon as they are ready.")
             }
             Section("Feedback") {
                 Toggle("Vibrate on new translation", isOn: $haptics)
@@ -551,7 +569,7 @@ struct AboutSettings: View {
                 Button("Show the welcome tour again") { onboarded = false }
             }
             Section("Changelog") {
-                ForEach(AppVersion.changelog, id: \.0) { v in
+                ForEach(AppVersion.changelog, id: \.1) { v in
                     VStack(alignment: .leading, spacing: 2) {
                         Text("v\(v.0)").bold()
                         Text(v.1).font(.footnote).foregroundStyle(.secondary)

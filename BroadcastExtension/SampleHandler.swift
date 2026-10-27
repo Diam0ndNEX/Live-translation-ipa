@@ -238,6 +238,9 @@ class SampleHandler: RPBroadcastSampleHandler {
         let need = max(1, cfg.stability ?? 2)
         let key = lines.map(\.t).joined(separator: "\n")
         if PipelineSafety.isDuplicate(key.components(separatedBy: "\n"), previous: sentKey.components(separatedBy: "\n")) { candidateKey = key; candidateCount = 0; return }
+        // A new confirmation run can resemble the previous subtitle. Reset timing
+        // when the count restarts, even if the fuzzy comparison still matches.
+        if candidateCount == 0 { candidateStartedAt = readStartedAt }
         if TextSim.similar(key, candidateKey) { candidateCount += 1 }
         else { candidateKey = key; candidateCount = 1; candidateStartedAt = readStartedAt }
         if candidateCount >= need {

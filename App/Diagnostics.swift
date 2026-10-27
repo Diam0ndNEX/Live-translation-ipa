@@ -96,11 +96,12 @@ struct StateSpan: Identifiable {
 }
 
 enum Fix: String {
-    case fastSpeed, instantStability, fixedRotation, narrowArea, openLanguages, startCapture, translateAhead
+    case fastSpeed, instantStability, immediateDisplay, fixedRotation, narrowArea, openLanguages, startCapture, translateAhead
     var label: String {
         switch self {
         case .fastSpeed: "Use Fast speed"
         case .instantStability: "Use Instant mode"
+        case .immediateDisplay: "Show ready results immediately"
         case .fixedRotation: "Turn off auto-rotation"
         case .narrowArea: "Read the bottom third only"
         case .openLanguages: "Open Languages"
@@ -161,6 +162,7 @@ final class Diagnostics: ObservableObject {
     @Published var ocr: [Sample] = []
     @Published var translate: [Sample] = []
     @Published var latency: [Sample] = []
+    @Published var pipeline: [PipelineMeasurement] = []
     @Published var transport: [Sample] = []
     @Published var fps: [Sample] = []
     @Published var lineCounts: [Sample] = []
@@ -183,14 +185,16 @@ final class Diagnostics: ObservableObject {
 
     private func add(_ kp: ReferenceWritableKeyPath<Diagnostics, [Sample]>, _ v: Double, cap: Int = 600) {
         self[keyPath: kp].append(Sample(t: Date(), v: v))
-        let extra = self[keyPath: kp].count - cap
+        let limit = max(300, min(1200, (UserDefaults.standard.object(forKey: "diagSamples") as? Int) ?? 600))
+        let extra = self[keyPath: kp].count - limit
         if extra > 0 { self[keyPath: kp].removeFirst(extra) }
     }
 
     // MARK: Events
     func event(_ kind: EventKind, _ text: String, detail: String? = nil) {
         events.append(TimelineEvent(time: Date(), kind: kind, text: text, detail: detail))
-        if events.count > 600 { events.removeFirst(events.count - 600) }
+        let limit = max(300, min(1200, (UserDefaults.standard.object(forKey: "diagSamples") as? Int) ?? 600))
+        if events.count > limit { events.removeFirst(events.count - limit) }
     }
 
     /// Plain log line; the category is worked out from the wording.
@@ -218,8 +222,15 @@ final class Diagnostics: ObservableObject {
 
     func recordLatency(ms: Double) { add(\.latency, ms) }
 
+    func recordPipeline(_ stages: LatencyBreakdown) {
+        pipeline.append(PipelineMeasurement(date: Date(), stages: stages))
+        let limit = max(300, min(1200, (UserDefaults.standard.object(forKey: "diagSamples") as? Int) ?? 600))
+        if pipeline.count > limit { pipeline.removeFirst(pipeline.count - limit) }
+    }
+
     func reset() {
         s = Stats()
+        pipeline = []
         ocr = []; translate = []; latency = []; transport = []; fps = []; lineCounts = []
         extMem = []; appMem = []; thermal = []; battery = []; cacheRate = []
         events = []; spans = []; langCounts = [:]; names = []
@@ -327,9 +338,9 @@ final class Diagnostics: ObservableObject {
             }
             if latS.n >= 3 {
                 if latS.avg > 2000 {
-                    flag(2, "Translations show up late (\(Int(latS.avg)) ms)", "Instant mode skips the extra confirmation read.", .instantStability); score -= 20
+                    flag(2, "Translations show up late (\(Int(latS.avg)) ms)", "Check measured queue and readability hold time. Immediate display keeps confirmation enabled.", .immediateDisplay); score -= 20
                 } else if latS.avg > 1200 {
-                    flag(1, "Slightly delayed translations (\(Int(latS.avg)) ms)", "Instant mode or the Fast speed reduces the delay.", .instantStability); score -= 10
+                    flag(1, "Slightly delayed translations (\(Int(latS.avg)) ms)", "Immediate display removes optional readability holds without changing translation quality.", .immediateDisplay); score -= 10
                 }
             }
             if s.fps > 0 && s.fps < 15 {
@@ -387,6 +398,12 @@ final class Diagnostics: ObservableObject {
             let clean = e.text.replacingOccurrences(of: "\"", with: "'")
             rows.append("\(e.time.timeIntervalSince1970),\(e.kind.rawValue),\"\(clean)\"")
         }
+        rows.append("")
+        rows.append("pipeline_time,confirmation_ms,ocr_ms,delivery_filtering_ms,queue_ms,processing_ms,readability_hold_ms,frame_ms,total_ms")
+        for sample in pipeline {
+            let v = sample.stages
+            rows.append("\(sample.date.timeIntervalSince1970),\(v.confirmation),\(v.recognition),\(v.delivery),\(v.queue),\(v.translation),\(v.displayHold),\(v.rendering),\(v.total)")
+        }
         return rows.joined(separator: "\n")
     }
 
@@ -414,6 +431,11 @@ final class Diagnostics: ObservableObject {
             l.append("Speakers: \(names.joined(separator: ", "))")
         }
         l.append("")
+        if let latest = pipeline.last?.stages {
+            l.append("Latest paired timing (ms): confirmation \(Int(latest.confirmation)), OCR \(Int(latest.recognition)), delivery/filtering \(Int(latest.delivery)), queue \(Int(latest.queue)), processing \(Int(latest.translation)), readability hold \(Int(latest.displayHold)), frame preparation \(Int(latest.rendering)), total \(Int(latest.total))")
+            l.append("Total measures first OCR sighting to frame enqueue; it does not measure physical screen presentation. Confirmation and translation-ahead can overlap.")
+        }
+        l.append("Memory values are remaining per-process allowance, not total free phone RAM.")
         l.append("Recent events:")
         for e in events.suffix(60).reversed() {
             l.append("\(e.time.formatted(date: .omitted, time: .standard)) [\(e.kind.title)] \(e.text)")
@@ -864,6 +886,7 @@ private struct DiagnosticsBody: View {
         switch f {
         case .fastSpeed: ud.set("fast", forKey: "speed")
         case .instantStability: ud.set(1, forKey: "stability")
+        case .immediateDisplay: ud.set("immediate", forKey: "displayPolicy"); engine.timingSettingsChanged()
         case .fixedRotation:
             ud.set("0", forKey: "frameRot")
             engine.rotationSettingChanged()
@@ -1094,36 +1117,15 @@ private struct DiagnosticsBody: View {
     private var speedPage: some View {
         let important: Set<EventKind> = [.error, .rotation, .preset, .capture]
         let markers = Array(diag.events.filter { important.contains($0.kind) && $0.time >= rangeStart }.suffix(6))
-        let total = Diagnostics.summarize(slice(diag.latency)).avg
-        let tr = Diagnostics.summarize(slice(diag.transport)).avg
-        let ts = Diagnostics.summarize(slice(diag.translate)).avg
-        let other = Swift.max(0, total - tr - ts)
         return VStack(spacing: 14) {
             LineCard(title: "Reading the screen", samples: slice(diag.ocr), color: Color.green, unit: "ms", rule: 300, markers: markers)
             LineCard(title: "Translating", samples: slice(diag.translate), color: Color.cyan, unit: "ms", markers: markers)
-            LineCard(title: "Total delay (read → shown)", samples: slice(diag.latency), color: Color.orange, unit: "ms", rule: 1500, markers: markers)
+            LineCard(title: "First sighting → frame enqueue", samples: slice(diag.latency), color: Color.orange, unit: "ms", rule: 1500, markers: markers)
             LineCard(title: "Transfer extension → app", samples: slice(diag.transport), color: Color.purple, unit: "ms")
             LineCard(title: "Frames per second", samples: slice(diag.fps), color: Color.teal, unit: "fps")
             HistogramCard(title: "How long reading takes", values: slice(diag.ocr).map { $0.v }, color: Color.green)
             HistogramCard(title: "How long the total delay is", values: slice(diag.latency).map { $0.v }, color: Color.orange)
-            if total > 0 {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Where the delay goes (average)").font(.subheadline.weight(.semibold))
-                    Chart {
-                        BarMark(x: .value("ms", tr), y: .value("Delay", "Delay"))
-                            .foregroundStyle(by: .value("Step", "Transfer"))
-                        BarMark(x: .value("ms", ts), y: .value("Delay", "Delay"))
-                            .foregroundStyle(by: .value("Step", "Translate"))
-                        BarMark(x: .value("ms", other), y: .value("Delay", "Delay"))
-                            .foregroundStyle(by: .value("Step", "Waiting & display"))
-                    }
-                    .chartForegroundStyleScale(["Transfer": Color.purple, "Translate": Color.cyan, "Waiting & display": Color.orange])
-                    .chartLegend(position: .bottom)
-                    .chartYAxis(.hidden)
-                    .frame(height: 90)
-                }
-                .card()
-            }
+            PairedTimingCard(samples: diag.pipeline.filter { $0.date >= rangeStart })
         }
     }
 
@@ -1418,8 +1420,9 @@ private struct DiagnosticsBody: View {
         let s = diag.s
         let b = UIDevice.current.batteryLevel
         return VStack(spacing: 14) {
-            LineCard(title: "Capture extension memory free", samples: slice(diag.extMem), color: Color.teal, unit: "MB", rule: 15)
-            LineCard(title: "App memory free", samples: slice(diag.appMem), color: Color.indigo, unit: "MB")
+            MemoryAllowanceExplanation().card()
+            LineCard(title: "Extension memory headroom", samples: slice(diag.extMem), color: Color.teal, unit: "MB", rule: 15)
+            LineCard(title: "Main app memory headroom", samples: slice(diag.appMem), color: Color.indigo, unit: "MB")
             thermalCard
             LineCard(title: "Battery", samples: slice(diag.battery), color: Color.green, unit: "%")
             VStack(alignment: .leading, spacing: 8) {
@@ -1429,7 +1432,7 @@ private struct DiagnosticsBody: View {
                 LabeledContent("Orientation from iOS", value: s.orientation)
                 LabeledContent("Read area size", value: s.cropSize)
                 LabeledContent("Rotation applied", value: "\(s.rotation * 90)°")
-                LabeledContent("Lowest extension memory", value: s.minExtFreeMB > 9000 ? "–" : "\(Int(s.minExtFreeMB)) MB")
+                LabeledContent("Lowest extension headroom", value: s.minExtFreeMB > 9000 ? "–" : "\(Int(s.minExtFreeMB)) MB")
                 LabeledContent("Low Power Mode", value: ProcessInfo.processInfo.isLowPowerModeEnabled ? "On" : "Off")
                 LabeledContent("Battery now", value: b < 0 ? "–" : "\(Int(b * 100))%")
             }
