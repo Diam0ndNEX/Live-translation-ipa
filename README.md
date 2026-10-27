@@ -1,18 +1,23 @@
-# ScreenLingo 1.1.0 (40)
+# ScreenLingo v1.2.0 · build 41
 
-## Changes
+- Fixed the session speaker list: visible `Name: dialogue` labels are now recorded without opting into diagnostic text exports. This is text-label recognition, not voice identification. Names remain session-only; private sessions suppress them, and exports still require explicit text consent.
+- Cool mode in Settings → Performance & power reduces OCR frequency (double the configured interval, minimum 450 ms), disables speculative translation and idle prewarming. It preserves recognition resolution, accuracy, correction and confirmation requirements. This trades update speed and brief-caption coverage for less work; actual temperature savings need device testing.
+- Simple diagnostics collects summary counters. Detailed diagnostics additionally enables bounded graph samples, device sampling and event history. Both off stops collection; capture/translation safety timers continue. Collection changes clear the previous session so graphs cannot imply continuous coverage.
+- Automatic source language lock stabilizes repeated language detections: four matching detections in a six-entry window engage it; three mismatches release it. Explicit source selection bypasses this feature.
+
+## Previous v1.1 changes
 
 - Fixed the empty language graph when a source is explicitly selected. Confirmed source inputs now count for selected, automatically detected and locked source languages. Chart labels distinguish usage from detection; a selected Portuguese source is never reported as an automatic detection.
 - Speculative sightings and target-language passthroughs do not inflate the language counters. Reset clears language and selection-mode totals together.
 - Reports and CSV exports include source-language and source-choice counts. Text reports include configured source, last source used, app phase, PiP state, packet/sample times and capture settings.
-- Foreground, inactive and background transitions are recorded alongside the existing capture/PiP events, making future background traces easier to interpret.
+- With detailed collection enabled, foreground, inactive and background transitions are recorded alongside the existing capture/PiP events, making future background traces easier to interpret.
 - Removed the requested memory explanation from the interface and report.
 
 Translation selection, source filtering, OCR quality and rotation behavior retain the 1.0 implementation.
 
 ## How diagnostic graphs get their data
 
-The ReplayKit extension counts incoming video frames, OCR passes/skips and OCR durations and sends timestamped packets to the main app over localhost UDP. The app records packet delivery, processing, source usage, caching and presentation timings during the real pipeline. A timer samples the iOS battery, thermal and process-memory APIs every two timer ticks while the app is executing. Swift Charts draws the bounded arrays of samples; opening the diagnostics screen is not required to collect them.
+The ReplayKit extension counts incoming video frames, OCR passes/skips and OCR durations and sends timestamped packets to the main app over localhost UDP. The app records packet delivery, processing, source usage, caching and presentation timings during the real pipeline. When detailed collection is enabled, a timer samples the iOS battery, thermal and process-memory APIs every two timer ticks while the app is executing. Swift Charts draws the bounded arrays of samples; opening the diagnostics screen is not required to collect them.
 
 The project uses the Audio/AirPlay/Picture in Picture background mode with the visible PiP translation window. Live Activities are not the mechanism that runs the translator. Background execution remains controlled by iOS: if the app is suspended, its timers and graph collection stop executing until it resumes. ReplayKit's broadcast extension has its own lifecycle. A pre-1.1 trace cannot establish foreground/background timing because those transitions were not recorded.
 
@@ -22,6 +27,6 @@ Across 143 paired displayed results, average total time was 878 ms: confirmation
 
 ## Build and verification
 
-The `codex/screenlingo-v1.1.0` branch builds the unsigned IPA after focused Swift regression checks and verifies both bundle versions. Main and previous branches remain unchanged. The simulator preview remains an optional manual workflow input.
+The `codex/screenlingo-v1.2.0` branch builds the unsigned IPA after focused Swift regression checks and verifies both bundle versions. Main and previous branches remain unchanged. The simulator preview remains an optional manual workflow input.
 
-Regression coverage includes manually selected Portuguese, automatic detection, locked sources, unresolved-source placeholders, reconciled counters and reset, alongside the existing pipeline, timing, grouping, export and stale-output checks. Physical-device verification is still needed to confirm the new counters and lifecycle events during a broadcast.
+Regression coverage includes manually selected Portuguese, automatic detection, locked sources, unresolved-source placeholders, reconciled counters and reset, alongside the existing pipeline, timing, grouping, export and stale-output checks. Regression coverage also checks Cool mode cadence and optional work, session speaker extraction, deduplication, privacy, reset and collection policy. Physical-device verification is still needed to measure temperature and verify the new controls during a broadcast.

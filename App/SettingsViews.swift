@@ -465,6 +465,7 @@ struct InterfaceSettings: View {
 // MARK: - Performance
 struct PerformanceSettings: View {
     @EnvironmentObject var engine: TranslatorEngine
+    @AppStorage("coolMode") private var coolMode = false
     @AppStorage("adaptive") private var adaptive = true
     @AppStorage("idleMinutes") private var idleMinutes = 0
     @AppStorage("translateAhead") private var translateAhead = true
@@ -486,6 +487,8 @@ struct PerformanceSettings: View {
                 Text("Translate ahead starts translating the moment text appears and shows it once it's confirmed, so the two waits overlap. Keeping the translator warm avoids a slow first sentence. Remembered sentences are reused instantly, even after restarting. None of this changes the wording of a translation.")
             }
             Section {
+                Toggle("Cool mode", isOn: $coolMode)
+                Text("Reads at least twice as far apart (minimum 0.45 seconds), skips translate-ahead and idle warm-ups. OCR accuracy, resolution and confirmation checks stay the same. Updates can arrive later and very brief captions may be missed. Your speed settings are restored when switched off.").font(.footnote).foregroundStyle(.secondary)
                 Toggle("Adaptive performance", isOn: $adaptive)
                 Toggle("Reduce OCR work when no text is visible", isOn: $idleBackoff)
                 Picker("Pause after no text for", selection: $idleMinutes) {
@@ -500,9 +503,10 @@ struct PerformanceSettings: View {
                 Text("Adaptive performance reads less often when the phone gets hot, Low Power Mode is on, or the capture extension is running low on memory. Auto-pause saves battery during long gaps.")
             }
             Section {
+                DiagnosticsCollectionControls()
                 Button("Reset diagnostics counters") { engine.diag.reset(); engine.toast("Counters reset") }
             }
-            ResetSection(keys: ["adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember", "idleBackoff"])
+            ResetSection(keys: ["coolMode", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember", "idleBackoff"])
         }
         .settingsPage("Performance & power")
         .onChange(of: adaptive) { _, _ in engine.syncConfig() }
@@ -585,14 +589,17 @@ struct PrivacySettings: View {
     @EnvironmentObject private var engine: TranslatorEngine
     @AppStorage("privateSession") private var privateSession = false
     @AppStorage("diagIncludeText") private var includeText = false
+    @AppStorage("showSessionSpeakers") private var showSpeakers = true
     @State private var confirm = false
     var body: some View {
         List {
             Section {
                 Toggle("Private session", isOn: $privateSession)
                 Text("New translations stay out of History and are not written to translation memory. Existing saved history is kept.").font(.footnote).foregroundStyle(.secondary)
+                Toggle("Show recognized speaker labels this session", isOn: $showSpeakers)
+                Text("Shows names from visible Name: dialogue labels, kept only for this session. Private sessions hide the list. This does not identify voices or unnamed people.").font(.footnote).foregroundStyle(.secondary)
                 Toggle("Include recognized names and text in diagnostics", isOn: $includeText)
-                Text("Turn this on only when you want to include text while troubleshooting. Translation and OCR run on your device.").font(.footnote).foregroundStyle(.secondary)
+                Text("Allows names in shared reports and text in detailed events. Turn this on only when you want to include text while troubleshooting. Translation and OCR run on your device.").font(.footnote).foregroundStyle(.secondary)
             }
             Section("Local storage") {
                 LabeledContent("History entries", value: "\(engine.history.count)")
@@ -607,6 +614,22 @@ struct PrivacySettings: View {
                 engine.eraseHistory()
                 engine.clearMemory()
             }
+        }
+    }
+}
+
+/// Collection is independent of which diagnostics page happens to be visible.
+struct DiagnosticsCollectionControls: View {
+    @AppStorage("diagnosticsEnabled") private var enabled = true
+    @AppStorage("detailedCollection") private var detailed = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle("Simple diagnostics", isOn: $enabled)
+            Toggle("Detailed diagnostics", isOn: $detailed).disabled(!enabled)
+            Text(enabled ? (detailed ? "Records summary counters, graphs, device samples and events." : "Summary counters only. Graph sampling, device polling and event history are off.") : "Diagnostic collection is off. Capture and translation continue.")
+                .font(.caption).foregroundStyle(.secondary)
+            Text("Changing collection starts a fresh diagnostic session. Detailed collection requires Simple diagnostics.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 }

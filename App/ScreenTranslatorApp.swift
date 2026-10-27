@@ -12,6 +12,11 @@ struct RootView: View {
     @Environment(\.scenePhase) private var phase
     @AppStorage("accent") private var accent = AccentChoice.blue.rawValue
     @AppStorage("onboarded") private var onboarded = false
+    @AppStorage("diagnosticsEnabled") private var diagnosticsEnabled = true
+    @AppStorage("detailedCollection") private var detailedCollection = false
+    @AppStorage("showSessionSpeakers") private var showSessionSpeakers = true
+    @AppStorage("privateSession") private var privateSession = false
+    @AppStorage("coolMode") private var coolMode = false
     @State private var tab = 0
 
     var body: some View {
@@ -45,6 +50,11 @@ struct RootView: View {
             engine.diag.noteExecutionPhase(phase == .active ? "active" : (phase == .background ? "background" : "inactive"), pipActive: engine.pipActive)
             await engine.loadLanguages()
         }
+        .onChange(of: diagnosticsEnabled) { _, _ in engine.diagnosticsSettingsChanged() }
+        .onChange(of: detailedCollection) { _, _ in engine.diagnosticsSettingsChanged() }
+        .onChange(of: privateSession) { _, _ in engine.diag.clearSpeakers() }
+        .onChange(of: showSessionSpeakers) { _, _ in engine.diag.clearSpeakers() }
+        .onChange(of: coolMode) { _, _ in engine.powerPolicyChanged() }
         .onChange(of: phase) { _, p in
             engine.diag.noteExecutionPhase(p == .active ? "active" : (p == .background ? "background" : "inactive"), pipActive: engine.pipActive)
             if p == .active { engine.server.start() }

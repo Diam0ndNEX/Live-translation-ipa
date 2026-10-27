@@ -96,10 +96,10 @@ final class TranslatorEngine: ObservableObject {
         "langLock", "neverTranslate", "sourceFixes", "glossary", "winSize", "theme", "textSize", "pipFont",
         "showOriginal", "autoClear", "clearHold", "minDisplay", "autoOpenPiP", "haptics", "speak", "speechRate",
         "autoCopy", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember",
-        "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff"
+        "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode"
     ]
     /// App look & behaviour that presets do not touch.
-    static let interfaceKeys = ["accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "memoryCapacity", "diagSamples", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
+    static let interfaceKeys = ["accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "memoryCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
     static var settingKeys: [String] { presetKeys + interfaceKeys }
     static let defaults: [String: Any] = [
         "source": "auto", "target": "en", "mode": "movie", "area": "smart", "customY0": 0.0, "customY1": 0.5,
@@ -116,6 +116,7 @@ final class TranslatorEngine: ObservableObject {
         "memoryCapacity": 3000, "diagSamples": 600, "homeMetrics": true, "homeQuickExpanded": false,
         "homeDetailsExpanded": false, "hapticStrength": "light", "autoCopyFormat": "translation", "interruptSpeech": true,
         "photoOCREdge": 2400, "photoAutoTranslate": false,
+        "coolMode": false, "diagnosticsEnabled": true, "detailedCollection": false, "showSessionSpeakers": true,
         "privateSession": false, "diagIncludeText": false, "sessionLimit": 0, "readerSize": 28.0,
         "readerOriginal": true, "readerAlignment": false, "ocrConfidence": 0.3, "ocrCorrection": true, "idleBackoff": true
     ]
@@ -150,7 +151,7 @@ final class TranslatorEngine: ObservableObject {
     // Languages
     @Published var languages: [LangItem] = TranslatorEngine.fallbackLanguages
     @Published var langStatus: [String: LanguageAvailability.Status] = [:]
-    @Published var lockedLang: String? = nil { didSet { diag.s.lockedLang = lockedLang ?? "–" } }
+    @Published var lockedLang: String? = nil { didSet { if diag.enabled { diag.s.lockedLang = lockedLang ?? "–" } } }
     // Output + diagnostics
     @Published var original = ""
     @Published var translated = ""
@@ -339,6 +340,26 @@ final class TranslatorEngine: ObservableObject {
         syncConfig()
     }
 
+    private var runtimePolicy: RuntimePolicy {
+        RuntimePolicy(coolMode: flag("coolMode", false), diagnosticsEnabled: flag("diagnosticsEnabled", true),
+                      detailedRequested: flag("detailedCollection", false))
+    }
+
+    func diagnosticsSettingsChanged() {
+        diag.collectionChanged()
+        if diag.enabled {
+            diag.s.lockedLang = lockedLang ?? "–"
+            diag.s.rotation = effectiveRot
+            diag.s.orderVote = orderVote
+            diag.s.calibrated = calibrated
+        }
+    }
+
+    func powerPolicyChanged() {
+        if !runtimePolicy.allowsSpeculation { specQueued = nil }
+        syncConfig()
+    }
+
     /// Sends OCR area, source-language hint, speed and rotation to the extension.
     func syncConfig() {
         let r = area.range(mode: mode)
@@ -352,12 +373,13 @@ final class TranslatorEngine: ObservableObject {
             if ProcessInfo.processInfo.isLowPowerModeEnabled { interval *= 1.5 }
             if extFreeMB > 0 && extFreeMB < 12 { maxEdge = min(maxEdge, 800) }
         }
-        diag.s.rotation = effectiveRot
+        interval = runtimePolicy.captureInterval(interval)
+        if diag.enabled { diag.s.rotation = effectiveRot }
         server.send(Config(lang: lockedLang ?? sourceCode, y0: r.lowerBound, y1: r.upperBound,
                            maxEdge: maxEdge, interval: interval, paused: paused || manualMode,
                            stability: int("stability", 2), rot: effectiveRot, rev: rotRev,
                            boost: int("boost", 1), skipUnchanged: flag("skipUnchanged", true),
-                           speculate: flag("translateAhead", true), confidence: num("ocrConfidence", 0.3),
+                           speculate: runtimePolicy.allowsSpeculation && flag("translateAhead", true), confidence: num("ocrConfidence", 0.3),
                            correction: flag("ocrCorrection", true), idleBackoff: flag("idleBackoff", true)))
     }
 
@@ -618,7 +640,7 @@ final class TranslatorEngine: ObservableObject {
         guard p.kind == "ocr" else { return }
         // First, unconfirmed sighting: translate quietly now so the result is ready the moment the text is confirmed.
         if p.stable == false {
-            if flag("translateAhead", true) {
+            if runtimePolicy.allowsSpeculation && flag("translateAhead", true) {
                 let early = extractTexts(p.lines, count: false)
                 if !early.isEmpty { speculate(early) }
             }
@@ -652,26 +674,26 @@ final class TranslatorEngine: ObservableObject {
         let ignore = list("ignoreList", lower: true)
         var cand: [OCRLine] = []
         for l in lines {
-            if count { diag.s.linesIn += 1 }
-            if !range.contains(l.y) { if count { diag.s.dropArea += 1 }; continue }
-            if l.h < minH { if count { diag.s.dropSmall += 1 }; continue }
-            if ignore.contains(where: { l.t.lowercased().contains($0) }) { if count { diag.s.dropIgnore += 1 }; continue }
+            if count && diag.enabled { diag.s.linesIn += 1 }
+            if !range.contains(l.y) { if count && diag.enabled { diag.s.dropArea += 1 }; continue }
+            if l.h < minH { if count && diag.enabled { diag.s.dropSmall += 1 }; continue }
+            if ignore.contains(where: { l.t.lowercased().contains($0) }) { if count && diag.enabled { diag.s.dropIgnore += 1 }; continue }
             cand.append(l)
         }
         let n1 = cand.count
         cand = removeOwnOutput(cand)
-        if count { diag.s.dropSelf += n1 - cand.count }
+        if count && diag.enabled { diag.s.dropSelf += n1 - cand.count }
         let allBlocks = makeBlocks(cand)
-        if count { diag.s.blocksIn += allBlocks.count }
+        if count && diag.enabled { diag.s.blocksIn += allBlocks.count }
         let blocks = selectBlocks(allBlocks)
-        if count { diag.s.blocksKept += blocks.count }
+        if count && diag.enabled { diag.s.blocksKept += blocks.count }
         var texts: [String] = []
         for b in blocks {
             let t = blockText(b)
             if TextSim.norm(t).count < 2 { continue }
-            if flag("dropNoise", true) && TextIntel.isNoise(t) { if count { diag.s.dropNoise += 1 }; continue }
-            if isTargetLanguage(t) { if count { diag.s.dropTarget += b.count }; continue }
-            if !plausiblySource(t) { if count { diag.s.dropLanguage += 1 }; continue }
+            if flag("dropNoise", true) && TextIntel.isNoise(t) { if count && diag.enabled { diag.s.dropNoise += 1 }; continue }
+            if isTargetLanguage(t) { if count && diag.enabled { diag.s.dropTarget += b.count }; continue }
+            if !plausiblySource(t) { if count && diag.enabled { diag.s.dropLanguage += 1 }; continue }
             texts.append(t)
         }
         return dedupe(texts).map { String($0.prefix(400)) }
@@ -679,6 +701,7 @@ final class TranslatorEngine: ObservableObject {
 
     /// Queues a quiet, low-priority translation that only fills the cache.
     private func speculate(_ blocks: [String]) {
+        guard runtimePolicy.allowsSpeculation else { return }
         let thermal = ProcessInfo.processInfo.thermalState
         if ProcessInfo.processInfo.isLowPowerModeEnabled || thermal == .serious || thermal == .critical { return }
         let joined = blocks.joined(separator: "\n")
@@ -699,7 +722,7 @@ final class TranslatorEngine: ObservableObject {
         guard diff != 0 else { return }
         orderVote = max(-30, min(30, orderVote * 0.8 + diff))
         votesSinceChange += 1
-        diag.s.orderVote = orderVote
+        if diag.enabled { diag.s.orderVote = orderVote }
         guard frameRotMode == "auto" else { return }
         if orderVote < -4 && votesSinceChange >= 2 {
             trial = (trial + 1) % 4
@@ -707,12 +730,12 @@ final class TranslatorEngine: ObservableObject {
             rotRev += 1
             invalidatePending()
             orderVote = 0; votesSinceChange = 0; calibrated = false
-            diag.s.calibrated = false
+            if diag.enabled { diag.s.calibrated = false }
             diag.log("Reading order looks reversed → trying rotation \(autoRot * 90)°")
             syncConfig()
         } else if orderVote > 4 && !calibrated {
             calibrated = true
-            diag.s.calibrated = true
+            if diag.enabled { diag.s.calibrated = true }
             diag.log("Reading order OK at rotation \(autoRot * 90)°")
         }
     }
@@ -830,7 +853,7 @@ final class TranslatorEngine: ObservableObject {
             pipRegion = r.insetBy(dx: -0.04, dy: showOriginal ? -0.18 : -0.06)
             pipRegionStamp = Date()
             if let g = pipRegion {
-                diag.s.pipRegion = "x \(Int(g.minX * 100))–\(Int(g.maxX * 100))%, y \(Int(g.minY * 100))–\(Int(g.maxY * 100))%"
+                if diag.enabled { diag.s.pipRegion = "x \(Int(g.minX * 100))–\(Int(g.maxX * 100))%, y \(Int(g.minY * 100))–\(Int(g.maxY * 100))%" }
             }
         }
         if let reg = pipRegion, Date().timeIntervalSince(pipRegionStamp) < 15 {
@@ -904,7 +927,7 @@ final class TranslatorEngine: ObservableObject {
                 await process(b, display: true)
             } else if let sp = specQueued {
                 specQueued = nil
-                await process(sp, display: false)
+                if runtimePolicy.allowsSpeculation { await process(sp, display: false) }
             }
         }
     }
@@ -1032,18 +1055,21 @@ final class TranslatorEngine: ObservableObject {
                 if display, let name = d.label { diag.learn(name) }
                 let prot = TextIntel.protect(d.text, words: never)
                 let sentences = splitSentences(prot.text)
-                if display { diag.s.sentences += sentences.count }
+                if display && diag.enabled { diag.s.sentences += sentences.count }
                 var outs: [String?] = []
                 for (si, s) in sentences.enumerated() {
                     let key = PipelineSafety.cacheKey(source: id, target: destination, text: s, protectedWords: prot.tokens.map { "\($0.0)=\($0.1)" })
                     if let hit = cache[key] {
                         outs.append(hit); translatedAny = true
                         if display {
-                            if specKeys.remove(key) != nil { diag.s.specHits += 1 } else { diag.s.cacheHits += 1 }
+                            let speculativeHit = specKeys.remove(key) != nil
+                            if diag.enabled {
+                                if speculativeHit { diag.s.specHits += 1 } else { diag.s.cacheHits += 1 }
+                            }
                         }
                     } else {
                         outs.append(nil)
-                        if display { diag.s.cacheMisses += 1 }
+                        if display && diag.enabled { diag.s.cacheMisses += 1 }
                         pending[id, default: []].append((bi, ui, si, s, key))
                     }
                 }
@@ -1063,7 +1089,7 @@ final class TranslatorEngine: ObservableObject {
                 failed = true; continue
             }
             if availability == .supported && display { status = "Language pack missing – open the Languages tab" }
-            if display { diag.s.batches += 1 }
+            if display && diag.enabled { diag.s.batches += 1 }
             let installed = availability == .installed
             let plan = TranslationBatchPlan(items.map { $0.text }, contexts: items.map { $0.key })
             if display { savedRequests += items.count - plan.unique.count }
@@ -1089,7 +1115,7 @@ final class TranslatorEngine: ObservableObject {
                     translatedAny = true
                 } else {
                     failed = true
-                    if display { diag.s.failures += 1 }
+                    if display && diag.enabled { diag.s.failures += 1 }
                 }
             }
         }
@@ -1126,8 +1152,8 @@ final class TranslatorEngine: ObservableObject {
         diag.recordTranslate(ms: translateMs, sentences: sentenceCount,
                              from: srcLangs.keys.sorted().joined(separator: "+"), to: targetCode,
                              preview: outBlocks.joined(separator: " / "))
-        diag.s.translations += 1
-        diag.s.chars += blocks.joined().count
+        if diag.enabled { diag.s.translations += 1 }
+        if diag.enabled { diag.s.chars += blocks.joined().count }
         status = "\(srcLangs.keys.sorted().joined(separator: "+")) → \(targetCode) ✓"
         let timing = PresentationTiming(packet: currentPacket, firstSeen: currentTs,
             queuedAt: currentQueuedAt, processingAt: processingStarted, processingMs: translateMs,
@@ -1145,13 +1171,13 @@ final class TranslatorEngine: ObservableObject {
                 directSession = TranslationSession(installedSource: source, target: target)
                 directKey = k
             }
-            diag.s.sessionKind = "Direct session (iOS 26)"
+            if diag.enabled { diag.s.sessionKind = "Direct session (iOS 26)" }
             guard let session = directSession else { return nil }
             let r = await runBatch(session, texts)
             if r == nil { directSession = nil }
             return r
         }
-        diag.s.sessionKind = "Hosted view (iOS 18)"
+        if diag.enabled { diag.s.sessionKind = "Hosted view (iOS 18)" }
         return await translateLegacy(texts, source: source, target: target)
     }
 
@@ -1318,7 +1344,7 @@ final class TranslatorEngine: ObservableObject {
 
     /// Loads the translation models before they're needed so the first real sentence isn't slow.
     func prewarm() async {
-        guard flag("keepWarm", true), !paused, !busy, !warming,
+        guard runtimePolicy.allowsPrewarming, flag("keepWarm", true), !paused, !busy, !warming,
               Date().timeIntervalSince(lastWarm) > 25 else { return }
         warming = true
         defer { warming = false }

@@ -100,3 +100,29 @@ check(languageUsage.counts.values.reduce(0, +) == languageUsage.origins.values.r
 languageUsage = SourceLanguageUsage()
 check(languageUsage.counts.isEmpty && languageUsage.origins.isEmpty, "Reset must clear both source counters")
 print("Source-language diagnostics regression checks passed")
+
+let standardPolicy = RuntimePolicy(coolMode: false, diagnosticsEnabled: true, detailedRequested: false)
+check(standardPolicy.captureInterval(0.12) == 0.12, "Normal cadence must remain unchanged")
+let coolPolicy = RuntimePolicy(coolMode: true, diagnosticsEnabled: true, detailedRequested: true)
+check(coolPolicy.captureInterval(0.12) == 0.45, "Cool mode caps capture work even on Fast")
+check(coolPolicy.captureInterval(0.4) == 0.8, "Cool mode halves configured OCR frequency")
+check(!coolPolicy.allowsSpeculation && !coolPolicy.allowsPrewarming, "Cool mode skips optional translation work")
+check(!standardPolicy.detailedDiagnostics, "Simple collection must not enable detailed work")
+check(!RuntimePolicy(coolMode: false, diagnosticsEnabled: false, detailedRequested: true).detailedDiagnostics, "Master collection switch wins")
+var speakers = SpeakerSession()
+for part in TextIntel.splitDialogue("Rem: hello Subaru: how are you?") {
+    if let name = part.label { speakers.record(name, enabled: true, privateSession: false) }
+}
+check(speakers.names == ["Rem", "Subaru"], "Recognized speakers appear without export consent")
+speakers.record("rem", enabled: true, privateSession: false)
+check(speakers.names.count == 2, "Speaker OCR capitalization jitter is deduplicated")
+speakers.record("Private", enabled: true, privateSession: true)
+speakers.record("Disabled", enabled: false, privateSession: false)
+check(speakers.names.count == 2, "Private and disabled collection cannot learn speakers")
+check(TextIntel.splitDialogue("Hello there").allSatisfy { $0.label == nil }, "Unlabeled dialogue must not invent speakers")
+speakers = SpeakerSession()
+check(speakers.names.isEmpty, "Session speaker reset clears names")
+print("Cool mode and session speaker checks passed")
+
+for n in 0..<100 { speakers.record("Speaker \(n)", enabled: true, privateSession: false) }
+check(speakers.names.count == 60, "Session speaker storage stays bounded")

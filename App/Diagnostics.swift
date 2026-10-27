@@ -179,16 +179,35 @@ final class Diagnostics: ObservableObject {
     @Published private(set) var executionPhase = "starting"
     private var lastPacketAt: Date?
     private var lastDeviceSampleAt: Date?
-    @Published var names: [String] = []
-    let started = Date()
+    @Published private var speakerSession = SpeakerSession()
+    var names: [String] {
+        guard enabled, !UserDefaults.standard.bool(forKey: "privateSession"),
+              (UserDefaults.standard.object(forKey: "showSessionSpeakers") as? Bool) ?? true else { return [] }
+        return speakerSession.names
+    }
+    var enabled: Bool { (UserDefaults.standard.object(forKey: "diagnosticsEnabled") as? Bool) ?? true }
+    var detailedCollection: Bool {
+        RuntimePolicy(coolMode: false, diagnosticsEnabled: enabled,
+                      detailedRequested: UserDefaults.standard.bool(forKey: "detailedCollection")).detailedDiagnostics
+    }
+
+    func collectionChanged() {
+        // A new collection interval must never be mistaken for continuous history.
+        reset()
+        UIDevice.current.isBatteryMonitoringEnabled = detailedCollection
+    }
+
+    func clearSpeakers() { speakerSession = SpeakerSession() }
+    @Published private(set) var started = Date()
     private var lastFrames = 0
     private var lastFrameTime = Date()
     private var tickN = 0
     private var lastState: EngineState?
 
-    init() { UIDevice.current.isBatteryMonitoringEnabled = true }
+    init() { UIDevice.current.isBatteryMonitoringEnabled = detailedCollection }
 
     private func add(_ kp: ReferenceWritableKeyPath<Diagnostics, [Sample]>, _ v: Double, cap: Int = 600) {
+        guard detailedCollection else { return }
         self[keyPath: kp].append(Sample(t: Date(), v: v))
         let limit = max(300, min(1200, (UserDefaults.standard.object(forKey: "diagSamples") as? Int) ?? 600))
         let extra = self[keyPath: kp].count - limit
@@ -197,6 +216,7 @@ final class Diagnostics: ObservableObject {
 
     // MARK: Events
     func event(_ kind: EventKind, _ text: String, detail: String? = nil) {
+        guard detailedCollection else { return }
         events.append(TimelineEvent(time: Date(), kind: kind, text: text, detail: detail))
         let limit = max(300, min(1200, (UserDefaults.standard.object(forKey: "diagSamples") as? Int) ?? 600))
         if events.count > limit { events.removeFirst(events.count - limit) }
@@ -204,20 +224,21 @@ final class Diagnostics: ObservableObject {
 
     /// Plain log line; the category is worked out from the wording.
     func log(_ t: String) {
+        guard enabled else { return }
         let k = EventKind.classify(t)
         if k == .rotation && t.lowercased().contains("trying") { s.rotationTries += 1 }
         event(k, t)
     }
 
     func learn(_ name: String) {
-        guard !names.contains(name) else { return }
-        guard UserDefaults.standard.bool(forKey: "diagIncludeText"), !UserDefaults.standard.bool(forKey: "privateSession") else { return }
-        names.append(name)
-        names.sort()
-        if names.count > 60 { names.removeLast() }
+        var next = speakerSession
+        next.record(name, enabled: enabled && ((UserDefaults.standard.object(forKey: "showSessionSpeakers") as? Bool) ?? true),
+                    privateSession: UserDefaults.standard.bool(forKey: "privateSession"))
+        if next.names != speakerSession.names { speakerSession = next }
     }
 
     func recordSourceLanguage(_ code: String, origin: SourceLanguageOrigin) {
+        guard enabled else { return }
         sourceUsage.record(code, origin: origin)
         s.sourceUsed = code
         s.sourceOrigin = origin.title
@@ -225,12 +246,13 @@ final class Diagnostics: ObservableObject {
     }
 
     func noteExecutionPhase(_ phase: String, pipActive: Bool) {
-        guard executionPhase != phase else { return }
+        guard enabled, executionPhase != phase else { return }
         executionPhase = phase
         event(.state, "App entered \(phase) (PiP \(pipActive ? "active" : "inactive"))")
     }
 
     func recordTranslate(ms: Double, sentences: Int, from: String, to: String, preview: String) {
+        guard detailedCollection else { return }
         add(\.translate, ms)
         event(.translation, "Translated \(sentences) sentence\(sentences == 1 ? "" : "s") \(from) → \(to) in \(Int(ms)) ms",
               detail: UserDefaults.standard.bool(forKey: "diagIncludeText") && !UserDefaults.standard.bool(forKey: "privateSession") ? String(preview.prefix(90)) : nil)
@@ -239,22 +261,27 @@ final class Diagnostics: ObservableObject {
     func recordLatency(ms: Double) { add(\.latency, ms) }
 
     func recordPipeline(_ stages: LatencyBreakdown) {
+        guard detailedCollection else { return }
         pipeline.append(PipelineMeasurement(date: Date(), stages: stages))
         let limit = max(300, min(1200, (UserDefaults.standard.object(forKey: "diagSamples") as? Int) ?? 600))
         if pipeline.count > limit { pipeline.removeFirst(pipeline.count - limit) }
     }
 
     func reset() {
+        started = Date()
+        lastFrames = 0; lastFrameTime = Date(); tickN = 0
+        lastPacketAt = nil; lastDeviceSampleAt = nil
         s = Stats()
         pipeline = []
         ocr = []; translate = []; latency = []; transport = []; fps = []; lineCounts = []
         extMem = []; appMem = []; thermal = []; battery = []; cacheRate = []
-        events = []; spans = []; sourceUsage = SourceLanguageUsage(); names = []
+        events = []; spans = []; sourceUsage = SourceLanguageUsage(); clearSpeakers()
         lastState = nil
     }
 
     // MARK: Packets from the extension
     func onPacket(_ p: Packet, transport t: Double?) {
+        guard enabled else { return }
         lastPacketAt = Date()
         s.packets += 1
         if p.kind == "ocr" {
@@ -285,17 +312,18 @@ final class Diagnostics: ObservableObject {
 
     // MARK: Once a second
     func tick(alive: Bool, paused: Bool, frozen: Bool) {
+        guard enabled else { return }
         tickN += 1
         let st: EngineState = !alive ? .idle : (paused ? .paused : (frozen ? .frozen : .live))
         if st != lastState {
             if let i = spans.indices.last { spans[i].end = Date() }
-            spans.append(StateSpan(start: Date(), end: nil, state: st))
+            if detailedCollection { spans.append(StateSpan(start: Date(), end: nil, state: st)) }
             if spans.count > 300 { spans.removeFirst() }
             if let prev = lastState, prev != .idle, st == .idle { s.captureDrops += 1 }
             event(.state, "Now \(st.title)")
             lastState = st
         }
-        if tickN % 2 == 0 { sampleDevice(alive: alive) }
+        if detailedCollection && tickN % 2 == 0 { sampleDevice(alive: alive) }
     }
 
     private func sampleDevice(alive: Bool) {
@@ -440,6 +468,7 @@ final class Diagnostics: ObservableObject {
         }
         var l: [String] = []
         l.append("ScreenLingo \(AppVersion.full) – diagnostics")
+        l.append("Collection: \(enabled ? (detailedCollection ? "detailed" : "simple (graphs and events off)") : "off"); Cool mode: \(UserDefaults.standard.bool(forKey: "coolMode") ? "on" : "off").")
         l.append("Health \(a.score)/100 – \(a.headline)")
         for i in a.issues { l.append("  • \(i.title)") }
         l.append("Capture: \(engine.captureAlive ? "connected" : "not connected"), extension v\(engine.extensionVersion), drops \(s.captureDrops)")
@@ -787,6 +816,8 @@ private struct DiagnosticsBody: View {
     @Environment(\.selectTab) private var selectTab
     @ObservedObject var diag: Diagnostics
     @AppStorage("diagDetailed") private var detailed = false
+    @AppStorage("diagnosticsEnabled") private var collectionEnabled = true
+    @AppStorage("detailedCollection") private var collectDetails = false
     @AppStorage("diagPage") private var pageRaw = DiagPage.overview.rawValue
     @AppStorage("diagRange") private var rangeRaw = DiagRange.fiveMin.rawValue
     @State private var visible = false
@@ -812,12 +843,20 @@ private struct DiagnosticsBody: View {
             ScrollView {
                 if visible {
                     VStack(spacing: 14) {
+                        DiagnosticsCollectionControls()
+                        if collectionEnabled {
                         Picker("Mode", selection: $detailed) {
                             Text("Simple").tag(false)
                             Text("Detailed").tag(true)
                         }
                         .pickerStyle(.segmented)
                         if detailed { detailedBody } else { simpleBody }
+                        if detailed && !collectDetails {
+                            Text("Graphs and events are off. Language counters and session speaker labels still work. Enable Detailed diagnostics to collect graph samples.").font(.footnote).foregroundStyle(.secondary)
+                        }
+                        } else {
+                            Text("Diagnostics collection is off. Translation and capture continue.").foregroundStyle(.secondary).card()
+                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 4)
@@ -866,6 +905,7 @@ private struct DiagnosticsBody: View {
             healthCard(a)
             if !a.issues.isEmpty { suggestions(a.issues, limit: 3) }
             liveFeed
+            if collectDetails {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Speed, last 2 minutes").font(.subheadline.weight(.semibold))
                 MultiSpeedChart(ocr: diag.ocr.filter { $0.t > cutoff },
@@ -874,6 +914,10 @@ private struct DiagnosticsBody: View {
             }
             .card()
             recentEvents
+            }
+            if !collectDetails {
+                Text("Summary collection is active. Timing history and events are off.").font(.footnote).foregroundStyle(.secondary).card()
+            }
         }
     }
 
@@ -887,21 +931,26 @@ private struct DiagnosticsBody: View {
         let o = Diagnostics.summarize(Array(diag.ocr.suffix(30)))
         let t = Diagnostics.summarize(Array(diag.translate.suffix(30)))
         let d = Diagnostics.summarize(Array(diag.latency.suffix(30)))
+        let read = collectDetails ? o.avg : engine.ocrMs
+        let processing = collectDetails ? t.avg : engine.translateMs
+        let delay = collectDetails ? d.avg : engine.latency.last.total
         return VStack(spacing: 14) {
             HStack(spacing: 16) {
-                HealthRing(score: a.score)
+                if collectDetails { HealthRing(score: a.score) }
+                else { Image(systemName: "waveform.path.ecg").font(.largeTitle).foregroundStyle(Theme.accent.start) }
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(a.headline).font(.title3.weight(.bold))
+                    Text(collectDetails ? a.headline : "Summary only").font(.title3.weight(.bold))
                     Text(statusLine).font(.footnote).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
             }
+            if !collectDetails { Text("Latest pipeline values · no timing history").font(.caption).foregroundStyle(.secondary) }
             HStack(spacing: 10) {
-                StatTile(title: "Reads in", value: o.n > 0 ? "\(Int(o.avg)) ms" : "–",
+                StatTile(title: "Reads in", value: read > 0 ? "\(Int(read)) ms" : "–",
                          tint: level(o.avg, o.n, 300, 500), icon: "text.viewfinder")
-                StatTile(title: "Translates in", value: t.n > 0 ? "\(Int(t.avg)) ms" : "–",
+                StatTile(title: "Translates in", value: processing > 0 ? "\(Int(processing)) ms" : "–",
                          tint: level(t.avg, t.n, 400, 800), icon: "character.bubble")
-                StatTile(title: "Total delay", value: d.n > 0 ? "\(Int(d.avg)) ms" : "–",
+                StatTile(title: "Total delay", value: delay > 0 ? "\(Int(delay)) ms" : "–",
                          tint: level(d.avg, d.n, 1200, 2000), icon: "timer")
             }
         }
@@ -1366,7 +1415,7 @@ private struct DiagnosticsBody: View {
             VStack(alignment: .leading, spacing: 6) {
                 Text(engine.sourceCode == "auto" ? "Source: Automatic" : "Source: \(engine.sourceCode.uppercased()) selected")
                     .font(.subheadline.weight(.semibold))
-                Text(engine.sourceCode == "auto" ? "Detected and locked sources are counted when confirmed input is processed." : "Automatic detection is off. Selected-language inputs still count in the graph.")
+                Text(engine.sourceCode == "auto" ? "With language lock enabled, four matching detections within the last six readings lock the source. Three mismatches release it. Short lines keep the lock to avoid switching languages." : "Automatic detection is off. Selected-language inputs still count in the graph.")
                     .font(.caption).foregroundStyle(.secondary)
             }.card()
             BarListCard(title: "Source languages used · session", rows: Array(counts), color: Color.purple)
@@ -1376,9 +1425,10 @@ private struct DiagnosticsBody: View {
             DonutCard(title: "Where translations come from", parts: cache)
             LineCard(title: "Cache hit rate over time", samples: slice(diag.cacheRate), color: Color.green, unit: "%")
             VStack(alignment: .leading, spacing: 10) {
-                Text("Speakers learned").font(.subheadline.weight(.semibold))
+                Text("Recognized speaker labels · session").font(.subheadline.weight(.semibold))
+                Text("This session list is local and clears on reset or app restart. Exporting names still requires text-sharing consent.").font(.caption).foregroundStyle(.secondary)
                 if diag.names.isEmpty {
-                    Text("Names appear here when text looks like \"Name: line\".")
+                    Text("Private sessions hide names. Otherwise, enable speaker recognition and session speaker labels; names appear for visible text such as \"Name: line\". Voices and unlabeled people are not identified.")
                         .font(.footnote).foregroundStyle(.secondary)
                 } else {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 80), spacing: 8)], alignment: .leading, spacing: 8) {
