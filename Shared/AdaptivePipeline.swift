@@ -15,7 +15,7 @@ struct RecognitionPlan {
 }
 enum AdaptiveRecognition {
     static func plan(baseEdge: Double, interval: Double, enabled: Bool, cool: Bool,
-                     pressure: Bool, feedback f: RecognitionFeedback) -> RecognitionPlan {
+                     pressure: Bool, feedback f: RecognitionFeedback, ceiling: Double = 2400) -> RecognitionPlan {
         var edge = baseEdge, cadence = interval, reason = "fixed preset"
         if enabled {
             if f.failures >= 2 || (f.confidence > 0 && f.confidence < 0.75) || (f.textHeight > 0 && f.textHeight < 0.022) {
@@ -32,7 +32,7 @@ enum AdaptiveRecognition {
             if f.unchangedSeconds > 3 || f.failures >= 4 { cadence = max(cadence, cool ? 0.8 : 0.5) }
             reason += cool ? "; cool controller" : "; queue/thermal pressure"
         }
-        return RecognitionPlan(edge: min(2400, max(800, edge)), interval: min(1.5, max(0.1, cadence)), reason: reason)
+        return RecognitionPlan(edge: min(ceiling.isFinite ? max(320, ceiling) : 2400, min(2400, max(800, edge))), interval: min(1.5, max(0.1, cadence)), reason: reason)
     }
 }
 

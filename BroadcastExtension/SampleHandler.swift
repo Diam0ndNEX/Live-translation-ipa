@@ -87,7 +87,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         feedback.unchangedSeconds = now.timeIntervalSince(lastChanged)
         let plan = AdaptiveRecognition.plan(baseEdge: cfg.maxEdge, interval: cfg.interval,
             enabled: cfg.adaptiveOCR ?? false, cool: cfg.smartCool ?? false,
-            pressure: cfg.pressure ?? false, feedback: feedback)
+            pressure: cfg.pressure ?? false, feedback: feedback, ceiling: cfg.detailCeiling ?? 2400)
         recognitionReason = plan.reason
         let idleFactor = (cfg.idleBackoff ?? true) && now.timeIntervalSince(lastUsefulText) > 8 ? 2.5 : 1.0
         guard !cfg.paused else { pausedSkipped += 1; return }

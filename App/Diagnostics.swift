@@ -275,7 +275,7 @@ final class Diagnostics: ObservableObject {
         sourceUsage.record(code, origin: origin)
         s.sourceUsed = code
         s.sourceOrigin = origin.title
-        if origin != .selected { s.detected = code } else { s.languageConfidence = 0 }
+        if origin != .selected { s.detected = code } else { s.languageConfidence = 0; s.languageContextUsed = false }
     }
 
     func noteExecutionPhase(_ phase: String, pipActive: Bool) {

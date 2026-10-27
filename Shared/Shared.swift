@@ -96,6 +96,7 @@ struct Config: Codable, Equatable {
     var pressure: Bool? = nil
     var selectiveSpeculation: Bool? = nil
     var speculationConfidence: Double? = nil
+    var detailCeiling: Double? = nil
 }
 
 enum TextSim {

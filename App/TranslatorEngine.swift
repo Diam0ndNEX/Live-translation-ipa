@@ -435,7 +435,8 @@ final class TranslatorEngine: ObservableObject {
                            adaptiveConfirmation: flag("adaptiveConfirmation", false), subtitleTracking: flag("subtitleTracking", true),
                            confirmationDeadline: num("confirmationDeadline", 0.6), smartCool: intelligentCool,
                            pressure: flag("adaptive", true) && (intelligentCool || speed == .automatic || (speed == .balanced && flag("adaptiveOCR", true))) && (ProcessInfo.processInfo.thermalState != .nominal || (busy && queued != nil)),
-                           selectiveSpeculation: flag("selectiveSpeculation", true), speculationConfidence: num("speculationConfidence", 0.85)))
+                           selectiveSpeculation: flag("selectiveSpeculation", true), speculationConfidence: num("speculationConfidence", 0.85),
+                           detailCeiling: (ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical || (extFreeMB > 0 && extFreeMB < 12)) ? maxEdge : 2400))
     }
 
     // MARK: PiP
@@ -1486,7 +1487,7 @@ final class TranslatorEngine: ObservableObject {
         memoryDirty = false
         // Unconfirmed speculative results stay session-only until used by confirmed input.
         let snapshot = cache.filter { confirmedKeys.contains($0.key) }
-        memoryCount = snapshot.count
+        memoryCount = cache.count
         let url = memoryURL
         memoryRevision += 1
         let revision = memoryRevision

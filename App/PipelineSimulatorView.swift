@@ -156,6 +156,7 @@ struct PipelineSimulatorView: View {
             Section("Translation and device state") {
                 Picker("Cache result",selection:$input.cacheOrigin) { ForEach(["fresh","session","saved","speculative"],id:\.self) { Text($0.capitalized).tag($0) } }
                 Picker("Thermal state",selection:$input.thermal) { ForEach(["nominal","fair","serious","critical"],id:\.self) { Text($0.capitalized).tag($0) } }
+                Toggle("Low Power Mode",isOn:$input.lowPower)
                 Toggle("Language packs ready",isOn:$input.packReady)
                 Toggle("Language pair supported",isOn:$input.pairSupported)
                 Toggle("Capture paused",isOn:$input.paused)

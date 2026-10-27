@@ -14,6 +14,7 @@ struct SimulationInput: Equatable {
     var renderMs = 1.64
     var cacheOrigin = "fresh"
     var thermal = "nominal"
+    var lowPower = false
     var emptyReads = 0
     var unchangedSeconds = 0.0
     var duplicateCopies = false
@@ -86,14 +87,20 @@ enum PipelineSimulation {
             r.steps.append(SimulationStep(id: r.steps.count, title: title, lane: lane, state: state, detail: detail, settings: keys, start: start, duration: duration))
         }
         let speed = o["speed"] ?? "balanced"
-        let edge = speed == "fast" ? 1000.0 : (speed == "sharp" ? 2000 : 1400)
+        var edge = speed == "fast" ? 1000.0 : (speed == "sharp" ? 2000 : 1400)
         var baseInterval = speed == "fast" ? 0.12 : (speed == "sharp" ? 0.4 : 0.22)
+        if b("adaptive",true) {
+            if s.thermal == "serious" { edge *= 0.75; baseInterval *= 1.5 }
+            if s.thermal == "critical" { edge *= 0.55; baseInterval *= 2.5 }
+            if s.lowPower { baseInterval *= 1.5 }
+        }
         let cool = b("coolMode"), smartCool = cool && b("smartCool",true)
         if cool && !smartCool { baseInterval = max(0.45, baseInterval*2) }
         let feedback = RecognitionFeedback(confidence: s.confidence, textHeight: s.height, processingMs: s.ocrMs, failures: s.emptyReads, unchangedSeconds: s.unchangedSeconds, motion: s.motion)
         let plan = AdaptiveRecognition.plan(baseEdge: edge, interval: baseInterval,
             enabled: speed == "automatic" || (speed == "balanced" && b("adaptiveOCR",true)), cool: smartCool,
-            pressure: b("adaptive",true) && s.thermal != "nominal", feedback: feedback)
+            pressure: b("adaptive",true) && s.thermal != "nominal", feedback: feedback,
+            ceiling: (s.thermal == "serious" || s.thermal == "critical") ? edge : 2400)
         r.resolution = plan.edge; r.interval = plan.interval
         add("Video frame", "ReplayKit extension", s.paused ? "paused" : "received", "Virtual frame: sample text and normalized boxes. No screen capture occurs in this simulator.", ["mode","idleMinutes","sessionLimit"])
         if s.paused { add("Capture paused", "ReplayKit extension", "stop", "No OCR, translation or PiP replacement is scheduled.", []); return r }
@@ -180,7 +187,7 @@ enum PipelineSimulation {
         let protected = TextIntel.protect(text,words:words)
         add("Understanding & grouping", "Main app", "\(blocks.count) regions · \(names.count) labels", "OCR clean-up/source fixes precede language handling. Slang, speaker splitting and protected tokens precede sentence batching. Sample after processing: \(protected.text)", ["cleanOCR","sourceFixes","slang","speakerDetect","neverTranslate","glossary"])
         let origin = s.cacheOrigin == "saved" && !b("remember",true) ? "fresh" : s.cacheOrigin
-        let speculate = b("translateAhead",true) && (!cool || (smartCool && readMs<100 && s.thermal=="nominal"))
+        let speculate = b("translateAhead",true) && !s.lowPower && s.thermal != "serious" && s.thermal != "critical" && (!cool || (smartCool && readMs<100 && s.thermal=="nominal"))
             && (!b("selectiveSpeculation",true) || SpeculationPolicy.credible(lines:lines,threshold:cool ? max(0.95,n("speculationConfidence",0.85)) : n("speculationConfidence",0.85)))
         add("Speculative-work gate", "Main app", speculate ? "credible early work" : "wait for confirmation", "Early work starts after the first OCR pass. Uncertain/near-duplicate candidates are declined, only the newest candidate is queued, and superseded results are never published. Model cancellation is cooperative.", ["translateAhead","selectiveSpeculation","speculationConfidence","coolMode","smartCool"])
         add("Translation memory lookup", "Main app", origin, "Session, saved-memory and speculative hits are separate. Rule fingerprints, source/target and protected-token context namespace every entry. Memory capacity changes retention, not wording.", ["remember","memoryCapacity","privateSession","glossary"])

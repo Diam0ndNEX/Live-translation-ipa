@@ -270,3 +270,10 @@ let privateSimulation=PipelineSimulation.run(options:privateOptions,input:Simula
 check(privateSimulation.steps.contains { $0.title == "History, persistent memory & feedback" && $0.state == "session only" }, "Simulator explains private retention without writing history or memory")
 check(PipelineSimulation.optionGroups.flatMap { $0.1 }.contains("contextualLanguage"), "Source-context control is represented in the simulator")
 print("Bounded rotation, context recovery and in-app simulation regression checks passed")
+
+let limitedPlan = AdaptiveRecognition.plan(baseEdge: 550, interval: 0.3, enabled: true, cool: true, pressure: true, feedback: hardFeedback, ceiling: 550)
+check(limitedPlan.edge <= 550, "Adaptive detail cannot override a critical-thermal or memory image ceiling")
+var lowPowerSimulation=SimulationInput();lowPowerSimulation.lowPower=true
+let lowPowerResult=PipelineSimulation.run(options:simulationOptions,input:lowPowerSimulation)
+check(lowPowerResult.steps.contains { $0.title == "Speculative-work gate" && $0.state == "wait for confirmation" }, "Low Power Mode disables speculative model work in the simulator")
+print("Thermal ceiling and Low Power Mode checks passed")
