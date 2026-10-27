@@ -43,6 +43,9 @@ final class PresetStore: ObservableObject {
                           "paintpalette.fill", "briefcase.fill", "airplane", "cart.fill"]
 
     static let builtIns: [Preset] = [
+        Preset(id: UUID(uuidString: "11111111-0000-0000-0000-000000000004")!, name: "Lyrics", symbol: "music.note", colorIndex: 1,
+               settings: ["mode": "movie", "area": "full", "speed": "balanced", "stability": 2,
+                          "clearHold": 2.0, "minDisplay": 0.0, "showOriginal": true], builtIn: true),
         Preset(id: UUID(uuidString: "11111111-0000-0000-0000-000000000001")!, name: "Movie", symbol: "film", colorIndex: 0,
                settings: ["mode": "movie", "area": "smart", "speed": "balanced", "stability": 2,
                           "clearHold": 1.0, "minDisplay": 0.0], builtIn: true),

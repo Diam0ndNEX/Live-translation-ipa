@@ -20,6 +20,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var lastOCRConfig: Config?
     private var emptyPasses = 0
     private var lastOcrMs: Double = 0
+    private var lastUsefulText = Date()
     private var ocrSig: [UInt8] = []
     private var info = (bw: 0, bh: 0, orient: 1, cw: 0, ch: 0)
 
@@ -69,7 +70,8 @@ class SampleHandler: RPBroadcastSampleHandler {
             ocrSig = []; emptyPasses = 0
             lastOCRConfig = cfg
         }
-        guard !cfg.paused, now.timeIntervalSince(lastRun) >= cfg.interval,
+        let idleFactor = (cfg.idleBackoff ?? true) && now.timeIntervalSince(lastUsefulText) > 8 ? 2.5 : 1.0
+        guard !cfg.paused, now.timeIntervalSince(lastRun) >= cfg.interval * idleFactor,
               let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
         // Skip frames that look identical to the last one we read (saves battery, keeps things fast)
@@ -139,7 +141,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private func makeRequest(_ cfg: Config, span: Double) -> VNRecognizeTextRequest {
         let r = VNRecognizeTextRequest()
         r.recognitionLevel = .accurate
-        r.usesLanguageCorrection = true
+        r.usesLanguageCorrection = cfg.correction ?? true
         r.minimumTextHeight = Float(min(0.1, 0.01 / max(0.1, span)))
         if let langs = visionLanguages(for: cfg.lang) {
             r.automaticallyDetectsLanguage = false
@@ -159,7 +161,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         guard (try? handler.perform([req])) != nil, let results = req.results else { return [] }
 
         var lines = results.compactMap { obs -> OCRLine? in
-            guard let c = obs.topCandidates(1).first, c.confidence >= 0.3, c.string.count >= 2,
+            guard let c = obs.topCandidates(1).first, c.confidence >= Float(min(0.95, max(0.1, cfg.confidence ?? 0.3))), c.string.count >= 2,
                   c.string.contains(where: { $0.isLetter || $0.isNumber }) else { return nil }
             let b = obs.boundingBox
             let y = y0 + Double(b.midY) * span
@@ -213,6 +215,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             }
         } else {
             emptyPasses = 0
+            lastUsefulText = Date()
         }
         lastOcrMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
 

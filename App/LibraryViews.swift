@@ -1,5 +1,6 @@
 // Screen Translator – App – v0.9.0
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Languages
 struct LanguagesView: View {
@@ -61,6 +62,9 @@ struct LanguagesView: View {
                     Section("Available to download (\(available.count))") {
                         ForEach(available) { l in row(l, ready: false) }
                     }
+                }
+                if !engine.downloadMessage.isEmpty {
+                    Section("Download status") { Text(engine.downloadMessage).font(.footnote) }
                 }
                 Section {
                     Text("Translation runs fully on your phone with Apple's language packs. The packs are stored by iOS, not by this app, and are shared with the Translate app.")
@@ -129,108 +133,133 @@ struct HistoryView: View {
     @EnvironmentObject var engine: TranslatorEngine
     @State private var query = ""
     @State private var onlyStarred = false
+    @State private var selection: Set<UUID> = []
+    @State private var confirmDelete = false
+    @State private var importing = false
+    @State private var lastSevenDays = false
 
     private var items: [HistoryItem] {
         engine.history.filter { h in
             (!onlyStarred || h.starred)
+                && (!lastSevenDays || h.date >= Date().addingTimeInterval(-7 * 86400))
                 && (query.isEmpty || h.original.localizedCaseInsensitiveContains(query)
-                    || h.translated.localizedCaseInsensitiveContains(query))
+                    || h.translated.localizedCaseInsensitiveContains(query)
+                    || (h.note ?? "").localizedCaseInsensitiveContains(query))
         }
     }
-
+    private var exportItems: [HistoryItem] { selection.isEmpty ? items : items.filter { selection.contains($0.id) } }
     private var groups: [(day: Date, items: [HistoryItem])] {
         Dictionary(grouping: items, by: { Calendar.current.startOfDay(for: $0.date) })
-            .map { (day: $0.key, items: $0.value) }
-            .sorted { $0.day > $1.day }
-    }
-
-    private func dayTitle(_ d: Date) -> String {
-        if Calendar.current.isDateInToday(d) { return "Today" }
-        if Calendar.current.isDateInYesterday(d) { return "Yesterday" }
-        return d.formatted(date: .abbreviated, time: .omitted)
+            .map { (day: $0.key, items: $0.value) }.sorted { $0.day > $1.day }
     }
 
     var body: some View {
         NavigationStack {
-            List {
-                ForEach(groups, id: \.day) { g in
-                    Section(dayTitle(g.day)) {
-                        ForEach(g.items) { h in row(h) }
+            List(selection: $selection) {
+                if !engine.history.isEmpty {
+                    Section {
+                        HStack {
+                            Label("\(items.count) translations", systemImage: "text.bubble")
+                            Spacer()
+                            Text("\(engine.history.filter(\.starred).count) saved").foregroundStyle(.secondary)
+                        }.font(.subheadline)
+                    }
+                }
+                ForEach(groups, id: \.day) { group in
+                    Section(group.day.formatted(date: .abbreviated, time: .omitted)) {
+                        ForEach(group.items) { item in
+                            NavigationLink { HistoryDetail(item: item).environmentObject(engine) } label: {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    HStack(alignment: .top) {
+                                        Text(item.translated).font(.body.weight(.medium)).lineLimit(3)
+                                        Spacer()
+                                        if item.starred { Image(systemName: "star.fill").foregroundStyle(.yellow) }
+                                    }
+                                    Text(item.original).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                                    HStack {
+                                        Text(item.date.formatted(date: .omitted, time: .shortened))
+                                        if let from = item.sourceLanguage, let to = item.targetLanguage { Text("· \(from.uppercased()) → \(to.uppercased())") }
+                                    }.font(.caption2).foregroundStyle(.tertiary)
+                                }.padding(.vertical, 5)
+                            }.tag(item.id)
+                            .swipeActions(edge: .leading) {
+                                Button { engine.toggleStar(item.id) } label: { Label("Save", systemImage: item.starred ? "star.slash" : "star") }.tint(.yellow)
+                            }
+                            .swipeActions {
+                                Button(role: .destructive) { engine.deleteHistory(ids: [item.id]) } label: { Label("Delete", systemImage: "trash") }
+                            }
+                        }
                     }
                 }
             }
-            .overlay {
-                if engine.history.isEmpty {
-                    ContentUnavailableView("No translations yet", systemImage: "text.bubble",
-                                           description: Text("Everything that gets translated shows up here, so you can read it again."))
-                } else if items.isEmpty {
-                    ContentUnavailableView.search(text: query)
-                }
-            }
-            .scrollContentBackground(.hidden)
-            .background(Theme.bg.ignoresSafeArea())
-            .searchable(text: $query, prompt: "Search history")
-            .navigationTitle("History")
+            .overlay { if items.isEmpty { ContentUnavailableView(query.isEmpty ? "Your translation library" : "No matching translations", systemImage: "text.book.closed", description: Text("Translations appear here unless a private session is enabled.")) } }
+            .scrollContentBackground(.hidden).background(Theme.bg.ignoresSafeArea())
+            .searchable(text: $query, prompt: "Search original, translation or notes")
+            .navigationTitle("Library")
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button {
-                        Sharer.shareFile(text: engine.history.map { "\($0.original)\n→ \($0.translated)" }.joined(separator: "\n\n"),
-                                         name: "translation-history-\(Sharer.stamp()).txt")
-                    } label: { Image(systemName: "square.and.arrow.up") }
-                    .disabled(engine.history.isEmpty)
+                    Menu {
+                        Button("Export text") { Sharer.shareFile(text: exportItems.map { "\($0.original)\n→ \($0.translated)" }.joined(separator: "\n\n"), name: "screenlingo-history.txt") }
+                        Button("Export CSV") { Sharer.shareFile(text: engine.historyCSV(exportItems), name: "screenlingo-history.csv") }
+                        Button("Export JSON backup") { Sharer.shareFile(text: engine.historyJSON(exportItems), name: "screenlingo-history.json") }
+                        Button("Restore JSON backup") { importing = true }
+                    } label: { Image(systemName: "square.and.arrow.up") }.accessibilityLabel("Export or restore library")
                 }
+                ToolbarItem(placement: .topBarTrailing) { EditButton() }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
-                        Toggle("Only starred", isOn: $onlyStarred)
-                        Button("Clear unstarred", role: .destructive) { engine.history.removeAll { !$0.starred } }
-                        Button("Clear everything", role: .destructive) { engine.history.removeAll() }
-                    } label: { Image(systemName: "ellipsis.circle") }
+                        Toggle("Only saved", isOn: $onlyStarred)
+                        Toggle("Last 7 days", isOn: $lastSevenDays)
+                        Button("Undo last deletion") { engine.undoHistoryDeletion() }
+                        Button(selection.isEmpty ? "Delete visible unstarred entries" : "Delete selected entries", role: .destructive) { confirmDelete = true }
+                    } label: { Image(systemName: "line.3.horizontal.decrease") }.accessibilityLabel("Library filters and actions")
                 }
+            }
+            .confirmationDialog("Delete these translations? You can undo the last deletion during this app session.", isPresented: $confirmDelete) {
+                Button("Delete", role: .destructive) {
+                    let ids = selection.isEmpty ? Set(items.filter { !$0.starred }.map(\.id)) : selection
+                    engine.deleteHistory(ids: ids); selection = []
+                }
+            }
+            .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
+                do {
+                    let url = try result.get(); let access = url.startAccessingSecurityScopedResource()
+                    defer { if access { url.stopAccessingSecurityScopedResource() } }
+                    let success = engine.importHistory(try Data(contentsOf: url))
+                    engine.toast(success ? "Library restored" : "This is not a valid ScreenLingo backup")
+                } catch { engine.toast("Could not open backup") }
             }
         }
     }
+}
 
-    private func row(_ h: HistoryItem) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .top) {
-                Text(h.translated).font(.body.weight(.semibold))
-                Spacer(minLength: 8)
-                if h.starred { Image(systemName: "star.fill").foregroundStyle(.yellow) }
+struct HistoryDetail: View {
+    @EnvironmentObject private var engine: TranslatorEngine
+    let item: HistoryItem
+    @State private var note: String
+    init(item: HistoryItem) { self.item = item; _note = State(initialValue: item.note ?? "") }
+    private var current: HistoryItem { engine.history.first { $0.id == item.id } ?? item }
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                Text(current.translated).font(.title2.weight(.medium)).textSelection(.enabled)
+                Divider()
+                Text(current.original).foregroundStyle(.secondary).textSelection(.enabled)
+                HStack {
+                    Button { engine.toggleStar(item.id) } label: { Label(current.starred ? "Saved" : "Save", systemImage: current.starred ? "star.fill" : "star") }
+                    Button { engine.speak(current.translated) } label: { Label("Listen", systemImage: "speaker.wave.2") }
+                    ShareLink(item: current.translated) { Image(systemName: "square.and.arrow.up") }
+                }.buttonStyle(.bordered)
+                VStack(alignment: .leading) {
+                    Text("Personal note").font(.headline)
+                    TextField("Add context or vocabulary…", text: $note, axis: .vertical).lineLimit(3...8)
+                }.card()
+                Button("Share translation card") { Sharer.shareImage(engine.image(for: current)) }.buttonStyle(.bordered)
+                Text(current.date.formatted()).font(.caption).foregroundStyle(.secondary)
+            }.padding(24)
+        }.background(Theme.bg.ignoresSafeArea()).navigationTitle("Translation").navigationBarTitleDisplayMode(.inline)
+            .onChange(of: note) { _, value in
+                if let index = engine.history.firstIndex(where: { $0.id == item.id }) { engine.history[index].note = String(value.prefix(2000)) }
             }
-            Text(h.original).font(.caption).foregroundStyle(.secondary)
-            Text(h.date.formatted(date: .omitted, time: .shortened)).font(.caption2).foregroundStyle(.tertiary)
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
-            UIPasteboard.general.string = h.translated
-            engine.tap()
-            engine.toast("Copied")
-        }
-        .swipeActions(edge: .leading) {
-            Button { engine.toggleStar(h.id) } label: { Label("Star", systemImage: h.starred ? "star.slash" : "star") }
-                .tint(.yellow)
-        }
-        .swipeActions(edge: .trailing) {
-            Button(role: .destructive) { engine.history.removeAll { $0.id == h.id } } label: {
-                Label("Delete", systemImage: "trash")
-            }
-        }
-        .contextMenu {
-            Button { UIPasteboard.general.string = h.translated; engine.toast("Copied translation") } label: {
-                Label("Copy translation", systemImage: "doc.on.doc")
-            }
-            Button { UIPasteboard.general.string = h.original; engine.toast("Copied original") } label: {
-                Label("Copy original", systemImage: "doc.on.doc.fill")
-            }
-            Button { Sharer.shareImage(engine.image(for: h)) } label: {
-                Label("Share as image", systemImage: "photo")
-            }
-            Button { engine.toggleStar(h.id) } label: {
-                Label(h.starred ? "Remove star" : "Star", systemImage: h.starred ? "star.slash" : "star")
-            }
-            Button(role: .destructive) { engine.history.removeAll { $0.id == h.id } } label: {
-                Label("Delete", systemImage: "trash")
-            }
-        }
     }
 }

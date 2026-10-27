@@ -58,6 +58,7 @@ struct SettingsView: View {
             || show("Floating window", "size theme colour font text original auto open clear hold display vibrate speak voice copy preview")
             || show("Interface", "accent colour home sections haptics keep awake history save")
             || show("Performance & power", "adaptive battery idle pause thermal hot")
+            || show("Privacy & storage", "private session history memory diagnostic text delete")
             || show("Backup & reset", "export import backup restore reset")
             || show("About & help", "version changelog help how")
     }
@@ -83,6 +84,9 @@ struct SettingsView: View {
                     }
                     if show("Performance & power", "adaptive battery idle pause thermal hot") {
                         NavigationLink { PerformanceSettings() } label: { Label("Performance & power", systemImage: "bolt.fill") }
+                    }
+                    if show("Privacy & storage", "private session history memory diagnostic text delete") {
+                        NavigationLink { PrivacySettings() } label: { Label("Privacy & storage", systemImage: "hand.raised.fill") }
                     }
                     if show("Backup & reset", "export import backup restore reset") {
                         NavigationLink { BackupSettings() } label: { Label("Backup & reset", systemImage: "externaldrive.fill") }
@@ -118,8 +122,11 @@ struct ReadingSettings: View {
     @AppStorage("dropNoise") private var dropNoise = true
     @AppStorage("boost") private var boost = 1
     @AppStorage("skipUnchanged") private var skipUnchanged = true
+    @AppStorage("ocrConfidence") private var confidence = 0.3
+    @AppStorage("ocrCorrection") private var correction = true
+    @State private var showAreaEditor = false
 
-    private var key: String { "\(mode)|\(area)|\(customY0)|\(customY1)|\(speed)|\(stability)|\(boost)|\(skipUnchanged)" }
+    private var key: String { "\(mode)|\(area)|\(customY0)|\(customY1)|\(speed)|\(stability)|\(boost)|\(skipUnchanged)|\(confidence)|\(correction)" }
 
     var body: some View {
         List {
@@ -130,6 +137,7 @@ struct ReadingSettings: View {
                 Picker("OCR area", selection: $area) {
                     ForEach(OCRArea.allCases) { Text($0.title).tag($0.rawValue) }
                 }
+                Button("Visual capture-area editor") { showAreaEditor = true }
                 if area == OCRArea.custom.rawValue {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("From \(Int(customY0 * 100))% to \(Int(customY1 * 100))% of the screen height (0% = bottom)")
@@ -176,6 +184,11 @@ struct ReadingSettings: View {
                     Text("Always").tag(2)
                 }
                 Toggle("Skip unchanged frames", isOn: $skipUnchanged)
+                Toggle("OCR language correction", isOn: $correction)
+                VStack(alignment: .leading) {
+                    Text("Minimum OCR confidence · \(Int(confidence * 100))%")
+                    Slider(value: $confidence, in: 0.1...0.9, step: 0.05)
+                }
             } header: {
                 Text("Speed & quality")
             } footer: {
@@ -183,9 +196,10 @@ struct ReadingSettings: View {
             }
 
             ResetSection(keys: ["mode", "area", "customY0", "customY1", "frameRot", "speed", "stability",
-                                "minTextH", "ignoreList", "dropNoise", "boost", "skipUnchanged"])
+                                "minTextH", "ignoreList", "dropNoise", "boost", "skipUnchanged", "ocrConfidence", "ocrCorrection"])
         }
         .settingsPage("Reading & OCR")
+        .sheet(isPresented: $showAreaEditor) { CaptureAreaEditor().environmentObject(engine) }
         .onChange(of: key) { _, _ in engine.syncConfig() }
         .onChange(of: frameRot) { _, _ in engine.rotationSettingChanged() }
     }
@@ -427,6 +441,7 @@ struct PerformanceSettings: View {
     @AppStorage("translateAhead") private var translateAhead = true
     @AppStorage("keepWarm") private var keepWarm = true
     @AppStorage("remember") private var remember = true
+    @AppStorage("idleBackoff") private var idleBackoff = true
 
     var body: some View {
         List {
@@ -443,6 +458,7 @@ struct PerformanceSettings: View {
             }
             Section {
                 Toggle("Adaptive performance", isOn: $adaptive)
+                Toggle("Reduce OCR work when no text is visible", isOn: $idleBackoff)
                 Picker("Pause after no text for", selection: $idleMinutes) {
                     Text("Never").tag(0)
                     Text("1 minute").tag(1)
@@ -457,11 +473,12 @@ struct PerformanceSettings: View {
             Section {
                 Button("Reset diagnostics counters") { engine.diag.reset(); engine.toast("Counters reset") }
             }
-            ResetSection(keys: ["adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember"])
+            ResetSection(keys: ["adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember", "idleBackoff"])
         }
         .settingsPage("Performance & power")
         .onChange(of: adaptive) { _, _ in engine.syncConfig() }
         .onChange(of: translateAhead) { _, _ in engine.syncConfig() }
+        .onChange(of: idleBackoff) { _, _ in engine.syncConfig() }
     }
 }
 
@@ -532,5 +549,35 @@ struct AboutSettings: View {
             }
         }
         .settingsPage("About & help")
+    }
+}
+
+struct PrivacySettings: View {
+    @EnvironmentObject private var engine: TranslatorEngine
+    @AppStorage("privateSession") private var privateSession = false
+    @AppStorage("diagIncludeText") private var includeText = false
+    @State private var confirm = false
+    var body: some View {
+        List {
+            Section {
+                Toggle("Private session", isOn: $privateSession)
+                Text("New translations stay out of History and are not written to translation memory. Existing saved history is kept.").font(.footnote).foregroundStyle(.secondary)
+                Toggle("Include recognized names and text in diagnostics", isOn: $includeText)
+                Text("Turn this on only when you want to include text while troubleshooting. Translation and OCR run on your device.").font(.footnote).foregroundStyle(.secondary)
+            }
+            Section("Local storage") {
+                LabeledContent("History entries", value: "\(engine.history.count)")
+                LabeledContent("Remembered sentences", value: "\(engine.memoryCount)")
+                Button("Clear translation memory", role: .destructive) { engine.clearMemory() }
+                Button("Erase history and memory", role: .destructive) { confirm = true }
+            }
+        }
+        .settingsPage("Privacy & storage")
+        .confirmationDialog("Erase saved translations and memory?", isPresented: $confirm) {
+            Button("Erase", role: .destructive) {
+                engine.eraseHistory()
+                engine.clearMemory()
+            }
+        }
     }
 }

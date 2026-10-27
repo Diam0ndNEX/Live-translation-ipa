@@ -168,36 +168,61 @@ struct ToastView: View {
 struct ReaderView: View {
     @EnvironmentObject var engine: TranslatorEngine
     @Environment(\.dismiss) private var dismiss
-    @State private var scale = 1.0
+    @AppStorage("readerSize") private var size = 28.0
+    @AppStorage("readerOriginal") private var showOriginal = true
+    @AppStorage("readerAlignment") private var centered = false
+    @State private var focus = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    Text(engine.translated.isEmpty ? "Waiting for text…" : engine.translated)
-                        .font(.system(size: 30 * scale, weight: .bold))
-                        .foregroundStyle(engine.translated.isEmpty ? Color.secondary : Color.white)
-                    if !engine.original.isEmpty {
-                        Text(engine.original)
-                            .font(.system(size: 16 * scale))
-                            .foregroundStyle(.secondary)
+                VStack(alignment: centered ? .center : .leading, spacing: 24) {
+                    if engine.translated.isEmpty {
+                        ContentUnavailableView("Ready to read", systemImage: "text.book.closed",
+                            description: Text("Start capture or translate text from Home."))
+                    } else {
+                        Text(engine.translated).font(.system(size: size, weight: .medium, design: .rounded))
+                            .lineSpacing(8).textSelection(.enabled)
+                        if showOriginal, !engine.original.isEmpty {
+                            Divider()
+                            Text(engine.original).font(.system(size: max(15, size * 0.65)))
+                                .foregroundStyle(.secondary).textSelection(.enabled)
+                        }
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
+                .multilineTextAlignment(centered ? .center : .leading)
+                .frame(maxWidth: .infinity, alignment: centered ? .center : .leading).padding(24)
             }
             .background(Theme.bg.ignoresSafeArea())
-            .navigationTitle("Reader")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
-            .safeAreaInset(edge: .bottom) {
-                HStack(spacing: 12) {
-                    Image(systemName: "textformat.size.smaller")
-                    Slider(value: $scale, in: 0.7...2.2)
-                    Image(systemName: "textformat.size.larger")
+            .navigationTitle("Focus reader").navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { engine.toggleFrozenOutput() } label: { Image(systemName: engine.frozen ? "play.fill" : "pause.fill") }
+                        .accessibilityLabel(engine.frozen ? "Resume live text" : "Freeze current text")
                 }
-                .padding()
-                .background(.ultraThinMaterial)
+                ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Toggle("Show original", isOn: $showOriginal)
+                        Toggle("Center text", isOn: $centered)
+                        Button("Listen") { engine.speak(engine.translated) }
+                        Button("Copy translation") { UIPasteboard.general.string = engine.translated; engine.toast("Copied") }
+                        ShareLink(item: engine.translated) { Label("Share text", systemImage: "square.and.arrow.up") }
+                    } label: { Image(systemName: "ellipsis.circle") }
+                }
+            }
+            .safeAreaInset(edge: .bottom) {
+                VStack(spacing: 12) {
+                    if !focus {
+                        HStack {
+                            Image(systemName: "textformat.size.smaller")
+                            Slider(value: $size, in: 18...56).accessibilityLabel("Reader text size")
+                            Image(systemName: "textformat.size.larger")
+                        }
+                    }
+                    Button(focus ? "Show reading controls" : "Hide reading controls") { withAnimation { focus.toggle() } }
+                        .font(.caption)
+                }.padding().background(.ultraThinMaterial)
             }
         }
     }

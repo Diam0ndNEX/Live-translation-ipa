@@ -19,6 +19,9 @@ struct HomeView: View {
     @AppStorage("homeRecent") private var homeRecent = true
     @State private var editor: PresetEditorMode?
     @State private var showReader = false
+    @State private var showWorkspace = false
+    @State private var showArea = false
+    @State private var showSession = false
 
     private var previewRatio: CGFloat {
         let s = (WindowSize(rawValue: winSize) ?? .normal).size
@@ -38,6 +41,7 @@ struct HomeView: View {
                 VStack(spacing: 14) {
                     header
                     languageSection
+                    launchPad
                     hero
                     if homeTools { tools }
                     startSection
@@ -52,7 +56,9 @@ struct HomeView: View {
                 .padding(.bottom, 28)
             }
             .scrollIndicators(.hidden)
-            .background(Theme.bg.ignoresSafeArea())
+            .background {
+                LinearGradient(colors: [Theme.accent.start.opacity(0.16), Theme.bg, Theme.bg], startPoint: .topLeading, endPoint: .bottomTrailing).ignoresSafeArea()
+            }
             .toolbar(.hidden, for: .navigationBar)
             .onChange(of: speed) { _, _ in engine.syncConfig() }
             .onChange(of: area) { _, _ in engine.syncConfig() }
@@ -62,6 +68,30 @@ struct HomeView: View {
         }
         .sheet(item: $editor) { PresetEditor(store: engine.presets, mode: $0).environmentObject(engine) }
         .sheet(isPresented: $showReader) { ReaderView().environmentObject(engine) }
+        .sheet(isPresented: $showWorkspace) { TranslationWorkspace().environmentObject(engine) }
+        .sheet(isPresented: $showArea) { CaptureAreaEditor().environmentObject(engine) }
+        .sheet(isPresented: $showSession) { SessionControls().environmentObject(engine) }
+    }
+
+    private var launchPad: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Button { showWorkspace = true } label: {
+                HStack(spacing: 14) {
+                    Image(systemName: "text.viewfinder").font(.title)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Translate text & photos").font(.headline)
+                        Text("Paste, type or choose a screenshot").font(.subheadline).opacity(0.8)
+                    }
+                    Spacer()
+                    Image(systemName: "arrow.up.right")
+                }.padding(20).background(Theme.gradient, in: RoundedRectangle(cornerRadius: 24))
+            }.foregroundStyle(.white)
+            HStack(spacing: 12) {
+                Button { showArea = true } label: { Label("Capture area", systemImage: "viewfinder") }
+                Spacer()
+                Button { showSession = true } label: { Label("Session", systemImage: "timer") }
+            }.font(.subheadline.weight(.semibold)).buttonStyle(.bordered)
+        }
     }
 
     // MARK: Header
@@ -69,7 +99,7 @@ struct HomeView: View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 2) {
                 Text("ScreenLingo").font(.title.bold())
-                Text("Offline · \(AppVersion.full)").font(.caption).foregroundStyle(.secondary)
+                Text("Your screen. Your language.").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
             Button { selectTab(3) } label: {
@@ -148,7 +178,11 @@ struct HomeView: View {
                 .foregroundStyle(.white)
                 .padding(10)
         }
-        .onTapGesture { showReader = true }
+        .overlay(alignment: .bottomTrailing) {
+            Button { showReader = true } label: {
+                Image(systemName: "arrow.up.left.and.arrow.down.right").padding(12).background(.ultraThinMaterial, in: Circle())
+            }.padding(10).accessibilityLabel("Open focus reader")
+        }
         .accessibilityLabel("Live preview. Tap for the full-screen reader")
     }
 
@@ -157,7 +191,7 @@ struct HomeView: View {
         Button(action: action) {
             VStack(spacing: 4) {
                 Image(systemName: icon).font(.system(size: 16, weight: .semibold))
-                Text(title).font(.system(size: 10, weight: .semibold))
+                Text(title).font(.caption.weight(.semibold))
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 10)

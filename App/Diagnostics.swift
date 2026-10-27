@@ -202,6 +202,7 @@ final class Diagnostics: ObservableObject {
 
     func learn(_ name: String) {
         guard !names.contains(name) else { return }
+        guard UserDefaults.standard.bool(forKey: "diagIncludeText"), !UserDefaults.standard.bool(forKey: "privateSession") else { return }
         names.append(name)
         names.sort()
         if names.count > 60 { names.removeLast() }
@@ -212,7 +213,7 @@ final class Diagnostics: ObservableObject {
     func recordTranslate(ms: Double, sentences: Int, from: String, to: String, preview: String) {
         add(\.translate, ms)
         event(.translation, "Translated \(sentences) sentence\(sentences == 1 ? "" : "s") \(from) → \(to) in \(Int(ms)) ms",
-              detail: String(preview.prefix(90)))
+              detail: UserDefaults.standard.bool(forKey: "diagIncludeText") && !UserDefaults.standard.bool(forKey: "privateSession") ? String(preview.prefix(90)) : nil)
     }
 
     func recordLatency(ms: Double) { add(\.latency, ms) }
@@ -397,7 +398,7 @@ final class Diagnostics: ObservableObject {
             "\(n): avg \(Int(s.avg)) ms, p50 \(Int(s.p50)), p95 \(Int(s.p95)), max \(Int(s.max)) (\(s.n) samples)"
         }
         var l: [String] = []
-        l.append("Screen Translator \(AppVersion.full) – diagnostics")
+        l.append("ScreenLingo \(AppVersion.full) – diagnostics")
         l.append("Health \(a.score)/100 – \(a.headline)")
         for i in a.issues { l.append("  • \(i.title)") }
         l.append("Capture: \(engine.captureAlive ? "connected" : "not connected"), extension v\(engine.extensionVersion), drops \(s.captureDrops)")
@@ -408,7 +409,10 @@ final class Diagnostics: ObservableObject {
         l.append("Lines \(s.linesIn): area \(s.dropArea), small \(s.dropSmall), ignore \(s.dropIgnore), own window \(s.dropSelf), target language \(s.dropTarget); blocks \(s.blocksIn) → \(s.blocksKept), noise \(s.dropNoise), other language \(s.dropLanguage)")
         l.append("Order confidence \(String(format: "%.1f", s.orderVote)), calibrated \(s.calibrated), rotation tries \(s.rotationTries)")
         l.append("Translations \(s.translations), sentences \(s.sentences), cache \(s.cacheHits)/\(s.cacheHits + s.specHits + s.cacheMisses) (pre-translated \(s.specHits)), failures \(s.failures), engine \(s.sessionKind)")
-        l.append("Language \(s.detected), locked \(s.lockedLang). Speakers: \(names.joined(separator: ", "))")
+        l.append("Language \(s.detected), locked \(s.lockedLang).")
+        if UserDefaults.standard.bool(forKey: "diagIncludeText"), !UserDefaults.standard.bool(forKey: "privateSession") {
+            l.append("Speakers: \(names.joined(separator: ", "))")
+        }
         l.append("")
         l.append("Recent events:")
         for e in events.suffix(60).reversed() {

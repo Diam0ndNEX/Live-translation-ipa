@@ -1,28 +1,33 @@
-# ScreenLingo
+# ScreenLingo 0.8.0
 
-On-device screen translation for iOS 18 and later, with ReplayKit capture, Apple Translation language packs and a floating Picture in Picture window.
+Major overhaul built on the complete main-branch integration, with on-device translation and iOS 18 support. The preceding ScreenLingo branch and its IPA remain available separately.
 
-## Version 1.5.0 (36)
+## New in this release
 
-This branch incorporates the complete main-branch app at `a91907a`: the redesigned Home, language library, reader, custom presets, configurable interface, file-based sharing, detailed diagnostics, translation memory and translate-ahead.
+- Home launchpad for live capture, text/photo translation, visual capture area and session controls.
+- Workspace for typing, pasting, importing text files and recognizing photos/screenshots on device. Large photos are downsampled with orientation preserved. Workspace OCR pauses live reading and restores it on dismissal.
+- Focus reader with persistent text size, selectable text, centered alignment, original-text toggle, speech, sharing, freeze/resume and hideable controls.
+- Visual capture-area editor with full-screen, subtitle and middle-band shortcuts.
+- Library with search across original/translated text and notes, saved entries, date filters, multi-selection, detail pages, translation cards and deletion undo.
+- TXT, spreadsheet-safe CSV and JSON exports; JSON backup restore with duplicate-ID protection.
+- Session counters, optional timed pause, timer restart and recovery controls.
+- Private sessions, diagnostic text controls and storage erasure. Private sessions skip new history entries and disk memory writes.
+- OCR confidence and correction controls, idle backoff, thermal adaptation and low-power safeguards.
+- Background memory persistence is serialized so Clear cannot be undone by an older pending save.
+- Dedicated Lyrics preset that stays in Movie mode; existing subtitle grouping and stale-output safeguards remain active.
+- Clear language-download success/failure messages.
 
-ScreenLingo keeps its bundle identifier, app name, smaller text option, history migration, starred entries and retention settings. Integration fixes protect against partial OCR replacing complete subtitles, stale asynchronous results, malformed translation batches, overlapping hosted translation requests and frozen output being cleared. Movie mode keeps aligned lyric rows and joins adjacent subtitle fragments while comic bubbles remain separate. Frame skipping no longer delays the second OCR pass needed for confirmation.
+Version is **0.8.0 (37)** as requested. This intentionally changes the marketing version from the prior integration's 1.5.0; build number increases and bundle identifiers stay the same. Signing tools that enforce marketing-version ordering may require reinstalling the IPA.
 
-## Build
+## Build and validation
 
-Push this branch (`codex/screenlingo-v0.7.0`) or run **Build ScreenLingo IPA** manually in GitHub Actions. The workflow runs focused Swift regression checks, builds the app, verifies app/extension identity and version metadata, and uploads `ScreenLingo-ipa`.
+The `codex/screenlingo-v0.8.0` branch builds an unsigned IPA in GitHub Actions. CI runs focused Swift regression checks, compiles both targets and verifies app/extension versions and identifiers before packaging `ScreenLingo-ipa`.
 
-For local macOS builds, generate the icon with `scripts/make_icon.py` (Pillow required), run `xcodegen generate`, then build the `ScreenLingo` scheme. The app and extension versions are set in `project.yml` and `Shared/Shared.swift` and checked against the packaged product by CI.
-
-Regression checks on macOS:
+Local macOS regression checks:
 
 ```sh
-swiftc Shared/Shared.swift Shared/PipelineSafety.swift Shared/OCRGrouping.swift Tests/main.swift -o /tmp/screenlingo-tests
+swiftc Shared/Shared.swift Shared/PipelineSafety.swift Shared/OCRGrouping.swift Shared/ExportFormat.swift Tests/main.swift -o /tmp/screenlingo-tests
 /tmp/screenlingo-tests
 ```
 
-## Device checks
-
-Download the source/target packs in Languages, start capture from Home, and switch to the video. Test Portuguese to English in Movie mode with several visible lyric rows, a scrolling row change and two-line subtitles. Freeze should preserve the window until resumed; Pause should reject unfinished translation work. Changing the target language during translation must not show the previous pair's result. Confirm history, stars and saved settings survive an upgrade using the same signing identity.
-
-An iOS build and device tests are required to verify Apple's Translation, ReplayKit and PiP runtime behavior; syntax checks alone do not establish those outcomes.
+For device testing, cover Portuguese to English Movie subtitles, scrolling lyrics, freeze/resume, manual translation while capture is running, photo rotation, importing/exporting history, deletion undo, private sessions, timed pause and background/foreground recovery. CI compilation does not establish ReplayKit/PiP or Apple Translation runtime quality on a physical device.
