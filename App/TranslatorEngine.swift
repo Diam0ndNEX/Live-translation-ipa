@@ -401,6 +401,7 @@ final class TranslatorEngine: ObservableObject {
 
     func beginWorkspace() {
         manualMode = true
+        lockedLang = nil; detectLog = []; mismatchStreak = 0
         clearOutput()
         invalidatePending()
         syncConfig()
