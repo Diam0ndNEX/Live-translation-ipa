@@ -15,12 +15,41 @@ enum OCRGrouping {
         return rows.flatMap { $0.sorted { $0.x < $1.x } }
     }
 
+    /// Remove near-coincident OCR shadow copies only in subtitle mode. Deliberately
+    /// retain matching text at distant coordinates: it may be legitimate dialogue.
+    /// Bucketing by exact normalized text avoids comparing unrelated observations.
+    static func removeNearbyDuplicates(_ lines: [OCRLine]) -> [OCRLine] {
+        var result: [OCRLine] = []
+        var indices: [String: [Int]] = [:]
+        for line in lines {
+            let key = line.t.precomposedStringWithCanonicalMapping
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !key.isEmpty else { continue }
+            let previous = indices[key] ?? []
+            if let match = previous.first(where: { index in
+                let existing = result[index]
+                let xTolerance = max(0.012, min(existing.w ?? 0.2, line.w ?? 0.2) * 0.12)
+                let yTolerance = max(0.007, min(existing.h, line.h) * 0.5)
+                return abs(existing.x - line.x) <= xTolerance
+                    && abs(existing.y - line.y) <= yTolerance
+            }) {
+                if (line.confidence ?? 0) > (result[match].confidence ?? 0) {
+                    result[match] = line
+                }
+            } else {
+                indices[key, default: []].append(result.count)
+                result.append(line)
+            }
+        }
+        return result
+    }
+
     /// Clusters lines that belong together (similar size, stacked closely, overlapping horizontally).
     static func makeBlocks(_ lines: [OCRLine], movie: Bool) -> [[OCRLine]] {
         // Use the same canonical row-based ordering everywhere. Sorting raw OCR
         // observations independently here used to disagree with readingOrder() when
         // several boxes occupied one visual line.
-        let ordered = readingOrder(lines)
+        let ordered = readingOrder(movie ? removeNearbyDuplicates(lines) : lines)
 
         var blocks: [[OCRLine]] = []
         for line in ordered {
