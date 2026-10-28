@@ -252,6 +252,30 @@ final class Diagnostics: ObservableObject {
     }
 
 
+    /// Correlates a processing/rejection decision to the frame and candidate.
+    /// Reason codes and stages are hard-coded allowlists; raw OCR/source text,
+    /// user-provided candidate identifiers and paths never reach the archive.
+    func notePipelineDecision(candidate: String?, frameIndex: Int?,
+                              stage: String, reason: String, durationMs: Double? = nil) {
+        guard detailedCollection else { return }
+        let allowedStages: Set<String> = [
+            "frame_arrival", "rotation", "duplicate_detection", "ocr_filtering",
+            "stability", "text_grouping", "ocr_correction", "language_detection",
+            "segmentation", "memory_lookup", "translation", "pip_preparation",
+            "pip_enqueue", "cancellation"
+        ]
+        let allowedReasons: Set<String> = [
+            "accepted", "rejected_duplicate", "rejected_recent_fragment",
+            "rejected_empty", "rejected_revision", "rejected_unstable",
+            "rejected_low_confidence", "rejected_stale", "filtered",
+            "confirmed", "speculative", "ready", "enqueued", "cancelled"
+        ]
+        guard allowedStages.contains(stage), allowedReasons.contains(reason) else { return }
+        let token = beginRecorder(); defer { endRecorder(token) }
+        appendStructured(candidate: stableCandidateID(candidate), frameIndex: frameIndex,
+                         stage: stage, outcome: reason, reason: reason, durationMs: durationMs)
+    }
+
     /// Bounded, privacy-safe segmentation timing. Source text and cache keys are
     /// never stored in structured events; only opaque candidate IDs are emitted.
     func noteSegmentation(candidate: String?, reused: Bool, durationMs: Double) {
