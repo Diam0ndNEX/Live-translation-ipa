@@ -512,6 +512,34 @@ actor TranslationMemoryStore {
         return entries
     }
 
+    /// Bounded maintenance-only conflict inspection. The live lookup path uses
+    /// its existing exact index and never invokes this query.
+    func conflictingEntries(limit: Int = 100) throws -> [MemoryStoredEntry] {
+        guard active else { throw MemoryStoreError.unavailable }
+        let columns = entryColumns.split(separator: ",").map { "e." + $0 }.joined(separator: ",")
+        let sql = """
+            SELECT \(columns)
+            FROM memory_entries e
+            JOIN (
+                SELECT entry_id AS member_id FROM memory_conflicts WHERE resolved=0
+                UNION
+                SELECT alternative_id AS member_id FROM memory_conflicts WHERE resolved=0
+            ) conflicts ON conflicts.member_id=e.id
+            ORDER BY e.updated_at DESC
+            LIMIT ?
+            """
+        let query = try statement(sql, [.integer(Int64(min(100, max(1, limit))))])
+        defer { sqlite3_finalize(query) }
+        var entries: [MemoryStoredEntry] = []
+        while true {
+            let step = sqlite3_step(query)
+            if step == SQLITE_DONE { break }
+            guard step == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
+            entries.append(readEntry(query))
+        }
+        return entries
+    }
+
     private struct ExportEnvelope: Codable {
         let formatVersion: Int
         let schemaVersion: Int
