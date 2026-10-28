@@ -169,6 +169,11 @@ final class TranslatorEngine: ObservableObject {
     @Published private(set) var legacyBatchSkipped = 0
     @Published private(set) var legacyBatchWorkers = 0
     @Published private(set) var legacyBatchActive = false
+    @Published private(set) var legacyBatchProcessed = 0
+    @Published private(set) var legacyEntriesPerMinute = 0.0
+    @Published private(set) var legacyEstimatedRemainingMinutes: Double?
+    @Published private(set) var legacyValidationElapsedSeconds = 0.0
+    @Published private(set) var warmupLastDurationMs: Double?
     @Published var captureAlive = false
     @Published var frames = 0
     @Published var ocrCount = 0
@@ -209,6 +214,8 @@ final class TranslatorEngine: ObservableObject {
     private var legacyValidationCursor: Int64 = 0
     private var legacyValidationExhausted = false
     private var lastIdleValidationAttempt = Date.distantPast
+    private var legacyBatchStartedAt = Date.distantPast
+    private var legacyAverageRate = 0.0
     private var languageCache: [String: (NLLanguage?, [NLLanguage: Double])] = [:]
     private var drainTask: Task<Void, Never>?
     private var activeCandidateText = ""
@@ -2112,7 +2119,10 @@ final class TranslatorEngine: ObservableObject {
         legacyValidationBusy = true
         legacyBatchActive = true
         legacyBatchCompleted = 0
+        legacyBatchProcessed = 0
         legacyBatchSkipped = 0
+        legacyEstimatedRemainingMinutes = nil
+        legacyBatchStartedAt = Date()
         legacyBatchTotal = 0
         let maxCount = max(1, min(IdleLegacyBatchPolicy.maximumEntries, maxEntries))
         let fair = ProcessInfo.processInfo.thermalState == .fair
@@ -2123,6 +2133,7 @@ final class TranslatorEngine: ObservableObject {
         defer {
             legacyValidationBusy = false
             legacyBatchActive = false
+            legacyValidationElapsedSeconds = max(0, Date().timeIntervalSince(legacyBatchStartedAt))
             lastIdleValidationAttempt = Date()
         }
 
@@ -2137,9 +2148,11 @@ final class TranslatorEngine: ObservableObject {
             while selected.count < maxCount && scanned < 384 {
                 guard idleValidationStillSafe(revision: originalRevision, target: target, rules: rules)
                 else { return }
+                // Request no more rows than we can consume. Otherwise an
+                // early break can advance the cursor past unscheduled entries.
                 let rows = try await memoryStore.nextLegacyIdleCandidates(
                     target: target, selectedSource: sourceFilter,
-                    after: legacyValidationCursor, limit: 64)
+                    after: legacyValidationCursor, limit: min(64, maxCount - selected.count))
                 if rows.isEmpty { exhausted = true; break }
                 for entry in rows {
                     legacyValidationCursor = entry.id
@@ -2216,6 +2229,10 @@ final class TranslatorEngine: ObservableObject {
             var output: [(Int, [String]?)] = []
             while let value = await group.next() {
                 output.append(value)
+                let completedChunk = chunks[value.0]
+                legacyBatchProcessed += completedChunk.items.count
+                legacyValidationElapsedSeconds = max(0, Date().timeIntervalSince(legacyBatchStartedAt))
+                legacyIdleValidationStatus = "Translated \(legacyBatchProcessed)/\(items.count) • saving after batch"
                 if idleValidationStillSafe(revision: originalRevision, target: target, rules: rules) {
                     enqueue()
                 } else { group.cancelAll() }
@@ -2261,6 +2278,14 @@ final class TranslatorEngine: ObservableObject {
             legacyValidatedThisSession += commits.count
             legacyBatchCompleted = commits.count
             await refreshMemoryHealth()
+            let elapsed = max(0.1, Date().timeIntervalSince(legacyBatchStartedAt))
+            let rate = Double(commits.count) * 60.0 / elapsed
+            legacyAverageRate = legacyAverageRate == 0 ? rate : (0.6 * legacyAverageRate + 0.4 * rate)
+            legacyEntriesPerMinute = legacyAverageRate
+            if let health = memoryHealth, legacyAverageRate > 0 {
+                legacyEstimatedRemainingMinutes = Double(health.legacyUnverified) / legacyAverageRate
+            }
+            legacyValidationElapsedSeconds = elapsed
             legacyIdleValidationStatus = "Validated \(commits.count)/\(items.count), skipped \(legacyBatchSkipped)"
             diag.noteModelState("legacy_idle_completed")
         } catch {
@@ -2316,6 +2341,7 @@ final class TranslatorEngine: ObservableObject {
         diag.noteModelState("warmup_started")
         let session = TranslationSession(installedSource: src, target: target)
         let warmed = await runBatch(session, [word])
+        warmupLastDurationMs = Date().timeIntervalSince(t0) * 1000
         warmupStatus = warmed == nil ? "Warm-up failed" : "Ready"
         diag.noteModelState(warmed == nil ? "warmup_failed" : "warmup_succeeded",
             durationMs: Date().timeIntervalSince(t0) * 1000)
