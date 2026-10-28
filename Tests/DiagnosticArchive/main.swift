@@ -106,6 +106,18 @@ import Foundation
         let exportedZIP = try await writer.exportZIP(snapshot)
         defer { try? FileManager.default.removeItem(at: exportedZIP) }
         precondition(FileManager.default.fileExists(atPath: exportedZIP.path))
+        #if os(macOS)
+        // Check interoperability with the system ZIP reader, not only our own
+        // header checks, before considering bundles trustworthy for export.
+        let archiveCheck = Process()
+        archiveCheck.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+        archiveCheck.arguments = ["-t", exportedZIP.path]
+        archiveCheck.standardOutput = Pipe()
+        archiveCheck.standardError = Pipe()
+        try archiveCheck.run()
+        archiveCheck.waitUntilExit()
+        precondition(archiveCheck.terminationStatus == 0, "ZIP bundle must pass unzip -t")
+        #endif
         let unsafeEvent = StructuredDiagnosticEvent(id: UUID(), timestamp: Date(),
             sessionID: session, candidateID: UUID(), frameID: nil, unitID: nil,
             stage: "private source text", outcome: "private source text",
