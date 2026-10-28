@@ -158,7 +158,8 @@ import CryptoKit
         let differentText = "v4|\(rules)|pt>en|0:|Outros"
         _ = try await secondStore.save([differentText: "Others"], revision: 3,
             independentlyConfirmedKeys: [differentText])
-        precondition((try await secondStore.health()).legacyValidated == 1,
+        let afterUnrelated = try await secondStore.health()
+        precondition(afterUnrelated.legacyValidated == 1,
                      "No mass validation for unrelated source text")
 
         let conflictLegacy = root.appendingPathComponent("conflict-legacy.json")
@@ -187,7 +188,8 @@ import CryptoKit
         _ = try await conflictStore.save(
             [unrelatedContext: "Thanks"], revision: 2,
             independentlyConfirmedKeys: [unrelatedContext])
-        precondition((try await conflictStore.health()).legacySuperseded == 1,
+        let afterOtherContext = try await conflictStore.health()
+        precondition(afterOtherContext.legacySuperseded == 1,
                      "Context mismatch must not touch previously classified legacy rows")
 
         // User-quarantined compatible v4 entries must never be auto-revalidated
@@ -200,7 +202,8 @@ import CryptoKit
         _ = try await qStore.quarantineEntries(ids: qRows.map(\.id))
         _ = try await qStore.save([differentText: "Others"], revision: 2,
             independentlyConfirmedKeys: [differentText])
-        precondition((try await qStore.health()).needsValidation == 1,
+        let quarantinedHealth = try await qStore.health()
+        precondition(quarantinedHealth.needsValidation == 1,
                      "Legacy proof must never bypass a user's quarantine of a v4 key")
 
         // A partially unreadable legacy file must not be silently described as migrated.
