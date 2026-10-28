@@ -799,6 +799,8 @@ final class Diagnostics: ObservableObject {
             "candidateFirstSeen": eventTotals["firstSeen", default: 0],
             "speculativeRequests": s.specModelRequests,
             "speculativeDiscarded": s.specDiscarded,
+            "legacyVerified": memoryHealth.legacyValidated,
+            "legacySuperseded": memoryHealth.legacySuperseded,
             "ramHits": memoryOutcomes[.ramHit, default: 0],
             "persistentHits": memoryOutcomes[.persistentHit, default: 0],
             "speculativeHits": memoryOutcomes[.speculativeHit, default: 0],
