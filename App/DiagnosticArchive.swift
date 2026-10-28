@@ -114,7 +114,7 @@ actor DiagnosticExportWriter {
             "ocrCorrection", "language", "freshTranslation", "translationResult",
             "frame_arrival", "rotation", "ocr_execution", "duplicate_detection", "ocr_filtering",
             "stability", "text_grouping", "ocr_correction", "language_detection",
-            "memory_lookup", "translation", "pip_preparation", "pip_enqueue",
+            "memory_lookup", "translation", "pip_preparation", "pip_enqueue", "runtime_state",
             "cancellation"
         ]
         let eventCodes: Set<String> = Set(MemoryDiagnosticOutcome.allCases.map { $0.rawValue })
@@ -123,7 +123,9 @@ actor DiagnosticExportWriter {
                 "rejected_recent_fragment", "rejected_empty", "rejected_revision",
                 "rejected_unstable", "rejected_low_confidence", "rejected_stale",
                 "filtered", "confirmed", "speculative", "ready", "enqueued",
-                "cancelled", "redacted", "completed", "deferred_early_candidate"
+                "cancelled", "redacted", "completed", "deferred_early_candidate",
+                "heartbeat_timeout", "capture_connected", "idle_auto_pause", "session_time_limit",
+                "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical"
             ]).union(stageCodes)
         let safeEvents = snapshot.events.suffix(2400).map { event in
             StructuredDiagnosticEvent(id: event.id, timestamp: event.timestamp,
@@ -436,7 +438,7 @@ enum DiagnosticTraceReview {
         "frame_arrival", "rotation", "duplicate_detection", "ocr_filtering",
         "stability", "text_grouping", "ocr_correction", "language_detection",
         "segmentation", "memory_lookup", "translation", "pip_preparation",
-        "pip_enqueue", "cancellation", "first OCR", "seen", "confirmed",
+        "pip_enqueue", "cancellation", "runtime_state", "first OCR", "seen", "confirmed",
         "processing", "speculating", "cache", "ready", "enqueued",
         "superseded", "memory", "cancelled", "ocrCorrection", "language",
         "freshTranslation", "translationResult"
@@ -445,6 +447,8 @@ enum DiagnosticTraceReview {
         "accepted", "rejected_duplicate", "rejected_recent_fragment",
         "rejected_empty", "rejected_revision", "rejected_unstable",
         "rejected_low_confidence", "rejected_stale", "filtered", "deferred_early_candidate",
+        "heartbeat_timeout", "capture_connected", "idle_auto_pause", "session_time_limit",
+        "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical",
         "confirmed", "speculative", "ready", "enqueued", "cancelled",
         "observed", "cache_hit", "computed", "ramHit", "persistentHit",
         "legacyHit", "normalizedHit", "speculativeHit", "miss", "timeout",
