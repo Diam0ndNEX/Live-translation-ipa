@@ -584,9 +584,48 @@ check(SubtitlePerformancePolicy.preemptSpeculation(activeText: "Eu posso ir.", c
 check(!SubtitlePerformancePolicy.preemptSpeculation(activeText: nil, confirmedText: "Olá."),
     "Confirmed processing must not be mistaken for speculative work")
 
-check(!SubtitlePerformancePolicy.allowSpeculation(attempts: 32, discarded: 30, hits: 0, opportunity: 2, enabled: true),
-    "Sustained near-zero benefit reduces tentative model opportunities further")
+check(SubtitlePerformancePolicy.allowSpeculation(attempts: 32, discarded: 30, hits: 0, opportunity: 2, enabled: true),
+    "Poor historical yield must retain the 1.4.6 alternate-opportunity head starts")
 check(SubtitlePerformancePolicy.allowSpeculation(attempts: 32, discarded: 30, hits: 0, opportunity: 4, enabled: true),
-    "Severe speculation backoff retains recovery probes")
+    "Low-yield speculation retains regular recovery opportunities")
 check(SubtitlePerformancePolicy.allowSpeculation(attempts: 32, discarded: 30, hits: 0, opportunity: 2, enabled: false),
     "User disabling backoff retains tentative opportunities")
+
+// A completed obsolete caption can supply exact sentence reuse, never a stale
+// presentation. Exercise the same retention seam used after the model await.
+let retainedKey = PipelineSafety.cacheKey(source: "pt", target: "en", text: "Olá amigo.",
+    protectedWords: [], rules: "rules-A")
+let changedKey = PipelineSafety.cacheKey(source: "pt", target: "en", text: "Olá inimigo.",
+    protectedWords: [], rules: "rules-A")
+let retainedBatch = TranslationBatchPlan(["Olá amigo.", "Outra frase.", "Olá amigo."])
+let retainedKeys = [retainedKey, "other-exact-context-key", retainedKey]
+let retainedValues = retainedBatch.expand([Optional("Hello friend."), Optional("Another sentence.")])
+let retainedCache = SubtitlePerformancePolicy.retainedSpeculativeResults(keys: retainedKeys,
+    values: retainedValues, workContext: 7, currentContext: 7, reuseAllowed: true)
+check(retainedCache[retainedKey] == "Hello friend." && retainedCache.count == 2,
+    "Completed superseded units must be reusable without another translation call")
+check(retainedCache[changedKey] == nil,
+    "A different sentence must never reuse an obsolete translation")
+for isolatedKey in [
+    PipelineSafety.cacheKey(source: "pt", target: "de", text: "Olá amigo.", protectedWords: [], rules: "rules-A"),
+    PipelineSafety.cacheKey(source: "es", target: "en", text: "Olá amigo.", protectedWords: [], rules: "rules-A"),
+    PipelineSafety.cacheKey(source: "pt", target: "en", text: "Olá amigo.", protectedWords: [], rules: "rules-B"),
+    PipelineSafety.cacheKey(source: "pt", target: "en", text: "Olá amigo.", protectedWords: ["Zqa=Maria"], rules: "rules-A")
+] {
+    check(retainedCache[isolatedKey] == nil,
+        "Languages, rules and protected-name context must remain isolated")
+}
+check(SubtitlePerformancePolicy.retainedSpeculativeResults(keys: retainedKeys, values: retainedValues,
+    workContext: 7, currentContext: 8, reuseAllowed: true).isEmpty,
+    "Settings, capture and cache invalidation must reject suspended speculative output")
+check(SubtitlePerformancePolicy.retainedSpeculativeResults(keys: retainedKeys, values: retainedValues,
+    workContext: 7, currentContext: 7, reuseAllowed: false).isEmpty,
+    "Fresh-test and explicit memory bypass must prevent obsolete-result retention")
+let invalidRetainedBatches: [[String?]?] = [nil, [], ["partial"], ["Hello", nil, "Hello"],
+                                         ["Hello", " ", "Hello"], ["Hello", "Other", "Conflicting"]]
+for invalidValues in invalidRetainedBatches {
+    check(SubtitlePerformancePolicy.retainedSpeculativeResults(keys: retainedKeys, values: invalidValues,
+        workContext: 7, currentContext: 7, reuseAllowed: true).isEmpty,
+        "Failed, incomplete, empty or conflicting results must never seed the cache")
+}
+print("v1.4.8 restored head-start cadence and exact speculative recovery checks passed")

@@ -1633,6 +1633,30 @@ final class TranslatorEngine: ObservableObject {
                            detail: "Uncached units submitted to on-device translation")
             }
             let batch = await translateBatch(plan.unique, source: src, target: target, installed: installed, speculative: !display)
+            if !display, !isCurrent() {
+                // Cancellation is cooperative: the model can finish after a
+                // different caption arrives. Recover only completed exact-key
+                // units in the SAME context, never publish this old caption,
+                // never retry it and never write unconfirmed output to disk.
+                let recovered = SubtitlePerformancePolicy.retainedSpeculativeResults(
+                    keys: items.map { $0.key },
+                    values: batch.flatMap { plan.expand($0.map(Optional.some)) },
+                    workContext: workContext, currentContext: contextRevision,
+                    reuseAllowed: !bypassMemory && !flag("freshTranslationTest", false) &&
+                        rules == memoryRuleToken && destination == targetCode)
+                var retained = 0
+                for (key, value) in recovered where cache[key] == nil {
+                    cache[key] = value
+                    savedKeys.remove(key)
+                    specKeys.insert(key)
+                    if let speculativeID { speculativeOrigins[key] = speculativeID }
+                    touchCache(key)
+                    retained += 1
+                }
+                trimCache()
+                if diag.enabled && diag.started == diagnosticEpoch { diag.s.specRetainedUnits += retained }
+                return
+            }
             guard isCurrent() else { return }
             if display && diag.detailedCollection {
                 diag.trace(workCandidate, stage: "translationResult",

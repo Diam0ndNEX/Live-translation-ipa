@@ -130,6 +130,7 @@ struct DiagnosticIntervalBucket: Codable {
         "modelFailures", "warmupAttempts", "warmupSucceeded",
         "warmupPredicted", "coldModelBatches", "adaptiveSpeculationSkipped",
         "specPreemptionRequested", "specMatchingConfirmation",
+        "specRetainedUnits",
         "handoffDeferred", "slowTailEnqueues", "handoffReplayed", "handoffExpired", "enqueueFailed",
         "actualModelBatches", "confirmedModelBatches", "speculativeModelBatches",
         "warmupModelBatches", "first30sModelBatches", "cancelledModelBatches",
@@ -335,7 +336,7 @@ actor DiagnosticExportWriter {
     func exportZIP(_ snapshot: DiagnosticSessionExport) throws -> URL {
         let json = try encode(snapshot)
         let readme = Data("""
-        ScreenLingo offline diagnostics — 1.4.7
+        ScreenLingo offline diagnostics — 1.4.8
         session.json: bounded recent metadata-only candidate events, timing distributions,
         configuration, memory diagnostics and whole-session interval summaries.
         intervals.csv: chronological 15-second counters, thermal and capture state.
@@ -355,6 +356,9 @@ actor DiagnosticExportWriter {
         legacySkip* counts describe the last scanned batch only. Inventory pair is
         legacyInventorySource/Target; absent means no inventory captured this session.
         specPreemptionRequested counts app cancellation requests, not engine stops.
+        specRetainedUnits counts completed superseded speculative units newly
+        cached in RAM, not presentations or guaranteed future hits. Such pipelines
+        still count as speculativeDiscarded; later exact reuse counts as a hit.
         confirmedModelMs/speculativeModelMs are bounded completed-call samples.
         Settings, OS version, cache history and source content affect A/B comparisons.
         Nothing is automatically uploaded. This ZIP is generated at user request.

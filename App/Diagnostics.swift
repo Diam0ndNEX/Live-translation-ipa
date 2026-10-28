@@ -160,6 +160,7 @@ struct Stats {
     var adaptiveSpeculationSkipped = 0, confirmedHandoffDeferred = 0
     var slowTailEnqueues = 0
     var specPreemptionRequested = 0, specMatchingConfirmation = 0
+    var specRetainedUnits = 0
     var legacyBatchEntries = 0, legacyBatchVerified = 0, legacyBatchSkipped = 0
     var legacyBatchPeakWorkers = 0, legacyBatchElapsedMs = 0.0
     var specProcessingMs = 0.0, specDiscardedMs = 0.0
@@ -866,6 +867,7 @@ final class Diagnostics: ObservableObject {
             "speculativeRequests": s.specModelRequests,
             "specPreemptionRequested": s.specPreemptionRequested,
             "specMatchingConfirmation": s.specMatchingConfirmation,
+            "specRetainedUnits": s.specRetainedUnits,
             "speculativeDiscarded": s.specDiscarded,
             "legacyVerified": memoryHealth.legacyValidated,
             "legacySuperseded": memoryHealth.legacySuperseded,

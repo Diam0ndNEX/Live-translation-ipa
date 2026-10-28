@@ -79,6 +79,7 @@ import Foundation
             health: MemoryDiagnosticHealth(),
             counters: ["slowTailEnqueues": 1, "handoffDeferred": 1,
                        "legacyInventoryPending": 103, "legacySkipSegmentation": 12, "specPreemptionRequested": 9,
+                       "specRetainedUnits": 3,
                        "legacyBatchVerified": 24, "actualModelBatches": 7, "confirmedModelBatches": 2,
                        "speculativeModelBatches": 4, "warmupModelBatches": 1, "first30sModelBatches": 5,
                        "handoffReplayed": 1, "enqueueFailed": 1, "source text": 100],
@@ -92,6 +93,7 @@ import Foundation
                      performanceRestored.counters["legacyInventoryPending"] == 103 &&
                      performanceRestored.counters["legacySkipSegmentation"] == 12 &&
                      performanceRestored.counters["specPreemptionRequested"] == 9 &&
+                     performanceRestored.counters["specRetainedUnits"] == 3 &&
                      performanceRestored.counters["first30sModelBatches"] == 5 &&
                      performanceRestored.counters["handoffReplayed"] == 1 &&
                      performanceRestored.counters["enqueueFailed"] == 1 &&
