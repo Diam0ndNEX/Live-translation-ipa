@@ -184,7 +184,9 @@ actor DiagnosticExportWriter {
                 "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical",
                 "changing_group_preferred", "dominant_group", "queue_replaced",
                 "warmup_started", "warmup_succeeded", "warmup_failed",
-                "model_session_created", "model_batch_completed", "model_batch_failed"
+                "model_session_created", "model_batch_completed", "model_batch_failed",
+                "warmup_source_unresolved", "app_started", "capture_config_changed",
+                "capture_idle", "capture_live", "capture_paused", "capture_frozen"
             ]).union(stageCodes)
         let safeEvents = snapshot.events.suffix(2400).map { event in
             StructuredDiagnosticEvent(id: event.id, timestamp: event.timestamp,
