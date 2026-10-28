@@ -3,7 +3,7 @@ import SQLite3
 import CryptoKit
 
 struct MemoryStoreHealth: Codable, Sendable {
-    var schemaVersion = 1
+    var schemaVersion = 2
     var totalEntries = 0
     var readyEntries = 0
     var needsValidation = 0
@@ -11,6 +11,8 @@ struct MemoryStoreHealth: Codable, Sendable {
     var legacyValidated = 0
     var legacySuperseded = 0
     var legacyUnverified = 0
+    var suggestedOCRMatches = 0
+    var suggestedFragmentMatches = 0
     var conflicts = 0
     var databaseBytes: Int64 = 0
     var migrationStatus = "not_started"
@@ -65,7 +67,7 @@ private final class MemoryLookupCompletion: @unchecked Sendable {
 /// Owns all SQLite access. None of these operations run on MainActor. The persistent
 /// store is additive: evicting a RAM entry or saving a partial snapshot cannot erase it.
 actor TranslationMemoryStore {
-    static let schemaVersion = 1
+    static let schemaVersion = 2
     let directory: URL
     private var db: OpaquePointer?
     private var active = false
@@ -173,8 +175,9 @@ actor TranslationMemoryStore {
                 try execute("PRAGMA trusted_schema=OFF")
             }
             let version = try scalar("PRAGMA user_version")
-            guard version == 0 || version == Int64(Self.schemaVersion) else { throw MemoryStoreError.unsupportedSchema }
+            guard version == 0 || version == 1 || version == Int64(Self.schemaVersion) else { throw MemoryStoreError.unsupportedSchema }
             if version == 0 { try createSchema() }
+            else if version == 1 { try upgradeSchemaV2() }
             status.integrity = try verifyIntegrity()
             let previousMigrationState = try metadata("migration_status")
             status.migrationStatus = "discovering"
@@ -231,6 +234,9 @@ actor TranslationMemoryStore {
                 "CREATE INDEX memory_normalized ON memory_entries(source_language,target_language,normalized_source)",
                 "CREATE INDEX memory_compatibility ON memory_entries(validation_state,rules_version)",
                 "CREATE INDEX memory_last_used ON memory_entries(last_used_at)",
+                "CREATE INDEX memory_legacy_pending ON memory_entries(source_language,target_language,validation_state,rules_version)",
+                "CREATE TABLE memory_legacy_associations(legacy_id INTEGER NOT NULL REFERENCES memory_entries(id) ON DELETE CASCADE,current_id INTEGER NOT NULL REFERENCES memory_entries(id) ON DELETE CASCADE,kind TEXT NOT NULL,created_at REAL NOT NULL,PRIMARY KEY(legacy_id,current_id))",
+                "CREATE INDEX memory_legacy_kind ON memory_legacy_associations(kind)",
                 "CREATE TABLE memory_provenance(id INTEGER PRIMARY KEY,entry_id INTEGER NOT NULL REFERENCES memory_entries(id) ON DELETE CASCADE,source_format TEXT NOT NULL,source_fingerprint TEXT NOT NULL,legacy_key TEXT,import_batch TEXT NOT NULL,import_timestamp REAL NOT NULL,original_metadata TEXT,UNIQUE(entry_id,source_fingerprint,legacy_key))",
                 "CREATE INDEX memory_provenance_source ON memory_provenance(source_fingerprint,entry_id)",
                 "CREATE TABLE memory_conflicts(id INTEGER PRIMARY KEY,entry_id INTEGER NOT NULL REFERENCES memory_entries(id) ON DELETE CASCADE,alternative_id INTEGER NOT NULL REFERENCES memory_entries(id) ON DELETE CASCADE,created_at REAL NOT NULL,resolved INTEGER NOT NULL DEFAULT 0,UNIQUE(entry_id,alternative_id))",
@@ -240,16 +246,28 @@ actor TranslationMemoryStore {
                 "CREATE TABLE diagnostic_events(id INTEGER PRIMARY KEY,session_id TEXT NOT NULL REFERENCES diagnostic_sessions(id) ON DELETE CASCADE,timestamp REAL NOT NULL,payload BLOB NOT NULL)",
                 "CREATE INDEX diagnostic_event_time ON diagnostic_events(session_id,timestamp)",
                 "CREATE INDEX diagnostic_session_time ON diagnostic_sessions(ended_at)",
-                "PRAGMA user_version=1"
+                "PRAGMA user_version=2"
             ]
             for sql in statements { try execute(sql) }
-            try setMetadata("schema_version", "1")
+            try setMetadata("schema_version", "2")
             try setMetadata("translation_rules_version", "v4-fingerprint")
             try setMetadata("normalization_version", "1")
             try setMetadata("segmentation_version", "1")
             try setMetadata("cache_key_version", "4")
             try setMetadata("diagnostic_event_version", "1")
             try setMetadata("export_version", "1")
+        }
+    }
+
+    /// Non-destructive upgrade for devices that installed Memory 2.0 in v1.4.0 or v1.4.1.
+    /// The old rows, their IDs and the existing recovery copies remain untouched.
+    private func upgradeSchemaV2() throws {
+        try transaction {
+            try execute("CREATE INDEX IF NOT EXISTS memory_legacy_pending ON memory_entries(source_language,target_language,validation_state,rules_version)")
+            try execute("CREATE TABLE IF NOT EXISTS memory_legacy_associations(legacy_id INTEGER NOT NULL REFERENCES memory_entries(id) ON DELETE CASCADE,current_id INTEGER NOT NULL REFERENCES memory_entries(id) ON DELETE CASCADE,kind TEXT NOT NULL,created_at REAL NOT NULL,PRIMARY KEY(legacy_id,current_id))")
+            try execute("CREATE INDEX IF NOT EXISTS memory_legacy_kind ON memory_legacy_associations(kind)")
+            try execute("PRAGMA user_version=2")
+            try setMetadata("schema_version", "2")
         }
     }
 
@@ -484,33 +502,65 @@ actor TranslationMemoryStore {
         guard status.legacyUnverified > 0 else { return }
         guard let fresh = keyParts(key), fresh.rules != nil,
               !confirmedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        // Indexed exact/prefix selection, capped even on large legacy stores.
+        // Cross-language matches and unconstrained full-table fuzzy scans are forbidden.
+        let normalizedSource = normalized(fresh.sourceText)
+        let prefix = String(normalizedSource.prefix(2))
+        guard prefix.count == 2 && !prefix.contains(where: { "*?[]%_".contains($0) }) else { return }
         let q = try statement("""
             SELECT id,canonical_key,source_text,translated_text FROM memory_entries
-            WHERE source_language=? AND target_language=? AND normalized_source=?
+            WHERE source_language=? AND target_language=?
               AND rules_version IS NULL AND validation_state='needs_validation'
-            LIMIT 33
-            """, [.text(fresh.source), .text(fresh.target), .text(normalized(fresh.sourceText))])
+              AND (normalized_source=? OR normalized_source LIKE ?)
+            ORDER BY CASE WHEN normalized_source=? THEN 0 ELSE 1 END, id DESC
+            LIMIT 65
+            """, [.text(fresh.source), .text(fresh.target),
+                   .text(normalizedSource), .text(prefix + "%"), .text(normalizedSource)])
         defer { sqlite3_finalize(q) }
         var updates: [(id: Int64, state: String)] = []
+        var suggestions: [(id: Int64, kind: LegacyAssociationKind)] = []
+        var seen = 0
         while true {
             let code = sqlite3_step(q)
             if code == SQLITE_DONE { break }
             guard code == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
             // Refuse an ambiguous or excessive set; leave all historical rows untouched.
-            if updates.count >= 32 { return }
+            seen += 1
+            if seen > 64 { return }
             let oldKey = text(q, 1)
-            guard let old = keyParts(oldKey),
-                  old.rules == nil,
+            guard let old = keyParts(oldKey), old.rules == nil,
                   old.source == fresh.source, old.target == fresh.target,
-                  old.context == fresh.context,
-                  old.sourceText.precomposedStringWithCanonicalMapping ==
-                    fresh.sourceText.precomposedStringWithCanonicalMapping
-            else { continue }
-            let oldValue = text(q, 3)
-            let state = oldValue == confirmedValue ? "validated_legacy" : "superseded_legacy"
-            updates.append((id: sqlite3_column_int64(q, 0), state: state))
+                  old.context == fresh.context else { continue }
+            let association = LegacyAssociation.classify(old: old.sourceText, new: fresh.sourceText)
+            let id = sqlite3_column_int64(q, 0)
+            if association == .exact {
+                let oldValue = text(q, 3)
+                // Differing natural translations are alternate wording, not proof
+                // of a wrong old answer. Both outputs remain inspectable.
+                let state = oldValue == confirmedValue ? "validated_legacy" : "superseded_legacy"
+                updates.append((id: id, state: state))
+            } else if association != .none {
+                // Only store a review suggestion. No fuzzy OCR/fragment match
+                // ever promotes a legacy translation to a usable memory hit.
+                suggestions.append((id: id, kind: association))
+            }
         }
         let now = Date().timeIntervalSince1970
+        if !suggestions.isEmpty {
+            let q = try statement("SELECT id FROM memory_entries WHERE canonical_key=? AND translated_text=? LIMIT 1",
+                [.text(key), .text(confirmedValue)])
+            let row = sqlite3_step(q)
+            let currentID: Int64? = row == SQLITE_ROW ? sqlite3_column_int64(q, 0) : nil
+            sqlite3_finalize(q)
+            guard let currentID else { throw MemoryStoreError.databaseOperation }
+            for suggestion in suggestions {
+                try execute("""
+                    INSERT OR IGNORE INTO memory_legacy_associations
+                    (legacy_id,current_id,kind,created_at) VALUES(?,?,?,?)
+                    """, [.integer(suggestion.id), .integer(currentID),
+                           .text(suggestion.kind.rawValue), .real(now)])
+            }
+        }
         for update in updates {
             try execute("""
                 UPDATE memory_entries SET validation_state=?, updated_at=?
@@ -550,6 +600,8 @@ actor TranslationMemoryStore {
         status.legacyValidated = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE validation_state='validated_legacy'"))
         status.legacySuperseded = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE validation_state='superseded_legacy'"))
         status.legacyUnverified = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE validation_state='needs_validation' AND rules_version IS NULL"))
+        status.suggestedOCRMatches = Int(try scalar("SELECT COUNT(DISTINCT legacy_id) FROM memory_legacy_associations WHERE kind IN ('orthographic','ocrCandidate')"))
+        status.suggestedFragmentMatches = Int(try scalar("SELECT COUNT(DISTINCT legacy_id) FROM memory_legacy_associations WHERE kind='fragment'"))
         status.conflicts = Int(try scalar("SELECT COUNT(*) FROM memory_conflicts WHERE resolved=0"))
         status.importedEntries = Int(try scalar("SELECT COALESCE(SUM(imported),0) FROM migration_runs WHERE state='ready'"))
         status.duplicateEntries = Int(try scalar("SELECT COALESCE(SUM(duplicates),0) FROM migration_runs WHERE state='ready'"))
