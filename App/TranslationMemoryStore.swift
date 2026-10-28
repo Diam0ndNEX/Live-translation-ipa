@@ -511,11 +511,14 @@ actor TranslationMemoryStore {
             SELECT id,canonical_key,source_text,translated_text FROM memory_entries
             WHERE source_language=? AND target_language=?
               AND rules_version IS NULL AND validation_state='needs_validation'
-              AND (normalized_source=? OR normalized_source LIKE ?)
+              AND (normalized_source=? OR normalized_source LIKE ?
+                   OR normalized_source LIKE ? OR INSTR(?, normalized_source)>0)
             ORDER BY CASE WHEN normalized_source=? THEN 0 ELSE 1 END, id DESC
             LIMIT 65
             """, [.text(fresh.source), .text(fresh.target),
-                   .text(normalizedSource), .text(prefix + "%"), .text(normalizedSource)])
+                   .text(normalizedSource), .text(prefix + "%"),
+                   .text("%" + normalizedSource + "%"), .text(normalizedSource),
+                   .text(normalizedSource)])
         defer { sqlite3_finalize(q) }
         var updates: [(id: Int64, state: String)] = []
         var suggestions: [(id: Int64, kind: LegacyAssociationKind)] = []
