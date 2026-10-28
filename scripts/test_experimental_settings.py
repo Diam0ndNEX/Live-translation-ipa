@@ -36,8 +36,7 @@ expected = {
     },
     "SettingsViews.swift": {
         "adaptiveOCR", "subtitleTracking", "deduplicateCopies",
-        "contextualLanguage", "languageRecovery", "steadyCaptions",
-        "protectConfirmedPresentation", "smartCool", "keepAwake",
+        "contextualLanguage", "languageRecovery", "smartCool", "keepAwake",
         "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded",
     },
     "SettingsCategories.swift": {
@@ -48,6 +47,7 @@ expected = {
     },
     "CustomizationViews.swift": {
         "displayPolicy", "minDisplay", "heartbeatInterval",
+        "steadyCaptions", "protectConfirmedPresentation",
         "haptics", "hapticStrength", "autoCopy", "autoCopyFormat",
         "speak", "speechRate", "interruptSpeech",
     },
