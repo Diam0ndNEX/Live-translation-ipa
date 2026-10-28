@@ -1664,6 +1664,16 @@ final class TranslatorEngine: ObservableObject {
         }
     }
 
+    /// Only call after clearMemoryConfirmed() succeeded and the user explicitly
+    /// requested erasure of recoverable memory originals and snapshots.
+    func purgePreservedMemoryCopies() async throws {
+        let legacy = [memoryURL,
+            FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("translation-memory.json")]
+        try await memoryStore.deletePreservedCopies(legacyURLs: legacy)
+        await refreshMemoryHealth()
+    }
+
     /// Called from the live app on an iOS memory warning. Persistent SQLite entries
     /// remain untouched; only evictable RAM entries are reduced.
     func handleMemoryPressure() {
