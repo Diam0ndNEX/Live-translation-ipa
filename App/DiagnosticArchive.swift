@@ -160,7 +160,7 @@ struct DiagnosticIntervalBucket: Codable {
 
 struct DiagnosticSessionExport: Codable, Identifiable {
     var eventSchemaVersion = 1
-    var exportFormatVersion = 2
+    var exportFormatVersion = 3
     let id: UUID
     let startedAt: Date
     let endedAt: Date
@@ -235,7 +235,12 @@ actor DiagnosticExportWriter {
             "remember", "privateSession", "diagnosticsEnabled", "detailedCollection",
             "skipUnchanged", "idleBackoff", "adaptiveConfirmation", "subtitleTracking",
             "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest",
-            "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup"
+            "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
+            "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer",
+            "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
+            "deduplicateCopies", "contextualLanguage", "languageRecovery",
+            "continuousRotation", "smartCool", "persistDiagnosticSessions",
+            "diagSamples", "heartbeatInterval", "keepAwake"
         ]
         let safeSettings = snapshot.settings.filter { pair in
             settingsKeys.contains(pair.key) && pair.value.utf8.count <= 48 &&
@@ -275,12 +280,28 @@ actor DiagnosticExportWriter {
         let safeCounters = snapshot.counters.filter {
             allowedCounters.contains($0.key) && $0.value >= 0
         }
+        // The archive must not silently accept arbitrary distribution keys or
+        // nonfinite caller-supplied measurements. Reconstruct from bounded,
+        // known timing statistics instead of copying potentially private labels.
+        let allowedMetrics: Set<String> = [
+            "memoryLookupMs", "memoryWriteMs", "ocrMs", "translationMs",
+            "enqueueLatencyMs", "finalOCRMs", "transportMs", "confirmationMs",
+            "deliveryFilteringMs", "queueMs", "processingMs", "displayHoldMs",
+            "renderingMs", "speculativeModelMs", "confirmedModelMs", "modelBatchMs"
+        ]
+        let safeMetrics = snapshot.distributions.filter { key, value in
+            allowedMetrics.contains(key) && value.count >= 0 &&
+                value.mean.isFinite && value.mean >= 0 &&
+                [value.p50, value.p90, value.p95, value.p99, value.maximum].allSatisfy {
+                    $0 == nil || ($0!.isFinite && $0! >= 0)
+                }
+        }
         return DiagnosticSessionExport(id: snapshot.id, startedAt: snapshot.startedAt,
             endedAt: snapshot.endedAt, appVersion: snapshot.appVersion,
             systemVersion: snapshot.systemVersion, hardwareModel: safeHardware,
             settings: safeSettings,
             health: snapshot.health, counters: safeCounters,
-            distributions: snapshot.distributions, events: safeEvents,
+            distributions: safeMetrics, events: safeEvents,
             intervals: snapshot.intervals.map { Array($0.suffix(960)).map { $0.sanitized() } },
             measurementBoundary: safeBoundary, textCapture: false)
     }
