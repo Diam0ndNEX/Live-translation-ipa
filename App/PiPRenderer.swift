@@ -330,7 +330,7 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
         if r.status == .failed { r.flush() }
         // Only avoid redundant heartbeat frames when the display queue is full.
         // Newly translated subtitles must still be enqueued immediately.
-        if heartbeat && !r.readyForMoreMediaData { return true }
+        if heartbeat && !r.isReadyForMoreMediaData { return true }
         guard let sb = makeSampleBuffer() else { return false }
         r.enqueue(sb)
         return r.status != .failed
