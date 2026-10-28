@@ -319,7 +319,7 @@ import CryptoKit
                 currentKey: "v4|\(rules)|pt>en|0:|\($0.text)",
                 freshOutput: "Fresh output for \($0.text)")
         }
-        let malformedCommit = batchConfirmations[0...1] + [
+        let malformedCommit = Array(batchConfirmations[0...1]) + [
             .init(id: firstPage[2].id,
                   currentKey: "v4|\(rules)|de>en|0:|\(firstPage[2].text)",
                   freshOutput: "Wrong language")
