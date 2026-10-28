@@ -212,7 +212,7 @@ import SQLite3
         }
         let boundedSessions = try await sessionStore.loadDiagnosticSessions()
         precondition(boundedSessions.count == 20, "Diagnostic archive must retain at most 20 sessions")
-        let indexedMetadata = Data("{\\"stage\\":\\"memory\\",\\"privacy\\":\\"metadataOnly\\"}".utf8)
+        let indexedMetadata = Data(#"{"stage":"memory","privacy":"metadataOnly"}"#.utf8)
         try await sessionStore.saveDiagnosticSession(id: "test-24",
             startedAt: now, endedAt: now.addingTimeInterval(24),
             payload: Data("replacement-session".utf8),
