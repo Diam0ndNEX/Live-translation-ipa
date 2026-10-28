@@ -2113,7 +2113,8 @@ final class TranslatorEngine: ObservableObject {
 
     /// Loads the translation models before they're needed so the first real sentence isn't slow.
     func prewarm() async {
-        guard runtimePolicy.allowsPrewarming, flag("keepWarm", true), !paused, !busy, !warming,
+        guard runtimePolicy.allowsPrewarming, flag("keepWarm", true), !paused,
+              !legacyValidationBusy, !busy, !warming,
               Date().timeIntervalSince(lastWarm) > 25 else { return }
         warming = true
         defer { warming = false }
@@ -2122,6 +2123,7 @@ final class TranslatorEngine: ObservableObject {
         else if let l = lockedLang { code = l }
         else if detectedLang != "–" { code = detectedLang }
         else {
+            warmupStatus = "Waiting for source language"
             if Date().timeIntervalSince(lastUnresolvedWarmupNotice) > 25 {
                 lastUnresolvedWarmupNotice = Date()
                 diag.noteModelState("warmup_source_unresolved")
@@ -2136,7 +2138,10 @@ final class TranslatorEngine: ObservableObject {
               let word = Self.warmWords[src.languageCode?.identifier ?? code] else { return }
         // Avoid reloading the same model while a usable warm session exists.
         let warmKey = "\(src.minimalIdentifier)>\(destination)"
-        guard directSession == nil || directKey != warmKey else { return }
+        guard directSession == nil || directKey != warmKey else {
+            warmupStatus = "Ready"
+            return
+        }
         guard await pairStatus(src, target) == .installed, workContext == contextRevision, !busy,
               !ProcessInfo.processInfo.isLowPowerModeEnabled,
               ProcessInfo.processInfo.thermalState != .serious,
@@ -2145,9 +2150,11 @@ final class TranslatorEngine: ObservableObject {
         guard #available(iOS 26.0, *) else { return }
         lastWarm = Date()
         let t0 = Date()
+        warmupStatus = "Warming up…"
         diag.noteModelState("warmup_started")
         let session = TranslationSession(installedSource: src, target: target)
         let warmed = await runBatch(session, [word])
+        warmupStatus = warmed == nil ? "Warm-up failed" : "Ready"
         diag.noteModelState(warmed == nil ? "warmup_failed" : "warmup_succeeded",
             durationMs: Date().timeIntervalSince(t0) * 1000)
         if warmed != nil, !busy, workContext == contextRevision,
