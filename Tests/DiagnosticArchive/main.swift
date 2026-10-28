@@ -102,7 +102,8 @@ import Foundation
         var oldWithoutIntervals = try JSONSerialization.jsonObject(with: intervalBytes) as! [String: Any]
         oldWithoutIntervals.removeValue(forKey: "intervals")
         let previousBundle = try JSONSerialization.data(withJSONObject: oldWithoutIntervals)
-        precondition(try await writer.decode(previousBundle).intervals == nil,
+        let decodedPreviousBundle = try await writer.decode(previousBundle)
+        precondition(decodedPreviousBundle.intervals == nil,
                      "Existing 1.4.0 diagnostic archives must remain decodable")
 
         let matching = DiagnosticPerformanceComparison(baseline: snapshot, current: snapshot)
