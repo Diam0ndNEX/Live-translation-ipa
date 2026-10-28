@@ -233,6 +233,9 @@ final class TranslatorEngine: ObservableObject {
     @Published var memoryPendingWrites = 0
     @Published var memoryFailure: String?
     private var pendingMemory: [String: String] = [:]
+    // A proof is recorded only when the current model generated the result for a
+    // confirmed subtitle; speculative/ RAM/ SQLite reuse never counts as proof.
+    private var pendingLegacyProof: [String: String] = [:]
     private var memorySaving = false
     private var memoryMutationInProgress = false
     private var memoryRetryAttempts = 0
@@ -1282,7 +1285,7 @@ final class TranslatorEngine: ObservableObject {
             savedKeys.remove(key)
             if display && eligibleMemoryKeys.contains(key) && !flag("freshTranslationTest", false) {
                 confirmedKeys.insert(key)
-                queueMemory(key, out)
+                queueMemory(key, out, independentlyConfirmed: true)
             }
             memoryDirty = true
             touchCache(key)
@@ -1696,7 +1699,7 @@ final class TranslatorEngine: ObservableObject {
         cacheUse[key] = cacheClock
     }
 
-    private func queueMemory(_ key: String, _ value: String) {
+    private func queueMemory(_ key: String, _ value: String, independentlyConfirmed: Bool = false) {
         guard flag("remember", true), !flag("privateSession", false),
               !flag("freshTranslationTest", false) else { return }
         // Bound pending writes without claiming unsaved entries are durable.
@@ -1705,6 +1708,8 @@ final class TranslatorEngine: ObservableObject {
             return
         }
         pendingMemory[key] = value
+        if independentlyConfirmed { pendingLegacyProof[key] = value }
+        else if pendingLegacyProof[key] != value { pendingLegacyProof[key] = nil }
         memoryPendingWrites = pendingMemory.count
         memoryDirty = true
         saveMemory()
@@ -1715,6 +1720,9 @@ final class TranslatorEngine: ObservableObject {
               force || Date() >= storageFullRetryNotBefore else { return }
         memorySaving = true
         let snapshot = pendingMemory
+        let freshKeys = Set(snapshot.compactMap { key, value in
+            pendingLegacyProof[key] == value ? key : nil
+        })
         memoryRevision += 1
         let revision = memoryRevision
         Task { [weak self] in
@@ -1723,10 +1731,16 @@ final class TranslatorEngine: ObservableObject {
             var committed = false
             var storageFull = false
             do {
-                self.memoryHealth = try await self.memoryStore.save(snapshot, revision: revision)
+                self.memoryHealth = try await self.memoryStore.save(snapshot,
+                    revision: revision, independentlyConfirmedKeys: freshKeys)
                 committed = true
                 if self.memoryRevision == revision {
-                    for (key, value) in snapshot where self.pendingMemory[key] == value { self.pendingMemory[key] = nil }
+                    for (key, value) in snapshot where self.pendingMemory[key] == value {
+                        self.pendingMemory[key] = nil
+                        if self.pendingLegacyProof[key] == value {
+                            self.pendingLegacyProof[key] = nil
+                        }
+                    }
                 }
                 self.memoryFailure = nil
                 self.diag.recordMemory(.persisted, durationMs: (ProcessInfo.processInfo.systemUptime - writeStart) * 1000)
@@ -1796,6 +1810,9 @@ final class TranslatorEngine: ObservableObject {
             diag.memoryHealth.totalEntries = health.totalEntries
             diag.memoryHealth.readyEntries = health.readyEntries
             diag.memoryHealth.needsValidation = health.needsValidation
+            diag.memoryHealth.legacyValidated = health.legacyValidated
+            diag.memoryHealth.legacySuperseded = health.legacySuperseded
+            diag.memoryHealth.legacyUnverified = health.legacyUnverified
             diag.memoryHealth.conflicts = health.conflicts
             diag.memoryHealth.databaseBytes = health.databaseBytes
             diag.memoryHealth.migrationStatus = health.migrationStatus
