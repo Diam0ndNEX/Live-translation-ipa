@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.4.1"
-    static let build = 45
+    static let version = "1.4.2"
+    static let build = 46
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("1.4.2", "Conservative lazy validation of legacy memory using independently confirmed translations, startup and subtitle continuity improvements, and richer diagnostics for tail latency and memory validation."),
         ("1.4.1", "Improved rapid-subtitle detection, reduced idle OCR delay in Movie mode, protected confirmed text from speculative cancellation, prioritized confirmed translation and expanded privacy-safe diagnostics."),
         ("1.4.0", "Universal Translation Memory 2.0 development candidate: SQLite-backed persistence and migration, memory management and diagnostics. Release acceptance remains pending."),
         ("1.3.0", "Adaptive Auto/Balanced recognition, optional confidence-aware confirmation, spatial subtitle tracking, selective cancellable speculation and stable candidate-aware presentation. Versioned rule-aware memory in Application Support, separate cache origins, smarter Cool Mode and detailed subtitle/workload diagnostics with measured recorder self-time. Fixed runtime pressure changes resetting OCR confirmation."),
