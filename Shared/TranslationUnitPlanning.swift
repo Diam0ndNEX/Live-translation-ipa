@@ -35,7 +35,10 @@ enum TranslationUnitPlanning {
             let isEllipsis = pending.hasSuffix("...") || pending.hasSuffix("…")
             let lastScalar = pending.unicodeScalars.last
             let hasBoundary = lastScalar.map { terminators.contains($0) } ?? false
-            if !isEllipsis && hasBoundary && index < filtered.count - 1 && units.count < maxUnits - 1 {
+            let abbreviation = pending.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+            let shortAbbreviations: Set<String> = ["dr.", "mr.", "mrs.", "ms.", "prof.", "sr.", "jr.", "st.", "vs."]
+            if !isEllipsis && hasBoundary && !shortAbbreviations.contains(abbreviation)
+                && index < filtered.count - 1 && units.count < maxUnits - 1 {
                 units.append(pending)
                 pending = ""
             }
@@ -49,7 +52,7 @@ enum TranslationUnitPlanning {
         let resultAlphanumeric = units.joined().unicodeScalars
             .filter { CharacterSet.alphanumerics.contains($0) }
             .map(String.init).joined().precomposedStringWithCanonicalMapping
-        guard sourceAlphanumeric == resultAlphanumeric, !units.isEmpty,
+        guard sourceAlphanumeric == resultAlphanumeric, units.count > 1,
               units.count <= maxUnits else { return [original] }
         return units
     }
