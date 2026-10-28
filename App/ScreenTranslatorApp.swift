@@ -1,6 +1,7 @@
 // Screen Translator – App – v0.11.0
 import SwiftUI
 import Translation
+import UIKit
 
 @main
 struct ScreenTranslatorApp: App {
@@ -61,7 +62,39 @@ struct RootView: View {
         .onChange(of: phase) { _, p in
             engine.diag.noteExecutionPhase(p == .active ? "active" : (p == .background ? "background" : "inactive"), pipActive: engine.pipActive)
             if p == .active { engine.server.start() }
-            if p == .background { engine.saveMemory(force: true) }
+            if p == .background {
+                engine.saveMemory(force: true)
+                let backgroundTask = MemoryBackgroundTask()
+                backgroundTask.begin()
+                Task {
+                    _ = await engine.flushPendingMemory(maxWaitSeconds: 2.5)
+                    backgroundTask.end()
+                }
+            }
         }
+    }
+}
+
+
+/// The system can suspend an app before its confirmed SQLite writes finish.
+/// A short, explicitly ended background task gives the writer a bounded chance
+/// to commit. It does not promise extra background time or hide failed writes.
+@MainActor
+private final class MemoryBackgroundTask {
+    private var identifier: UIBackgroundTaskIdentifier = .invalid
+
+    func begin() {
+        identifier = UIApplication.shared.beginBackgroundTask(
+            withName: "ScreenLingo translation memory flush",
+            expirationHandler: { [weak self] in
+                Task { @MainActor in self?.end() }
+            })
+    }
+
+    func end() {
+        guard identifier != .invalid else { return }
+        let finished = identifier
+        identifier = .invalid
+        UIApplication.shared.endBackgroundTask(finished)
     }
 }
