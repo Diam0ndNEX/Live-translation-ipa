@@ -73,7 +73,16 @@ import Foundation
             precondition(stillImported.totalEntries == previouslyImported)
         }
 
+        let snapshotName = try await store.createRecoverySnapshot()
+        let snapshotURL = root.appendingPathComponent("db/recovery").appendingPathComponent(snapshotName)
+        precondition(FileManager.default.fileExists(atPath: snapshotURL.path),
+                     "Snapshot must be created through SQLite, not a WAL-blind file copy")
+        let backupHealth = try await store.health()
+        precondition(backupHealth.lastVerifiedBackup != nil,
+                     "Health must expose a verified recovery snapshot timestamp")
         try await store.clear(revision: 4)
+        precondition(FileManager.default.fileExists(atPath: snapshotURL.path),
+                     "Clearing active memory must never delete the recovery snapshot")
         do {
             _ = try await store.save([key:"Stale work"], revision: 3)
             preconditionFailure("Old in-flight write must be fenced by clear revision")
