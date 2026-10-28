@@ -1677,10 +1677,21 @@ final class TranslatorEngine: ObservableObject {
         let limit = min(configured, memoryPressureCapacity ?? configured)
         let excess = cache.count - limit
         guard excess > 0 else { return }
-        for key in cacheUse.sorted(by: { $0.value < $1.value }).prefix(excess).map(\.key) {
+        // The common case is one insertion beyond capacity. Finding the oldest
+        // key with a linear scan avoids sorting the entire cache on every frame.
+        let victims: [String]
+        if excess == 1 {
+            victims = cacheUse.min(by: { $0.value < $1.value }).map { [$0.key] } ??
+                      Array(cache.keys.prefix(1))
+        } else {
+            victims = cacheUse.sorted(by: { $0.value < $1.value }).prefix(excess).map(\.key)
+        }
+        for key in victims {
             cache[key] = nil; cacheUse[key] = nil
             specKeys.remove(key); savedKeys.remove(key); confirmedKeys.remove(key)
         }
+        // Report entries evicted, not maintenance batches; persistence is untouched.
+        diag.recordMemory(.ramEviction, count: victims.count)
     }
 
     // MARK: Keep the translator warm
