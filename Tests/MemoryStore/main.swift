@@ -1,5 +1,6 @@
 import Foundation
 import SQLite3
+import CryptoKit
 
 @main struct MemoryTests {
     static func main() async throws {
@@ -67,6 +68,42 @@ import SQLite3
         let reopenedHit = await nextLaunch.lookup(key: durableKey, timeoutMilliseconds: 50)
         precondition(reopenedHit.value == "Persisted from earlier launch.",
                      "Stored translations must survive reopening without legacy source files")
+
+        // Simulate a kill between the 'importing' receipt and transaction COMMIT.
+        // A restart must retry idempotently rather than skipping an incomplete
+        // migration because an old receipt exists.
+        let interruptedDirectory = root.appendingPathComponent("interrupted-db")
+        let interruptedSource = root.appendingPathComponent("interrupted-legacy.json")
+        let interruptedKey = "v4|\(rules)|pt>en|0:|Interruption recovery."
+        try JSONEncoder().encode(
+            MemoryEnvelope(entries: [interruptedKey: "Restored after interruption."]))
+            .write(to: interruptedSource, options: .atomic)
+        do {
+            let initializer = TranslationMemoryStore(directory: interruptedDirectory)
+            _ = try await initializer.prepare(legacyURLs: [])
+        }
+        let sourceBytes = try Data(contentsOf: interruptedSource)
+        let fingerprint = SHA256.hash(data: sourceBytes)
+            .map { String(format: "%02x", $0) }.joined()
+        let interruptionDB = interruptedDirectory.appendingPathComponent("memory.sqlite")
+        var interruptionConnection: OpaquePointer?
+        precondition(sqlite3_open(interruptionDB.path, &interruptionConnection) == SQLITE_OK)
+        let incompleteReceipt = """
+            INSERT INTO migration_runs(id,source_fingerprint,source_format,state,started_at)
+            VALUES('interrupted-test','\(fingerprint)','envelope_v4','importing',0)
+            """
+        precondition(sqlite3_exec(interruptionConnection, incompleteReceipt,
+                                  nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(interruptionConnection)
+        let restarted = TranslationMemoryStore(directory: interruptedDirectory)
+        let resumedHealth = try await restarted.prepare(legacyURLs: [interruptedSource])
+        precondition(resumedHealth.totalEntries == 1 && resumedHealth.migrationStatus == "ready")
+        let interruptionHit = await restarted.lookup(
+            key: interruptedKey, timeoutMilliseconds: 50)
+        precondition(interruptionHit.value == "Restored after interruption.")
+        let resumedAgain = try await restarted.prepare(legacyURLs: [interruptedSource])
+        precondition(resumedAgain.totalEntries == 1,
+                     "Interrupted migrations must be safely retryable and idempotent")
 
         let legacy = root.appendingPathComponent("translation-memory-v4.json")
         try JSONEncoder().encode(MemoryEnvelope(entries: [key:"Hello."])).write(to: legacy)
