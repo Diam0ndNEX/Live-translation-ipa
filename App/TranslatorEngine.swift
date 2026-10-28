@@ -100,7 +100,7 @@ final class TranslatorEngine: ObservableObject {
         "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode", "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "smartCool", "steadyCaptions", "languageRecovery", "deduplicateCopies", "continuousRotation", "contextualLanguage"
     ]
     /// App look & behaviour that presets do not touch.
-    static let interfaceKeys = ["accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
+    static let interfaceKeys = ["legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
     static var settingKeys: [String] { presetKeys + interfaceKeys }
     static let defaults: [String: Any] = [
         "source": "auto", "target": "en", "mode": "movie", "area": "smart", "customY0": 0.0, "customY1": 0.5,
@@ -121,7 +121,7 @@ final class TranslatorEngine: ObservableObject {
         "speculationConfidence": 0.85, "confirmationDeadline": 0.6, "smartCool": true, "steadyCaptions": true,
         "languageRecovery": true, "deduplicateCopies": true, "continuousRotation": false, "contextualLanguage": true,
         "coolMode": false, "diagnosticsEnabled": true, "detailedCollection": false, "freshTranslationTest": false, "showSessionSpeakers": true,
-        "privateSession": false, "diagIncludeText": false, "sessionLimit": 0, "readerSize": 28.0,
+        "legacyIdleValidationEnabled": false, "privateSession": false, "diagIncludeText": false, "sessionLimit": 0, "readerSize": 28.0,
         "readerOriginal": true, "readerAlignment": false, "ocrConfidence": 0.3, "ocrCorrection": true, "idleBackoff": true
     ]
 
@@ -161,6 +161,9 @@ final class TranslatorEngine: ObservableObject {
     @Published var original = ""
     @Published var translated = ""
     @Published var status = "Idle"
+    @Published private(set) var warmupStatus = "Waiting for source language"
+    @Published private(set) var legacyIdleValidationStatus = "Disabled"
+    @Published private(set) var legacyValidatedThisSession = 0
     @Published var captureAlive = false
     @Published var frames = 0
     @Published var ocrCount = 0
@@ -196,6 +199,9 @@ final class TranslatorEngine: ObservableObject {
     private var processingStarted = Date()
     private var savedRequests = 0
     private var warming = false
+    private var legacyValidationBusy = false
+    private var legacyValidationCursor: Int64 = 0
+    private var lastIdleValidationAttempt = Date.distantPast
     private var languageCache: [String: (NLLanguage?, [NLLanguage: Double])] = [:]
     private var drainTask: Task<Void, Never>?
     private var activeCandidateText = ""
@@ -355,6 +361,11 @@ final class TranslatorEngine: ObservableObject {
         diag.tick(alive: alive, paused: paused, frozen: frozen)
         if tickCount % 5 == 0 { saveMemory() }
         if tickCount % 60 == 0 { applyHistoryRetention() }
+        if tickCount % 60 == 0, flag("legacyIdleValidationEnabled", false),
+           Date().timeIntervalSince(lastIdleValidationAttempt) > 90,
+           mayRunIdleValidation {
+            Task { await validateIdleLegacy(maxEntries: 1) }
+        }
         if alive, !paused, tickCount % 10 == 0, Date().timeIntervalSince(lastTextDate) > 8,
            Date().timeIntervalSince(lastWarm) > 25 {
             Task { await prewarm() }
