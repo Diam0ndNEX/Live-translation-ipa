@@ -54,7 +54,7 @@ struct SettingsView: View {
     private var anyMatch: Bool {
         show("Presets", "save profile custom switch")
             || show("Pipeline simulator", "simulation stages diagram timeline settings lab")
-            || show("Smart pipeline", "adaptive auto confidence tracking speculative memory cool latency")
+            || show("Experimental Features", "experiments smart pipeline advanced adaptive OCR model low latency lyrics PiP prediction memory speculative")
             || show("Reading & OCR", "mode area custom rotation order speed stability ignore noise contrast frames words small")
             || show("Understanding & rules", "clean slang speaker language lock never translate glossary fixes names")
             || show("Floating window", "size theme colour font text original auto open clear hold display vibrate speak voice copy preview")
@@ -108,8 +108,8 @@ struct SettingsView: View {
                     if show("Pipeline simulator", "simulation stages diagram timeline settings lab") {
                         NavigationLink { PipelineSimulatorView() } label: { Label("Pipeline simulator", systemImage: "point.3.connected.trianglepath.dotted") }
                     }
-                    if show("Smart pipeline", "adaptive auto confidence tracking speculative memory cool latency") {
-                        NavigationLink { SmartPipelineSettings() } label: { Label("Smart pipeline", systemImage: "sparkles") }
+                    if show("Experimental Features", "experiments smart pipeline advanced adaptive OCR model low latency lyrics PiP prediction memory speculative") {
+                        NavigationLink { ExperimentalFeaturesView() } label: { Label("Experimental Features", systemImage: "testtube.2") }
                     }
                     if show("Reading & OCR", "mode area custom rotation order speed stability ignore noise contrast frames words small") {
                         NavigationLink { ReadingSettings() } label: { Label("Reading & OCR", systemImage: "viewfinder") }
@@ -163,8 +163,6 @@ struct ReadingSettings: View {
     @AppStorage("dropNoise") private var dropNoise = true
     @AppStorage("boost") private var boost = 1
     @AppStorage("skipUnchanged") private var skipUnchanged = true
-    @AppStorage("subtitleAwareChangeDetection") private var subtitleAwareChangeDetection = false
-    @AppStorage("preserveRelatedMovieGroups") private var preserveRelatedMovieGroups = false
     @AppStorage("ocrConfidence") private var confidence = 0.3
     @AppStorage("ocrCorrection") private var correction = true
     @State private var showAreaEditor = false
@@ -227,14 +225,6 @@ struct ReadingSettings: View {
                     Text("Always").tag(2)
                 }
                 Toggle("Skip unchanged frames", isOn: $skipUnchanged)
-                Toggle("Experimental subtitle-area change detection", isOn: $subtitleAwareChangeDetection)
-                    .disabled(!skipUnchanged)
-                Text("Upright video: samples more of the selected subtitle area. Rotated video: full-frame fallback. Periodic OCR remains active.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                Toggle("Experimental multi-line lyric groups", isOn: $preserveRelatedMovieGroups)
-                    .disabled(mode != TranslateMode.movie.rawValue)
-                Text("Retains nearby, aligned secondary lyric/dialogue groups; may include unrelated text. Off by default.")
-                    .font(.footnote).foregroundStyle(.secondary)
                 Toggle("OCR language correction", isOn: $correction)
                 VStack(alignment: .leading) {
                     Text("Minimum OCR confidence · \(Int(confidence * 100))%")
@@ -247,14 +237,12 @@ struct ReadingSettings: View {
             }
 
             ResetSection(keys: ["mode", "area", "customY0", "customY1", "frameRot", "speed", "stability",
-                                "minTextH", "ignoreList", "dropNoise", "boost", "skipUnchanged", "subtitleAwareChangeDetection", "preserveRelatedMovieGroups", "ocrConfidence", "ocrCorrection"])
+                                "minTextH", "ignoreList", "dropNoise", "boost", "skipUnchanged", "ocrConfidence", "ocrCorrection"])
         }
         .settingsPage("Reading & OCR")
         .sheet(isPresented: $showAreaEditor) { CaptureAreaEditor().environmentObject(engine) }
         .onChange(of: key) { _, _ in engine.syncConfig() }
         .onChange(of: frameRot) { _, _ in engine.rotationSettingChanged() }
-        .onChange(of: subtitleAwareChangeDetection) { _, _ in engine.pipelineSettingsChanged() }
-        .onChange(of: preserveRelatedMovieGroups) { _, _ in engine.pipelineSettingsChanged() }
     }
 }
 
@@ -493,37 +481,19 @@ struct PerformanceSettings: View {
     @AppStorage("adaptive") private var adaptive = true
     @AppStorage("idleMinutes") private var idleMinutes = 0
     @AppStorage("translateAhead") private var translateAhead = true
-    @AppStorage("lowLatencyTranslation") private var lowLatencyTranslation = false
-    @AppStorage("incrementalBatchRecovery") private var incrementalBatchRecovery = false
-    @AppStorage("directPiPBuffer") private var directPiPBuffer = false
     @AppStorage("keepWarm") private var keepWarm = true
-    @AppStorage("predictiveWarmup") private var predictiveWarmup = true
     @AppStorage("remember") private var remember = true
     @AppStorage("idleBackoff") private var idleBackoff = true
-    @AppStorage("freshTranslationTest") private var freshTranslationTest = false
 
     var body: some View {
         List {
             Section {
                 Toggle("Translate ahead", isOn: $translateAhead)
-                if #available(iOS 26.4, *) {
-                    Toggle("Low-latency translation models", isOn: $lowLatencyTranslation)
-                    Text("Optional traditional on-device models for faster, lower-power translations. Wording can be less fluent. Turn off to restore the existing automatic model choice. Changing this setting reinitializes the translator.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                } else {
-                    Text("Low-latency model selection requires iOS 26.4 or newer; the existing translator remains unchanged.")
-                        .font(.footnote).foregroundStyle(.secondary)
-                }
                 Toggle("Keep the translator warm", isOn: $keepWarm)
-                Toggle("Warm the last confirmed language before Auto detection", isOn: $predictiveWarmup)
                 LabeledContent("Model status", value: engine.warmupStatus)
                 if let duration = engine.warmupLastDurationMs {
                     LabeledContent("Last warm-up", value: "\(Int(duration)) ms")
                 }
-                Text("An optional first-use optimization: while Automatic is unresolved, prewarm a recent source model without changing OCR language detection. The actual new source always wins.").font(.footnote).foregroundStyle(.secondary)
-                Toggle("Experimental incremental batch recovery", isOn: $incrementalBatchRecovery)
-                Text("Opt-in: collect completed speculative sentence results before a whole batch finishes. Only exact-context RAM reuse; no partial captions or unconfirmed disk writes.")
-                    .font(.footnote).foregroundStyle(.secondary)
                 Toggle("Remember translations", isOn: $remember)
                 LabeledContent("Persisted translation units", value: "\(engine.memoryCount)")
                 NavigationLink("Manage translation memory") { MemoryManagementView() }
@@ -534,7 +504,7 @@ struct PerformanceSettings: View {
             }
             Section {
                 Toggle("Cool mode", isOn: $coolMode)
-                Text("Smart Cool Mode adapts OCR frequency to workload and permits only very clear pre-translation when processing is quick and the phone is cool. Disable its controller in Smart pipeline to use fixed intervals instead. Idle warm-ups are off. Updates can arrive later and brief captions may be missed.").font(.footnote).foregroundStyle(.secondary)
+                Text("Smart Cool Mode adapts OCR frequency to workload and permits only very clear pre-translation when processing is quick and the phone is cool. Disable its controller in Experimental Features to use fixed intervals instead. Idle warm-ups are off. Updates can arrive later and brief captions may be missed.").font(.footnote).foregroundStyle(.secondary)
                 Toggle("Adaptive performance", isOn: $adaptive)
                 Toggle("Reduce OCR work when no text is visible", isOn: $idleBackoff)
                 Picker("Pause after no text for", selection: $idleMinutes) {
@@ -548,27 +518,16 @@ struct PerformanceSettings: View {
             } footer: {
                 Text("Adaptive performance reads less often when the phone gets hot, Low Power Mode is on, or the capture extension is running low on memory. Auto-pause saves battery during long gaps.")
             }
-            Section("Controlled comparison") {
-                Toggle("Experimental direct PiP rendering", isOn: $directPiPBuffer)
-                Text("Draw directly into the PiP pixel buffer instead of rendering a UIImage first. Compare appearance, frame delivery, latency and battery; turn off if rendering differs.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                Toggle("Fresh translation test (no memory reuse)", isOn: $freshTranslationTest)
-                Text("For same-video comparisons only. Temporarily bypasses RAM/SQLite reuse and translation-ahead, without deleting remembered translations. It can be slower, warmer and use more power. Turn it off after testing.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            }
             Section {
                 DiagnosticsCollectionControls()
                 Button("Reset diagnostics counters") { engine.diag.reset(); engine.toast("Counters reset") }
             }
-            ResetSection(keys: ["coolMode", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "predictiveWarmup", "remember", "lowLatencyTranslation", "incrementalBatchRecovery", "idleBackoff", "directPiPBuffer", "freshTranslationTest"])
+            ResetSection(keys: ["coolMode", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember", "idleBackoff"])
         }
         .settingsPage("Performance & power")
         .onChange(of: adaptive) { _, _ in engine.syncConfig() }
         .onChange(of: translateAhead) { _, _ in engine.syncConfig() }
-        .onChange(of: lowLatencyTranslation) { _, _ in engine.translationStrategyChanged() }
-        .onChange(of: incrementalBatchRecovery) { _, _ in engine.pipelineSettingsChanged() }
         .onChange(of: idleBackoff) { _, _ in engine.syncConfig() }
-        .onChange(of: freshTranslationTest) { _, _ in engine.pipelineSettingsChanged() }
     }
 }
 
