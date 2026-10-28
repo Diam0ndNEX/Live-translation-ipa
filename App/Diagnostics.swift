@@ -299,6 +299,7 @@ final class Diagnostics: ObservableObject {
             "accepted", "completed", "rejected_duplicate", "rejected_recent_fragment",
             "rejected_empty", "rejected_revision", "rejected_unstable",
             "rejected_low_confidence", "rejected_stale", "filtered", "deferred_early_candidate",
+            "preserved_confirmed_work",
             "changing_group_preferred", "dominant_group", "queue_replaced",
             "confirmed", "speculative", "ready", "enqueued", "cancelled"
         ]
