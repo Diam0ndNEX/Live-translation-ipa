@@ -1655,6 +1655,12 @@ final class TranslatorEngine: ObservableObject {
             let result = PipelineSafety.orderedTranslations(res.map { ($0.clientIdentifier, $0.targetText) }, count: texts.count)
             diag.noteModelState(result == nil ? "model_batch_failed" : "model_batch_completed",
                 durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
+            if let started = sessionStarted,
+               Date().timeIntervalSince(started) >= 0,
+               Date().timeIntervalSince(started) <= 30 {
+                diag.noteModelState("model_batch_first_30s",
+                    durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
+            }
             return result
         } catch {
             if Task.isCancelled { return nil }
@@ -1765,6 +1771,14 @@ final class TranslatorEngine: ObservableObject {
         }
         renderedGrams = TextSim.grams(result).union(placeholderGrams)
         sourceGrams = TextSim.grams(text)
+        // Only a successfully displayed, independently resolved source should
+        // influence a future predictive model warm-up; never change Auto OCR.
+        let sourceToRemember = sourceCode == "auto" ? detectedLang : sourceCode
+        if sourceToRemember != "–", !sourceToRemember.isEmpty {
+            ud.set(sourceToRemember, forKey: "lastEffectiveSource")
+            ud.set(Date().timeIntervalSince1970, forKey: "lastEffectiveSourceAt")
+        }
+        replayDeferredConfirmedIfPossible()
     }
 
     func speak(_ s: String) {
@@ -2367,10 +2381,19 @@ final class TranslatorEngine: ObservableObject {
         warming = true
         defer { warming = false }
         let code: String
+        var predicted = false
         if sourceCode != "auto" { code = sourceCode }
         else if let l = lockedLang { code = l }
         else if detectedLang != "–" { code = detectedLang }
-        else {
+        else if let previous = SubtitlePerformancePolicy.predictiveSource(
+            selected: sourceCode, detected: nil,
+            lastResolved: ud.string(forKey: "lastEffectiveSource"),
+            ageSeconds: Date().timeIntervalSince1970 -
+                ud.double(forKey: "lastEffectiveSourceAt"),
+            enabled: flag("predictiveWarmup", true)) {
+            code = previous
+            predicted = true
+        } else {
             warmupStatus = "Waiting for source language"
             if Date().timeIntervalSince(lastUnresolvedWarmupNotice) > 25 {
                 lastUnresolvedWarmupNotice = Date()
@@ -2398,8 +2421,9 @@ final class TranslatorEngine: ObservableObject {
         guard #available(iOS 26.0, *) else { return }
         lastWarm = Date()
         let t0 = Date()
-        warmupStatus = "Warming up…"
+        warmupStatus = predicted ? "Predictive warm-up…" : "Warming up…"
         diag.noteModelState("warmup_started")
+        if predicted { diag.noteModelState("warmup_predicted_source") }
         let session = TranslationSession(installedSource: src, target: target)
         let warmed = await runBatch(session, [word])
         warmupLastDurationMs = Date().timeIntervalSince(t0) * 1000
