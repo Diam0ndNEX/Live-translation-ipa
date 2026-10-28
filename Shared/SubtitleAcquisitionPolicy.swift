@@ -32,7 +32,10 @@ enum SubtitleAcquisitionPolicy {
     /// A tentative next subtitle must not erase a confirmed one that is still
     /// translating. Once the new subtitle is confirmed, ordinary freshness
     /// guards may supersede the older output.
-    static func shouldSupersedeActive(activeConfirmed: Bool, incomingConfirmed: Bool) -> Bool {
-        incomingConfirmed || !activeConfirmed
+    static func shouldSupersedeActive(activeConfirmed: Bool, activePresented: Bool,
+                                      incomingConfirmed: Bool) -> Bool {
+        // Once the earlier subtitle was enqueued, start processing the next
+        // early sighting immediately; only ongoing confirmed work is protected.
+        incomingConfirmed || !activeConfirmed || activePresented
     }
 }
