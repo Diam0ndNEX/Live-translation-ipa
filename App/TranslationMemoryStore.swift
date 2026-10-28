@@ -569,6 +569,82 @@ actor TranslationMemoryStore {
         }
     }
 
+    struct LegacyIdleCandidate: Sendable {
+        let id: Int64
+        let source: String
+        let target: String
+        let text: String
+        let previousOutput: String
+    }
+
+    /// Only called after user opt-in while foreground/idle. Cursor avoids repeatedly
+    /// scheduling the same unsupported language pair or failing old entry.
+    func nextLegacyIdleCandidate(target: String, selectedSource: String?,
+                                 after id: Int64) throws -> LegacyIdleCandidate? {
+        guard active else { throw MemoryStoreError.unavailable }
+        let query = try statement("""
+            SELECT id,canonical_key,source_text,translated_text,source_language,target_language
+            FROM memory_entries
+            WHERE validation_state='needs_validation' AND rules_version IS NULL
+              AND target_language=? AND id>? AND LENGTH(source_text) BETWEEN 4 AND 240
+              AND (? IS NULL OR source_language=?)
+            ORDER BY id LIMIT 64
+            """, [.text(target), .integer(id), selectedSource.map(SQLValue.text) ?? .null,
+                   selectedSource.map(SQLValue.text) ?? .null])
+        defer { sqlite3_finalize(query) }
+        var scanned = 0
+        while scanned < 64 {
+            let result = sqlite3_step(query)
+            if result == SQLITE_DONE { return nil }
+            guard result == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
+            scanned += 1
+            let key = text(query, 1)
+            guard let parsed = keyParts(key), parsed.rules == nil,
+                  parsed.context.isEmpty,
+                  parsed.source == text(query, 4),
+                  parsed.target == text(query, 5) else { continue }
+            return LegacyIdleCandidate(id: sqlite3_column_int64(query, 0),
+                source: parsed.source, target: parsed.target,
+                text: parsed.sourceText, previousOutput: text(query, 3))
+        }
+        return nil
+    }
+
+    /// A successful fresh on-device model translation, independently requested
+    /// while idle. This never trusts the historical output as translation truth.
+    /// One transaction saves the v4 current translation and classifies the old
+    /// record without deleting it. Fails closed if state changed in the meantime.
+    func confirmIdleLegacy(id: Int64, currentKey: String,
+                           freshOutput: String, revision: Int) throws -> MemoryStoreHealth {
+        guard active else { throw MemoryStoreError.unavailable }
+        guard revision > latestRevision else { throw MemoryStoreError.staleRevision }
+        guard let parts = keyParts(currentKey), parts.rules != nil, parts.context.isEmpty,
+              !freshOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { throw MemoryStoreError.invalidImport }
+        try transaction {
+            let query = try statement("""
+                SELECT canonical_key,translated_text FROM memory_entries
+                WHERE id=? AND rules_version IS NULL AND validation_state='needs_validation'
+                """, [.integer(id)])
+            let result = sqlite3_step(query)
+            let oldKey = result == SQLITE_ROW ? text(query, 0) : ""
+            let oldOutput = result == SQLITE_ROW ? text(query, 1) : ""
+            sqlite3_finalize(query)
+            guard result == SQLITE_ROW, let old = keyParts(oldKey),
+                  old.source == parts.source, old.target == parts.target,
+                  old.context.isEmpty, old.sourceText == parts.sourceText
+            else { throw MemoryStoreError.staleRevision }
+            _ = try insert(key: currentKey, value: freshOutput, compatible: true)
+            try execute("""
+                UPDATE memory_entries SET validation_state=?, updated_at=?
+                WHERE id=? AND validation_state='needs_validation'
+                """, [.text(oldOutput == freshOutput ? "validated_legacy" : "superseded_legacy"),
+                       .real(Date().timeIntervalSince1970), .integer(id)])
+        }
+        latestRevision = revision
+        return try health()
+    }
+
     /// The caller supplies only confirmed eligible results. Return means COMMIT has
     /// succeeded. A failed transaction leaves every prior translation untouched.
     /// independentlyConfirmedKeys come only from current-model results that
