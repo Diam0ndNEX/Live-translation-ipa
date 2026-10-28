@@ -1364,8 +1364,9 @@ final class TranslatorEngine: ObservableObject {
         // Preserve the original v4 memory rule digest when the optional model
         // strategy is OFF. Only isolate outputs when a genuinely distinct
         // low-latency model was selected on a supported OS.
-        if #available(iOS 26.4, *), flag("lowLatencyTranslation", false) {
-            snapshot += "\u{1F}translationStrategy=lowLatency"
+        if #available(iOS 26.4, *) {
+            snapshot = TranslationModelMemoryPolicy.rulesContext(
+                base: snapshot, lowLatency: flag("lowLatencyTranslation", false))
         }
         if snapshot != rulesSnapshot {
             rulesSnapshot = snapshot
