@@ -145,7 +145,17 @@ struct MemoryManagementView: View {
             } catch { message = "Memory is preparing or unavailable" }
         }
         .confirmationDialog("Permanently delete translation memory? History and settings remain.", isPresented: $confirmClear, titleVisibility: .visible) {
-            Button("Delete translation memory", role: .destructive) { engine.clearMemory(); entries = [] }
+            Button("Delete translation memory", role: .destructive) {
+                Task {
+                    let committed = await engine.clearMemoryConfirmed()
+                    if committed {
+                        entries.removeAll()
+                        message = "Translation memory deleted; history and settings retained"
+                    } else {
+                        message = engine.memoryFailure ?? "Memory deletion was not completed"
+                    }
+                }
+            }
         }
     }
 }
