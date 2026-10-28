@@ -265,10 +265,11 @@ final class Diagnostics: ObservableObject {
 
     /// Counts one lookup outcome per unit; persistence and eviction counters have separate denominators.
     func recordMemory(_ outcome: MemoryDiagnosticOutcome, durationMs: Double = 0,
-                      candidate: String? = nil, frameIndex: Int? = nil, unitKey: String? = nil) {
+                      candidate: String? = nil, frameIndex: Int? = nil, unitKey: String? = nil,
+                      count: Int = 1) {
         let token = beginRecorder(); defer { endRecorder(token) }
-        guard enabled else { return }
-        memoryOutcomes[outcome, default: 0] += 1
+        guard enabled, count > 0 else { return }
+        memoryOutcomes[outcome, default: 0] += count
         let finite = durationMs.isFinite && durationMs >= 0
         switch outcome {
         case .ramHit, .persistentHit, .legacyHit, .speculativeHit, .miss, .timeout, .compatibilityRejected, .databaseUnavailable:
