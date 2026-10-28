@@ -1,4 +1,5 @@
 import Foundation
+import SQLite3
 
 @main struct MemoryTests {
     static func main() async throws {
@@ -97,6 +98,37 @@ import Foundation
             _ = try await store.save([key:"Stale work"], revision: 3)
             preconditionFailure("Old in-flight write must be fenced by clear revision")
         } catch MemoryStoreError.staleRevision { }
+
+        // A future database schema is not downgraded or silently overwritten.
+        let futureDirectory = root.appendingPathComponent("future-db")
+        try FileManager.default.createDirectory(at: futureDirectory, withIntermediateDirectories: true)
+        let futureFile = futureDirectory.appendingPathComponent("memory.sqlite")
+        var futureConnection: OpaquePointer?
+        precondition(sqlite3_open(futureFile.path, &futureConnection) == SQLITE_OK)
+        precondition(sqlite3_exec(futureConnection, "PRAGMA user_version=99", nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(futureConnection)
+        let futureStore = TranslationMemoryStore(directory: futureDirectory)
+        do {
+            _ = try await futureStore.prepare(legacyURLs: [])
+            preconditionFailure("Unknown future schema must not be opened for writes")
+        } catch MemoryStoreError.unsupportedSchema {
+            precondition(FileManager.default.fileExists(atPath: futureFile.path))
+        }
+
+        // Corrupt SQLite files are preserved for diagnosis; never recreate an
+        // empty database over the damaged original.
+        let corruptDirectory = root.appendingPathComponent("corrupt-db")
+        try FileManager.default.createDirectory(at: corruptDirectory, withIntermediateDirectories: true)
+        let corruptFile = corruptDirectory.appendingPathComponent("memory.sqlite")
+        try Data("not-a-sqlite-database".utf8).write(to: corruptFile)
+        let corruptStore = TranslationMemoryStore(directory: corruptDirectory)
+        do {
+            _ = try await corruptStore.prepare(legacyURLs: [])
+            preconditionFailure("Corrupt database must not silently initialize")
+        } catch {
+            precondition(FileManager.default.fileExists(atPath: corruptFile.path))
+            precondition((try FileManager.default.attributesOfItem(atPath: corruptFile.path)[.size] as? NSNumber)?.intValue ?? 0 > 0)
+        }
 
         let reopened = TranslationMemoryStore(directory: root.appendingPathComponent("db"))
         let cleared = try await reopened.prepare(legacyURLs: [legacy])
