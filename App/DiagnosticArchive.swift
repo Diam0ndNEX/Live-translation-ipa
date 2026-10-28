@@ -297,8 +297,8 @@ actor DiagnosticExportWriter {
                 String(interval.thermalLevel),
                 interval.lowPower ? "1" : "0",
                 interval.captureConnected ? "1" : "0",
-                interval.effectiveOCRIntervalMs.map(String.init) ?? "",
-                interval.visualChangeProxyMs.map(String.init) ?? ""
+                interval.effectiveOCRIntervalMs.map { String($0) } ?? "",
+                interval.visualChangeProxyMs.map { String($0) } ?? ""
             ] + names.map { String(interval.counters[$0, default: 0]) }
             return fields.joined(separator: ",")
         }
