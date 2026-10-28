@@ -83,7 +83,6 @@ import Foundation
             measurementBoundary: "OCR through PiP enqueue", textCapture: false)
         let performanceBytes = try await writer.encode(performanceSnapshot)
         let performanceRestored = try await writer.decode(performanceBytes)
-        print("v1.4.4 ARCHIVE DIAGNOSTIC: counters=\(performanceRestored.counters) eventCount=\(performanceRestored.events.count) eventOutcomes=\(performanceRestored.events.map { $0.outcome }) eventPrivacy=\(performanceRestored.events.map { $0.privacy })")
         precondition(performanceRestored.counters["legacyBatchVerified"] == 24 &&
                      performanceRestored.counters["slowTailEnqueues"] == 1 &&
                      performanceRestored.counters["source text"] == nil &&
