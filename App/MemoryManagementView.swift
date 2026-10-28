@@ -31,8 +31,12 @@ struct MemoryManagementView: View {
                 if let h = engine.memoryHealth {
                     LabeledContent("Migration", value: h.migrationStatus)
                     LabeledContent("Integrity", value: h.integrity)
+                    LabeledContent("Ready for compatible reuse", value: String(h.readyEntries))
                     LabeledContent("Needs validation", value: String(h.needsValidation))
                     LabeledContent("Conflicts", value: String(h.conflicts))
+                    LabeledContent("Legacy imports", value: String(h.importedEntries))
+                    LabeledContent("Legacy duplicates", value: String(h.duplicateEntries))
+                    LabeledContent("Failed write attempts", value: String(h.failedWrites))
                     LabeledContent("Database", value: ByteCountFormatter.string(fromByteCount: h.databaseBytes, countStyle: .file))
                     LabeledContent("Last verified backup", value: h.lastVerifiedBackup ?? "None")
                 }
