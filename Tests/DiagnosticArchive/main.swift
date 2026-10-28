@@ -22,6 +22,21 @@ import Foundation
             events: [event], measurementBoundary: "OCR through PiP enqueue",
             textCapture: false)
         let writer = DiagnosticExportWriter()
+        let indexed = try await writer.encodeIndexedEvents([event])
+        precondition(indexed.count == 1 && indexed[0].payload.count <= 4096)
+        let decodedEvent = try JSONDecoder().decode(
+            StructuredDiagnosticEvent.self,
+            from: indexed[0].payload)
+        precondition(decodedEvent.sessionID == session &&
+                     decodedEvent.unitID == safeUnit &&
+                     decodedEvent.privacy == "metadataOnly")
+        let privateEvent = StructuredDiagnosticEvent(id: UUID(), timestamp: Date(),
+            sessionID: session, candidateID: nil, frameID: nil, unitID: nil,
+            stage: "memory", outcome: "untrusted", reasonCode: "untrusted",
+            durationMs: nil, privacy: "text")
+        let sanitized = try await writer.encodeIndexedEvents([event, privateEvent])
+        precondition(sanitized.count == 1,
+                     "Indexed events must discard non-metadata privacy classifications")
         let bytes = try await writer.encode(snapshot)
         let recovered = try await writer.decode(bytes)
         precondition(recovered.id == session && recovered.events.count == 1)
