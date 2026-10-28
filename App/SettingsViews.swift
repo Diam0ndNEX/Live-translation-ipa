@@ -252,9 +252,13 @@ struct ReadingSettings: View {
     @AppStorage("skipUnchanged") private var skipUnchanged = true
     @AppStorage("ocrConfidence") private var confidence = 0.3
     @AppStorage("ocrCorrection") private var correction = true
+    @AppStorage("adaptiveOCR") private var adaptiveOCR = true
+    @AppStorage("subtitleTracking") private var subtitleTracking = true
+    @AppStorage("deduplicateCopies") private var deduplicateCopies = true
     @State private var showAreaEditor = false
 
     private var key: String { "\(mode)|\(area)|\(customY0)|\(customY1)|\(speed)|\(stability)|\(boost)|\(skipUnchanged)|\(confidence)|\(correction)" }
+    private var recognitionPolicy: String { "\(adaptiveOCR)|\(subtitleTracking)|\(deduplicateCopies)" }
 
     var body: some View {
         List {
@@ -323,13 +327,26 @@ struct ReadingSettings: View {
                 Text("Instant is fastest but may translate half-faded text. Always boosting contrast helps thin or outlined fonts but is slower.")
             }
 
+            Section {
+                Toggle("Adaptive detail in Balanced", isOn: $adaptiveOCR)
+                Text("Adjusts OCR resolution for small or uncertain subtitles without reducing the base accuracy setting.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Toggle("Track subtitle position and lifetime", isOn: $subtitleTracking)
+                Text("Keeps moving and multi-line subtitles associated across nearby frames.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Toggle("Merge duplicate OCR copies", isOn: $deduplicateCopies)
+                Text("Removes shadow or overlapping copies of the same subtitle, but preserves genuine repeated lyrics.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            } header: { Text("Recognition intelligence") }
             ResetSection(keys: ["mode", "area", "customY0", "customY1", "frameRot", "speed", "stability",
-                                "minTextH", "ignoreList", "dropNoise", "boost", "skipUnchanged", "ocrConfidence", "ocrCorrection"])
+                                "minTextH", "ignoreList", "dropNoise", "boost", "skipUnchanged", "ocrConfidence", "ocrCorrection",
+                                "adaptiveOCR", "subtitleTracking", "deduplicateCopies"])
         }
         .settingsPage("Reading & OCR")
         .sheet(isPresented: $showAreaEditor) { CaptureAreaEditor().environmentObject(engine) }
         .onChange(of: key) { _, _ in engine.syncConfig() }
         .onChange(of: frameRot) { _, _ in engine.rotationSettingChanged() }
+        .onChange(of: recognitionPolicy) { _, _ in engine.pipelineSettingsChanged() }
     }
 }
 
@@ -343,6 +360,8 @@ struct IntelligenceSettings: View {
     @AppStorage("neverTranslate") private var neverTranslate = ""
     @AppStorage("sourceFixes") private var sourceFixes = ""
     @AppStorage("glossary") private var glossary = ""
+    @AppStorage("contextualLanguage") private var contextualLanguage = true
+    @AppStorage("languageRecovery") private var languageRecovery = true
 
     private func editor(_ text: Binding<String>) -> some View {
         TextEditor(text: text)
@@ -358,6 +377,12 @@ struct IntelligenceSettings: View {
                 Toggle("Expand chat slang (pq, vc, tbm, idk…)", isOn: $slang)
                 Toggle("Recognize speakers (\"Name: text\")", isOn: $speakerDetect)
                 Toggle("Lock detected language", isOn: $langLock)
+                Toggle("Use recent context for ambiguous languages", isOn: $contextualLanguage)
+                Text("Recent confirmed subtitles can help Automatic recognize a short, ambiguous phrase.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Toggle("Recover Automatic after repeated failures", isOn: $languageRecovery)
+                Text("Rechecks the source language if translation fails repeatedly.")
+                    .font(.footnote).foregroundStyle(.secondary)
             } header: {
                 Text("Understanding")
             } footer: {
@@ -384,9 +409,12 @@ struct IntelligenceSettings: View {
             } footer: {
                 Text("One per line: word=replacement. Example: Lord Subaru=Subaru")
             }
-            ResetSection(keys: ["cleanOCR", "slang", "speakerDetect", "langLock", "neverTranslate", "sourceFixes", "glossary"])
+            ResetSection(keys: ["cleanOCR", "slang", "speakerDetect", "langLock", "contextualLanguage", "languageRecovery",
+                                "neverTranslate", "sourceFixes", "glossary"])
         }
-        .settingsPage("Understanding & rules")
+        .settingsPage("Languages & text rules")
+        .onChange(of: contextualLanguage) { _, _ in engine.pipelineSettingsChanged() }
+        .onChange(of: languageRecovery) { _, _ in engine.pipelineSettingsChanged() }
         .onDisappear { engine.reloadSettings() }
     }
 }
