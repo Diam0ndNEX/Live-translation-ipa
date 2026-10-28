@@ -365,7 +365,9 @@ actor DiagnosticExportWriter {
     /// ONLY the same redacted snapshot as session.json.
     func exportZIP(_ snapshot: DiagnosticSessionExport) throws -> URL {
         let sessionData = try encode(snapshot)
-        let safe = try decode(sessionData)
+        // Keep full in-memory Date precision for the per-event CSV. The legacy
+        // JSON encoder deliberately retains its older date encoding for readers.
+        let safe = redact(snapshot)
         let counterNames = DiagnosticIntervalBucket.allowedCounters.sorted()
         let header = "start_time,elapsed_seconds,thermal_level,low_power,capture_connected,effective_ocr_interval_ms,visual_motion_proxy_ms,ocr_median_ms,ocr_p95_ms,translation_median_ms,translation_p95_ms,enqueue_median_ms,enqueue_p95_ms,model_batch_median_ms," +
             counterNames.joined(separator: ",")
@@ -414,10 +416,11 @@ actor DiagnosticExportWriter {
 
         // An event timeline with opaque IDs allows joining a candidate across
         // OCR, translation and enqueue stages; the keys never expose OCR text.
-        let eventsHeader = "timestamp_utc,session_id,candidate_id,frame_id,unit_id,stage,outcome,reason_code,duration_ms"
+        let eventsHeader = "timestamp_utc,timestamp_unix_ms,session_id,candidate_id,frame_id,unit_id,stage,outcome,reason_code,duration_ms"
         let eventsRows = safe.events.map { event -> String in
             [
                 event.timestamp.ISO8601Format(),
+                String(Int64((event.timestamp.timeIntervalSince1970 * 1000).rounded())),
                 event.sessionID.uuidString,
                 event.candidateID?.uuidString ?? "",
                 event.frameID?.uuidString ?? "",
@@ -547,7 +550,8 @@ actor DiagnosticExportWriter {
             Percentiles are calculated from original measurements in each bucket,
             never averaged from the percentiles of shorter buckets.
             metrics.csv: sample count, mean, median, P90, P95, P99 by timing stage.
-            events.csv: recent candidate/frame/unit event timeline with opaque UUIDs.
+            events.csv: recent candidate/frame/unit event timeline with opaque UUIDs
+              and millisecond-precision Unix timestamps for exact ordering.
             findings.json: observed and suspected issues; heuristics, not verified errors.
             README.txt: this file.
 
