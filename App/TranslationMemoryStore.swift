@@ -798,6 +798,12 @@ actor TranslationMemoryStore {
         }
         defer { sqlite3_close_v2(snapshotDB) }
 
+        func statementForReadOnly(_ db: OpaquePointer, sql: String) throws -> OpaquePointer {
+            var pointer: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &pointer, nil) == SQLITE_OK,
+                  let pointer else { throw MemoryStoreError.backupFailed }
+            return pointer
+        }
         func check(_ sql: String, expected: String) throws {
             var statement: OpaquePointer?
             guard sqlite3_prepare_v2(snapshotDB, sql, -1, &statement, nil) == SQLITE_OK,
@@ -807,7 +813,14 @@ actor TranslationMemoryStore {
                   text(statement, 0) == expected else { throw MemoryStoreError.backupFailed }
         }
         try check("PRAGMA quick_check", expected: "ok")
-        try check("PRAGMA user_version", expected: String(Self.schemaVersion))
+        // A verified schema-v1 recovery image is still a valid source of saved
+        // translations. Its memory_entries layout is compatible with schema-v2.
+        let versionQuery = try statementForReadOnly(snapshotDB, sql: "PRAGMA user_version")
+        let snapshotVersion = sqlite3_step(versionQuery) == SQLITE_ROW ?
+            sqlite3_column_int64(versionQuery, 0) : -1
+        sqlite3_finalize(versionQuery)
+        guard snapshotVersion == 1 || snapshotVersion == Int64(Self.schemaVersion)
+        else { throw MemoryStoreError.backupFailed }
 
         var reader: OpaquePointer?
         guard sqlite3_prepare_v2(snapshotDB,
@@ -883,7 +896,7 @@ actor TranslationMemoryStore {
                 return String(cString: bytes)
             }
             return value("PRAGMA quick_check") == "ok" &&
-                   value("PRAGMA user_version") == String(Self.schemaVersion)
+                   ["1", String(Self.schemaVersion)].contains(value("PRAGMA user_version") ?? "")
         }
         guard verified(snapshot) else { throw MemoryStoreError.backupFailed }
 
@@ -1065,14 +1078,22 @@ actor TranslationMemoryStore {
         guard active else { throw MemoryStoreError.unavailable }
         guard data.count <= 256 * 1024 * 1024 else { throw MemoryStoreError.tooLarge }
         guard let envelope = try? JSONDecoder().decode(ExportEnvelope.self, from: data) else { throw MemoryStoreError.invalidImport }
-        guard envelope.formatVersion == 1, envelope.schemaVersion == Self.schemaVersion else { throw MemoryStoreError.unsupportedImport }
+        guard envelope.formatVersion == 1, [1, Self.schemaVersion].contains(envelope.schemaVersion) else { throw MemoryStoreError.unsupportedImport }
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         guard digest(try encoder.encode(envelope.entries)) == envelope.checksum else { throw MemoryStoreError.integrityFailure }
         try transaction {
             for entry in envelope.entries {
-                _ = try insert(key: entry.key, value: entry.translatedText,
+                let inserted = try insert(key: entry.key, value: entry.translatedText,
                     compatible: entry.validationState == "ready" && entry.confirmationState == "persisted",
                     revalidateExisting: false)
+                if inserted.inserted, keyParts(entry.key)?.rules == nil,
+                   ["validated_legacy", "superseded_legacy"].contains(entry.validationState) {
+                    try execute("""
+                        UPDATE memory_entries SET validation_state=?,confirmation_state=?
+                        WHERE id=? AND rules_version IS NULL
+                        """, [.text(entry.validationState),
+                               .text(entry.confirmationState), .integer(inserted.id)])
+                }
             }
         }
         return try health()
