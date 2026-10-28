@@ -92,6 +92,10 @@ struct DiagnosticIntervalBucket: Codable {
     let thermalLevel: Int
     let lowPower: Bool
     let captureConnected: Bool
+    /// The current effective cadence in the extension. Not actual capture FPS.
+    var effectiveOCRIntervalMs: Double? = nil
+    /// Last coarse image-motion-to-first-OCR proxy; NOT subtitle acquisition latency.
+    var visualChangeProxyMs: Double? = nil
 
     static let allowedCounters: Set<String> = [
         "captureFrames", "capturePasses", "ocrPackets", "candidateConfirmed",
@@ -111,13 +115,19 @@ struct DiagnosticIntervalBucket: Codable {
             elapsedSeconds: elapsedSeconds.isFinite ? max(0, min(elapsedSeconds, 1800)) : 0,
             counters: counters.filter { Self.allowedCounters.contains($0.key) && $0.value >= 0 },
             thermalLevel: max(0, min(thermalLevel, 3)),
-            lowPower: lowPower, captureConnected: captureConnected)
+            lowPower: lowPower, captureConnected: captureConnected,
+            effectiveOCRIntervalMs: effectiveOCRIntervalMs.flatMap {
+                $0.isFinite && $0 >= 0 ? min($0, 60000) : nil
+            },
+            visualChangeProxyMs: visualChangeProxyMs.flatMap {
+                $0.isFinite && $0 >= 0 ? min($0, 6000) : nil
+            })
     }
 }
 
 struct DiagnosticSessionExport: Codable, Identifiable {
     var eventSchemaVersion = 1
-    var exportFormatVersion = 1
+    var exportFormatVersion = 2
     let id: UUID
     let startedAt: Date
     let endedAt: Date
@@ -278,7 +288,7 @@ actor DiagnosticExportWriter {
         """.utf8)
         let safe = redact(snapshot)
         let names = DiagnosticIntervalBucket.allowedCounters.sorted()
-        let header = "start_time,elapsed_seconds,thermal_level,low_power,capture_connected," +
+        let header = "start_time,elapsed_seconds,thermal_level,low_power,capture_connected,effective_ocr_interval_ms,visual_motion_proxy_ms," +
                      names.joined(separator: ",")
         let lines = (safe.intervals ?? []).map { interval -> String in
             let fields = [
@@ -286,7 +296,9 @@ actor DiagnosticExportWriter {
                 String(interval.elapsedSeconds),
                 String(interval.thermalLevel),
                 interval.lowPower ? "1" : "0",
-                interval.captureConnected ? "1" : "0"
+                interval.captureConnected ? "1" : "0",
+                interval.effectiveOCRIntervalMs.map(String.init) ?? "",
+                interval.visualChangeProxyMs.map(String.init) ?? ""
             ] + names.map { String(interval.counters[$0, default: 0]) }
             return fields.joined(separator: ",")
         }
