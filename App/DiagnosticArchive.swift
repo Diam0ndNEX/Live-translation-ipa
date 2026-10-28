@@ -406,3 +406,89 @@ enum DiagnosticStoredZIP {
         return body
     }
 }
+
+/// A view model derived from the existing structured diagnostic recorder.
+/// Candidate and frame identities are random UUIDs, not OCR source strings.
+struct DiagnosticReviewedStage: Identifiable {
+    let id: UUID
+    let timestamp: Date
+    let stage: String
+    let reason: String
+    let durationMs: Double?
+}
+struct DiagnosticReviewedCandidate: Identifiable {
+    let id: UUID
+    let sessionID: UUID
+    let firstAt: Date
+    let lastAt: Date
+    let frameCount: Int
+    let stages: [DiagnosticReviewedStage]
+    let status: String
+}
+
+/// Off the live path: only process the recorder's bounded last 600 events.
+/// This is an explanation of *instrumented* stages, not a reconstruction of
+/// unobserved OCR, model accuracy, or the physical PiP display.
+enum DiagnosticTraceReview {
+    private static let allowedStages: Set<String> = [
+        "frame_arrival", "rotation", "duplicate_detection", "ocr_filtering",
+        "stability", "text_grouping", "ocr_correction", "language_detection",
+        "segmentation", "memory_lookup", "translation", "pip_preparation",
+        "pip_enqueue", "cancellation", "first OCR", "seen", "confirmed",
+        "processing", "speculating", "cache", "ready", "enqueued",
+        "superseded", "memory", "cancelled", "ocrCorrection", "language",
+        "freshTranslation", "translationResult"
+    ]
+    private static let allowedReasons: Set<String> = [
+        "accepted", "rejected_duplicate", "rejected_recent_fragment",
+        "rejected_empty", "rejected_revision", "rejected_unstable",
+        "rejected_low_confidence", "rejected_stale", "filtered",
+        "confirmed", "speculative", "ready", "enqueued", "cancelled",
+        "observed", "cache_hit", "computed", "ramHit", "persistentHit",
+        "legacyHit", "normalizedHit", "speculativeHit", "miss", "timeout",
+        "compatibilityRejected", "databaseUnavailable", "persisted",
+        "writeFailed", "ramEviction", "other", "incompatible", "conflict"
+    ]
+    static func review(_ input: [StructuredDiagnosticEvent], limit: Int = 12)
+        -> [DiagnosticReviewedCandidate] {
+        let bounded = input.suffix(600)
+            .filter { $0.privacy == "metadataOnly" && $0.candidateID != nil }
+        var byCandidate: [UUID: [StructuredDiagnosticEvent]] = [:]
+        for event in bounded {
+            guard let id = event.candidateID else { continue }
+            byCandidate[id, default: []].append(event)
+        }
+        return byCandidate.compactMap { id, events in
+            guard let first = events.min(by: { $0.timestamp < $1.timestamp }),
+                  let last = events.max(by: { $0.timestamp < $1.timestamp })
+            else { return nil }
+            let sorted = events.sorted { $0.timestamp < $1.timestamp }
+            let stages = sorted.suffix(64).map { event in
+                DiagnosticReviewedStage(id: event.id, timestamp: event.timestamp,
+                    stage: allowedStages.contains(event.stage) ? event.stage : "other",
+                    reason: allowedReasons.contains(event.reasonCode) ?
+                        event.reasonCode : "unclassified",
+                    durationMs: event.durationMs.flatMap {
+                        $0.isFinite && $0 >= 0 ? $0 : nil
+                    })
+            }
+            let stageNames = Set(stages.map(\.stage))
+            let state: String
+            if stageNames.contains("enqueued") || stageNames.contains("pip_enqueue") {
+                state = "PiP buffer enqueued (physical display unverified)"
+            } else if stageNames.contains("cancelled") || stageNames.contains("cancellation") ||
+                      stageNames.contains("superseded") {
+                state = "Superseded or cancelled"
+            } else {
+                state = "Partial trace (unobserved stages unknown)"
+            }
+            return DiagnosticReviewedCandidate(id: id, sessionID: first.sessionID,
+                firstAt: first.timestamp, lastAt: last.timestamp,
+                frameCount: Set(events.compactMap(\.frameID)).count,
+                stages: stages, status: state)
+        }
+        .sorted { $0.lastAt > $1.lastAt }
+        .prefix(max(1, min(limit, 20)))
+        .map { $0 }
+    }
+}
