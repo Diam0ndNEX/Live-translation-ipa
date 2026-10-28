@@ -224,7 +224,16 @@ final class TranslatorEngine: ObservableObject {
     private var specKeys = Set<String>()
     private var lastSpecText = ""
     private var lastWarm = Date.distantPast
-    private let memoryWriter = MemoryWriter()
+    let memoryStore = TranslationMemoryStore(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ScreenLingo/TranslationMemory", isDirectory: true))
+    @Published var memoryHealth: MemoryStoreHealth?
+    @Published var memoryPendingWrites = 0
+    @Published var memoryFailure: String?
+    private var pendingMemory: [String: String] = [:]
+    private var memorySaving = false
+    private var memoryReady = false
+    private var cacheUse: [String: UInt64] = [:]
+    private var cacheClock: UInt64 = 0
+    private var bypassMemory = false
     private var memoryRevision = 0
     private var memoryDirty = false
     private var lastMemorySave = Date.distantPast
@@ -593,7 +602,6 @@ final class TranslatorEngine: ObservableObject {
     func applyStorageSettings() {
         if history.count > historyCapacity { history = Array(history.prefix(historyCapacity)) }
         if cache.count > max(500, min(6000, int("memoryCapacity", 3000))) { trimCache(); memoryDirty = true }
-        memoryCount = cache.count
         saveMemory()
     }
 
@@ -1156,9 +1164,12 @@ final class TranslatorEngine: ObservableObject {
             guard !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             cache[key] = out
             savedKeys.remove(key)
-            if display && eligibleMemoryKeys.contains(key) { confirmedKeys.insert(key) }
+            if display && eligibleMemoryKeys.contains(key) {
+                confirmedKeys.insert(key)
+                queueMemory(key, out)
+            }
             memoryDirty = true
-            memoryCount = cache.count
+            touchCache(key)
             if !display { specKeys.insert(key) }
         }
 
@@ -1201,12 +1212,25 @@ final class TranslatorEngine: ObservableObject {
                 for (si, s) in sentences.enumerated() {
                     let key = PipelineSafety.cacheKey(source: id, target: destination, text: s, protectedWords: prot.tokens.map { "\($0.0)=\($0.1)" }, rules: rules)
                     if memoryEligible { eligibleMemoryKeys.insert(key) }
-                    if let hit = cache[key] {
+                    var resolvedHit = bypassMemory ? nil : cache[key]
+                    var diskHit = false
+                    if resolvedHit == nil, !bypassMemory, memoryReady, flag("remember", true), !flag("privateSession", false) {
+                        let lookup = await memoryStore.lookup(key: key)
+                        guard isCurrent() else { return }
+                        resolvedHit = lookup.value
+                        diskHit = lookup.value != nil
+                        if display {
+                            diag.recordMemory(lookup.outcome == "timeout" ? .timeout : (diskHit ? (lookup.origin == "legacy" ? .legacyHit : .persistentHit) : .miss), durationMs: lookup.durationMs)
+                        }
+                        if let value = resolvedHit { cache[key] = value; touchCache(key) }
+                    }
+                    if let hit = resolvedHit {
+                        touchCache(key)
                         outs.append(hit); translatedAny = true
                         if display {
                             let speculativeHit = specKeys.remove(key) != nil
-                            let savedHit = savedKeys.remove(key) != nil
-                            if memoryEligible && confirmedKeys.insert(key).inserted { memoryDirty = true }
+                            let savedHit = diskHit || savedKeys.remove(key) != nil
+                            if memoryEligible && confirmedKeys.insert(key).inserted { queueMemory(key, hit) }
                             if diag.enabled {
                                 if speculativeHit { diag.s.specHits += 1 }
                                 else if savedHit { diag.s.savedHits += 1 }
@@ -1275,7 +1299,8 @@ final class TranslatorEngine: ObservableObject {
             }
         }
         guard isCurrent(), (!paused || manualMode) else { return }
-        if cache.count > max(500, min(6000, int("memoryCapacity", 3000))) { trimCache() }
+        trimCache()
+        bypassMemory = false
 
         guard translatedAny else {
             if display {
@@ -1471,55 +1496,117 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func loadMemory() {
-        guard flag("remember", true), let d = try? Data(contentsOf: memoryURL),
-              let envelope = try? JSONDecoder().decode(MemoryEnvelope.self, from: d) else { return }
-        cache = envelope.validated
-        savedKeys = Set(cache.keys)
-        confirmedKeys = Set(cache.keys)
-        trimCache()
-        memoryCount = cache.count
-    }
-
-    func saveMemory(force: Bool = false) {
-        guard flag("remember", true), !flag("privateSession", false), memoryDirty || force else { return }
-        guard force || Date().timeIntervalSince(lastMemorySave) > 15 else { return }
-        lastMemorySave = Date()
-        memoryDirty = false
-        // Unconfirmed speculative results stay session-only until used by confirmed input.
-        let snapshot = cache.filter { confirmedKeys.contains($0.key) }
-        memoryCount = cache.count
-        let url = memoryURL
-        memoryRevision += 1
-        let revision = memoryRevision
-        let writer = memoryWriter
-        Task(priority: .utility) { [weak self] in
-            let saved = await writer.save(snapshot, to: url, revision: revision)
-            if !saved, self?.memoryRevision == revision {
-                self?.memoryDirty = true
-                self?.diag.log("Translation memory could not be saved; will retry")
+        diag.memoryStore = memoryStore
+        let legacy = [memoryURL, FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("translation-memory.json")]
+        Task { [weak self] in
+            guard let self else { return }
+            do {
+                self.memoryHealth = try await self.memoryStore.prepare(legacyURLs: legacy)
+                self.memoryReady = true
+                await self.refreshMemoryHealth()
+                self.saveMemory(force: true)
+            } catch {
+                self.memoryFailure = "Memory unavailable; fresh translation remains available"
+                self.diag.log("Memory initialization failed; preserved data requires recovery")
             }
         }
     }
 
-    func clearMemory() {
-        invalidatePending()
-        cache.removeAll()
-        languageCache.removeAll()
-        specKeys.removeAll(); savedKeys.removeAll(); confirmedKeys.removeAll()
-        memoryDirty = false
-        memoryCount = 0
+    private func touchCache(_ key: String) {
+        cacheClock &+= 1
+        cacheUse[key] = cacheClock
+    }
+
+    private func queueMemory(_ key: String, _ value: String) {
+        guard flag("remember", true), !flag("privateSession", false) else { return }
+        // Bound pending writes without claiming unsaved entries are durable.
+        guard pendingMemory[key] != nil || pendingMemory.count < 3000 else {
+            memoryFailure = "Memory write queue full; new entries remain session-only"
+            return
+        }
+        pendingMemory[key] = value
+        memoryPendingWrites = pendingMemory.count
+        memoryDirty = true
+        saveMemory()
+    }
+
+    func saveMemory(force: Bool = false) {
+        guard memoryReady, !memorySaving, !pendingMemory.isEmpty else { return }
+        memorySaving = true
+        let snapshot = pendingMemory
         memoryRevision += 1
-        let revision = memoryRevision, url = memoryURL, writer = memoryWriter
-        Task { await writer.clear(url, revision: revision) }
-        toast("Translation memory cleared")
+        let revision = memoryRevision
+        Task { [weak self] in
+            guard let self else { return }
+            let writeStart = ProcessInfo.processInfo.systemUptime
+            do {
+                self.memoryHealth = try await self.memoryStore.save(snapshot, revision: revision)
+                for (key, value) in snapshot where self.pendingMemory[key] == value { self.pendingMemory[key] = nil }
+                self.memoryFailure = nil
+                self.diag.recordMemory(.persisted, durationMs: (ProcessInfo.processInfo.systemUptime - writeStart) * 1000)
+            } catch {
+                self.memoryFailure = "Memory write failed; pending entries will retry"
+                self.diag.recordMemory(.writeFailed, durationMs: (ProcessInfo.processInfo.systemUptime - writeStart) * 1000)
+            }
+            self.memorySaving = false
+            self.memoryPendingWrites = self.pendingMemory.count
+            self.memoryDirty = !self.pendingMemory.isEmpty
+            await self.refreshMemoryHealth()
+        }
+    }
+
+    func refreshMemoryHealth() async {
+        do {
+            let health = try await memoryStore.health()
+            memoryHealth = health
+            memoryCount = health.totalEntries
+            diag.memoryHealth.totalEntries = health.totalEntries
+            diag.memoryHealth.readyEntries = health.readyEntries
+            diag.memoryHealth.needsValidation = health.needsValidation
+            diag.memoryHealth.conflicts = health.conflicts
+            diag.memoryHealth.databaseBytes = health.databaseBytes
+            diag.memoryHealth.migrationStatus = health.migrationStatus
+            diag.memoryHealth.integrity = health.integrity
+            diag.memoryHealth.failedWrites = health.failedWrites
+            diag.memoryHealth.pendingWrites = memoryPendingWrites
+            diag.memoryHealth.ramEntries = cache.count
+        } catch { memoryFailure = "Memory health unavailable" }
+    }
+
+    func clearRAMCache() {
+        invalidatePending()
+        cache.removeAll(); cacheUse.removeAll()
+        specKeys.removeAll(); savedKeys.removeAll(); confirmedKeys.removeAll()
+    }
+
+    func removeMemoryEntries(ids: [Int64]) async throws {
+        guard !memorySaving, pendingMemory.isEmpty else { throw MemoryStoreError.unavailable }
+        clearRAMCache()
+        try await memoryStore.delete(ids: ids)
+        await refreshMemoryHealth()
+    }
+
+    func clearMemory() {
+        clearRAMCache()
+        pendingMemory.removeAll(); memoryPendingWrites = 0
+        memoryRevision += 1
+        let revision = memoryRevision
+        Task {
+            do {
+                try await memoryStore.clear(revision: revision)
+                await refreshMemoryHealth()
+                toast("Translation memory cleared")
+            } catch { memoryFailure = "Memory could not be cleared" }
+        }
     }
 
     private func trimCache() {
-        let limit = max(500, min(6000, int("memoryCapacity", 3000)))
-        let extra = cache.count - limit * 2 / 3
-        guard extra > 0 else { return }
-        for k in Array(cache.keys.prefix(extra)) {
-            cache[k] = nil; specKeys.remove(k); savedKeys.remove(k); confirmedKeys.remove(k)
+        let limit = max(250, min(6000, int("memoryRAMCapacity", 3000)))
+        let excess = cache.count - limit
+        guard excess > 0 else { return }
+        for key in cacheUse.sorted(by: { $0.value < $1.value }).prefix(excess).map(\.key) {
+            cache[key] = nil; cacheUse[key] = nil
+            specKeys.remove(key); savedKeys.remove(key); confirmedKeys.remove(key)
         }
     }
 
@@ -1568,7 +1655,7 @@ final class TranslatorEngine: ObservableObject {
         invalidatePending()
         cache.removeAll()
         specKeys.removeAll(); savedKeys.removeAll(); confirmedKeys.removeAll()
-        memoryDirty = true
+        bypassMemory = true
         lastHandled = ""
         let blocks = original.components(separatedBy: "\n")
         diag.log("Retranslating current text")

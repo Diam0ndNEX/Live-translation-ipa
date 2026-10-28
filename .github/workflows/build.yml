@@ -29,6 +29,8 @@ jobs:
         run: |
           swiftc Shared/*.swift App/TextIntelligence.swift App/MemoryWriter.swift App/PipelineSimulation.swift Tests/main.swift -o /tmp/pipeline-tests
           /tmp/pipeline-tests
+      - name: Check SQLite memory migration
+        run: bash scripts/test_memory.sh
       - name: Generate app icon
         run: |
           python3 -m venv .venv
