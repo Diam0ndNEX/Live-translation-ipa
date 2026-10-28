@@ -164,6 +164,11 @@ final class TranslatorEngine: ObservableObject {
     @Published private(set) var warmupStatus = "Waiting for source language"
     @Published private(set) var legacyIdleValidationStatus = "Disabled"
     @Published private(set) var legacyValidatedThisSession = 0
+    @Published private(set) var legacyBatchTotal = 0
+    @Published private(set) var legacyBatchCompleted = 0
+    @Published private(set) var legacyBatchSkipped = 0
+    @Published private(set) var legacyBatchWorkers = 0
+    @Published private(set) var legacyBatchActive = false
     @Published var captureAlive = false
     @Published var frames = 0
     @Published var ocrCount = 0
@@ -202,6 +207,7 @@ final class TranslatorEngine: ObservableObject {
     private var legacyValidationBusy = false
     private var idleValidationTask: Task<Void, Never>?
     private var legacyValidationCursor: Int64 = 0
+    private var legacyValidationExhausted = false
     private var lastIdleValidationAttempt = Date.distantPast
     private var languageCache: [String: (NLLanguage?, [NLLanguage: Double])] = [:]
     private var drainTask: Task<Void, Never>?
@@ -362,10 +368,13 @@ final class TranslatorEngine: ObservableObject {
         diag.tick(alive: alive, paused: paused, frozen: frozen)
         if tickCount % 5 == 0 { saveMemory() }
         if tickCount % 60 == 0 { applyHistoryRetention() }
-        if tickCount % 60 == 0, flag("legacyIdleValidationEnabled", false),
-           Date().timeIntervalSince(lastIdleValidationAttempt) > 90,
-           mayRunIdleValidation {
-            startLegacyValidation(maxEntries: 1)
+        if tickCount % 5 == 0, flag("legacyIdleValidationEnabled", false),
+           !legacyValidationExhausted, mayRunIdleValidation {
+            let fair = ProcessInfo.processInfo.thermalState == .fair
+            if Date().timeIntervalSince(lastIdleValidationAttempt) >=
+                IdleLegacyBatchPolicy.cooldownSeconds(thermalFair: fair) {
+                startLegacyValidation(maxEntries: IdleLegacyBatchPolicy.automaticEntries)
+            }
         }
         if alive, !paused, tickCount % 10 == 0, Date().timeIntervalSince(lastTextDate) > 8,
            Date().timeIntervalSince(lastWarm) > 25 {
