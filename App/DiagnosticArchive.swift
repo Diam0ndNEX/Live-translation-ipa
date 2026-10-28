@@ -83,6 +83,38 @@ struct DiagnosticDistribution: Codable {
     }
 }
 
+/// Fifteen-second, metadata-only summaries cover the full captured session instead
+/// of only the last few thousand events. Keys are strict counters, never OCR text.
+struct DiagnosticIntervalBucket: Codable {
+    let startedAt: Date
+    let elapsedSeconds: Double
+    let counters: [String: Int]
+    let thermalLevel: Int
+    let lowPower: Bool
+    let captureConnected: Bool
+
+    static let allowedCounters: Set<String> = [
+        "captureFrames", "capturePasses", "ocrPackets", "candidateConfirmed",
+        "candidateEnqueued", "candidateSuperseded", "candidateCancelled",
+        "candidateFirstSeen", "speculativeRequests", "speculativeDiscarded",
+        "ramHits", "persistentHits", "speculativeHits", "lookupMisses",
+        "unchangedSkips", "cadenceSkips", "pausedSkips", "emptyOCRPasses",
+        "contrastRetries", "movieSelections", "movieTemporalOverrides",
+        "movieRejectedSmall", "queueReplacements", "earlyDeferred",
+        "unpresentedConfirmed", "capturePackets", "modelBatches",
+        "modelFailures", "warmupAttempts", "warmupSucceeded",
+        "runtimeTransitions", "visualChanges"
+    ]
+
+    func sanitized() -> DiagnosticIntervalBucket {
+        DiagnosticIntervalBucket(startedAt: startedAt,
+            elapsedSeconds: elapsedSeconds.isFinite ? max(0, min(elapsedSeconds, 1800)) : 0,
+            counters: counters.filter { Self.allowedCounters.contains($0.key) && $0.value >= 0 },
+            thermalLevel: max(0, min(thermalLevel, 3)),
+            lowPower: lowPower, captureConnected: captureConnected)
+    }
+}
+
 struct DiagnosticSessionExport: Codable, Identifiable {
     var eventSchemaVersion = 1
     var exportFormatVersion = 1
@@ -99,6 +131,8 @@ struct DiagnosticSessionExport: Codable, Identifiable {
     let counters: [String: Int]
     let distributions: [String: DiagnosticDistribution]
     let events: [StructuredDiagnosticEvent]
+    /// Optional for backwards-compatible import of 1.4.0/early 1.4.1 bundles.
+    var intervals: [DiagnosticIntervalBucket]? = nil
     let measurementBoundary: String
     let textCapture: Bool
 }
@@ -167,6 +201,7 @@ actor DiagnosticExportWriter {
             settings: safeSettings,
             health: snapshot.health, counters: snapshot.counters,
             distributions: snapshot.distributions, events: safeEvents,
+            intervals: snapshot.intervals.map { Array($0.suffix(960)).map { $0.sanitized() } },
             measurementBoundary: safeBoundary, textCapture: false)
     }
 
@@ -221,13 +256,37 @@ actor DiagnosticExportWriter {
     func exportZIP(_ snapshot: DiagnosticSessionExport) throws -> URL {
         let json = try encode(snapshot)
         let readme = Data("""
-        ScreenLingo offline diagnostics
-        Contains metadata-only session.json. No screen frames are included.
-        Timings end at PiP enqueue, not measured physical display.
-        Session comparisons do not establish causation.
+        ScreenLingo offline diagnostics — 1.4.1
+        session.json: bounded recent metadata-only candidate events, timing distributions,
+        configuration, memory diagnostics and whole-session interval summaries.
+        intervals.csv: chronological 15-second counters, thermal and capture state.
+        Empty/missing intervals indicate this older version did not record interval data.
+        Counts are OCR/processing events, NOT a count of spoken sentences or missed captions.
+        Visual-change timestamps are only coarse image-motion proxies, not a video subtitle
+        ground truth. A caption invisible to OCR cannot be recovered from these statistics.
+        No screen frames, recognized words, translated words, audio or identifying file paths.
+        Physical PiP presentation time is NOT measured; 'enqueued' is a buffer enqueue.
+        Settings, OS version, cache history and source content affect A/B comparisons.
+        Nothing is automatically uploaded. This ZIP is generated at user request.
         """.utf8)
+        let safe = redact(snapshot)
+        let names = DiagnosticIntervalBucket.allowedCounters.sorted()
+        let header = "start_time,elapsed_seconds,thermal_level,low_power,capture_connected," +
+                     names.joined(separator: ",")
+        let lines = (safe.intervals ?? []).map { interval -> String in
+            let fields = [
+                String(Int(interval.startedAt.timeIntervalSince1970)),
+                String(interval.elapsedSeconds),
+                String(interval.thermalLevel),
+                interval.lowPower ? "1" : "0",
+                interval.captureConnected ? "1" : "0"
+            ] + names.map { String(interval.counters[$0, default: 0]) }
+            return fields.joined(separator: ",")
+        }
+        let csv = Data(([header] + lines).joined(separator: "\n").utf8)
         let zip = try DiagnosticStoredZIP.make(entries: [
             (name: "session.json", contents: json),
+            (name: "intervals.csv", contents: csv),
             (name: "README.txt", contents: readme)
         ])
         let url = FileManager.default.temporaryDirectory
