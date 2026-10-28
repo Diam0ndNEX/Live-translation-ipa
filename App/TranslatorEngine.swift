@@ -2011,6 +2011,102 @@ final class TranslatorEngine: ObservableObject {
         diag.recordMemory(.ramEviction, count: victims.count)
     }
 
+    // MARK: Explicitly opt-in, foreground-only old memory reconciliation
+    private var mayRunIdleValidation: Bool {
+        memoryReady && !memorySaving && !memoryMutationInProgress &&
+        pendingMemory.isEmpty && !legacyValidationBusy && !warming &&
+        !captureAlive && !pipActive && !busy &&
+        UIApplication.shared.applicationState == .active &&
+        !flag("privateSession", false) && !flag("freshTranslationTest", false) &&
+        !ProcessInfo.processInfo.isLowPowerModeEnabled &&
+        ProcessInfo.processInfo.thermalState != .serious &&
+        ProcessInfo.processInfo.thermalState != .critical
+    }
+
+    /// At most five translations on demand, or one per idle interval. The old
+    /// output never becomes authoritative; all model requests remain on-device.
+    func validateIdleLegacy(maxEntries: Int = 1) async {
+        guard mayRunIdleValidation else {
+            legacyIdleValidationStatus = "Unavailable while capturing or under power pressure"
+            return
+        }
+        guard #available(iOS 26.0, *) else {
+            legacyIdleValidationStatus = "Requires iOS 26 or newer"
+            return
+        }
+        guard pairs("sourceFixes").isEmpty &&
+              list("neverTranslate", lower: false).isEmpty else {
+            legacyIdleValidationStatus = "Source substitutions/protected words prevent safe idle validation"
+            return
+        }
+        lastIdleValidationAttempt = Date()
+        legacyValidationBusy = true
+        legacyIdleValidationStatus = "Checking old translations…"
+        defer { legacyValidationBusy = false }
+        let originalRevision = contextRevision
+        let target = targetCode
+        let source: String? = sourceCode == "auto" ? nil : sourceCode
+        var completed = 0
+        for _ in 0..<max(1, min(5, maxEntries)) {
+            guard !captureAlive && !pipActive && !busy &&
+                  UIApplication.shared.applicationState == .active &&
+                  !ProcessInfo.processInfo.isLowPowerModeEnabled &&
+                  ProcessInfo.processInfo.thermalState != .serious &&
+                  ProcessInfo.processInfo.thermalState != .critical &&
+                  contextRevision == originalRevision && targetCode == target &&
+                  !memorySaving && pendingMemory.isEmpty else { break }
+            do {
+                guard let candidate = try await memoryStore.nextLegacyIdleCandidate(
+                    target: target, selectedSource: source,
+                    after: legacyValidationCursor) else {
+                    if completed == 0 { legacyIdleValidationStatus = "No eligible older entries for this language pair" }
+                    break
+                }
+                legacyValidationCursor = candidate.id
+                let text = candidate.text
+                // Existing OCR cleanup, slang, and sentence splitting rules may
+                // change a historical string. Never store an incorrect v4 key.
+                guard (!flag("cleanOCR", true) || TextIntel.cleanOCR(text) == text),
+                      (!flag("slang", true) ||
+                       TextIntel.expandSlang(text, lang: candidate.source) == text)
+                else { continue }
+                let segments = splitSentences(text)
+                guard segments.count == 1 && segments[0] == text else { continue }
+                let src = Locale.Language(identifier: candidate.source)
+                let dst = Locale.Language(identifier: target)
+                guard src.languageCode != dst.languageCode else { continue }
+                guard await pairStatus(src, dst) == .installed else { continue }
+                guard !captureAlive && !pipActive && !busy &&
+                      contextRevision == originalRevision else { break }
+                let outputs = await translateBatch([text], source: src,
+                    target: dst, installed: true)
+                guard !captureAlive && !pipActive && !busy &&
+                      contextRevision == originalRevision &&
+                      UIApplication.shared.applicationState == .active &&
+                      !ProcessInfo.processInfo.isLowPowerModeEnabled &&
+                      ProcessInfo.processInfo.thermalState != .serious &&
+                      ProcessInfo.processInfo.thermalState != .critical else { break }
+                guard let translation = outputs?.first, !translation.isEmpty else { continue }
+                let key = PipelineSafety.cacheKey(source: candidate.source,
+                    target: target, text: text, protectedWords: [],
+                    rules: memoryRuleToken)
+                memoryRevision += 1
+                memoryHealth = try await memoryStore.confirmIdleLegacy(
+                    id: candidate.id, currentKey: key,
+                    freshOutput: translation, revision: memoryRevision)
+                legacyValidatedThisSession += 1
+                completed += 1
+                await refreshMemoryHealth()
+            } catch {
+                legacyIdleValidationStatus = "Deferred; saved memory preserved"
+                break
+            }
+        }
+        if completed > 0 {
+            legacyIdleValidationStatus = "Verified \(completed) older entries in this batch"
+        }
+    }
+
     // MARK: Keep the translator warm
     private static let warmWords = ["en": "Hello.", "pt": "Olá.", "es": "Hola.", "fr": "Bonjour.", "de": "Hallo.",
                                     "it": "Ciao.", "ja": "こんにちは。", "ko": "안녕하세요.", "zh": "你好。", "ru": "Привет."]
