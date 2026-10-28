@@ -1837,7 +1837,50 @@ private struct DiagnosticsBody: View {
             }
             .font(.footnote)
             .card()
+            if diag.detailedCollection {
+                candidateTraceCard
+            }
         }
+    }
+
+    /// Unlike a plain timeline, this groups all observed stages by the same
+    /// privacy-safe candidate identity. Missing stages are never synthesized.
+    private var candidateTraceCard: some View {
+        let candidates = DiagnosticTraceReview.review(diag.structuredEvents, limit: 12)
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Translation decision traces").font(.subheadline.weight(.semibold))
+            Text("Correlated metadata from this session. An absent stage was not necessarily executed or skipped; PiP timings end at buffer enqueue.")
+                .font(.caption).foregroundStyle(.secondary)
+            if candidates.isEmpty {
+                Text("No correlated events yet. Enable detailed collection and translate a subtitle.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                ForEach(candidates) { candidate in
+                    DisclosureGroup("Candidate \(candidate.id.uuidString.prefix(8)) · \(candidate.stages.count) events") {
+                        Text(candidate.status)
+                            .font(.caption.weight(.medium))
+                        LabeledContent("Observed frames", value: String(candidate.frameCount))
+                        ForEach(candidate.stages) { stage in
+                            HStack(alignment: .firstTextBaseline) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(stage.stage.replacingOccurrences(of: "_", with: " "))
+                                        .font(.caption.weight(.medium))
+                                    Text(stage.reason.replacingOccurrences(of: "_", with: " "))
+                                        .font(.caption2).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if let ms = stage.durationMs {
+                                    Text(String(format: "%.2f ms", ms))
+                                        .font(.caption2.monospacedDigit())
+                                }
+                            }
+                        }
+                    }
+                    .font(.footnote)
+                }
+            }
+        }
+        .card()
     }
 
     // MARK: Language

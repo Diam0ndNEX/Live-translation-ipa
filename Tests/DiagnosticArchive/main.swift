@@ -146,6 +146,37 @@ import Foundation
         precondition(protectedEvents.count == 1)
         precondition(!String(decoding: protectedEvents[0].payload, as: UTF8.self).contains("private source text"),
                      "Indexed events must share the same privacy boundary")
+        // Review events through stable candidate and frame UUIDs without
+        // leaking untrusted stage/reason strings to the UI.
+        let candidateA = UUID(), candidateB = UUID(), base = Date()
+        func traceEvent(_ candidate: UUID, _ offset: Double, _ stage: String,
+                        _ reason: String, _ privacy: String = "metadataOnly") -> StructuredDiagnosticEvent {
+            StructuredDiagnosticEvent(id: UUID(), timestamp: base.addingTimeInterval(offset),
+                sessionID: session, candidateID: candidate, frameID: safeFrame, unitID: safeUnit,
+                stage: stage, outcome: reason, reasonCode: reason,
+                durationMs: 1.25, privacy: privacy)
+        }
+        let reviewed = DiagnosticTraceReview.review([
+            traceEvent(candidateA, 0, "first OCR", "observed"),
+            traceEvent(candidateA, 0.1, "segmentation", "computed"),
+            traceEvent(candidateA, 0.2, "enqueued", "enqueued"),
+            traceEvent(candidateB, 0.3, "cancelled", "cancelled"),
+            traceEvent(candidateA, 0.4, "untrusted subtitle text", "secret lyric"),
+            traceEvent(candidateB, 0.5, "memory", "private words", "text")
+        ], limit: 10)
+        precondition(reviewed.count == 2)
+        guard let firstCandidate = reviewed.first(where: { $0.id == candidateA }),
+              let secondCandidate = reviewed.first(where: { $0.id == candidateB })
+        else { preconditionFailure("Correlation lost a candidate") }
+        precondition(firstCandidate.frameCount == 1 && firstCandidate.stages.count == 4)
+        precondition(firstCandidate.status.contains("PiP buffer enqueued"))
+        precondition(firstCandidate.stages.last?.stage == "other" &&
+                     firstCandidate.stages.last?.reason == "unclassified",
+                     "Potential source text must never appear as a displayed stage or reason")
+        precondition(secondCandidate.stages.count == 1 &&
+                     secondCandidate.status == "Superseded or cancelled",
+                     "Privacy-incompatible events must be ignored")
+        precondition(DiagnosticTraceReview.review([], limit: 5).isEmpty)
         print("Diagnostic percentile, privacy, correlation, compatibility and comparison passed")
     }
 }
