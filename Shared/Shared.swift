@@ -89,6 +89,7 @@ struct Config: Codable, Equatable {
     var confidence: Double? = nil
     var correction: Bool? = nil
     var idleBackoff: Bool? = nil
+    var movieMode: Bool? = nil
     var adaptiveOCR: Bool? = nil
     var adaptiveConfirmation: Bool? = nil
     var subtitleTracking: Bool? = nil
