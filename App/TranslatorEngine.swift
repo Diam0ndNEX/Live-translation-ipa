@@ -96,7 +96,7 @@ final class TranslatorEngine: ObservableObject {
         "frameRot", "dropNoise", "boost", "skipUnchanged", "cleanOCR", "slang", "speakerDetect", "highlightNames",
         "langLock", "neverTranslate", "sourceFixes", "glossary", "winSize", "theme", "textSize", "pipFont",
         "showOriginal", "autoClear", "clearHold", "minDisplay", "autoOpenPiP", "haptics", "speak", "speechRate",
-        "autoCopy", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember",
+        "autoCopy", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember", "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
         "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode", "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "smartCool", "steadyCaptions", "languageRecovery", "deduplicateCopies", "continuousRotation", "contextualLanguage"
     ]
     /// App look & behaviour that presets do not touch.
@@ -111,6 +111,7 @@ final class TranslatorEngine: ObservableObject {
         "showOriginal": false, "autoClear": true, "clearHold": 1.0, "minDisplay": 0.0, "autoOpenPiP": true,
         "haptics": false, "speak": false, "speechRate": 0.5, "autoCopy": false, "adaptive": true, "idleMinutes": 0,
         "translateAhead": true, "keepWarm": true, "remember": true,
+        "adaptiveSpeculation": true, "protectConfirmedPresentation": true, "predictiveWarmup": true,
         "displayPolicy": "immediate", "pipWeight": "bold", "pipAlignment": "left", "pipLineSpacing": 0.0,
         "pipPadding": 24.0, "originalFraction": 0.27, "pipScale": 1.0, "speakerAccent": "blue", "heartbeatInterval": 1.0,
         "readerFont": "rounded", "readerSpacing": 8.0, "readerWidth": "full", "historyCapacity": 500,
@@ -222,6 +223,11 @@ final class TranslatorEngine: ObservableObject {
     private var activeCandidateID: String?
     private var activeCandidateConfirmed = false
     private var activeCandidatePresented = false
+    private var activeCandidateConfirmedAt = Date.distantPast
+    private var deferredConfirmedPacket: Packet?
+    private var confirmedHandoffDeadlineTask: Task<Void, Never>?
+    private var deferredConfirmedReceivedAt = Date.distantPast
+    private var speculationOpportunity = 0
     private var specPacket: Packet?
     private var savedKeys = Set<String>()
     private var confirmedKeys = Set<String>()
@@ -248,6 +254,7 @@ final class TranslatorEngine: ObservableObject {
     private var lastSpecText = ""
     private var lastWarm = Date.distantPast
     private var lastUnresolvedWarmupNotice = Date.distantPast
+    private var startupWarmupTask: Task<Void, Never>?
     let memoryStore = TranslationMemoryStore(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ScreenLingo/TranslationMemory", isDirectory: true))
     @Published var memoryHealth: MemoryStoreHealth?
     @Published var memoryPendingWrites = 0
@@ -358,6 +365,10 @@ final class TranslatorEngine: ObservableObject {
         presets.applyStartup()
         diag.log("App started \(AppVersion.full)")
         diag.noteRuntimeState("app_started")
+        startupWarmupTask = Task { [weak self] in
+            await self?.prewarm()
+            self?.startupWarmupTask = nil
+        } // Prepare a recent source pair before capture, when possible.
     }
 
     private func tick() {
@@ -746,6 +757,8 @@ final class TranslatorEngine: ObservableObject {
         diag.onPacket(p, transport: p.ts.map { max(0, now.timeIntervalSince1970 - $0) * 1000 })
 
         if !wasAlive {
+            startupWarmupTask?.cancel() // Live capture takes priority over idle prewarming.
+            startupWarmupTask = nil
             idleValidationTask?.cancel()
             idleValidationTask = nil
             sessionStarted = now
@@ -768,7 +781,12 @@ final class TranslatorEngine: ObservableObject {
         if p.kind == "ping" { syncConfig(); return }          // keeps the extension's settings fresh
         if paused || manualMode { return }
         if let rev = p.rev, rev != rotRev { return }
-        if p.kind == "clear" { invalidatePending(); latestBlocks = []; handleClear(); return }
+        if p.kind == "clear" {
+            deferredConfirmedPacket = nil
+            confirmedHandoffDeadlineTask?.cancel()
+            confirmedHandoffDeadlineTask = nil
+            invalidatePending(); latestBlocks = []; handleClear(); return
+        }
         guard p.kind == "ocr" else { return }
         if diag.detailedCollection {
             diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
@@ -788,6 +806,37 @@ final class TranslatorEngine: ObservableObject {
             activePresented: activeCandidatePresented,
             previousBlocks: latestBlocks,
             incomingBlocks: candidateTexts)
+        if flag("protectConfirmedPresentation", true),
+           flag("steadyCaptions", true), p.candidateID != nil,
+           activeCandidateText != candidateText,
+           SubtitlePerformancePolicy.deferConfirmedReplacement(
+               activeConfirmed: activeCandidateConfirmed,
+               activePresented: activeCandidatePresented,
+               incomingConfirmed: p.stable != false,
+               workPending: busy || queued != nil || waitingToDisplay,
+               ageSeconds: now.timeIntervalSince(activeCandidateConfirmedAt),
+               equivalent: equivalentActiveCaption) {
+            // One-slot, latest-wins handoff. New confirmed captions must never
+            // be lost, but a previous confirmed caption gets a 450ms chance.
+            deferredConfirmedPacket = p
+            deferredConfirmedReceivedAt = now
+            confirmedHandoffDeadlineTask?.cancel()
+            let untilDeadline = max(0.01, 0.47 - now.timeIntervalSince(activeCandidateConfirmedAt))
+            confirmedHandoffDeadlineTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(untilDeadline))
+                guard let self, !Task.isCancelled,
+                      let pending = self.deferredConfirmedPacket else { return }
+                self.deferredConfirmedPacket = nil
+                self.confirmedHandoffDeadlineTask = nil
+                // Once the 450ms protection window has elapsed, supersession
+                // follows the existing confirmed candidate freshness logic.
+                self.handle(pending)
+            }
+            if diag.enabled { diag.s.confirmedHandoffDeferred += 1 }
+            diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
+                stage: "stability", reason: "confirmed_handoff_deferred")
+            return
+        }
         if flag("steadyCaptions", true), let candidate = p.candidateID,
            activeCandidateText != candidateText && !equivalentActiveCaption {
             let confirmed = p.stable != false
@@ -809,12 +858,17 @@ final class TranslatorEngine: ObservableObject {
             }
             activeCandidateID = candidate; activeCandidateText = candidateText
             activeCandidateConfirmed = confirmed; activeCandidatePresented = false
+            activeCandidateConfirmedAt = confirmed ? now : .distantPast
+            deferredConfirmedPacket = nil
+            confirmedHandoffDeadlineTask?.cancel()
+            confirmedHandoffDeadlineTask = nil
             clearTask?.cancel(); clearTask = nil
             generation += 1
             cancelPresentation()
             queued = nil; specQueued = nil
             drainTask?.cancel()
         } else if p.stable != false {
+            if !activeCandidateConfirmed { activeCandidateConfirmedAt = now }
             activeCandidateConfirmed = true
             if equivalentActiveCaption && activeCandidateText != candidateText {
                 diag.notePipelineDecision(candidate: activeCandidateID,
@@ -833,6 +887,17 @@ final class TranslatorEngine: ObservableObject {
         // First, unconfirmed sighting: translate quietly now so the result is ready the moment the text is confirmed.
         if p.stable == false {
             if speculationAllowed && flag("translateAhead", true) {
+                speculationOpportunity += 1
+                if !SubtitlePerformancePolicy.allowSpeculation(
+                    attempts: diag.s.specStarted, discarded: diag.s.specDiscarded,
+                    hits: diag.s.specHits, opportunity: speculationOpportunity,
+                    enabled: flag("adaptiveSpeculation", true)) {
+                    if diag.enabled { diag.s.adaptiveSpeculationSkipped += 1 }
+                    diag.notePipelineDecision(candidate: p.candidateID,
+                        frameIndex: p.frames, stage: "stability",
+                        reason: "adaptive_speculation_backoff")
+                    return
+                }
                 if flag("selectiveSpeculation", true), !SpeculationPolicy.credible(lines: p.lines, threshold: flag("coolMode", false) ? max(0.95, num("speculationConfidence", 0.85)) : num("speculationConfidence", 0.85)) {
                     if diag.enabled { diag.s.specSkipped += 1 }
                     if diag.detailedCollection {
@@ -1163,6 +1228,7 @@ final class TranslatorEngine: ObservableObject {
         defer {
             busy = false
             drainTask = nil
+            replayDeferredConfirmedIfPossible()
             startDrain()
         }
         while queued != nil || specQueued != nil {
@@ -1177,6 +1243,18 @@ final class TranslatorEngine: ObservableObject {
                 if speculationAllowed { await process(sp, display: false) }
             }
         }
+    }
+
+    /// A one-slot bounded handoff; if a delayed presentation is pending, its
+    /// display callback replays the newest confirmed candidate.
+    private func replayDeferredConfirmedIfPossible() {
+        guard !busy, !waitingToDisplay, let packet = deferredConfirmedPacket else { return }
+        deferredConfirmedPacket = nil
+        confirmedHandoffDeadlineTask?.cancel()
+        confirmedHandoffDeadlineTask = nil
+        guard !paused, !manualMode, captureAlive,
+              Date().timeIntervalSince(deferredConfirmedReceivedAt) < 1.2 else { return }
+        handle(packet)
     }
 
     // MARK: Translation
@@ -1597,7 +1675,8 @@ final class TranslatorEngine: ObservableObject {
         return await translateLegacy(texts, source: source, target: target)
     }
 
-    private func runBatch(_ session: TranslationSession, _ texts: [String]) async -> [String]? {
+    private func runBatch(_ session: TranslationSession, _ texts: [String],
+                          warmup: Bool = false) async -> [String]? {
         let began = ProcessInfo.processInfo.systemUptime
         let reqs = texts.enumerated().map { TranslationSession.Request(sourceText: $0.element, clientIdentifier: String($0.offset)) }
         do {
@@ -1605,6 +1684,12 @@ final class TranslatorEngine: ObservableObject {
             let result = PipelineSafety.orderedTranslations(res.map { ($0.clientIdentifier, $0.targetText) }, count: texts.count)
             diag.noteModelState(result == nil ? "model_batch_failed" : "model_batch_completed",
                 durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
+            if !warmup, let started = sessionStarted,
+               Date().timeIntervalSince(started) >= 0,
+               Date().timeIntervalSince(started) <= 30 {
+                diag.noteModelState("model_batch_first_30s",
+                    durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
+            }
             return result
         } catch {
             if Task.isCancelled { return nil }
@@ -1687,6 +1772,12 @@ final class TranslatorEngine: ObservableObject {
             activeCandidatePresented = true
         }
         if diag.enabled { diag.s.enqueuedCandidateFrames += 1 }
+        if total >= 1200 {
+            if diag.enabled { diag.s.slowTailEnqueues += 1 }
+            diag.notePipelineDecision(candidate: packet?.candidateID,
+                frameIndex: packet?.frames, stage: "pip_enqueue",
+                reason: "slow_tail", durationMs: total)
+        }
         diag.recordPipeline(latency.last)
         if total > 0 { diag.recordLatency(ms: total) }
         if history.first?.original != text {
@@ -1709,6 +1800,14 @@ final class TranslatorEngine: ObservableObject {
         }
         renderedGrams = TextSim.grams(result).union(placeholderGrams)
         sourceGrams = TextSim.grams(text)
+        // Only a successfully displayed, independently resolved source should
+        // influence a future predictive model warm-up; never change Auto OCR.
+        let sourceToRemember = sourceCode == "auto" ? detectedLang : sourceCode
+        if sourceToRemember != "–", !sourceToRemember.isEmpty {
+            ud.set(sourceToRemember, forKey: "lastEffectiveSource")
+            ud.set(Date().timeIntervalSince1970, forKey: "lastEffectiveSourceAt")
+        }
+        replayDeferredConfirmedIfPossible()
     }
 
     func speak(_ s: String) {
@@ -2282,6 +2381,9 @@ final class TranslatorEngine: ObservableObject {
                 commits, revision: memoryRevision)
             legacyValidatedThisSession += commits.count
             legacyBatchCompleted = commits.count
+            diag.noteLegacyBatch(selected: items.count, committed: commits.count,
+                skipped: legacyBatchSkipped, workers: workers,
+                durationMs: max(0, Date().timeIntervalSince(legacyBatchStartedAt) * 1000))
             await refreshMemoryHealth()
             let elapsed = max(0.1, Date().timeIntervalSince(legacyBatchStartedAt))
             let rate = Double(commits.count) * 60.0 / elapsed
@@ -2311,10 +2413,19 @@ final class TranslatorEngine: ObservableObject {
         warming = true
         defer { warming = false }
         let code: String
+        var predicted = false
         if sourceCode != "auto" { code = sourceCode }
         else if let l = lockedLang { code = l }
         else if detectedLang != "–" { code = detectedLang }
-        else {
+        else if let previous = SubtitlePerformancePolicy.predictiveSource(
+            selected: sourceCode, detected: nil,
+            lastResolved: ud.string(forKey: "lastEffectiveSource"),
+            ageSeconds: Date().timeIntervalSince1970 -
+                ud.double(forKey: "lastEffectiveSourceAt"),
+            enabled: flag("predictiveWarmup", true)) {
+            code = previous
+            predicted = true
+        } else {
             warmupStatus = "Waiting for source language"
             if Date().timeIntervalSince(lastUnresolvedWarmupNotice) > 25 {
                 lastUnresolvedWarmupNotice = Date()
@@ -2342,12 +2453,19 @@ final class TranslatorEngine: ObservableObject {
         guard #available(iOS 26.0, *) else { return }
         lastWarm = Date()
         let t0 = Date()
-        warmupStatus = "Warming up…"
+        warmupStatus = predicted ? "Predictive warm-up…" : "Warming up…"
         diag.noteModelState("warmup_started")
+        if predicted { diag.noteModelState("warmup_predicted_source") }
         let session = TranslationSession(installedSource: src, target: target)
-        let warmed = await runBatch(session, [word])
+        let warmed = await runBatch(session, [word], warmup: true)
+        guard !Task.isCancelled, workContext == contextRevision else {
+            warmupStatus = "Deferred for live translation"
+            diag.noteModelState("warmup_preempted")
+            return
+        }
         warmupLastDurationMs = Date().timeIntervalSince(t0) * 1000
-        warmupStatus = warmed == nil ? "Warm-up failed" : "Ready"
+        warmupStatus = warmed == nil ? "Warm-up failed" :
+            (predicted ? "Predicted source prepared" : "Ready")
         diag.noteModelState(warmed == nil ? "warmup_failed" : "warmup_succeeded",
             durationMs: Date().timeIntervalSince(t0) * 1000)
         if warmed != nil, !busy, workContext == contextRevision,

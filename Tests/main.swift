@@ -464,3 +464,69 @@ check(IdleLegacyBatchPolicy.cooldownSeconds(thermalFair: true) >
       IdleLegacyBatchPolicy.cooldownSeconds(thermalFair: false),
       "Warm devices receive a longer cooldown")
 print("Adaptive legacy batch plan checks passed")
+
+
+// v1.4.4 — subtitle continuity, predictive warm-up and adaptive speculation.
+// Protect confirmed work only for a bounded interval while a real task is pending.
+check(SubtitlePerformancePolicy.deferConfirmedReplacement(
+    activeConfirmed: true, activePresented: false, incomingConfirmed: true,
+    workPending: true, ageSeconds: 0.18, equivalent: false),
+    "A newly confirmed subtitle waits briefly for older confirmed work")
+check(!SubtitlePerformancePolicy.deferConfirmedReplacement(
+    activeConfirmed: true, activePresented: false, incomingConfirmed: true,
+    workPending: true, ageSeconds: 0.47, equivalent: false),
+    "After the bounded handoff, new dialogue must not be held up")
+check(!SubtitlePerformancePolicy.deferConfirmedReplacement(
+    activeConfirmed: true, activePresented: true, incomingConfirmed: true,
+    workPending: true, ageSeconds: 0.1, equivalent: false),
+    "An already presented subtitle never blocks new dialogue")
+check(!SubtitlePerformancePolicy.deferConfirmedReplacement(
+    activeConfirmed: true, activePresented: false, incomingConfirmed: false,
+    workPending: true, ageSeconds: 0.1, equivalent: false),
+    "Tentative OCR cannot enter confirmed-only handoff")
+check(!SubtitlePerformancePolicy.deferConfirmedReplacement(
+    activeConfirmed: true, activePresented: false, incomingConfirmed: true,
+    workPending: false, ageSeconds: 0.1, equivalent: false),
+    "Unproductive stalled candidates cannot block new confirmed subtitles")
+check(!SubtitlePerformancePolicy.deferConfirmedReplacement(
+    activeConfirmed: true, activePresented: false, incomingConfirmed: true,
+    workPending: true, ageSeconds: 0.1, equivalent: true),
+    "Equivalent OCR text is handled by existing duplicate protection")
+
+check(SubtitlePerformancePolicy.allowSpeculation(
+    attempts: 10, discarded: 10, hits: 0, opportunity: 1, enabled: true),
+    "Early adaptive observations must not prematurely throttle speculation")
+check(SubtitlePerformancePolicy.allowSpeculation(
+    attempts: 60, discarded: 45, hits: 2, opportunity: 2, enabled: true),
+    "Low-yield speculation still gets periodic recovery opportunities")
+check(!SubtitlePerformancePolicy.allowSpeculation(
+    attempts: 60, discarded: 45, hits: 2, opportunity: 3, enabled: true),
+    "Low-yield speculation must skip some unnecessary model work")
+check(SubtitlePerformancePolicy.allowSpeculation(
+    attempts: 60, discarded: 45, hits: 2, opportunity: 3, enabled: false),
+    "User disabling adaptive speculation must preserve previous behavior")
+check(SubtitlePerformancePolicy.allowSpeculation(
+    attempts: 60, discarded: 20, hits: 25, opportunity: 3, enabled: true),
+    "Effective speculation must not be throttled")
+
+check(SubtitlePerformancePolicy.predictiveSource(
+    selected: "auto", detected: nil, lastResolved: "pt",
+    ageSeconds: 100, enabled: true) == "pt",
+    "Recently verified source may prewarm only in unresolved Automatic")
+check(SubtitlePerformancePolicy.predictiveSource(
+    selected: "auto", detected: "fr", lastResolved: "pt",
+    ageSeconds: 100, enabled: true) == nil,
+    "Current detected source must override prediction")
+check(SubtitlePerformancePolicy.predictiveSource(
+    selected: "ja", detected: nil, lastResolved: "pt",
+    ageSeconds: 100, enabled: true) == nil,
+    "Explicit language source must never be replaced by remembered language")
+check(SubtitlePerformancePolicy.predictiveSource(
+    selected: "auto", detected: nil, lastResolved: "pt",
+    ageSeconds: 90000, enabled: true) == nil,
+    "Stale prediction must not trigger model warm-up")
+check(SubtitlePerformancePolicy.predictiveSource(
+    selected: "auto", detected: nil, lastResolved: "pt",
+    ageSeconds: 100, enabled: false) == nil,
+    "User can disable predictive warm-up")
+print("v1.4.4 speculative, confirmed-handoff and predictive-warmup checks passed")

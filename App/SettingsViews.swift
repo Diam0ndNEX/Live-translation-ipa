@@ -482,6 +482,7 @@ struct PerformanceSettings: View {
     @AppStorage("idleMinutes") private var idleMinutes = 0
     @AppStorage("translateAhead") private var translateAhead = true
     @AppStorage("keepWarm") private var keepWarm = true
+    @AppStorage("predictiveWarmup") private var predictiveWarmup = true
     @AppStorage("remember") private var remember = true
     @AppStorage("idleBackoff") private var idleBackoff = true
     @AppStorage("freshTranslationTest") private var freshTranslationTest = false
@@ -491,6 +492,12 @@ struct PerformanceSettings: View {
             Section {
                 Toggle("Translate ahead", isOn: $translateAhead)
                 Toggle("Keep the translator warm", isOn: $keepWarm)
+                Toggle("Warm the last confirmed language before Auto detection", isOn: $predictiveWarmup)
+                LabeledContent("Model status", value: engine.warmupStatus)
+                if let duration = engine.warmupLastDurationMs {
+                    LabeledContent("Last warm-up", value: "\(Int(duration)) ms")
+                }
+                Text("An optional first-use optimization: while Automatic is unresolved, prewarm a recent source model without changing OCR language detection. The actual new source always wins.").font(.footnote).foregroundStyle(.secondary)
                 Toggle("Remember translations", isOn: $remember)
                 LabeledContent("Persisted translation units", value: "\(engine.memoryCount)")
                 NavigationLink("Manage translation memory") { MemoryManagementView() }
@@ -524,7 +531,7 @@ struct PerformanceSettings: View {
                 DiagnosticsCollectionControls()
                 Button("Reset diagnostics counters") { engine.diag.reset(); engine.toast("Counters reset") }
             }
-            ResetSection(keys: ["coolMode", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember", "idleBackoff", "freshTranslationTest"])
+            ResetSection(keys: ["coolMode", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "predictiveWarmup", "remember", "idleBackoff", "freshTranslationTest"])
         }
         .settingsPage("Performance & power")
         .onChange(of: adaptive) { _, _ in engine.syncConfig() }

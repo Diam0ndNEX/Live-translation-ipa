@@ -55,6 +55,40 @@ import Foundation
                      ocrDecoded.events[0].outcome == "completed" &&
                      ocrDecoded.events[0].durationMs == 141,
                      "Safe OCR labels and their timing must survive metadata-only export")
+        // v1.4.4 performance events must retain only metadata and millisecond
+        // durations. Source sentences / names never cross the archive boundary.
+        let performanceEvents = [
+            StructuredDiagnosticEvent(id: UUID(), timestamp: Date(),
+                sessionID: session, candidateID: nil, frameID: nil, unitID: nil,
+                stage: "model_state", outcome: "model_batch_first_30s",
+                reasonCode: "model_batch_first_30s", durationMs: 998,
+                privacy: "metadataOnly"),
+            StructuredDiagnosticEvent(id: UUID(), timestamp: Date(),
+                sessionID: session, candidateID: UUID(), frameID: safeFrame, unitID: nil,
+                stage: "pip_enqueue", outcome: "slow_tail", reasonCode: "slow_tail",
+                durationMs: 1400, privacy: "metadataOnly"),
+            StructuredDiagnosticEvent(id: UUID(), timestamp: Date(),
+                sessionID: session, candidateID: nil, frameID: nil, unitID: nil,
+                stage: "model_state", outcome: "legacy_batch_committed",
+                reasonCode: "legacy_batch_committed", durationMs: 1400,
+                privacy: "metadataOnly")
+        ]
+        let performanceSnapshot = DiagnosticSessionExport(id: session,
+            startedAt: Date(), endedAt: Date(), appVersion: "1.4.4",
+            systemVersion: "test", settings: ["predictiveWarmup": "true"],
+            health: MemoryDiagnosticHealth(),
+            counters: ["slowTailEnqueues": 1, "handoffDeferred": 1,
+                       "legacyBatchVerified": 24, "source text": 100],
+            distributions: [:], events: performanceEvents,
+            measurementBoundary: "OCR through PiP enqueue", textCapture: false)
+        let performanceBytes = try await writer.encode(performanceSnapshot)
+        let performanceRestored = try await writer.decode(performanceBytes)
+        precondition(performanceRestored.counters["legacyBatchVerified"] == 24 &&
+                     performanceRestored.counters["slowTailEnqueues"] == 1 &&
+                     performanceRestored.counters["source text"] == nil &&
+                     performanceRestored.events.count == 3 &&
+                     performanceRestored.events.allSatisfy { $0.privacy == "metadataOnly" },
+                     "New duration/throughput counters must survive sanitization without private text")
         let traceLimit = 2400
         let longEvents = (0..<(traceLimit + 5)).map { index in
             StructuredDiagnosticEvent(id: UUID(), timestamp: Date().addingTimeInterval(Double(index)),

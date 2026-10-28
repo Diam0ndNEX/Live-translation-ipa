@@ -128,6 +128,9 @@ struct DiagnosticIntervalBucket: Codable {
         "movieRejectedSmall", "queueReplacements", "earlyDeferred",
         "unpresentedConfirmed", "capturePackets", "modelBatches",
         "modelFailures", "warmupAttempts", "warmupSucceeded",
+        "warmupPredicted", "coldModelBatches", "adaptiveSpeculationSkipped",
+        "handoffDeferred", "slowTailEnqueues",
+        "legacyBatchEntries", "legacyBatchVerified", "legacyBatchSkipped",
         "runtimeTransitions", "visualChanges",
         "ocrMeasurementCount", "translationMeasurementCount", "enqueueMeasurementCount"
     ]
@@ -197,10 +200,12 @@ actor DiagnosticExportWriter {
                 "heartbeat_timeout", "capture_connected", "idle_auto_pause", "session_time_limit",
                 "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical",
                 "changing_group_preferred", "dominant_group", "queue_replaced",
-                "preserved_confirmed_work",
+                "preserved_confirmed_work", "confirmed_handoff_deferred",
+                "adaptive_speculation_backoff", "slow_tail",
                 "warmup_started", "warmup_succeeded", "warmup_failed",
                 "model_session_created", "model_batch_completed", "model_batch_failed",
-                "warmup_source_unresolved", "legacy_idle_started", "legacy_idle_completed",
+                "warmup_source_unresolved", "warmup_predicted_source", "warmup_preempted",
+                "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started", "legacy_idle_completed",
                 "legacy_idle_deferred", "app_started", "capture_config_changed",
                 "capture_idle", "capture_live", "capture_paused", "capture_frozen"
             ]).union(stageCodes)
@@ -222,7 +227,8 @@ actor DiagnosticExportWriter {
             "selectiveSpeculation", "speculationConfidence", "confirmationDeadline",
             "remember", "privateSession", "diagnosticsEnabled", "detailedCollection",
             "skipUnchanged", "idleBackoff", "adaptiveConfirmation", "subtitleTracking",
-            "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest"
+            "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest",
+            "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup"
         ]
         let safeSettings = snapshot.settings.filter { pair in
             settingsKeys.contains(pair.key) && pair.value.utf8.count <= 48 &&
@@ -242,11 +248,28 @@ actor DiagnosticExportWriter {
                   }) else { return nil }
             return model
         }
+        // Defense in depth for all top-level counters too. The live producer
+        // currently uses fixed keys, but the archive boundary must not rely
+        // on future callers never accidentally supplying a source-text key.
+        let extraCounters: Set<String> = [
+            "sessionCacheHits", "savedMemoryHits", "speculativeModelRequests",
+            "supersededSpeculativePipelines", "confirmedCandidatePackets",
+            "deferredEarlyCandidates", "supersededUnpresentedConfirmed",
+            "enqueuedCandidateFrames", "unchangedSkippedFrames",
+            "cadenceSkippedFrames", "pausedSkippedFrames", "emptyReads",
+            "contrastRetries", "emptyOCRPasses"
+        ]
+        let allowedCounters = DiagnosticIntervalBucket.allowedCounters
+            .union(MemoryDiagnosticOutcome.allCases.map { $0.rawValue })
+            .union(extraCounters)
+        let safeCounters = snapshot.counters.filter {
+            allowedCounters.contains($0.key) && $0.value >= 0
+        }
         return DiagnosticSessionExport(id: snapshot.id, startedAt: snapshot.startedAt,
             endedAt: snapshot.endedAt, appVersion: snapshot.appVersion,
             systemVersion: snapshot.systemVersion, hardwareModel: safeHardware,
             settings: safeSettings,
-            health: snapshot.health, counters: snapshot.counters,
+            health: snapshot.health, counters: safeCounters,
             distributions: snapshot.distributions, events: safeEvents,
             intervals: snapshot.intervals.map { Array($0.suffix(960)).map { $0.sanitized() } },
             measurementBoundary: safeBoundary, textCapture: false)
