@@ -1567,6 +1567,7 @@ final class TranslatorEngine: ObservableObject {
             guard let session = directSession else { return nil }
             let r = await runBatch(session, texts)
             if r == nil { directSession = nil }
+            else { warmupStatus = "Ready" }
             return r
         }
         if diag.enabled { diag.s.sessionKind = "Hosted view (iOS 18)" }
@@ -2066,6 +2067,7 @@ final class TranslatorEngine: ObservableObject {
                 }
                 legacyValidationCursor = candidate.id
                 let text = candidate.text
+                guard !text.isEmpty && !candidate.source.isEmpty else { continue }
                 // Existing OCR cleanup, slang, and sentence splitting rules may
                 // change a historical string. Never store an incorrect v4 key.
                 guard (!flag("cleanOCR", true) || TextIntel.cleanOCR(text) == text),
@@ -2087,7 +2089,9 @@ final class TranslatorEngine: ObservableObject {
                       UIApplication.shared.applicationState == .active &&
                       !ProcessInfo.processInfo.isLowPowerModeEnabled &&
                       ProcessInfo.processInfo.thermalState != .serious &&
-                      ProcessInfo.processInfo.thermalState != .critical else { break }
+                      ProcessInfo.processInfo.thermalState != .critical &&
+                      !memorySaving && !memoryMutationInProgress &&
+                      pendingMemory.isEmpty else { break }
                 guard let translation = outputs?.first, !translation.isEmpty else { continue }
                 let key = PipelineSafety.cacheKey(source: candidate.source,
                     target: target, text: text, protectedWords: [],
