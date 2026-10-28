@@ -277,3 +277,13 @@ var lowPowerSimulation=SimulationInput();lowPowerSimulation.lowPower=true
 let lowPowerResult=PipelineSimulation.run(options:simulationOptions,input:lowPowerSimulation)
 check(lowPowerResult.steps.contains { $0.title == "Speculative-work gate" && $0.state == "wait for confirmation" }, "Low Power Mode disables speculative model work in the simulator")
 print("Thermal ceiling and Low Power Mode checks passed")
+
+var sqliteScenario = SimulationInput()
+sqliteScenario.cacheOrigin = "sqlite"
+sqliteScenario.memoryLookupMs = 3
+let sqliteSimulation = PipelineSimulation.run(options: simulationOptions, input: sqliteScenario)
+check(sqliteSimulation.steps.contains { $0.title == "Persistent memory decision" && $0.state == "sqlite" }, "Simulator exposes SQLite hit scenario")
+sqliteScenario.memoryLookupMs = 20
+let deadlineSimulation = PipelineSimulation.run(options: simulationOptions, input: sqliteScenario)
+check(deadlineSimulation.steps.contains { $0.title == "Persistent memory decision" && $0.state.contains("deadline exceeded") }, "Simulator models deadline fallback explicitly")
+print("Memory lookup simulator checks passed")

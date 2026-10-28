@@ -13,6 +13,7 @@ struct SimulationInput: Equatable {
     var transferMs = 3.03
     var renderMs = 1.64
     var cacheOrigin = "fresh"
+    var memoryLookupMs = 3.0
     var thermal = "nominal"
     var lowPower = false
     var emptyReads = 0
@@ -186,12 +187,19 @@ enum PipelineSimulation {
         let words = (o["neverTranslate"] ?? "").components(separatedBy:CharacterSet(charactersIn:",\n")).filter{ !$0.isEmpty }
         let protected = TextIntel.protect(text,words:words)
         add("Understanding & grouping", "Main app", "\(blocks.count) regions · \(names.count) labels", "OCR clean-up/source fixes precede language handling. Slang, speaker splitting and protected tokens precede sentence batching. Sample after processing: \(protected.text)", ["cleanOCR","sourceFixes","slang","speakerDetect","neverTranslate","glossary"])
-        let origin = s.cacheOrigin == "saved" && !b("remember",true) ? "fresh" : s.cacheOrigin
+        let persistentOrigin = ["saved", "sqlite", "legacy"].contains(s.cacheOrigin)
+        let origin = persistentOrigin && (!b("remember",true) || b("privateSession")) ? "fresh" : s.cacheOrigin
         let speculate = b("translateAhead",true) && !s.lowPower && s.thermal != "serious" && s.thermal != "critical" && (!cool || (smartCool && readMs<100 && s.thermal=="nominal"))
             && (!b("selectiveSpeculation",true) || SpeculationPolicy.credible(lines:lines,threshold:cool ? max(0.95,n("speculationConfidence",0.85)) : n("speculationConfidence",0.85)))
         add("Speculative-work gate", "Main app", speculate ? "credible early work" : "wait for confirmation", "Early work starts after the first OCR pass. Uncertain/near-duplicate candidates are declined, only the newest candidate is queued, and superseded results are never published. Model cancellation is cooperative.", ["translateAhead","selectiveSpeculation","speculationConfidence","coolMode","smartCool"])
         add("Translation memory lookup", "Main app", origin, "Session, saved-memory and speculative hits are separate. Rule fingerprints, source/target and protected-token context namespace every entry. Memory capacity changes retention, not wording.", ["remember","memoryCapacity","privateSession","glossary"])
-        let isHit = origin == "session" || origin == "saved" || origin == "speculative"
+        let memoryCost = s.memoryLookupMs.isFinite ? min(50, max(0, s.memoryLookupMs)) : 3
+        if ["sqlite", "legacy", "miss", "incompatible", "migration failed", "database unavailable"].contains(origin) {
+            let memoryOutcome = memoryCost > 8 ? "deadline exceeded; fresh fallback" : origin
+            add("Persistent memory decision", "Main app", memoryOutcome,
+                "SIMULATED: exact-key compatibility only; an unavailable database, failed migration, incompatible entry or miss falls back to fresh translation. Timing is an editable assumption, not measured runtime evidence.", ["remember", "privateSession"], 0, min(8, memoryCost))
+        }
+        let isHit = origin == "session" || origin == "saved" || origin == "speculative" || (["sqlite", "legacy"].contains(origin) && memoryCost <= 8)
         if !isHit && (!s.packReady || !s.pairSupported) { add("Language readiness", "Translation framework", "blocked", s.pairSupported ? "Language packs need downloading. Speculative work never opens download UI." : "The chosen pair is unsupported; the simulator does not replace it with a different language.", ["source","target","keepWarm"]); return r }
         let modelMs = isHit ? 0 : max(0,s.translationMs)
         let queue = isHit ? 0 : max(0,s.queueMs)
