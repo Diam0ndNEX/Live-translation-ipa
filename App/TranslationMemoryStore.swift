@@ -349,7 +349,7 @@ actor TranslationMemoryStore {
         do {
             // At most two indexed rows are read. Any conflicting ready outputs make
             // automatic reuse ambiguous; keep both and request fresh translation.
-            let query = try statement("SELECT id,translated_text,EXISTS(SELECT 1 FROM memory_provenance p WHERE p.entry_id=memory_entries.id) FROM memory_entries WHERE canonical_key=? AND validation_state='ready' AND confirmation_state='persisted' LIMIT 2", [.text(key)])
+            let query = try statement("SELECT id,translated_text,EXISTS(SELECT 1 FROM memory_provenance p WHERE p.entry_id=memory_entries.id AND p.source_format IN ('envelope_v4','legacy_dictionary','envelope_v3','envelope_v2')) FROM memory_entries WHERE canonical_key=? AND validation_state='ready' AND confirmation_state='persisted' LIMIT 2", [.text(key)])
             defer { sqlite3_finalize(query) }
             let first = sqlite3_step(query)
             if first == SQLITE_DONE { return result(nil, "none", "miss") }
@@ -460,6 +460,102 @@ actor TranslationMemoryStore {
     /// deliberately leaves history, settings, diagnostic sessions, and the
     /// active SQLite database untouched. A failed removal is not reported as
     /// success and can be retried without restoring deleted translations.
+    /// Only explicit user actions enumerate or restore snapshots. Never replace
+    /// an active SQLite/WAL file; merge entries transactionally instead.
+    func recoverySnapshots() throws -> [String] {
+        let folder = directory.appendingPathComponent("recovery", isDirectory: true)
+        guard FileManager.default.fileExists(atPath: folder.path) else { return [] }
+        return try FileManager.default.contentsOfDirectory(atPath: folder.path)
+            .filter { $0.hasPrefix("memory-") && $0.hasSuffix(".sqlite") &&
+                !$0.contains("/") && !$0.contains("\\") }
+            .sorted(by: >)
+            .prefix(20)
+            .map { $0 }
+    }
+
+    /// A recovery is additive: conflicting translations are retained and exact
+    /// lookup rejects ambiguous matches. The active database is never replaced.
+    func mergeRecoverySnapshot(named name: String) throws -> MemoryStoreHealth {
+        guard active else { throw MemoryStoreError.unavailable }
+        guard try recoverySnapshots().contains(name) else { throw MemoryStoreError.sourceUnreadable }
+        let source = directory.appendingPathComponent("recovery", isDirectory: true)
+            .appendingPathComponent(name)
+        let handle = try FileHandle(forReadingFrom: source)
+        var hasher = SHA256()
+        do {
+            while let chunk = try handle.read(upToCount: 1_048_576), !chunk.isEmpty {
+                hasher.update(data: chunk)
+            }
+        } catch {
+            try? handle.close()
+            throw MemoryStoreError.sourceUnreadable
+        }
+        try? handle.close()
+        let fingerprint = hasher.finalize().map { String(format: "%02x", $0) }.joined()
+
+        var snapshotDB: OpaquePointer?
+        guard sqlite3_open_v2(source.path, &snapshotDB,
+            SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK,
+            let snapshotDB else {
+            if let snapshotDB { sqlite3_close_v2(snapshotDB) }
+            throw MemoryStoreError.backupFailed
+        }
+        defer { sqlite3_close_v2(snapshotDB) }
+
+        func check(_ sql: String, expected: String) throws {
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(snapshotDB, sql, -1, &statement, nil) == SQLITE_OK,
+                  let statement else { throw MemoryStoreError.backupFailed }
+            defer { sqlite3_finalize(statement) }
+            guard sqlite3_step(statement) == SQLITE_ROW,
+                  text(statement, 0) == expected else { throw MemoryStoreError.backupFailed }
+        }
+        try check("PRAGMA quick_check", expected: "ok")
+        try check("PRAGMA user_version", expected: String(Self.schemaVersion))
+
+        var reader: OpaquePointer?
+        guard sqlite3_prepare_v2(snapshotDB,
+            "SELECT canonical_key,translated_text,validation_state,confirmation_state FROM memory_entries ORDER BY id",
+            -1, &reader, nil) == SQLITE_OK, let reader else {
+            throw MemoryStoreError.backupFailed
+        }
+        defer { sqlite3_finalize(reader) }
+        let batch = UUID().uuidString
+        let now = Date().timeIntervalSince1970
+        try transaction {
+            var imported = 0, duplicates = 0
+            while true {
+                let step = sqlite3_step(reader)
+                if step == SQLITE_DONE { break }
+                guard step == SQLITE_ROW else { throw MemoryStoreError.backupFailed }
+                let key = text(reader, 0)
+                let value = text(reader, 1)
+                let compatible = text(reader, 2) == "ready" &&
+                    text(reader, 3) == "persisted"
+                let result = try insert(key: key, value: value,
+                    compatible: compatible, confirmed: compatible)
+                if result.inserted { imported += 1 } else { duplicates += 1 }
+                try execute("""
+                    INSERT OR IGNORE INTO memory_provenance(
+                        entry_id,source_format,source_fingerprint,legacy_key,
+                        import_batch,import_timestamp,original_metadata)
+                    VALUES(?,?,?,?,?,?,?)
+                    """, [.integer(result.id), .text("recovery_snapshot"),
+                        .text(fingerprint), .text(key), .text(batch), .real(now),
+                        .text("{\\"kind\\":\\"verified_snapshot\\"}")])
+            }
+            try execute("""
+                INSERT INTO migration_runs(
+                    id,source_fingerprint,source_format,state,started_at,finished_at,
+                    imported,duplicates)
+                VALUES(?,?,?,'ready',?,?,?,?)
+                """, [.text(batch), .text(fingerprint), .text("recovery_snapshot"),
+                    .real(now), .real(now), .integer(Int64(imported)),
+                    .integer(Int64(duplicates))])
+        }
+        return try health()
+    }
+
     func deletePreservedCopies(legacyURLs: [URL]) throws {
         guard active else { throw MemoryStoreError.unavailable }
         // Enforce the destructive operation's precondition at the storage boundary,
