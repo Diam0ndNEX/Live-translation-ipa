@@ -2065,6 +2065,11 @@ final class TranslatorEngine: ObservableObject {
         !memoryMutationInProgress && pendingMemory.isEmpty && memoryReady
     }
 
+    func cancelLegacyValidation() {
+        idleValidationTask?.cancel()
+        legacyIdleValidationStatus = "Stopping after current on-device model request…"
+    }
+
     func startLegacyValidation(maxEntries: Int = IdleLegacyBatchPolicy.manualEntries) {
         guard idleValidationTask == nil else { return }
         if legacyValidationExhausted {
