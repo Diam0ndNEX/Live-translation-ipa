@@ -451,7 +451,11 @@ actor TranslationMemoryStore {
         }
         let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
         let checksum = digest(try encoder.encode(entries))
-        return try encoder.encode(ExportEnvelope(formatVersion: 1, schemaVersion: Self.schemaVersion, exportedAt: Date(), entries: entries, checksum: checksum))
+        let data = try encoder.encode(ExportEnvelope(formatVersion: 1, schemaVersion: Self.schemaVersion, exportedAt: Date(), entries: entries, checksum: checksum))
+        // Keep exports within the same documented 256 MiB transfer ceiling as imports.
+        // A too-large export must fail explicitly instead of presenting an unusable file.
+        guard data.count <= 256 * 1024 * 1024 else { throw MemoryStoreError.tooLarge }
+        return data
     }
     func importData(_ data: Data) throws -> MemoryStoreHealth {
         guard active else { throw MemoryStoreError.unavailable }
