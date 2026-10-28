@@ -98,6 +98,7 @@ struct Config: Codable, Equatable {
     var rev: Int?          // bumps whenever rot changes so stale packets can be ignored
     var boost: Int?        // 0 = off, 1 = only when nothing is found, 2 = always
     var skipUnchanged: Bool?
+    var subtitleAwareChangeDetection: Bool? = nil
     var speculate: Bool?   // send an early "first sighting" so the app can translate ahead
     var confidence: Double? = nil
     var correction: Bool? = nil
