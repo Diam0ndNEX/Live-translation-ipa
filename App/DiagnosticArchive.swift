@@ -116,6 +116,7 @@ struct DiagnosticIntervalBucket: Codable {
         "candidateEnqueued", "candidateSuperseded", "candidateCancelled",
         "candidateFirstSeen", "speculativeRequests", "speculativeDiscarded",
         "ramHits", "persistentHits", "speculativeHits", "lookupMisses",
+        "legacyVerified", "legacySuperseded",
         "unchangedSkips", "cadenceSkips", "pausedSkips", "emptyOCRPasses",
         "contrastRetries", "movieSelections", "movieTemporalOverrides",
         "movieRejectedSmall", "queueReplacements", "earlyDeferred",
