@@ -29,6 +29,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var cachedRequestKey = ""
     private var lastUsefulText = Date()
     private var ocrSig: [UInt8] = []
+    private let perf = OSSignposter(subsystem: "com.diam0ndnex.screenlingo", category: "capture")
     private var tracker = SubtitleTracker()
     private let captureID = UUID().uuidString
     private var candidateID: String?
@@ -111,11 +112,17 @@ class SampleHandler: RPBroadcastSampleHandler {
                                        interval: interval) <= 0 else { cadenceSkipped += 1; return }
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
+        var orientation = CGImagePropertyOrientation.up
+        if let n = CMGetAttachment(sampleBuffer, key: RPVideoSampleOrientationKey as CFString,
+                                   attachmentModeOut: nil) as? NSNumber,
+           let o = CGImagePropertyOrientation(rawValue: n.uint32Value) {
+            orientation = o
+        }
         // When diagnostics are enabled, sample lightweight *numeric* visual change
         // even if frame skipping is off; only the counters/timestamp leave the extension.
         // This is NOT a subtitle-presence oracle: moving scenes also trigger it.
         if (cfg.skipUnchanged ?? true) || (cfg.captureDiagnostics ?? false) {
-            let sig = signature(pb)
+            let sig = signature(pb, config: cfg, oriented: orientation)
             let comparable = !sig.isEmpty && sig.count == ocrSig.count
             let changed = comparable && SubtitleAcquisitionPolicy.changed(previous: ocrSig, current: sig)
             if comparable { feedback.motion = meanDiff(sig, ocrSig) }
@@ -130,12 +137,6 @@ class SampleHandler: RPBroadcastSampleHandler {
             if !sig.isEmpty { ocrSig = sig }
         }
 
-        var orientation = CGImagePropertyOrientation.up
-        if let n = CMGetAttachment(sampleBuffer, key: RPVideoSampleOrientationKey as CFString,
-                                   attachmentModeOut: nil) as? NSNumber,
-           let o = CGImagePropertyOrientation(rawValue: n.uint32Value) {
-            orientation = o
-        }
         info.bw = CVPixelBufferGetWidth(pb)
         info.bh = CVPixelBufferGetHeight(pb)
         info.orient = Int(orientation.rawValue)
@@ -147,7 +148,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     }
 
     // MARK: Cheap change detection
-    private func signature(_ pb: CVPixelBuffer) -> [UInt8] {
+    private func signature(_ pb: CVPixelBuffer, config cfg: Config, oriented: CGImagePropertyOrientation) -> [UInt8] {
         CVPixelBufferLockBaseAddress(pb, .readOnly)
         defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
         let planar = CVPixelBufferIsPlanar(pb)
@@ -157,12 +158,30 @@ class SampleHandler: RPBroadcastSampleHandler {
         let stride = planar ? CVPixelBufferGetBytesPerRowOfPlane(pb, 0) : CVPixelBufferGetBytesPerRow(pb)
         let bpp = planar ? 1 : 4
         guard w > 8, h > 8 else { return [] }
+        // The ROI uses bottom-origin screen coordinates. Use full-frame
+        // sampling for rotated captures to avoid an incorrect region.
+        let focused = cfg.subtitleAwareChangeDetection == true &&
+            oriented == .up && (cfg.rot ?? 0) == 0
+        let low = focused ? max(0, min(0.95, 1 - cfg.y1 - 0.03)) : 0
+        let high = focused ? max(low + 0.05, min(1, 1 - cfg.y0 + 0.03)) : 1
+        let firstY = Int(Double(h - 1) * low)
+        let lastY = Int(Double(h - 1) * high)
+        let cols = focused ? 48 : 24
         var out: [UInt8] = []
-        out.reserveCapacity(576)
+        out.reserveCapacity(cols * 24)
+        let bgra = !planar && CVPixelBufferGetPixelFormatType(pb) == kCVPixelFormatType_32BGRA
         for gy in 0..<24 {
-            let row = base.advanced(by: ((gy * (h - 1)) / 23) * stride)
-            for gx in 0..<24 {
-                out.append(row.load(fromByteOffset: ((gx * (w - 1)) / 23) * bpp, as: UInt8.self))
+            let row = base.advanced(by: (firstY + (gy * (lastY - firstY)) / 23) * stride)
+            for gx in 0..<cols {
+                let offset = ((gx * (w - 1)) / (cols - 1)) * bpp
+                if bgra {
+                    let blue = Int(row.load(fromByteOffset: offset, as: UInt8.self))
+                    let green = Int(row.load(fromByteOffset: offset + 1, as: UInt8.self))
+                    let red = Int(row.load(fromByteOffset: offset + 2, as: UInt8.self))
+                    out.append(UInt8((red * 77 + green * 150 + blue * 29) >> 8))
+                } else {
+                    out.append(row.load(fromByteOffset: offset, as: UInt8.self))
+                }
             }
         }
         return out
@@ -232,6 +251,8 @@ class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func recognize(_ pb: CVPixelBuffer, _ orientation: CGImagePropertyOrientation, _ cfg: Config, edge plannedEdge: Double) {
+        let state = perf.beginInterval("OCRFrame")
+        defer { perf.endInterval("OCRFrame", state) }
         let t0 = CFAbsoluteTimeGetCurrent()
         passes += 1
 
