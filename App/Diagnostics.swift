@@ -392,7 +392,8 @@ final class Diagnostics: ObservableObject {
         switch stage {
         case "first OCR": key = "firstSeen"
         case "superseded": key = "superseded"
-        case "cancelled", "cancellation": key = "cancelled"
+        case "cancelled": key = "cancelled"
+        case "cancellation": key = reason == "queue_replaced" ? nil : "cancelled"
         case "runtime_state": key = "runtimeTransition"
         case "model_state": key = reason
         default: key = nil
@@ -810,9 +811,23 @@ final class Diagnostics: ObservableObject {
         let elapsed = now.timeIntervalSince(intervalStart)
         guard elapsed > 0 else { return nil }
         let current = cumulativeCounters()
-        let delta = current.reduce(into: [String: Int]()) { result, entry in
+        var delta = current.reduce(into: [String: Int]()) { result, entry in
             result[entry.key] = max(0, entry.value - intervalBaseline[entry.key, default: 0])
         }
+        let ocrTimes = ocr.filter { $0.t >= intervalStart && $0.t <= now }.map(\.v)
+        let translationTimes = translate.filter { $0.t >= intervalStart && $0.t <= now }.map(\.v)
+        let enqueueTimes = latency.filter { $0.t >= intervalStart && $0.t <= now }.map(\.v)
+        let modelTimes = structuredEvents.filter {
+            $0.timestamp >= intervalStart && $0.timestamp <= now &&
+            $0.stage == "model_state" && $0.reasonCode == "model_batch_completed"
+        }.compactMap(\.durationMs)
+        delta["ocrMeasurementCount"] = ocrTimes.count
+        delta["translationMeasurementCount"] = translationTimes.count
+        delta["enqueueMeasurementCount"] = enqueueTimes.count
+        let ocrTiming = DiagnosticDistribution(ocrTimes)
+        let translationTiming = DiagnosticDistribution(translationTimes)
+        let enqueueTiming = DiagnosticDistribution(enqueueTimes)
+        let modelTiming = DiagnosticDistribution(modelTimes)
         let thermal: Int
         switch ProcessInfo.processInfo.thermalState {
         case .nominal: thermal = 0
@@ -828,7 +843,12 @@ final class Diagnostics: ObservableObject {
             captureConnected: lastCaptureConnected,
             effectiveOCRIntervalMs: s.effectiveOCRIntervalMs > 0 ? s.effectiveOCRIntervalMs : nil,
             visualChangeProxyMs: s.firstSightVisualChangeLagMs > 0 ?
-                s.firstSightVisualChangeLagMs : nil)
+                s.firstSightVisualChangeLagMs : nil,
+            ocrMedianMs: ocrTiming.p50, ocrP95Ms: ocrTiming.p95,
+            translationMedianMs: translationTiming.p50,
+            translationP95Ms: translationTiming.p95,
+            enqueueMedianMs: enqueueTiming.p50, enqueueP95Ms: enqueueTiming.p95,
+            modelBatchMedianMs: modelTiming.p50)
     }
 
     private func diagnosticIntervals(at now: Date) -> [DiagnosticIntervalBucket] {
