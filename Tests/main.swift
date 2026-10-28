@@ -395,3 +395,30 @@ movieFocus.reset()
 check(movieFocus.preferredIndex(in: [dialogue], at: 5) == 0,
       "Context changes clear the stale overlay preference")
 print("Movie static-overlay and subtitle freshness checks passed")
+
+
+// v1.4.2 - OCR jitter cannot cancel a confirmed, unpresented caption merely
+// to have the duplicate filter reject the replacement. Real new dialogue
+// and a changed lyric row must remain eligible.
+check(SubtitleAcquisitionPolicy.isSameUnpresentedCaption(
+    activeConfirmed: true, activePresented: false,
+    previousBlocks: ["Olá, mundo!"], incomingBlocks: ["Olá mundo"]),
+    "Punctuation-only OCR differences retain already confirmed model work")
+check(!SubtitleAcquisitionPolicy.isSameUnpresentedCaption(
+    activeConfirmed: true, activePresented: false,
+    previousBlocks: ["I love you"], incomingBlocks: ["I hate you"]),
+    "Changed dialogue must not be mistaken for harmless OCR jitter")
+check(!SubtitleAcquisitionPolicy.isSameUnpresentedCaption(
+    activeConfirmed: true, activePresented: false,
+    previousBlocks: ["First verse", "I love you"],
+    incomingBlocks: ["First verse", "I hate you"]),
+    "Changing any lyric row must still replace the old caption")
+check(!SubtitleAcquisitionPolicy.isSameUnpresentedCaption(
+    activeConfirmed: true, activePresented: true,
+    previousBlocks: ["Olá mundo"], incomingBlocks: ["Olá mundo!"]),
+    "Presented captions do not block fresh work")
+check(!SubtitleAcquisitionPolicy.isSameUnpresentedCaption(
+    activeConfirmed: false, activePresented: false,
+    previousBlocks: ["Olá mundo"], incomingBlocks: ["Olá mundo!"]),
+    "Tentative captions must not gain confirmed-work protection")
+print("Confirmed-caption OCR jitter continuity checks passed")
