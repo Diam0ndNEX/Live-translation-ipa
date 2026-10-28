@@ -159,6 +159,7 @@ struct Stats {
     var specStarted = 0, specCompleted = 0, specDiscarded = 0, specSkipped = 0
     var adaptiveSpeculationSkipped = 0, confirmedHandoffDeferred = 0
     var slowTailEnqueues = 0
+    var specPreemptionRequested = 0, specMatchingConfirmation = 0
     var legacyBatchEntries = 0, legacyBatchVerified = 0, legacyBatchSkipped = 0
     var legacyBatchPeakWorkers = 0, legacyBatchElapsedMs = 0.0
     var specProcessingMs = 0.0, specDiscardedMs = 0.0
@@ -363,18 +364,38 @@ final class Diagnostics: ObservableObject {
         noteModelState("legacy_batch_committed", durationMs: durationMs)
     }
 
-    func noteModelState(_ reason: String, durationMs: Double? = nil) {
+    private var legacyValidationSnapshot: [String: Int] = [:]
+    private var legacyValidationPair: [String: String] = [:]
+    func recordLegacyValidationSnapshot(inventory: [String: Int], reasons: [String: Int], source: String, target: String) {
+        guard enabled else { return }
+        let inventoryKeys = ["Pending legacy records": "legacyInventoryPending",
+            "Different target language": "legacyInventoryOtherTarget",
+            "Different source language": "legacyInventoryOtherSource",
+            "Outside 4–240 character range": "legacyInventoryOutsideLength",
+            "Scan candidates before safety checks": "legacyInventoryCandidates"]
+        let reasonKeys = ["Unreadable key or protected context": "legacySkipKeyContext",
+            "Needs cleanup or slang review": "legacySkipCleanup",
+            "Needs sentence-unit review": "legacySkipSegmentation",
+            "Language model unavailable": "legacySkipModel"]
+        legacyValidationSnapshot = [:]
+        for (label, key) in inventoryKeys { legacyValidationSnapshot[key] = max(0, inventory[label, default: 0]) }
+        for (label, key) in reasonKeys { legacyValidationSnapshot[key] = max(0, reasons[label, default: 0]) }
+        legacyValidationPair = ["legacyInventorySource": source, "legacyInventoryTarget": target]
+    }
+
+    func noteModelState(_ reason: String, durationMs: Double? = nil, candidate: String? = nil) {
         guard enabled else { return }
         let allowed: Set<String> = [
             "warmup_started", "warmup_succeeded", "warmup_failed",
             "warmup_model_submitted", "speculative_model_submitted", "confirmed_model_submitted", "model_batch_cancelled",
+            "warmup_model_completed", "speculative_model_completed", "confirmed_model_completed",
             "model_session_created", "model_batch_failed", "model_batch_completed",
             "warmup_source_unresolved", "warmup_predicted_source", "warmup_preempted",
             "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started",
             "legacy_idle_completed", "legacy_idle_deferred"
         ]
         guard allowed.contains(reason) else { return }
-        appendStructured(stage: "model_state", outcome: reason, reason: reason,
+        appendStructured(candidate: stableCandidateID(candidate), stage: "model_state", outcome: reason, reason: reason,
             durationMs: durationMs)
     }
 
@@ -488,7 +509,9 @@ final class Diagnostics: ObservableObject {
                 settings[key] = String(describing: value)
             }
         }
+        settings.merge(legacyValidationPair) { _, new in new }
         var counters = cumulativeCounters()
+        counters.merge(legacyValidationSnapshot) { _, new in new }
         counters.merge(Dictionary(uniqueKeysWithValues: memoryOutcomes.map { ($0.key.rawValue, $0.value) })) { _, new in new }
         counters["sessionCacheHits"] = s.cacheHits
         counters["savedMemoryHits"] = s.savedHits
@@ -527,6 +550,12 @@ final class Diagnostics: ObservableObject {
                 "processingMs": DiagnosticDistribution(pipeline.map { $0.stages.translation }),
                 "displayHoldMs": DiagnosticDistribution(pipeline.map { $0.stages.displayHold }),
                 "renderingMs": DiagnosticDistribution(pipeline.map { $0.stages.rendering }),
+                "speculativeModelMs": DiagnosticDistribution(structuredEvents.filter {
+                    $0.reasonCode == "speculative_model_completed"
+                }.compactMap(\.durationMs)),
+                "confirmedModelMs": DiagnosticDistribution(structuredEvents.filter {
+                    $0.reasonCode == "confirmed_model_completed"
+                }.compactMap(\.durationMs)),
                 "modelBatchMs": DiagnosticDistribution(structuredEvents.filter {
                     $0.reasonCode == "model_batch_completed"
                 }.compactMap(\.durationMs))],
@@ -714,6 +743,7 @@ final class Diagnostics: ObservableObject {
     func reset() {
         persistSession()
         diagnosticSessionID = UUID(); candidateIDs = [:]; frameIDs = [:]; unitIDs = [:]; structuredEvents = []
+        legacyValidationSnapshot = [:]; legacyValidationPair = [:]
         eventTotals = [:]; intervalHistory = []; intervalStart = Date()
         openingEvents = []; earlyEventsSeen = 0
         intervalBaseline = [:]; lastCaptureConnected = false
@@ -834,6 +864,8 @@ final class Diagnostics: ObservableObject {
             "candidateCancelled": eventTotals["cancelled", default: 0],
             "candidateFirstSeen": eventTotals["firstSeen", default: 0],
             "speculativeRequests": s.specModelRequests,
+            "specPreemptionRequested": s.specPreemptionRequested,
+            "specMatchingConfirmation": s.specMatchingConfirmation,
             "speculativeDiscarded": s.specDiscarded,
             "legacyVerified": memoryHealth.legacyValidated,
             "legacySuperseded": memoryHealth.legacySuperseded,

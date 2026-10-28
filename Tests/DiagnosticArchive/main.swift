@@ -78,6 +78,7 @@ import Foundation
             systemVersion: "test", settings: ["predictiveWarmup": "true"],
             health: MemoryDiagnosticHealth(),
             counters: ["slowTailEnqueues": 1, "handoffDeferred": 1,
+                       "legacyInventoryPending": 103, "legacySkipSegmentation": 12, "specPreemptionRequested": 9,
                        "legacyBatchVerified": 24, "actualModelBatches": 7, "confirmedModelBatches": 2,
                        "speculativeModelBatches": 4, "warmupModelBatches": 1, "first30sModelBatches": 5,
                        "handoffReplayed": 1, "enqueueFailed": 1, "source text": 100],
@@ -88,6 +89,9 @@ import Foundation
         precondition(performanceRestored.counters["legacyBatchVerified"] == 24 &&
                      performanceRestored.counters["slowTailEnqueues"] == 1 &&
                      performanceRestored.counters["actualModelBatches"] == 7 &&
+                     performanceRestored.counters["legacyInventoryPending"] == 103 &&
+                     performanceRestored.counters["legacySkipSegmentation"] == 12 &&
+                     performanceRestored.counters["specPreemptionRequested"] == 9 &&
                      performanceRestored.counters["first30sModelBatches"] == 5 &&
                      performanceRestored.counters["handoffReplayed"] == 1 &&
                      performanceRestored.counters["enqueueFailed"] == 1 &&

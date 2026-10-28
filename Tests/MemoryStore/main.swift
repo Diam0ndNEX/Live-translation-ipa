@@ -233,6 +233,50 @@ import CryptoKit
         precondition(oldVariantHit.value == nil,
                      "A suggestion alone must never become a legacy cache hit")
 
+        // Selective deletion covers all languages/lengths, preserving validated,
+        // superseded and current-rule quarantined records. Rollback is retryable.
+        let deletePath = root.appendingPathComponent("selective-delete-legacy.json")
+        let keepValidated = "v2|pt>en|0:|Olá amigo"
+        let keepSuperseded = "v2|de>en|0:|Guten Morgen"
+        let deletePending = "v2|fr>de|0:|" + String(repeating: "bonjour ", count: 60)
+        try JSONEncoder().encode([keepValidated: "Hello friend", keepSuperseded: "Wrong old result",
+            deletePending: "Historical long entry"]).write(to: deletePath)
+        let selectiveDirectory = root.appendingPathComponent("selective-delete-db")
+        let selectiveStore = TranslationMemoryStore(directory: selectiveDirectory)
+        _ = try await selectiveStore.prepare(legacyURLs: [deletePath])
+        let validation = try await selectiveStore.nextLegacyIdleCandidate(target: "en", selectedSource: "pt", after: 0)!
+        _ = try await selectiveStore.confirmIdleLegacy(id: validation.id,
+            currentKey: "v4|\(rules)|pt>en|0:|Olá amigo", freshOutput: "Hello friend", revision: 1)
+        let supersession = try await selectiveStore.nextLegacyIdleCandidate(target: "en", selectedSource: "de", after: 0)!
+        _ = try await selectiveStore.confirmIdleLegacy(id: supersession.id,
+            currentKey: "v4|\(rules)|de>en|0:|Guten Morgen", freshOutput: "Good morning", revision: 2)
+        let quarantinedCurrentKey = "v4|\(rules)|pt>en|0:|Preserve quarantined current"
+        _ = try await selectiveStore.save([quarantinedCurrentKey: "Keep this"], revision: 3)
+        let beforeDelete = try await selectiveStore.search(limit: 100)
+        let currentID = beforeDelete.first { $0.key == quarantinedCurrentKey }!.id
+        _ = try await selectiveStore.quarantineEntries(ids: [currentID])
+        #if MEMORY_FAULT_TESTING
+        await selectiveStore.injectLegacyDeletionFailure()
+        do {
+            _ = try await selectiveStore.deleteUnvalidatedLegacy(revision: 4)
+            preconditionFailure("Injected failure must roll deletion back")
+        } catch { }
+        let rolledBackRows = try await selectiveStore.search(limit: 100)
+        precondition(rolledBackRows.count == beforeDelete.count)
+        #endif
+        let removedPending = try await selectiveStore.deleteUnvalidatedLegacy(revision: 4)
+        precondition(removedPending == 1)
+        let afterDelete = try await selectiveStore.search(limit: 100)
+        precondition(afterDelete.contains { $0.key == keepValidated && $0.validationState == "validated_legacy" })
+        precondition(afterDelete.contains { $0.key == keepSuperseded && $0.validationState == "superseded_legacy" })
+        precondition(afterDelete.contains { $0.id == currentID && $0.validationState == "needs_validation" })
+        precondition(!afterDelete.contains { $0.key == deletePending })
+        let reopenedSelective = TranslationMemoryStore(directory: selectiveDirectory)
+        _ = try await reopenedSelective.prepare(legacyURLs: [deletePath])
+        let reopenedRows = try await reopenedSelective.search(limit: 100)
+        precondition(!reopenedRows.contains { $0.key == deletePending },
+            "Preserved migration receipts must prevent automatic resurrection")
+
         // Explicit idle validation independently retranslates the ORIGINAL
         // source text. It creates a fresh current-key translation and marks
         // the old row historical, without importing the old output as truth.

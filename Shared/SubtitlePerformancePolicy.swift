@@ -46,6 +46,9 @@ enum SubtitlePerformancePolicy {
         let lost = Double(max(0, discarded)) / Double(max(attempts, 1))
         let useful = Double(max(0, hits)) / Double(max(attempts, 1))
         guard lost >= 0.50, useful < 0.18 else { return true }
+        // Sustained near-zero benefit backs off further, with periodic probes
+        // so a new scene can recover. Confirmed work never uses this gate.
+        if attempts >= 32 && lost >= 0.80 && useful < 0.05 { return opportunity.isMultiple(of: 4) }
         return opportunity.isMultiple(of: 2)
     }
 
