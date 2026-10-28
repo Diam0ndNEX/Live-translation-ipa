@@ -227,6 +227,7 @@ final class TranslatorEngine: ObservableObject {
     private var specKeys = Set<String>()
     private var lastSpecText = ""
     private var lastWarm = Date.distantPast
+    private var lastUnresolvedWarmupNotice = Date.distantPast
     let memoryStore = TranslationMemoryStore(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ScreenLingo/TranslationMemory", isDirectory: true))
     @Published var memoryHealth: MemoryStoreHealth?
     @Published var memoryPendingWrites = 0
@@ -329,6 +330,7 @@ final class TranslatorEngine: ObservableObject {
         }
         presets.applyStartup()
         diag.log("App started \(AppVersion.full)")
+        diag.noteRuntimeState("app_started")
     }
 
     private func tick() {
@@ -421,6 +423,7 @@ final class TranslatorEngine: ObservableObject {
     }
 
     func pipelineSettingsChanged() {
+        diag.noteRuntimeState("capture_config_changed")
         invalidatePending()
         rotRev += 1
         syncConfig()
@@ -1976,7 +1979,13 @@ final class TranslatorEngine: ObservableObject {
         if sourceCode != "auto" { code = sourceCode }
         else if let l = lockedLang { code = l }
         else if detectedLang != "–" { code = detectedLang }
-        else { return }
+        else {
+            if Date().timeIntervalSince(lastUnresolvedWarmupNotice) > 25 {
+                lastUnresolvedWarmupNotice = Date()
+                diag.noteModelState("warmup_source_unresolved")
+            }
+            return
+        }
         let workContext = contextRevision
         let destination = targetCode
         let src = Locale.Language(identifier: code)
