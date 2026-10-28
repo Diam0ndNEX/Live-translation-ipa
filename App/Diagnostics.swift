@@ -368,7 +368,7 @@ final class Diagnostics: ObservableObject {
         let allowed: Set<String> = [
             "warmup_started", "warmup_succeeded", "warmup_failed",
             "model_session_created", "model_batch_failed", "model_batch_completed",
-            "warmup_source_unresolved", "warmup_predicted_source",
+            "warmup_source_unresolved", "warmup_predicted_source", "warmup_preempted",
             "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started",
             "legacy_idle_completed", "legacy_idle_deferred"
         ]
