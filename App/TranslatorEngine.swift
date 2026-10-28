@@ -1231,7 +1231,10 @@ final class TranslatorEngine: ObservableObject {
         if SubtitlePerformancePolicy.preemptSpeculation(activeText: currentSpeculativeText, confirmedText: joined) {
             // Different input cannot supply an exact whole-caption reuse result.
             // Cancellation unwinds the single drain before confirmed work starts.
+            if diag.enabled { diag.s.specPreemptionRequested += 1 }
             drainTask?.cancel()
+        } else if currentSpeculativeText == joined {
+            if diag.enabled { diag.s.specMatchingConfirmation += 1 }
         }
         startDrain()
     }
@@ -1744,18 +1747,25 @@ final class TranslatorEngine: ObservableObject {
     private func runBatch(_ session: TranslationSession, _ texts: [String],
                           warmup: Bool = false, speculative: Bool = false) async -> [String]? {
         let began = ProcessInfo.processInfo.systemUptime
+        let modelCandidate = warmup ? nil : currentPacket?.candidateID
         let first30s = !warmup && sessionStarted.map {
             let age = Date().timeIntervalSince($0)
             return age >= 0 && age <= 30
         } == true
         diag.noteModelState(warmup ? "warmup_model_submitted" :
-            (speculative ? "speculative_model_submitted" : "confirmed_model_submitted"))
+            (speculative ? "speculative_model_submitted" : "confirmed_model_submitted"), candidate: modelCandidate)
         let reqs = texts.enumerated().map { TranslationSession.Request(sourceText: $0.element, clientIdentifier: String($0.offset)) }
         do {
             let res = try await session.translations(from: reqs)
             let result = PipelineSafety.orderedTranslations(res.map { ($0.clientIdentifier, $0.targetText) }, count: texts.count)
             diag.noteModelState(result == nil ? "model_batch_failed" : "model_batch_completed",
                 durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
+            if result != nil {
+                diag.noteModelState(warmup ? "warmup_model_completed" :
+                    (speculative ? "speculative_model_completed" : "confirmed_model_completed"),
+                    durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000,
+                    candidate: modelCandidate)
+            }
             if first30s {
                 diag.noteModelState("model_batch_first_30s",
                     durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
@@ -2065,6 +2075,23 @@ final class TranslatorEngine: ObservableObject {
         specKeys.removeAll(); speculativeOrigins.removeAll(); savedKeys.removeAll(); confirmedKeys.removeAll()
     }
 
+    func deleteUnvalidatedLegacy() async throws -> Int {
+        guard memoryReady, !captureAlive, !pipActive, !busy, !warming,
+              !legacyValidationBusy, idleValidationTask == nil, !memorySaving,
+              !memoryMutationInProgress, pendingMemory.isEmpty else { throw MemoryStoreError.unavailable }
+        memoryMutationInProgress = true
+        defer { memoryMutationInProgress = false; saveMemory(force: true) }
+        invalidatePending()
+        memoryRevision += 1
+        let count = try await memoryStore.deleteUnvalidatedLegacy(revision: memoryRevision)
+        // Pending legacy records are never RAM hits, so valid cached results
+        // can stay intact. Reset only scan snapshots/cursors after COMMIT.
+        legacyScanFingerprint = ""
+        refreshLegacyScanContext()
+        await refreshMemoryHealth()
+        return count
+    }
+
     func removeMemoryEntries(ids: [Int64]) async throws {
         guard memoryReady, !memorySaving, !memoryMutationInProgress, pendingMemory.isEmpty
         else { throw MemoryStoreError.unavailable }
@@ -2310,6 +2337,8 @@ final class TranslatorEngine: ObservableObject {
         legacyEstimatedRemainingMinutes = nil
         legacyBatchStartedAt = Date()
         legacyBatchTotal = 0
+        let scanSource = sourceCode
+        let scanTarget = targetCode
         let maxCount = max(1, min(IdleLegacyBatchPolicy.maximumEntries, maxEntries))
         let fair = ProcessInfo.processInfo.thermalState == .fair
         let workers = IdleLegacyBatchPolicy.concurrency(thermalFair: fair)
@@ -2320,6 +2349,8 @@ final class TranslatorEngine: ObservableObject {
             legacyValidationBusy = false
             legacyBatchActive = false
             legacyValidationElapsedSeconds = max(0, Date().timeIntervalSince(legacyBatchStartedAt))
+            diag.recordLegacyValidationSnapshot(inventory: legacyValidationInventory,
+                reasons: legacyScanReasons, source: scanSource, target: scanTarget)
             lastIdleValidationAttempt = Date()
         }
 

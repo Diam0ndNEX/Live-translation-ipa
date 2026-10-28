@@ -1111,6 +1111,33 @@ actor TranslationMemoryStore {
         }
         latestRevision = revision // A rolled-back clear must remain retryable.
     }
+    #if MEMORY_FAULT_TESTING
+    private var failLegacyDeletion = false
+    func injectLegacyDeletionFailure() { failLegacyDeletion = true }
+    #endif
+
+    /// Deletes only still-unvalidated legacy rows, across all language pairs
+    /// and lengths. Rechecks state inside the transaction; migration receipts
+    /// remain so retained import files cannot silently resurrect these rows.
+    func deleteUnvalidatedLegacy(revision: Int) throws -> Int {
+        guard active else { throw MemoryStoreError.unavailable }
+        guard revision > latestRevision else { throw MemoryStoreError.staleRevision }
+        let removed: Int = try transaction {
+            try execute("DELETE FROM memory_entries WHERE validation_state='needs_validation' AND rules_version IS NULL")
+            let count = Int(sqlite3_changes(db))
+            #if MEMORY_FAULT_TESTING
+            if failLegacyDeletion {
+                failLegacyDeletion = false
+                throw MemoryStoreError.databaseOperation
+            }
+            #endif
+            try setMetadata("last_unvalidated_legacy_delete", String(Date().timeIntervalSince1970))
+            return count
+        }
+        latestRevision = revision
+        return removed
+    }
+
     func delete(ids: [Int64]) throws {
         guard active else { throw MemoryStoreError.unavailable }
         try transaction { for id in ids { try execute("DELETE FROM memory_entries WHERE id=?", [.integer(id)]) } }

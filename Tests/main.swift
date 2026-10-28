@@ -583,3 +583,10 @@ check(SubtitlePerformancePolicy.preemptSpeculation(activeText: "Eu posso ir.", c
     "A different confirmed sentence must not wait for speculative input")
 check(!SubtitlePerformancePolicy.preemptSpeculation(activeText: nil, confirmedText: "Olá."),
     "Confirmed processing must not be mistaken for speculative work")
+
+check(!SubtitlePerformancePolicy.allowSpeculation(attempts: 32, discarded: 30, hits: 0, opportunity: 2, enabled: true),
+    "Sustained near-zero benefit reduces tentative model opportunities further")
+check(SubtitlePerformancePolicy.allowSpeculation(attempts: 32, discarded: 30, hits: 0, opportunity: 4, enabled: true),
+    "Severe speculation backoff retains recovery probes")
+check(SubtitlePerformancePolicy.allowSpeculation(attempts: 32, discarded: 30, hits: 0, opportunity: 2, enabled: false),
+    "User disabling backoff retains tentative opportunities")

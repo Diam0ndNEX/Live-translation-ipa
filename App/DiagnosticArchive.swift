@@ -129,6 +129,7 @@ struct DiagnosticIntervalBucket: Codable {
         "unpresentedConfirmed", "capturePackets", "modelBatches",
         "modelFailures", "warmupAttempts", "warmupSucceeded",
         "warmupPredicted", "coldModelBatches", "adaptiveSpeculationSkipped",
+        "specPreemptionRequested", "specMatchingConfirmation",
         "handoffDeferred", "slowTailEnqueues", "handoffReplayed", "handoffExpired", "enqueueFailed",
         "actualModelBatches", "confirmedModelBatches", "speculativeModelBatches",
         "warmupModelBatches", "first30sModelBatches", "cancelledModelBatches",
@@ -206,6 +207,7 @@ actor DiagnosticExportWriter {
                 "adaptive_speculation_backoff", "slow_tail", "handoff_expired", "handoff_replayed", "enqueue_failed",
                 "warmup_started", "warmup_succeeded", "warmup_failed",
                 "warmup_model_submitted", "speculative_model_submitted", "confirmed_model_submitted", "model_batch_cancelled",
+                "warmup_model_completed", "speculative_model_completed", "confirmed_model_completed",
                 "model_session_created", "model_batch_completed", "model_batch_failed",
                 "warmup_source_unresolved", "warmup_predicted_source", "warmup_preempted",
                 "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started", "legacy_idle_completed",
@@ -223,6 +225,7 @@ actor DiagnosticExportWriter {
                 privacy: "metadataOnly")
         }
         let settingsKeys: Set<String> = [
+            "legacyInventorySource", "legacyInventoryTarget",
             "mode", "speed", "stability", "frameRot", "area", "adaptiveOCR",
             "source", "target", "customY0", "customY1", "minTextH", "dropNoise",
             "boost", "ocrCorrection", "adaptive", "displayPolicy", "minDisplay",
@@ -255,6 +258,9 @@ actor DiagnosticExportWriter {
         // currently uses fixed keys, but the archive boundary must not rely
         // on future callers never accidentally supplying a source-text key.
         let extraCounters: Set<String> = [
+            "legacyInventoryPending", "legacyInventoryOtherTarget", "legacyInventoryOtherSource",
+            "legacyInventoryOutsideLength", "legacyInventoryCandidates", "legacySkipKeyContext",
+            "legacySkipCleanup", "legacySkipSegmentation", "legacySkipModel",
             "sessionCacheHits", "savedMemoryHits", "speculativeModelRequests",
             "supersededSpeculativePipelines", "confirmedCandidatePackets",
             "deferredEarlyCandidates", "supersededUnpresentedConfirmed",
@@ -329,7 +335,7 @@ actor DiagnosticExportWriter {
     func exportZIP(_ snapshot: DiagnosticSessionExport) throws -> URL {
         let json = try encode(snapshot)
         let readme = Data("""
-        ScreenLingo offline diagnostics — 1.4.5
+        ScreenLingo offline diagnostics — 1.4.7
         session.json: bounded recent metadata-only candidate events, timing distributions,
         configuration, memory diagnostics and whole-session interval summaries.
         intervals.csv: chronological 15-second counters, thermal and capture state.
@@ -345,6 +351,11 @@ actor DiagnosticExportWriter {
         submitted in the first 30 capture seconds; it does NOT prove a cold model load.
         Stage timing distributions are bounded matched enqueue samples, not additive.
         Legacy validation health/legacyVerified may include entries from earlier sessions.
+        legacyInventory* counters are a LAST-SCAN snapshot, not cumulative events.
+        legacySkip* counts describe the last scanned batch only. Inventory pair is
+        legacyInventorySource/Target; absent means no inventory captured this session.
+        specPreemptionRequested counts app cancellation requests, not engine stops.
+        confirmedModelMs/speculativeModelMs are bounded completed-call samples.
         Settings, OS version, cache history and source content affect A/B comparisons.
         Nothing is automatically uploaded. This ZIP is generated at user request.
         """.utf8)

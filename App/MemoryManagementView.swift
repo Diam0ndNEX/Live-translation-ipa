@@ -12,6 +12,7 @@ struct MemoryManagementView: View {
     @State private var confirmUnavailableRestore = false
     @State private var query = ""
     @State private var confirmClear = false
+    @State private var confirmDeleteLegacy = false
     @State private var message = ""
     @State private var transfer = MemoryTransferDocument(data: Data())
     @State private var exporting = false
@@ -73,6 +74,9 @@ struct MemoryManagementView: View {
                     engine.startLegacyValidation(maxEntries: IdleLegacyBatchPolicy.manualEntries)
                 }.disabled(captureInProgress || transferBusy ||
                     engine.memoryHealth == nil)
+                Button("Delete unvalidated legacy entries…", role: .destructive) { confirmDeleteLegacy = true }
+                    .disabled(captureInProgress || transferBusy || engine.legacyBatchActive ||
+                        (engine.memoryHealth?.legacyUnverified ?? 0) == 0)
                 LabeledContent("Validation activity", value: engine.legacyIdleValidationStatus)
                 Button("Rescan pending legacy records") { engine.rescanLegacyValidation() }
                     .disabled(captureInProgress || transferBusy || engine.legacyBatchActive || engine.memoryHealth == nil)
@@ -336,6 +340,22 @@ struct MemoryManagementView: View {
                     }
                 }
             }
+        }
+        .confirmationDialog("Delete only unvalidated legacy entries? This removes pending legacy records across ALL source/target languages and lengths, including those outside 4–240 characters. Validated legacy records, current memory, history and settings remain. Recovery copies are retained.", isPresented: $confirmDeleteLegacy, titleVisibility: .visible) {
+            Button("Delete unvalidated legacy entries", role: .destructive) {
+                transferBusy = true
+                Task {
+                    defer { transferBusy = false }
+                    do {
+                        let count = try await engine.deleteUnvalidatedLegacy()
+                        entries = (try? await engine.memoryStore.search(query: query)) ?? entries
+                        message = "Deleted \(count) unvalidated legacy entries. Validated and current memory preserved."
+                    } catch {
+                        message = "Deletion unavailable or failed. Stop capture/PiP and wait for writes/validation, then retry."
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) { }
         }
         .confirmationDialog("Delete translation memory? History and settings remain. Choose whether to retain recovery copies.", isPresented: $confirmClear, titleVisibility: .visible) {
             Button("Clear active memory (keep recovery copies)", role: .destructive) {
