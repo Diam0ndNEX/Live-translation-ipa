@@ -159,6 +159,8 @@ struct Stats {
     var specStarted = 0, specCompleted = 0, specDiscarded = 0, specSkipped = 0
     var adaptiveSpeculationSkipped = 0, confirmedHandoffDeferred = 0
     var slowTailEnqueues = 0
+    var legacyBatchEntries = 0, legacyBatchVerified = 0, legacyBatchSkipped = 0
+    var legacyBatchPeakWorkers = 0, legacyBatchElapsedMs = 0.0
     var specProcessingMs = 0.0, specDiscardedMs = 0.0
     var languageContextUsed = false
     var languageConfidence = 0.0, ocrConfidence = 0.0
@@ -348,13 +350,26 @@ final class Diagnostics: ObservableObject {
         }
     }
 
+    /// Aggregate-only idle reconciliation performance. Never export source
+    /// sentences, translated outputs, memory keys, or device identifiers.
+    func noteLegacyBatch(selected: Int, committed: Int, skipped: Int,
+                         workers: Int, durationMs: Double) {
+        guard enabled else { return }
+        s.legacyBatchEntries += max(0, selected)
+        s.legacyBatchVerified += max(0, committed)
+        s.legacyBatchSkipped += max(0, skipped)
+        s.legacyBatchPeakWorkers = max(s.legacyBatchPeakWorkers, max(0, workers))
+        if durationMs.isFinite && durationMs >= 0 { s.legacyBatchElapsedMs += durationMs }
+        noteModelState("legacy_batch_committed", durationMs: durationMs)
+    }
+
     func noteModelState(_ reason: String, durationMs: Double? = nil) {
         guard enabled else { return }
         let allowed: Set<String> = [
             "warmup_started", "warmup_succeeded", "warmup_failed",
             "model_session_created", "model_batch_failed", "model_batch_completed",
             "warmup_source_unresolved", "warmup_predicted_source",
-            "model_batch_first_30s", "legacy_idle_started",
+            "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started",
             "legacy_idle_completed", "legacy_idle_deferred"
         ]
         guard allowed.contains(reason) else { return }
@@ -825,6 +840,9 @@ final class Diagnostics: ObservableObject {
             "handoffDeferred": s.confirmedHandoffDeferred,
             "adaptiveSpeculationSkipped": s.adaptiveSpeculationSkipped,
             "slowTailEnqueues": s.slowTailEnqueues,
+            "legacyBatchEntries": s.legacyBatchEntries,
+            "legacyBatchVerified": s.legacyBatchVerified,
+            "legacyBatchSkipped": s.legacyBatchSkipped,
             "unpresentedConfirmed": s.supersededUnpresentedConfirmed,
             "modelBatches": s.batches, "modelFailures": s.failures,
             "warmupAttempts": eventTotals["warmup_started", default: 0],
@@ -1057,6 +1075,7 @@ final class Diagnostics: ObservableObject {
         l.append("Configured source \(engine.sourceCode), last source used \(s.sourceUsed) (\(s.sourceOrigin)), automatic detector \(engine.sourceCode == "auto" ? "enabled" : "off – source selected"), locked \(s.lockedLang).")
         l.append("Cache origins: session \(s.cacheHits), saved memory \(s.savedHits), speculative \(s.specHits), fresh requests \(s.cacheMisses).")
         l.append("Speculative model requests \(s.specModelRequests); pipeline attempts \(s.specStarted), completed \(s.specCompleted), superseded/cancelled \(s.specDiscarded), declined \(s.specSkipped), unconsumed results \(engine.unconsumedSpeculation); processing \(Int(s.specProcessingMs)) ms, discarded work \(Int(s.specDiscardedMs)) ms. Attempts count pipeline jobs; cache hits count sentences.")
+        l.append("Idle validation: selected \(s.legacyBatchEntries), verified \(s.legacyBatchVerified), skipped \(s.legacyBatchSkipped); peak workers \(s.legacyBatchPeakWorkers); model + commit wall time \(Int(s.legacyBatchElapsedMs)) ms.")
         l.append("v1.4.4: deferred confirmed handoffs \(s.confirmedHandoffDeferred); adaptive speculative skips \(s.adaptiveSpeculationSkipped); slow (>1200 ms) PiP enqueues \(s.slowTailEnqueues).")
         l.append("OCR confidence \(Int(s.ocrConfidence*100))%, source evidence \(s.sourceOrigin == "Selected" ? "manual selection" : "\(Int(s.languageConfidence*100))%"); recognition: \(s.recognitionReason); confirmation: \(s.confirmationReason).")
         l.append("Frame skips: unchanged \(s.unchangedSkipped), cadence \(s.cadenceSkipped), paused \(s.pausedSkipped); consecutive empty reads \(s.emptyReads), contrast retries \(s.retryCount).")
