@@ -210,15 +210,20 @@ final class Diagnostics: ObservableObject {
         recorderDepth -= 1
         if token.outer { recorderCosts.record(ms: (ProcessInfo.processInfo.systemUptime-token.start)*1000, detailed: token.detailed) }
     }
+    private func stableCandidateID(_ candidate: String?) -> UUID? {
+        guard let candidate else { return nil }
+        if let existing = candidateIDs[candidate] { return existing }
+        if candidateIDs.count >= 600 { candidateIDs.removeAll(keepingCapacity: true) }
+        let id = UUID()
+        candidateIDs[candidate] = id
+        return id
+    }
+
     func trace(_ candidate: String?, stage: String, detail: String, at time: Date = Date()) {
         let recorderToken = beginRecorder(); defer { endRecorder(recorderToken) }
         guard detailedCollection, let candidate else { return }
         // Never export a caller's identifier: historical candidates can encode input text.
-        if candidateIDs[candidate] == nil {
-            if candidateIDs.count >= 600 { candidateIDs.removeAll(keepingCapacity: true) }
-            candidateIDs[candidate] = UUID()
-        }
-        let safeID = candidateIDs[candidate] ?? UUID()
+        guard let safeID = stableCandidateID(candidate) else { return }
         let stages: Set<String> = ["first OCR", "seen", "confirmed", "processing", "speculating", "cache", "ready", "enqueued", "superseded", "memory", "cancelled"]
         let safeStage = stages.contains(stage) ? stage : "other"
         appendStructured(candidate: safeID, stage: safeStage, outcome: "observed", reason: safeStage, durationMs: nil, at: time)
@@ -237,13 +242,13 @@ final class Diagnostics: ObservableObject {
     }
 
     /// Counts one lookup outcome per unit; persistence and eviction counters have separate denominators.
-    func recordMemory(_ outcome: MemoryDiagnosticOutcome, durationMs: Double = 0) {
+    func recordMemory(_ outcome: MemoryDiagnosticOutcome, durationMs: Double = 0, candidate: String? = nil) {
         let token = beginRecorder(); defer { endRecorder(token) }
         guard enabled else { return }
         memoryOutcomes[outcome, default: 0] += 1
         let finite = durationMs.isFinite && durationMs >= 0
         switch outcome {
-        case .ramHit, .persistentHit, .legacyHit, .speculativeHit, .miss, .timeout, .compatibilityRejected:
+        case .ramHit, .persistentHit, .legacyHit, .speculativeHit, .miss, .timeout, .compatibilityRejected, .databaseUnavailable:
             if finite { lookupSamples.append(durationMs) }
             if lookupSamples.count > 600 { lookupSamples.removeFirst(lookupSamples.count - 600) }
         case .persisted, .writeFailed:
@@ -252,8 +257,10 @@ final class Diagnostics: ObservableObject {
         default: break
         }
         // Preserve errors in basic mode; detailed events are pressure-aware.
-        if detailedCollection || outcome == .writeFailed || outcome == .timeout {
-            appendStructured(stage: "memory", outcome: outcome.rawValue, reason: outcome.rawValue, durationMs: durationMs)
+        if detailedCollection || outcome == .writeFailed || outcome == .timeout || outcome == .databaseUnavailable {
+            let safeID = detailedCollection ? stableCandidateID(candidate) : nil
+            appendStructured(candidate: safeID, stage: "memory", outcome: outcome.rawValue,
+                             reason: outcome.rawValue, durationMs: durationMs)
         }
     }
 
