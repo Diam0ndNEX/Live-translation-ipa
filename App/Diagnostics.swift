@@ -576,7 +576,7 @@ final class Diagnostics: ObservableObject {
             if detailedCollection, p.orient != nil {
                 appendStructured(candidate: stableCandidateID(p.candidateID),
                     frameIndex: p.frames, stage: "rotation",
-                    outcome: "accepted", reason: "accepted")
+                    outcome: "accepted", reason: "accepted", durationMs: nil)
             }
         } else if p.kind == "clear" {
             s.clearPackets += 1
