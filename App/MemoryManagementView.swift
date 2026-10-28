@@ -4,7 +4,6 @@ import UniformTypeIdentifiers
 struct MemoryManagementView: View {
     @EnvironmentObject private var engine: TranslatorEngine
     @State private var entries: [MemoryStoredEntry] = []
-    @State private var conflictEntries: [MemoryStoredEntry] = []
     @State private var conflictingEntries: [MemoryStoredEntry] = []
     @State private var showConflicts = false
     @State private var query = ""
@@ -49,26 +48,6 @@ struct MemoryManagementView: View {
                         .font(.footnote)
                 }
                 Text("Thresholds do not delete translations. RAM eviction preserves committed entries.").font(.footnote)
-            }
-            Section("Conflicting translations") {
-                Button("Inspect unresolved conflicts") {
-                    Task {
-                        do {
-                            conflictEntries = try await engine.memoryStore.conflictingEntries(limit: 100)
-                            if conflictEntries.isEmpty { message = "No unresolved conflicts found" }
-                        } catch { message = "Conflict inspection unavailable; memory preserved" }
-                    }
-                }
-                ForEach(conflictEntries) { entry in
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(entry.sourceText)
-                        Text(entry.translatedText).foregroundStyle(.secondary)
-                        Text("\(entry.sourceLanguage) → \(entry.targetLanguage) · \(entry.validationState)")
-                            .font(.caption)
-                    }
-                }
-                Text("Alternative translations are preserved. Conflicted keys are not reused automatically; a fresh translation is safer.")
-                    .font(.footnote)
             }
             Section("Transfer") {
                 Button(transferBusy ? "Preparing…" : "Export translation memory") {
