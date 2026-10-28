@@ -137,12 +137,31 @@ struct HistoryStorageSettings: View {
 
 struct DiagnosticsSettings: View {
     @EnvironmentObject private var engine: TranslatorEngine
+    @Environment(\.selectTab) private var selectTab
     @AppStorage("diagSamples") private var samples = 600
     @AppStorage("persistDiagnosticSessions") private var persistSessions = false
     @AppStorage("freshTranslationTest") private var freshTranslationTest = false
 
     var body: some View {
         List {
+            Section {
+                LabeledContent("Session started", value: engine.diag.started.formatted(date: .abbreviated, time: .shortened))
+                Button {
+                    selectTab(3)
+                } label: {
+                    Label("Open live diagnostics dashboard", systemImage: "chart.xyaxis.line")
+                }
+                Button {
+                    Task { await engine.diag.exportZIP() }
+                } label: {
+                    Label(engine.diag.exportInProgress ? "Preparing diagnostic ZIP…" : "Export complete diagnostic ZIP",
+                          systemImage: "archivebox")
+                }
+                .disabled(engine.diag.exportInProgress)
+                Text("ZIP v3 includes a readable summary, full-session counters, timed intervals, latency percentiles, a privacy-safe event timeline and experiment settings. Nothing is uploaded automatically.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Text(engine.diag.archiveStatus).font(.caption).foregroundStyle(.secondary)
+            } header: { Text("Review & export") }
             Section {
                 DiagnosticsCollectionControls()
                 Toggle("Keep diagnostic sessions between launches", isOn: $persistSessions)
