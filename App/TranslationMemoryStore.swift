@@ -7,6 +7,10 @@ struct MemoryStoreHealth: Codable, Sendable {
     var totalEntries = 0
     var readyEntries = 0
     var needsValidation = 0
+    /// Historical rows are preserved, but never reused until a current v4 key is confirmed.
+    var legacyValidated = 0
+    var legacySuperseded = 0
+    var legacyUnverified = 0
     var conflicts = 0
     var databaseBytes: Int64 = 0
     var migrationStatus = "not_started"
@@ -469,9 +473,55 @@ actor TranslationMemoryStore {
         return try health()
     }
 
+    /// Reconcile *only* independently generated, confirmed current-rule model results.
+    /// An older key with no rules digest never becomes directly reusable: a new v4
+    /// translation is persisted first, then the old row is marked as historical evidence.
+    /// Exact language, NFC-equivalent source, and context must match. No fuzzy matching,
+    /// no app-start mass validation, and no additional translation requests are made.
+    private func reconcileLegacy(key: String, confirmedValue: String) throws {
+        guard let fresh = keyParts(key), fresh.rules != nil,
+              !confirmedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let q = try statement("""
+            SELECT id,canonical_key,source_text,translated_text FROM memory_entries
+            WHERE source_language=? AND target_language=? AND normalized_source=?
+              AND rules_version IS NULL AND validation_state='needs_validation'
+            LIMIT 33
+            """, [.text(fresh.source), .text(fresh.target), .text(normalized(fresh.sourceText))])
+        defer { sqlite3_finalize(q) }
+        var updates: [(id: Int64, state: String)] = []
+        while true {
+            let code = sqlite3_step(q)
+            if code == SQLITE_DONE { break }
+            guard code == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
+            // Refuse an ambiguous or excessive set; leave all historical rows untouched.
+            if updates.count >= 32 { return }
+            let oldKey = text(q, 1)
+            guard let old = keyParts(oldKey),
+                  old.rules == nil,
+                  old.source == fresh.source, old.target == fresh.target,
+                  old.context == fresh.context,
+                  old.sourceText.precomposedStringWithCanonicalMapping ==
+                    fresh.sourceText.precomposedStringWithCanonicalMapping
+            else { continue }
+            let oldValue = text(q, 3)
+            let state = oldValue == confirmedValue ? "validated_legacy" : "superseded_legacy"
+            updates.append((id: sqlite3_column_int64(q, 0), state: state))
+        }
+        let now = Date().timeIntervalSince1970
+        for update in updates {
+            try execute("""
+                UPDATE memory_entries SET validation_state=?, updated_at=?
+                WHERE id=? AND validation_state='needs_validation' AND rules_version IS NULL
+                """, [.text(update.state), .real(now), .integer(update.id)])
+        }
+    }
+
     /// The caller supplies only confirmed eligible results. Return means COMMIT has
     /// succeeded. A failed transaction leaves every prior translation untouched.
-    func save(_ entries: [String:String], revision: Int) throws -> MemoryStoreHealth {
+    /// independentlyConfirmedKeys come only from actual current-model results
+    /// (not speculative, RAM, disk, or imported cache hits).
+    func save(_ entries: [String:String], revision: Int,
+              independentlyConfirmedKeys: Set<String> = []) throws -> MemoryStoreHealth {
         guard active else { throw MemoryStoreError.unavailable }
         guard revision > latestRevision else { throw MemoryStoreError.staleRevision }
         do {
@@ -479,6 +529,9 @@ actor TranslationMemoryStore {
                 for (key, value) in entries {
                     guard keyParts(key)?.rules != nil, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
                     _ = try insert(key: key, value: value, compatible: true)
+                    if independentlyConfirmedKeys.contains(key) {
+                        try reconcileLegacy(key: key, confirmedValue: value)
+                    }
                 }
             }
         } catch { status.failedWrites += 1; throw error }
@@ -489,7 +542,10 @@ actor TranslationMemoryStore {
     func health() throws -> MemoryStoreHealth {
         status.totalEntries = Int(try scalar("SELECT COUNT(*) FROM memory_entries"))
         status.readyEntries = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE validation_state='ready'"))
-        status.needsValidation = status.totalEntries - status.readyEntries
+        status.needsValidation = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE validation_state='needs_validation'"))
+        status.legacyValidated = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE validation_state='validated_legacy'"))
+        status.legacySuperseded = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE validation_state='superseded_legacy'"))
+        status.legacyUnverified = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE validation_state='needs_validation' AND rules_version IS NULL"))
         status.conflicts = Int(try scalar("SELECT COUNT(*) FROM memory_conflicts WHERE resolved=0"))
         status.importedEntries = Int(try scalar("SELECT COALESCE(SUM(imported),0) FROM migration_runs WHERE state='ready'"))
         status.duplicateEntries = Int(try scalar("SELECT COALESCE(SUM(duplicates),0) FROM migration_runs WHERE state='ready'"))
