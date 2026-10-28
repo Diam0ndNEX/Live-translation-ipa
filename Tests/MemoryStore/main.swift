@@ -49,6 +49,25 @@ import SQLite3
                      "Confirmed writes can retry after storage capacity is restored")
         #endif
 
+        // Reopening a populated SQLite store without any legacy JSON file is not
+        // "no previous memory"; that status must survive multi-year app upgrades.
+        let durableDirectory = root.appendingPathComponent("already-migrated")
+        let durableKey = "v4|\(rules)|pt>en|0:|Known durable translation."
+        do {
+            let previousLaunch = TranslationMemoryStore(directory: durableDirectory)
+            _ = try await previousLaunch.prepare(legacyURLs: [])
+            _ = try await previousLaunch.save(
+                [durableKey: "Persisted from earlier launch."], revision: 1)
+        }
+        let nextLaunch = TranslationMemoryStore(directory: durableDirectory)
+        let reopenedHealth = try await nextLaunch.prepare(legacyURLs: [])
+        precondition(reopenedHealth.totalEntries == 1 &&
+                     reopenedHealth.migrationStatus == "ready",
+                     "Existing SQLite data must be recognized on app restart")
+        let reopenedHit = await nextLaunch.lookup(key: durableKey, timeoutMilliseconds: 50)
+        precondition(reopenedHit.value == "Persisted from earlier launch.",
+                     "Stored translations must survive reopening without legacy source files")
+
         let legacy = root.appendingPathComponent("translation-memory-v4.json")
         try JSONEncoder().encode(MemoryEnvelope(entries: [key:"Hello."])).write(to: legacy)
         let store = TranslationMemoryStore(directory: root.appendingPathComponent("db"))
@@ -388,6 +407,8 @@ import SQLite3
         let reopened = TranslationMemoryStore(directory: root.appendingPathComponent("db"))
         let cleared = try await reopened.prepare(legacyURLs: [legacy])
         precondition(cleared.totalEntries == 0, "Clear must not reimport legacy memory")
+        precondition(cleared.migrationStatus == "cleared",
+                     "An intentional clear must not be mistaken for an unmigrated installation")
         precondition(FileManager.default.fileExists(atPath: legacy.path))
         // Restore is additive and explicit. A previous Clear cannot be undone by
         // legacy migration, but a user-selected verified snapshot can be merged.
