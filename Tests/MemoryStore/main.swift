@@ -40,7 +40,8 @@ import Foundation
         precondition(damagedHealth.migrationStatus == "partial_recovery" && damagedHealth.totalEntries == 0)
         precondition(FileManager.default.fileExists(atPath: damagedLegacy.path))
         let malformedBackup = root.appendingPathComponent("damaged-db/legacy")
-        precondition((try FileManager.default.contentsOfDirectory(atPath: malformedBackup.path)).count == 1)
+        let preservedBackups = try FileManager.default.contentsOfDirectory(atPath: malformedBackup.path)
+        precondition(preservedBackups.count == 1)
 
         // A fresh authoritative sentence receives an explicit category. Unknown legacy
         // keys keep their restricted validation state and must not be reclassified as ready.
