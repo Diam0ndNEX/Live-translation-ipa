@@ -1223,7 +1223,14 @@ final class TranslatorEngine: ObservableObject {
                         resolvedHit = lookup.value
                         diskHit = lookup.value != nil
                         if display {
-                            diag.recordMemory(lookup.outcome == "timeout" ? .timeout : (diskHit ? (lookup.origin == "legacy" ? .legacyHit : .persistentHit) : .miss), durationMs: lookup.durationMs)
+                            let outcome: MemoryDiagnosticOutcome
+                            switch lookup.outcome {
+                            case "timeout": outcome = .timeout
+                            case "incompatible", "conflict": outcome = .compatibilityRejected
+                            case "database_error", "unavailable": outcome = .databaseUnavailable
+                            default: outcome = diskHit ? (lookup.origin == "legacy" ? .legacyHit : .persistentHit) : .miss
+                            }
+                            diag.recordMemory(outcome, durationMs: lookup.durationMs, candidate: currentPacket?.candidateID)
                         }
                         if let value = resolvedHit { cache[key] = value; touchCache(key) }
                     }
@@ -1233,7 +1240,7 @@ final class TranslatorEngine: ObservableObject {
                         if display {
                             let speculativeHit = specKeys.remove(key) != nil
                             let savedHit = diskHit || savedKeys.remove(key) != nil
-                            if !diskHit { diag.recordMemory(speculativeHit ? .speculativeHit : .ramHit, durationMs: (ProcessInfo.processInfo.systemUptime - lookupStart) * 1000) }
+                            if !diskHit { diag.recordMemory(speculativeHit ? .speculativeHit : .ramHit, durationMs: (ProcessInfo.processInfo.systemUptime - lookupStart) * 1000, candidate: currentPacket?.candidateID) }
                             if memoryEligible && confirmedKeys.insert(key).inserted { queueMemory(key, hit) }
                             if diag.enabled {
                                 if speculativeHit { diag.s.specHits += 1 }
