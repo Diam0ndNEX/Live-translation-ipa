@@ -204,7 +204,7 @@ actor DiagnosticExportWriter {
                 "adaptive_speculation_backoff", "slow_tail",
                 "warmup_started", "warmup_succeeded", "warmup_failed",
                 "model_session_created", "model_batch_completed", "model_batch_failed",
-                "warmup_source_unresolved", "warmup_predicted_source",
+                "warmup_source_unresolved", "warmup_predicted_source", "warmup_preempted",
                 "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started", "legacy_idle_completed",
                 "legacy_idle_deferred", "app_started", "capture_config_changed",
                 "capture_idle", "capture_live", "capture_paused", "capture_frozen"
