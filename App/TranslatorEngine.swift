@@ -1240,7 +1240,15 @@ final class TranslatorEngine: ObservableObject {
                     var diskHit = false
                     if resolvedHit == nil, !bypassMemory, memoryReady, flag("remember", true), !flag("privateSession", false) {
                         let lookup = await memoryStore.lookup(key: key)
-                        guard isCurrent() else { return }
+                        guard isCurrent() else {
+                            if display {
+                                // Never attribute an obsolete result to the newer
+                                // packet. Count it as cancelled, not as a usable hit.
+                                diag.recordMemory(.cancelled, durationMs: lookup.durationMs,
+                                    candidate: workCandidate, unitKey: key)
+                            }
+                            return
+                        }
                         resolvedHit = lookup.value
                         diskHit = lookup.value != nil
                         if display {
