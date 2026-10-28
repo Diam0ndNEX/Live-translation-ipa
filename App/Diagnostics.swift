@@ -274,13 +274,13 @@ final class Diagnostics: ObservableObject {
                               stage: String, reason: String, durationMs: Double? = nil) {
         guard detailedCollection else { return }
         let allowedStages: Set<String> = [
-            "frame_arrival", "rotation", "duplicate_detection", "ocr_filtering",
+            "frame_arrival", "rotation", "ocr_execution", "duplicate_detection", "ocr_filtering",
             "stability", "text_grouping", "ocr_correction", "language_detection",
             "segmentation", "memory_lookup", "translation", "pip_preparation",
             "pip_enqueue", "cancellation"
         ]
         let allowedReasons: Set<String> = [
-            "accepted", "rejected_duplicate", "rejected_recent_fragment",
+            "accepted", "completed", "rejected_duplicate", "rejected_recent_fragment",
             "rejected_empty", "rejected_revision", "rejected_unstable",
             "rejected_low_confidence", "rejected_stale", "filtered",
             "confirmed", "speculative", "ready", "enqueued", "cancelled"
@@ -566,6 +566,17 @@ final class Diagnostics: ObservableObject {
         if p.kind == "ocr" {
             s.ocrPackets += 1
             add(\.lineCounts, Double(p.lines.count))
+            // These are extension-reported OCR packet timings, not inferred
+            // physical screen-display latency or unobserved pre-OCR stages.
+            if detailedCollection, let ocrDuration = p.ocrMs, ocrDuration >= 0 {
+                notePipelineDecision(candidate: p.candidateID,
+                    frameIndex: p.frames, stage: "ocr_execution",
+                    reason: "completed", durationMs: ocrDuration)
+            }
+            if detailedCollection, p.orient != nil {
+                notePipelineDecision(candidate: p.candidateID,
+                    frameIndex: p.frames, stage: "rotation", reason: "accepted")
+            }
         } else if p.kind == "clear" {
             s.clearPackets += 1
         }
