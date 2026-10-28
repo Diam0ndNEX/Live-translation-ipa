@@ -291,12 +291,13 @@ final class Diagnostics: ObservableObject {
             "frame_arrival", "rotation", "ocr_execution", "duplicate_detection", "ocr_filtering",
             "stability", "text_grouping", "ocr_correction", "language_detection",
             "segmentation", "memory_lookup", "translation", "pip_preparation",
-            "pip_enqueue", "cancellation"
+            "pip_enqueue", "model_state", "cancellation"
         ]
         let allowedReasons: Set<String> = [
             "accepted", "completed", "rejected_duplicate", "rejected_recent_fragment",
             "rejected_empty", "rejected_revision", "rejected_unstable",
             "rejected_low_confidence", "rejected_stale", "filtered", "deferred_early_candidate",
+            "changing_group_preferred", "dominant_group", "queue_replaced",
             "confirmed", "speculative", "ready", "enqueued", "cancelled"
         ]
         guard allowedStages.contains(stage), allowedReasons.contains(reason) else { return }
@@ -435,6 +436,10 @@ final class Diagnostics: ObservableObject {
         // Explicit allowlist excludes glossary, protected names, source fixes, user text and paths.
         let keys = ["mode", "speed", "stability", "frameRot", "area", "adaptiveOCR", "remember", "privateSession", "diagnosticsEnabled", "detailedCollection",
                     "skipUnchanged", "idleBackoff", "adaptiveConfirmation", "subtitleTracking",
+                    "source", "target", "customY0", "customY1", "minTextH", "dropNoise",
+                    "boost", "ocrCorrection", "adaptive", "displayPolicy", "minDisplay",
+                    "clearHold", "autoClear", "keepWarm", "langLock",
+                    "selectiveSpeculation", "speculationConfidence", "confirmationDeadline",
                     "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest"]
         var settings: [String: String] = [:]
         for key in keys {
