@@ -494,6 +494,7 @@ struct PerformanceSettings: View {
     @AppStorage("idleMinutes") private var idleMinutes = 0
     @AppStorage("translateAhead") private var translateAhead = true
     @AppStorage("lowLatencyTranslation") private var lowLatencyTranslation = false
+    @AppStorage("incrementalBatchRecovery") private var incrementalBatchRecovery = false
     @AppStorage("keepWarm") private var keepWarm = true
     @AppStorage("predictiveWarmup") private var predictiveWarmup = true
     @AppStorage("remember") private var remember = true
@@ -519,6 +520,9 @@ struct PerformanceSettings: View {
                     LabeledContent("Last warm-up", value: "\(Int(duration)) ms")
                 }
                 Text("An optional first-use optimization: while Automatic is unresolved, prewarm a recent source model without changing OCR language detection. The actual new source always wins.").font(.footnote).foregroundStyle(.secondary)
+                Toggle("Experimental incremental batch recovery", isOn: $incrementalBatchRecovery)
+                Text("Opt-in: collect completed speculative sentence results before a whole batch finishes. Only exact-context RAM reuse; no partial captions or unconfirmed disk writes.")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Toggle("Remember translations", isOn: $remember)
                 LabeledContent("Persisted translation units", value: "\(engine.memoryCount)")
                 NavigationLink("Manage translation memory") { MemoryManagementView() }
@@ -552,12 +556,13 @@ struct PerformanceSettings: View {
                 DiagnosticsCollectionControls()
                 Button("Reset diagnostics counters") { engine.diag.reset(); engine.toast("Counters reset") }
             }
-            ResetSection(keys: ["coolMode", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "predictiveWarmup", "remember", "lowLatencyTranslation", "idleBackoff", "freshTranslationTest"])
+            ResetSection(keys: ["coolMode", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "predictiveWarmup", "remember", "lowLatencyTranslation", "incrementalBatchRecovery", "idleBackoff", "freshTranslationTest"])
         }
         .settingsPage("Performance & power")
         .onChange(of: adaptive) { _, _ in engine.syncConfig() }
         .onChange(of: translateAhead) { _, _ in engine.syncConfig() }
         .onChange(of: lowLatencyTranslation) { _, _ in engine.translationStrategyChanged() }
+        .onChange(of: incrementalBatchRecovery) { _, _ in engine.pipelineSettingsChanged() }
         .onChange(of: idleBackoff) { _, _ in engine.syncConfig() }
         .onChange(of: freshTranslationTest) { _, _ in engine.pipelineSettingsChanged() }
     }
