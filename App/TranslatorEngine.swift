@@ -232,6 +232,7 @@ final class TranslatorEngine: ObservableObject {
     private var memorySaving = false
     private var memoryMutationInProgress = false
     private var memoryRetryAttempts = 0
+    private var memoryPressureCapacity: Int?
     private var memoryReady = false
     private var cacheUse: [String: UInt64] = [:]
     private var cacheClock: UInt64 = 0
@@ -603,7 +604,7 @@ final class TranslatorEngine: ObservableObject {
 
     func applyStorageSettings() {
         if history.count > historyCapacity { history = Array(history.prefix(historyCapacity)) }
-        if cache.count > max(500, min(6000, int("memoryCapacity", 3000))) { trimCache(); memoryDirty = true }
+        if cache.count > max(500, min(6000, int("memoryRAMCapacity", 3000))) { trimCache(); memoryDirty = true }
         saveMemory()
     }
 
@@ -1647,8 +1648,17 @@ final class TranslatorEngine: ObservableObject {
         }
     }
 
+    /// Called from the live app on an iOS memory warning. Persistent SQLite entries
+    /// remain untouched; only evictable RAM entries are reduced.
+    func handleMemoryPressure() {
+        let configured = max(250, min(6000, int("memoryRAMCapacity", 3000)))
+        memoryPressureCapacity = max(250, configured / 4)
+        trimCache()
+    }
+
     private func trimCache() {
-        let limit = max(250, min(6000, int("memoryRAMCapacity", 3000)))
+        let configured = max(250, min(6000, int("memoryRAMCapacity", 3000)))
+        let limit = min(configured, memoryPressureCapacity ?? configured)
         let excess = cache.count - limit
         guard excess > 0 else { return }
         for key in cacheUse.sorted(by: { $0.value < $1.value }).prefix(excess).map(\.key) {
