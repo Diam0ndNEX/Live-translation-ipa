@@ -313,3 +313,30 @@ sqliteScenario.memoryLookupMs = 20
 let deadlineSimulation = PipelineSimulation.run(options: simulationOptions, input: sqliteScenario)
 check(deadlineSimulation.steps.contains { $0.title == "Persistent memory decision" && $0.state.contains("deadline exceeded") }, "Simulator models deadline fallback explicitly")
 print("Memory lookup simulator checks passed")
+
+let multiSentence = TranslationUnitPlanning.units(source: "Olá. Tudo bem?",
+    candidates: ["Olá.", "Tudo bem?"])
+check(multiSentence == ["Olá.", "Tudo bem?"], "Confirmed sentence punctuation may create distinct units")
+let incompleteLyrics = "Primeira linha\nsegunda linha\nterceira linha"
+check(TranslationUnitPlanning.units(source: incompleteLyrics,
+    candidates: ["Primeira linha", "segunda linha", "terceira linha"]) == [incompleteLyrics],
+    "Incomplete scrolling lyrics must retain their complete line structure")
+check(TranslationUnitPlanning.units(source: "Dr. Smith arrived.",
+    candidates: ["Dr.", "Smith arrived."]) == ["Dr. Smith arrived."],
+    "Abbreviations may not manufacture authoritative independent units")
+check(TranslationUnitPlanning.units(source: "He paused... then spoke.",
+    candidates: ["He paused...", "then spoke."]) == ["He paused... then spoke."],
+    "Unfinished ellipses must preserve subtitle context")
+check(TranslationUnitPlanning.units(source: "Eine Sache. Noch etwas.",
+    candidates: ["Eine Sache.", "Noch etwas."]) == ["Eine Sache.", "Noch etwas."],
+    "Sentence boundaries must preserve original source content")
+check(TranslationUnitPlanning.units(source: "Hello world!",
+    candidates: ["Hello", "world!"]) == ["Hello world!"],
+    "Tokenizer candidates without sentence boundaries must not fragment a sentence")
+check(!TranslationUnitPlanning.mayRemember("12 13", confirmed: true),
+    "Nonlinguistic OCR must not become an authoritative permanent memory entry")
+check(!TranslationUnitPlanning.mayRemember("Hello.", confirmed: false),
+    "Unconfirmed speculative text must remain RAM-only")
+check(TranslationUnitPlanning.mayRemember("Olá.", confirmed: true),
+    "Confirmed language-bearing entries remain eligible for persistence")
+print("Translation-unit segmentation, context and persistence safety checks passed")

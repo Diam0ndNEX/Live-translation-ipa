@@ -1132,7 +1132,7 @@ final class TranslatorEngine: ObservableObject {
         guard text.count > 24 else { return [text] }
         // Include effective language context: an OCR language correction must not
         // borrow the segmentation calculated for a different configuration.
-        let key = "seg1|\(sourceCode)|\(detectedLang)|\(targetCode)|\(text)"
+        let key = "seg\(TranslationUnitPlanning.version)|\(sourceCode)|\(detectedLang)|\(targetCode)|\(text)"
         let started = ProcessInfo.processInfo.systemUptime
         if let cached = segmentationCache.lookup(key) {
             diag.noteSegmentation(candidate: activeCandidateID, reused: true,
@@ -1152,7 +1152,7 @@ final class TranslatorEngine: ObservableObject {
             }
             return true
         }
-        let result = units.isEmpty ? [text] : units
+        let result = TranslationUnitPlanning.units(source: text, candidates: units.isEmpty ? [text] : units)
         segmentationCache.insert(key, units: result)
         diag.noteSegmentation(candidate: activeCandidateID, reused: false,
             durationMs: (ProcessInfo.processInfo.systemUptime - started) * 1000)
@@ -1283,7 +1283,9 @@ final class TranslatorEngine: ObservableObject {
                 var outs: [String?] = []
                 for (si, s) in sentences.enumerated() {
                     let key = PipelineSafety.cacheKey(source: id, target: destination, text: s, protectedWords: prot.tokens.map { "\($0.0)=\($0.1)" }, rules: rules)
-                    if memoryEligible { eligibleMemoryKeys.insert(key) }
+                    if memoryEligible && TranslationUnitPlanning.mayRemember(s, confirmed: display) {
+                        eligibleMemoryKeys.insert(key)
+                    }
                     let lookupStart = ProcessInfo.processInfo.systemUptime
                     var resolvedHit = bypassMemory ? nil : cache[key]
                     var diskHit = false

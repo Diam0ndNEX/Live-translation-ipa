@@ -25,6 +25,12 @@ enum MemoryUnitClassifier {
         let tokens = text.split(whereSeparator: { $0.isWhitespace })
         guard !tokens.isEmpty else { return .unknown }
         if tokens.count == 1 {
+            // A single-word utterance can be a complete subtitle ("Olá.",
+            // "Stop!"). Sentence punctuation is not noise.
+            if let last = text.last, ".!?。！？؟".contains(last),
+               !text.hasSuffix("...") {
+                return .sentence
+            }
             let acceptable = text.unicodeScalars.allSatisfy {
                 CharacterSet.letters.contains($0) || CharacterSet.nonBaseCharacters.contains($0) ||
                 $0 == "'" || $0 == "’" || $0 == "-"
