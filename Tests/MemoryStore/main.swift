@@ -290,6 +290,83 @@ import CryptoKit
         precondition(migratedHit.value == "Still saved",
                      "Existing confirmed translation must survive schema migration")
 
+        // v1.4.3: select 24+ entries in one indexed read, then commit all
+        // current-rule results atomically. One mismatched original rolls back
+        // *everything*, including newly inserted current translations.
+        let batchLegacyFile = root.appendingPathComponent("batch-legacy.json")
+        var batchImports: [String: String] = [:]
+        for i in 0..<30 {
+            batchImports["v2|pt>en|0:|Texto antigo \(i)"] = "Old translation \(i)"
+        }
+        try JSONEncoder().encode(batchImports).write(to: batchLegacyFile)
+        let batchStore = TranslationMemoryStore(directory:
+            root.appendingPathComponent("batch-validation-db"))
+        let originalBatch = try await batchStore.prepare(legacyURLs: [batchLegacyFile])
+        precondition(originalBatch.needsValidation == 30)
+        let firstPage = try await batchStore.nextLegacyIdleCandidates(
+            target: "en", selectedSource: "pt", after: 0, limit: 24)
+        precondition(firstPage.count == 24 &&
+                     Set(firstPage.map(\.id)).count == 24,
+                     "An indexed lookup must return 24 distinct old candidates")
+        let remainingPage = try await batchStore.nextLegacyIdleCandidates(
+            target: "en", selectedSource: "pt",
+            after: firstPage.last!.id, limit: 24)
+        precondition(remainingPage.count == 6,
+                     "The cursor must retrieve remaining entries without duplicates")
+        let batchConfirmations = firstPage.prefix(3).map {
+            TranslationMemoryStore.LegacyIdleConfirmation(
+                id: $0.id,
+                currentKey: "v4|\(rules)|pt>en|0:|\($0.text)",
+                freshOutput: "Fresh output for \($0.text)")
+        }
+        let malformedCommit = Array(batchConfirmations[0...1]) + [
+            .init(id: firstPage[2].id,
+                  currentKey: "v4|\(rules)|de>en|0:|\(firstPage[2].text)",
+                  freshOutput: "Wrong language")
+        ]
+        do {
+            _ = try await batchStore.confirmIdleLegacyBatch(
+                malformedCommit, revision: 1)
+            preconditionFailure("Mixed-language batch should roll back")
+        } catch MemoryStoreError.staleRevision { }
+        let untouchedBatch = try await batchStore.health()
+        precondition(untouchedBatch.needsValidation == 30 &&
+                     untouchedBatch.readyEntries == 0,
+                     "An invalid row must roll back every new translation")
+        let completedBatch = try await batchStore.confirmIdleLegacyBatch(
+            batchConfirmations, revision: 2)
+        precondition(completedBatch.readyEntries == 3 &&
+                     completedBatch.needsValidation == 27 &&
+                     completedBatch.legacySuperseded == 3,
+                     "All confirmed current-rule results must commit together")
+        let repeatedIDs = [batchConfirmations[0], batchConfirmations[0]]
+        do {
+            _ = try await batchStore.confirmIdleLegacyBatch(
+                repeatedIDs, revision: 3)
+            preconditionFailure("Duplicate IDs must not be committed twice")
+        } catch MemoryStoreError.invalidImport { }
+        let afterRejectedDuplicates = try await batchStore.health()
+        precondition(afterRejectedDuplicates.readyEntries == 3,
+                     "Rejected duplicate batch must not mutate durable memory")
+        #if MEMORY_FAULT_TESTING
+        let nextBatch = remainingPage.prefix(2).map {
+            TranslationMemoryStore.LegacyIdleConfirmation(
+                id: $0.id,
+                currentKey: "v4|\(rules)|pt>en|0:|\($0.text)",
+                freshOutput: "Retryable translation for \($0.text)")
+        }
+        await batchStore.injectStorageFull(afterSuccessfulInserts: 1)
+        do {
+            _ = try await batchStore.confirmIdleLegacyBatch(
+                nextBatch, revision: 4)
+            preconditionFailure("Simulated second insert must fail the entire batch")
+        } catch MemoryStoreError.storageFull { }
+        let afterBatchStorageFull = try await batchStore.health()
+        precondition(afterBatchStorageFull.readyEntries == 3 &&
+                     afterBatchStorageFull.needsValidation == 27,
+                     "Disk-full must preserve all original legacy and ready entries")
+        #endif
+
         // A partially unreadable legacy file must not be silently described as migrated.
         let damagedLegacy = root.appendingPathComponent("corrupt-legacy.json")
         try Data("{broken json".utf8).write(to: damagedLegacy)
