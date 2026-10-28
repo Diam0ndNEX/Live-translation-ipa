@@ -129,6 +129,12 @@ import SQLite3
         let cleared = try await reopened.prepare(legacyURLs: [legacy])
         precondition(cleared.totalEntries == 0, "Clear must not reimport legacy memory")
         precondition(FileManager.default.fileExists(atPath: legacy.path))
+        try await reopened.deletePreservedCopies(legacyURLs: [legacy, oldJSON])
+        precondition(!FileManager.default.fileExists(atPath: legacy.path))
+        precondition(!FileManager.default.fileExists(atPath: snapshotURL.path))
+        let purgedHealth = try await reopened.health()
+        precondition(purgedHealth.lastVerifiedBackup == nil,
+                     "Explicit purge must clear the recovery-backup indicator")
         print("SQLite migration, recovery, integrity checks, classification, revision barrier and clear/reopen passed")
     }
 }
