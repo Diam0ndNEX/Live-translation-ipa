@@ -258,8 +258,16 @@ import Foundation
         precondition(safeContinuity.settings["lowLatencyTranslation"] == "true" &&
                      safeContinuity.settings["directPiPBuffer"] == "false",
                      "Current model and PiP experiment flags must survive redacted exports")
-        var unsafeDistribution = continuityEvidence
-        unsafeDistribution.distributions["private subtitle text"] = DiagnosticDistribution([1.0])
+        let unsafeDistribution = DiagnosticSessionExport(
+            id: UUID(), startedAt: Date(), endedAt: Date(),
+            appVersion: "1.5.0", systemVersion: "test",
+            settings: ["lowLatencyTranslation": "true"], health: MemoryDiagnosticHealth(),
+            counters: [:],
+            distributions: [
+                "enqueueLatencyMs": DiagnosticDistribution([12.0]),
+                "private subtitle text": DiagnosticDistribution([1.0])
+            ],
+            events: [], measurementBoundary: "OCR through PiP enqueue", textCapture: false)
         let safeDistribution = try await writer.decode(try await writer.encode(unsafeDistribution))
         precondition(safeDistribution.distributions["private subtitle text"] == nil,
                      "Dynamic metric labels must not bypass the privacy allowlist")
