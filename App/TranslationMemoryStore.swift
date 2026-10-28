@@ -15,6 +15,7 @@ struct MemoryStoreHealth: Codable, Sendable {
     var importedEntries = 0
     var duplicateEntries = 0
     var categoryCounts: [String: Int] = [:]
+    var lastVerifiedBackup: String? = nil
 }
 
 struct MemoryLookupResult: Sendable {
@@ -396,6 +397,7 @@ actor TranslationMemoryStore {
             counts[text(categories, 0)] = Int(sqlite3_column_int64(categories, 1))
         }
         status.categoryCounts = counts
+        status.lastVerifiedBackup = try metadata("last_verified_backup")
         status.databaseBytes = ["memory.sqlite","memory.sqlite-wal","memory.sqlite-shm"].reduce(0) {
             $0 + ((try? FileManager.default.attributesOfItem(atPath: directory.appendingPathComponent($1).path)[.size] as? NSNumber)?.int64Value ?? 0)
         }
@@ -409,6 +411,49 @@ actor TranslationMemoryStore {
         guard sqlite3_step(foreign) == SQLITE_DONE else { throw MemoryStoreError.integrityFailure }
         status.integrity = "ok"
         return "ok"
+    }
+
+    /// Make a consistent SQLite snapshot without copying live WAL/SHM files.
+    /// This maintenance operation is explicit and never runs in the OCR path.
+    /// Restore is intentionally not automatic: a newer active DB may contain
+    /// confirmations made after this snapshot.
+    func createRecoverySnapshot() throws -> String {
+        guard active else { throw MemoryStoreError.unavailable }
+        let recovery = directory.appendingPathComponent("recovery", isDirectory: true)
+        try FileManager.default.createDirectory(at: recovery, withIntermediateDirectories: true)
+        let identifier = UUID().uuidString
+        let staging = recovery.appendingPathComponent(".pending-" + identifier + ".sqlite")
+        let destination = recovery.appendingPathComponent("memory-" + identifier + ".sqlite")
+        do {
+            try execute("VACUUM INTO ?", [.text(staging.path)])
+            var snapshot: OpaquePointer?
+            let opened = sqlite3_open_v2(staging.path, &snapshot,
+                SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil)
+            guard opened == SQLITE_OK, let snapshot else {
+                if let snapshot { sqlite3_close_v2(snapshot) }
+                throw MemoryStoreError.backupFailed
+            }
+            var validation: OpaquePointer?
+            let prepared = sqlite3_prepare_v2(snapshot, "PRAGMA quick_check", -1, &validation, nil)
+            guard prepared == SQLITE_OK, let validation else {
+                if let validation { sqlite3_finalize(validation) }
+                sqlite3_close_v2(snapshot)
+                throw MemoryStoreError.backupFailed
+            }
+            let valid = sqlite3_step(validation) == SQLITE_ROW && text(validation, 0) == "ok"
+            sqlite3_finalize(validation)
+            sqlite3_close_v2(snapshot)
+            guard valid else { throw MemoryStoreError.backupFailed }
+            try FileManager.default.moveItem(at: staging, to: destination)
+            let timestamp = ISO8601DateFormatter().string(from: Date())
+            try setMetadata("last_verified_backup", timestamp)
+            status.lastVerifiedBackup = timestamp
+            return destination.lastPathComponent
+        } catch {
+            // A failed snapshot must never touch memory.sqlite or its WAL.
+            try? FileManager.default.removeItem(at: staging)
+            throw error
+        }
     }
 
     func clear(revision: Int) throws {
