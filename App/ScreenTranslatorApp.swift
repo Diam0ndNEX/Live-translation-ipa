@@ -55,6 +55,9 @@ struct RootView: View {
         .onChange(of: privateSession) { _, _ in engine.diag.clearSpeakers() }
         .onChange(of: showSessionSpeakers) { _, _ in engine.diag.clearSpeakers() }
         .onChange(of: coolMode) { _, _ in engine.powerPolicyChanged() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
+            engine.handleMemoryPressure()
+        }
         .onChange(of: phase) { _, p in
             engine.diag.noteExecutionPhase(p == .active ? "active" : (p == .background ? "background" : "inactive"), pipActive: engine.pipActive)
             if p == .active { engine.server.start() }
