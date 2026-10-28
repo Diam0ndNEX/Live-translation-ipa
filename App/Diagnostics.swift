@@ -219,6 +219,14 @@ final class Diagnostics: ObservableObject {
     private var intervalStart = Date()
     private var intervalBaseline: [String: Int] = [:]
     private var intervalHistory: [DiagnosticIntervalBucket] = []
+    // Independent 1s and 5s buckets preserve timing distributions from the
+    // actual samples. Never average medians from smaller buckets.
+    private var oneSecondStart = Date()
+    private var oneSecondBaseline: [String: Int] = [:]
+    private var oneSecondHistory: [DiagnosticIntervalBucket] = []
+    private var fiveSecondStart = Date()
+    private var fiveSecondBaseline: [String: Int] = [:]
+    private var fiveSecondHistory: [DiagnosticIntervalBucket] = []
     private var openingEvents: [StructuredDiagnosticEvent] = []
     private var earlyEventsSeen = 0
     private var eventTotals: [String: Int] = [:]
@@ -567,6 +575,8 @@ final class Diagnostics: ObservableObject {
                 }.compactMap(\.durationMs))],
             events: exportEventWindow(),
             intervals: diagnosticIntervals(at: Date()),
+            oneSecondIntervals: detailedCollection ? recentIntervals(at: Date(), period: 1) : nil,
+            fiveSecondIntervals: diagnosticIntervals(at: Date(), period: 5),
             measurementBoundary: "First OCR sighting to PiP sample-buffer enqueue; physical display unmeasured. Distributions use the latest bounded samples within this session, not all-time aggregates. Stages can overlap.",
             textCapture: false)
     }
@@ -751,8 +761,11 @@ final class Diagnostics: ObservableObject {
         diagnosticSessionID = UUID(); candidateIDs = [:]; frameIDs = [:]; unitIDs = [:]; structuredEvents = []
         legacyValidationSnapshot = [:]; legacyValidationPair = [:]
         eventTotals = [:]; intervalHistory = []; intervalStart = Date()
+        oneSecondHistory = []; oneSecondStart = Date()
+        fiveSecondHistory = []; fiveSecondStart = Date()
         openingEvents = []; earlyEventsSeen = 0
-        intervalBaseline = [:]; lastCaptureConnected = false
+        intervalBaseline = [:]; oneSecondBaseline = [:]; fiveSecondBaseline = [:]
+        lastCaptureConnected = false
         lastRecordedThermalState = nil
         memoryOutcomes = [:]; lookupSamples = []; writeSamples = []
         started = Date()
@@ -848,9 +861,35 @@ final class Diagnostics: ObservableObject {
             lastState = st
         }
         lastCaptureConnected = alive
-        if Date().timeIntervalSince(intervalStart) >= 15 {
-            let now = Date()
-            if let completed = makeInterval(at: now) {
+        let now = Date()
+        // Fine-grained data is bounded: latest 5 minutes at 1s, latest
+        // 15 minutes at 5s; 15s buckets remain for long sessions/old readers.
+        if detailedCollection && now.timeIntervalSince(oneSecondStart) >= 1 {
+            if let completed = makeInterval(at: now, start: oneSecondStart, baseline: oneSecondBaseline) {
+                oneSecondHistory.append(completed)
+                if oneSecondHistory.count > 300 {
+                    oneSecondHistory.removeFirst(oneSecondHistory.count - 300)
+                }
+            }
+            oneSecondStart = now
+            oneSecondBaseline = cumulativeCounters()
+        } else if !detailedCollection {
+            oneSecondHistory = []
+            oneSecondStart = now
+            oneSecondBaseline = cumulativeCounters()
+        }
+        if now.timeIntervalSince(fiveSecondStart) >= 5 {
+            if let completed = makeInterval(at: now, start: fiveSecondStart, baseline: fiveSecondBaseline) {
+                fiveSecondHistory.append(completed)
+                if fiveSecondHistory.count > 180 {
+                    fiveSecondHistory.removeFirst(fiveSecondHistory.count - 180)
+                }
+            }
+            fiveSecondStart = now
+            fiveSecondBaseline = cumulativeCounters()
+        }
+        if now.timeIntervalSince(intervalStart) >= 15 {
+            if let completed = makeInterval(at: now, start: intervalStart, baseline: intervalBaseline) {
                 intervalHistory.append(completed)
                 if intervalHistory.count > 960 { intervalHistory.removeFirst(intervalHistory.count - 960) }
             }
@@ -919,18 +958,19 @@ final class Diagnostics: ObservableObject {
         ]
     }
 
-    private func makeInterval(at now: Date) -> DiagnosticIntervalBucket? {
-        let elapsed = now.timeIntervalSince(intervalStart)
+    private func makeInterval(at now: Date, start: Date,
+                              baseline: [String: Int]) -> DiagnosticIntervalBucket? {
+        let elapsed = now.timeIntervalSince(start)
         guard elapsed > 0 else { return nil }
         let current = cumulativeCounters()
         var delta = current.reduce(into: [String: Int]()) { result, entry in
-            result[entry.key] = max(0, entry.value - intervalBaseline[entry.key, default: 0])
+            result[entry.key] = max(0, entry.value - baseline[entry.key, default: 0])
         }
-        let ocrTimes = ocr.filter { $0.t >= intervalStart && $0.t <= now }.map(\.v)
-        let translationTimes = translate.filter { $0.t >= intervalStart && $0.t <= now }.map(\.v)
-        let enqueueTimes = latency.filter { $0.t >= intervalStart && $0.t <= now }.map(\.v)
+        let ocrTimes = ocr.filter { $0.t >= start && $0.t <= now }.map(\.v)
+        let translationTimes = translate.filter { $0.t >= start && $0.t <= now }.map(\.v)
+        let enqueueTimes = latency.filter { $0.t >= start && $0.t <= now }.map(\.v)
         let modelTimes = structuredEvents.filter {
-            $0.timestamp >= intervalStart && $0.timestamp <= now &&
+            $0.timestamp >= start && $0.timestamp <= now &&
             $0.stage == "model_state" && $0.reasonCode == "model_batch_completed"
         }.compactMap(\.durationMs)
         delta["ocrMeasurementCount"] = ocrTimes.count
@@ -948,7 +988,7 @@ final class Diagnostics: ObservableObject {
         case .critical: thermal = 3
         @unknown default: thermal = 0
         }
-        return DiagnosticIntervalBucket(startedAt: intervalStart,
+        return DiagnosticIntervalBucket(startedAt: start,
             elapsedSeconds: min(1800, elapsed), counters: delta,
             thermalLevel: thermal,
             lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled,
@@ -965,8 +1005,25 @@ final class Diagnostics: ObservableObject {
 
     private func diagnosticIntervals(at now: Date) -> [DiagnosticIntervalBucket] {
         var all = intervalHistory
-        if let current = makeInterval(at: now) { all.append(current) }
+        if let current = makeInterval(at: now, start: intervalStart, baseline: intervalBaseline) {
+            all.append(current)
+        }
         return Array(all.suffix(960))
+    }
+
+    private func recentIntervals(at now: Date, period: Int) -> [DiagnosticIntervalBucket] {
+        let isOneSecond = period == 1
+        let start = isOneSecond ? oneSecondStart : fiveSecondStart
+        let baseline = isOneSecond ? oneSecondBaseline : fiveSecondBaseline
+        var all = isOneSecond ? oneSecondHistory : fiveSecondHistory
+        if let current = makeInterval(at: now, start: start, baseline: baseline) {
+            all.append(current)
+        }
+        return Array(all.suffix(isOneSecond ? 300 : 180))
+    }
+
+    private func diagnosticIntervals(at now: Date, period: Int) -> [DiagnosticIntervalBucket] {
+        recentIntervals(at: now, period: period)
     }
 
     private func sampleDevice(alive: Bool) {
