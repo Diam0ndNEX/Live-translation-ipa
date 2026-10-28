@@ -2,6 +2,7 @@
 import SwiftUI
 import Charts
 import os
+import Darwin
 
 // MARK: - Models
 struct Sample: Identifiable {
@@ -168,6 +169,15 @@ struct Stats {
 // MARK: - Recorder
 @MainActor
 final class Diagnostics: ObservableObject {
+    private static var hardwareModelCode: String {
+        var machine = utsname()
+        _ = uname(&machine)
+        // The hw.machine family code is not a device name or unique identifier.
+        return withUnsafeBytes(of: &machine.machine) { bytes in
+            String(decoding: bytes.prefix(while: { $0 != 0 }), as: UTF8.self)
+        }
+    }
+
     @Published var s = Stats()
     @Published var ocr: [Sample] = []
     @Published var translate: [Sample] = []
@@ -346,7 +356,7 @@ final class Diagnostics: ObservableObject {
         counters["supersededSpeculativePipelines"] = s.specDiscarded
         return DiagnosticSessionExport(id: diagnosticSessionID, startedAt: started, endedAt: Date(),
             appVersion: AppVersion.full, systemVersion: UIDevice.current.systemVersion,
-            settings: settings, health: memoryHealth, counters: counters,
+            hardwareModel: Self.hardwareModelCode, settings: settings, health: memoryHealth, counters: counters,
             distributions: ["memoryLookupMs": DiagnosticDistribution(lookupSamples), "memoryWriteMs": DiagnosticDistribution(writeSamples),
                 "ocrMs": DiagnosticDistribution(ocr.map { $0.v }), "translationMs": DiagnosticDistribution(translate.map { $0.v }),
                 "enqueueLatencyMs": DiagnosticDistribution(latency.map { $0.v })],
