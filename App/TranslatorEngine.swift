@@ -253,6 +253,7 @@ final class TranslatorEngine: ObservableObject {
     private var lastSpecText = ""
     private var lastWarm = Date.distantPast
     private var lastUnresolvedWarmupNotice = Date.distantPast
+    private var startupWarmupTask: Task<Void, Never>?
     let memoryStore = TranslationMemoryStore(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ScreenLingo/TranslationMemory", isDirectory: true))
     @Published var memoryHealth: MemoryStoreHealth?
     @Published var memoryPendingWrites = 0
@@ -363,7 +364,10 @@ final class TranslatorEngine: ObservableObject {
         presets.applyStartup()
         diag.log("App started \(AppVersion.full)")
         diag.noteRuntimeState("app_started")
-        Task { await prewarm() } // Prepare a recent source pair before capture, when possible.
+        startupWarmupTask = Task { [weak self] in
+            await self?.prewarm()
+            self?.startupWarmupTask = nil
+        } // Prepare a recent source pair before capture, when possible.
     }
 
     private func tick() {
@@ -752,6 +756,8 @@ final class TranslatorEngine: ObservableObject {
         diag.onPacket(p, transport: p.ts.map { max(0, now.timeIntervalSince1970 - $0) * 1000 })
 
         if !wasAlive {
+            startupWarmupTask?.cancel() // Live capture takes priority over idle prewarming.
+            startupWarmupTask = nil
             idleValidationTask?.cancel()
             idleValidationTask = nil
             sessionStarted = now
@@ -2429,8 +2435,14 @@ final class TranslatorEngine: ObservableObject {
         if predicted { diag.noteModelState("warmup_predicted_source") }
         let session = TranslationSession(installedSource: src, target: target)
         let warmed = await runBatch(session, [word])
+        guard !Task.isCancelled, workContext == contextRevision else {
+            warmupStatus = "Deferred for live translation"
+            diag.noteModelState("warmup_preempted")
+            return
+        }
         warmupLastDurationMs = Date().timeIntervalSince(t0) * 1000
-        warmupStatus = warmed == nil ? "Warm-up failed" : "Ready"
+        warmupStatus = warmed == nil ? "Warm-up failed" :
+            (predicted ? "Predicted source prepared" : "Ready")
         diag.noteModelState(warmed == nil ? "warmup_failed" : "warmup_succeeded",
             durationMs: Date().timeIntervalSince(t0) * 1000)
         if warmed != nil, !busy, workContext == contextRevision,
