@@ -625,6 +625,98 @@ actor TranslationMemoryStore {
         return try health()
     }
 
+    /// Explicit, offline repair for an unreadable database. Never invoked by the
+    /// translation pipeline. The damaged DB plus its WAL/SHM are moved together
+    /// into a retained quarantine; a verified snapshot becomes the active store.
+    /// Writes newer than the selected snapshot remain recoverable only from the
+    /// quarantined files, so the UI must disclose that limitation.
+    func recoverUnavailableStore(named name: String) throws -> MemoryStoreHealth {
+        guard !active else { throw MemoryStoreError.unavailable }
+        guard try recoverySnapshots().contains(name) else { throw MemoryStoreError.sourceUnreadable }
+        let recovery = directory.appendingPathComponent("recovery", isDirectory: true)
+        let snapshot = recovery.appendingPathComponent(name)
+
+        func verified(_ url: URL) -> Bool {
+            var handle: OpaquePointer?
+            guard sqlite3_open_v2(url.path, &handle,
+                    SQLITE_OPEN_READONLY | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK,
+                    let handle else {
+                if let handle { sqlite3_close_v2(handle) }
+                return false
+            }
+            defer { sqlite3_close_v2(handle) }
+            func value(_ sql: String) -> String? {
+                var query: OpaquePointer?
+                guard sqlite3_prepare_v2(handle, sql, -1, &query, nil) == SQLITE_OK,
+                      let query else { return nil }
+                defer { sqlite3_finalize(query) }
+                guard sqlite3_step(query) == SQLITE_ROW else { return nil }
+                guard let bytes = sqlite3_column_text(query, 0) else { return nil }
+                return String(cString: bytes)
+            }
+            return value("PRAGMA quick_check") == "ok" &&
+                   value("PRAGMA user_version") == String(Self.schemaVersion)
+        }
+        guard verified(snapshot) else { throw MemoryStoreError.backupFailed }
+
+        let temp = directory.appendingPathComponent(".restoring-" + UUID().uuidString + ".sqlite")
+        try FileManager.default.copyItem(at: snapshot, to: temp)
+        guard verified(temp) else {
+            try? FileManager.default.removeItem(at: temp)
+            throw MemoryStoreError.backupFailed
+        }
+        // A failed open can leave an inactive SQLite connection. No file move
+        // is allowed until it has closed successfully.
+        if let db {
+            guard sqlite3_close(db) == SQLITE_OK else {
+                try? FileManager.default.removeItem(at: temp)
+                throw MemoryStoreError.databaseOperation
+            }
+            self.db = nil
+        }
+
+        let quarantine = recovery.appendingPathComponent("unhealthy-" + UUID().uuidString,
+                                                           isDirectory: true)
+        try FileManager.default.createDirectory(at: quarantine,
+                                                withIntermediateDirectories: true)
+        let names = ["memory.sqlite", "memory.sqlite-wal", "memory.sqlite-shm"]
+        var moved: [(original: URL, preserved: URL)] = []
+        do {
+            for filename in names {
+                let original = directory.appendingPathComponent(filename)
+                guard FileManager.default.fileExists(atPath: original.path) else { continue }
+                let preserved = quarantine.appendingPathComponent(filename)
+                try FileManager.default.moveItem(at: original, to: preserved)
+                moved.append((original, preserved))
+            }
+            try FileManager.default.moveItem(
+                at: temp, to: directory.appendingPathComponent("memory.sqlite"))
+            let health = try prepare(legacyURLs: [])
+            status.migrationStatus = "restored_from_snapshot"
+            try setMetadata("migration_status", status.migrationStatus)
+            return try self.health()
+        } catch {
+            active = false
+            if let db {
+                sqlite3_close_v2(db)
+                self.db = nil
+            }
+            let newDatabase = directory.appendingPathComponent("memory.sqlite")
+            if FileManager.default.fileExists(atPath: newDatabase.path) {
+                try? FileManager.default.moveItem(
+                    at: newDatabase,
+                    to: quarantine.appendingPathComponent("uncommitted-restoration.sqlite"))
+            }
+            for entry in moved.reversed() where
+                FileManager.default.fileExists(atPath: entry.preserved.path) &&
+                !FileManager.default.fileExists(atPath: entry.original.path) {
+                try? FileManager.default.moveItem(at: entry.preserved, to: entry.original)
+            }
+            try? FileManager.default.removeItem(at: temp)
+            throw error
+        }
+    }
+
     func deletePreservedCopies(legacyURLs: [URL]) throws {
         guard active else { throw MemoryStoreError.unavailable }
         // Enforce the destructive operation's precondition at the storage boundary,
