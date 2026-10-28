@@ -25,6 +25,7 @@ struct MemoryManagementView: View {
                     LabeledContent("Needs validation", value: String(h.needsValidation))
                     LabeledContent("Conflicts", value: String(h.conflicts))
                     LabeledContent("Database", value: ByteCountFormatter.string(fromByteCount: h.databaseBytes, countStyle: .file))
+                    LabeledContent("Last verified backup", value: h.lastVerifiedBackup ?? "None")
                 }
                 if let h = engine.memoryHealth, !h.categoryCounts.isEmpty {
                     ForEach(h.categoryCounts.keys.sorted(), id: \.self) { category in
@@ -59,6 +60,18 @@ struct MemoryManagementView: View {
                 Text("Memory exports contain source and translated text. Choose where to save them.").font(.footnote)
             }
             Section("Maintenance") {
+                Button(transferBusy ? "Preparing snapshot…" : "Create recovery snapshot") {
+                    transferBusy = true
+                    Task {
+                        defer { transferBusy = false }
+                        do {
+                            _ = try await engine.memoryStore.createRecoverySnapshot()
+                            await engine.refreshMemoryHealth()
+                            message = "Verified recovery snapshot created. Existing memory preserved."
+                        } catch { message = "Recovery snapshot failed; existing memory unchanged" }
+                    }
+                }.disabled(transferBusy)
+                Text("Snapshots protect stored memory, but restoring an older snapshot can omit newer translations. No automatic rollback is performed.").font(.footnote)
                 Button("Clear RAM cache") { engine.clearRAMCache() }
                 Button("Verify integrity") {
                     Task {
