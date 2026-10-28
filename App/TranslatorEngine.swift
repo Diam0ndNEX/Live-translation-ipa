@@ -739,7 +739,8 @@ final class TranslatorEngine: ObservableObject {
             // Tentative OCR jitter must never cancel a previously confirmed subtitle.
             // Its confirmed replacement can still supersede outdated work.
             guard SubtitleAcquisitionPolicy.shouldSupersedeActive(
-                activeConfirmed: activeCandidateConfirmed, incomingConfirmed: confirmed) else {
+                activeConfirmed: activeCandidateConfirmed, activePresented: activeCandidatePresented,
+                incomingConfirmed: confirmed) else {
                 if diag.enabled { diag.s.deferredEarlyCandidates += 1 }
                 diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
                     stage: "stability", reason: "deferred_early_candidate")
