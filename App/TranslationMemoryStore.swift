@@ -518,8 +518,9 @@ actor TranslationMemoryStore {
 
     /// The caller supplies only confirmed eligible results. Return means COMMIT has
     /// succeeded. A failed transaction leaves every prior translation untouched.
-    /// independentlyConfirmedKeys come only from actual current-model results
-    /// (not speculative, RAM, disk, or imported cache hits).
+    /// independentlyConfirmedKeys come only from current-model results that
+    /// reached confirmed OCR (including an exact-match speculative result after
+    /// confirmation), never from ordinary RAM, disk or imported memory hits.
     func save(_ entries: [String:String], revision: Int,
               independentlyConfirmedKeys: Set<String> = []) throws -> MemoryStoreHealth {
         guard active else { throw MemoryStoreError.unavailable }
