@@ -230,6 +230,8 @@ final class TranslatorEngine: ObservableObject {
     @Published var memoryFailure: String?
     private var pendingMemory: [String: String] = [:]
     private var memorySaving = false
+    private var memoryMutationInProgress = false
+    private var memoryRetryAttempts = 0
     private var memoryReady = false
     private var cacheUse: [String: UInt64] = [:]
     private var cacheClock: UInt64 = 0
@@ -1533,7 +1535,7 @@ final class TranslatorEngine: ObservableObject {
     }
 
     func saveMemory(force: Bool = false) {
-        guard memoryReady, !memorySaving, !pendingMemory.isEmpty else { return }
+        guard memoryReady, !memorySaving, !memoryMutationInProgress, !pendingMemory.isEmpty else { return }
         memorySaving = true
         let snapshot = pendingMemory
         memoryRevision += 1
@@ -1541,8 +1543,10 @@ final class TranslatorEngine: ObservableObject {
         Task { [weak self] in
             guard let self else { return }
             let writeStart = ProcessInfo.processInfo.systemUptime
+            var committed = false
             do {
                 self.memoryHealth = try await self.memoryStore.save(snapshot, revision: revision)
+                committed = true
                 if self.memoryRevision == revision {
                     for (key, value) in snapshot where self.pendingMemory[key] == value { self.pendingMemory[key] = nil }
                 }
@@ -1555,7 +1559,20 @@ final class TranslatorEngine: ObservableObject {
             self.memorySaving = false
             self.memoryPendingWrites = self.pendingMemory.count
             self.memoryDirty = !self.pendingMemory.isEmpty
+            if committed { self.memoryRetryAttempts = 0 }
             await self.refreshMemoryHealth()
+            guard !self.pendingMemory.isEmpty else { return }
+            if committed {
+                // Confirmations queued during the previous commit must not get stranded.
+                self.saveMemory(force: true)
+            } else if self.memoryRetryAttempts < 3 {
+                self.memoryRetryAttempts += 1
+                let delay: UInt64 = [2, 5, 15][self.memoryRetryAttempts - 1] * 1_000_000_000
+                Task { [weak self] in
+                    try? await Task.sleep(nanoseconds: delay)
+                    self?.saveMemory(force: true)
+                }
+            }
         }
     }
 
@@ -1584,19 +1601,26 @@ final class TranslatorEngine: ObservableObject {
     }
 
     func removeMemoryEntries(ids: [Int64]) async throws {
-        guard !memorySaving, pendingMemory.isEmpty else { throw MemoryStoreError.unavailable }
+        guard memoryReady, !memorySaving, !memoryMutationInProgress, pendingMemory.isEmpty
+        else { throw MemoryStoreError.unavailable }
+        memoryMutationInProgress = true
+        defer {
+            memoryMutationInProgress = false
+            saveMemory(force: true)
+        }
         clearRAMCache()
         try await memoryStore.delete(ids: ids)
         await refreshMemoryHealth()
     }
 
     func clearMemory() {
-        // Never discard uncommitted confirmed translations to perform a clear.
-        // The user can retry after the persistence queue has drained.
-        guard memoryReady, !memorySaving, pendingMemory.isEmpty else {
+        // A clear is a barrier: writes queued after it begins can only commit
+        // after SQLite confirms the deletion. Never silently drop queued results.
+        guard memoryReady, !memoryMutationInProgress, !memorySaving, pendingMemory.isEmpty else {
             memoryFailure = "Wait for pending memory writes before deleting"
             return
         }
+        memoryMutationInProgress = true
         clearRAMCache()
         memoryRevision += 1
         let revision = memoryRevision
@@ -1607,7 +1631,12 @@ final class TranslatorEngine: ObservableObject {
                 await refreshMemoryHealth()
                 memoryFailure = nil
                 toast("Translation memory cleared")
-            } catch { memoryFailure = "Memory could not be cleared" }
+            } catch {
+                memoryFailure = "Memory could not be cleared"
+            }
+            memoryMutationInProgress = false
+            // New confirmations received during the clear remain pending.
+            saveMemory(force: true)
         }
     }
 
