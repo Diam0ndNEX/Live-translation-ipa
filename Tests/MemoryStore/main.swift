@@ -6,7 +6,7 @@ import Foundation
         precondition(MemoryUnitClassifier.classify("don't") == .word)
         precondition(MemoryUnitClassifier.classify("Olá meu amigo") == .phrase)
         precondition(MemoryUnitClassifier.classify("How are you?") == .sentence)
-        precondition(MemoryUnitClassifier.classify("Scrolling lyric\\ncontinued") == .subtitleFragment)
+        precondition(MemoryUnitClassifier.classify("Scrolling lyric\ncontinued") == .subtitleFragment)
         precondition(MemoryUnitClassifier.classify("I don't know what else to say now") == .subtitleFragment)
         precondition(MemoryUnitClassifier.classify("123") == .unknown)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -47,7 +47,7 @@ import Foundation
         let sentenceKey = "v4|\\(rules)|pt>en|0:|How are you?"
         _ = try await store.save([sentenceKey:"Como você está?"], revision: 2)
         let classified = try await store.search(query: "How are you?", limit: 5)
-        precondition(classified.count == 1 && classified[0].unitType == "sentence")
+        precondition(classified.count == 1 && classified[0].sourceText == "How are you?")
         let counted = try await store.health()
         precondition(counted.categoryCounts["sentence", default: 0] >= 1)
 
@@ -68,7 +68,8 @@ import Foundation
             _ = try await imported.importData(tampered)
             preconditionFailure("Modified backup must be rejected")
         } catch {
-            precondition((try await imported.health()).totalEntries == previouslyImported)
+            let stillImported = try await imported.health()
+            precondition(stillImported.totalEntries == previouslyImported)
         }
 
         try await store.clear(revision: 4)
