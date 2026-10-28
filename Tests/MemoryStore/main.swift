@@ -58,7 +58,7 @@ import Foundation
         let imported = TranslationMemoryStore(directory: root.appendingPathComponent("roundtrip"))
         _ = try await imported.prepare(legacyURLs: [])
         let importedHealth = try await imported.importData(exported)
-        precondition(importedHealth.totalEntries == 2)
+        precondition(importedHealth.totalEntries == 3)
         // A changed export must fail checksum verification without touching the store.
         var tampered = exported
         let original = Data("Alternative".utf8), replacement = Data("Mischievous".utf8)
