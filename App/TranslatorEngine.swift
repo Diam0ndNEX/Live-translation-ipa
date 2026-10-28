@@ -225,6 +225,7 @@ final class TranslatorEngine: ObservableObject {
     private var activeCandidatePresented = false
     private var activeCandidateConfirmedAt = Date.distantPast
     private var deferredConfirmedPacket: Packet?
+    private var confirmedHandoffDeadlineTask: Task<Void, Never>?
     private var deferredConfirmedReceivedAt = Date.distantPast
     private var speculationOpportunity = 0
     private var specPacket: Packet?
@@ -780,7 +781,12 @@ final class TranslatorEngine: ObservableObject {
         if p.kind == "ping" { syncConfig(); return }          // keeps the extension's settings fresh
         if paused || manualMode { return }
         if let rev = p.rev, rev != rotRev { return }
-        if p.kind == "clear" { invalidatePending(); latestBlocks = []; handleClear(); return }
+        if p.kind == "clear" {
+            deferredConfirmedPacket = nil
+            confirmedHandoffDeadlineTask?.cancel()
+            confirmedHandoffDeadlineTask = nil
+            invalidatePending(); latestBlocks = []; handleClear(); return
+        }
         guard p.kind == "ocr" else { return }
         if diag.detailedCollection {
             diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
@@ -814,6 +820,18 @@ final class TranslatorEngine: ObservableObject {
             // be lost, but a previous confirmed caption gets a 450ms chance.
             deferredConfirmedPacket = p
             deferredConfirmedReceivedAt = now
+            confirmedHandoffDeadlineTask?.cancel()
+            let untilDeadline = max(0.01, 0.47 - now.timeIntervalSince(activeCandidateConfirmedAt))
+            confirmedHandoffDeadlineTask = Task { [weak self] in
+                try? await Task.sleep(for: .seconds(untilDeadline))
+                guard let self, !Task.isCancelled,
+                      let pending = self.deferredConfirmedPacket else { return }
+                self.deferredConfirmedPacket = nil
+                self.confirmedHandoffDeadlineTask = nil
+                // Once the 450ms protection window has elapsed, supersession
+                // follows the existing confirmed candidate freshness logic.
+                self.handle(pending)
+            }
             if diag.enabled { diag.s.confirmedHandoffDeferred += 1 }
             diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
                 stage: "stability", reason: "confirmed_handoff_deferred")
@@ -842,6 +860,8 @@ final class TranslatorEngine: ObservableObject {
             activeCandidateConfirmed = confirmed; activeCandidatePresented = false
             activeCandidateConfirmedAt = confirmed ? now : .distantPast
             deferredConfirmedPacket = nil
+            confirmedHandoffDeadlineTask?.cancel()
+            confirmedHandoffDeadlineTask = nil
             clearTask?.cancel(); clearTask = nil
             generation += 1
             cancelPresentation()
@@ -1230,6 +1250,8 @@ final class TranslatorEngine: ObservableObject {
     private func replayDeferredConfirmedIfPossible() {
         guard !busy, !waitingToDisplay, let packet = deferredConfirmedPacket else { return }
         deferredConfirmedPacket = nil
+        confirmedHandoffDeadlineTask?.cancel()
+        confirmedHandoffDeadlineTask = nil
         guard !paused, !manualMode, captureAlive,
               Date().timeIntervalSince(deferredConfirmedReceivedAt) < 1.2 else { return }
         handle(packet)
