@@ -1402,7 +1402,14 @@ final class TranslatorEngine: ObservableObject {
                                                                   durationMs: (ProcessInfo.processInfo.systemUptime - lookupStart) * 1000,
                                                                   candidate: currentPacket?.candidateID,
                                                                   frameIndex: currentPacket?.frames, unitKey: key) }
-                            if memoryEligible && confirmedKeys.insert(key).inserted { queueMemory(key, hit) }
+                            // A speculative result was produced by the current on-device
+                            // model, not by historical memory. Once this exact key is
+                            // independently confirmed by stable OCR, it is safe to use
+                            // as evidence for lazy legacy reconciliation without another
+                            // model call. Ordinary RAM/SQLite hits remain untrusted proof.
+                            if memoryEligible && confirmedKeys.insert(key).inserted {
+                                queueMemory(key, hit, independentlyConfirmed: speculativeHit)
+                            }
                             if diag.enabled {
                                 if speculativeHit { diag.s.specHits += 1 }
                                 else if savedHit { diag.s.savedHits += 1 }
