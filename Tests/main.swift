@@ -442,3 +442,25 @@ check(LegacyAssociation.classify(old: "I love you", new: "I hate you") == .none,
 check(LegacyAssociation.classify(old: "They'll never know", new: "They will never know") == .none,
       "Expansions that change words are not automatically equivalent")
 print("Conservative legacy discovery regressions passed")
+
+
+// v1.4.3 — batching accelerates work without opening one model per entry.
+let entries = (0..<50).map { i in
+    IdleLegacyWorkItem(id: Int64(i), source: i < 35 ? "pt" : "es", text: "Sentence \(i)")
+}
+let twoSources = IdleLegacyBatchPolicy.chunks(entries, limit: 48)
+check(twoSources.map { $0.items.count } == [12, 12, 11, 12, 1],
+      "48 entries must split into bounded same-source chunks")
+check(twoSources.allSatisfy { chunk in chunk.items.allSatisfy { $0.source == chunk.source } },
+      "A chunk may never mix language pairs")
+check(twoSources.flatMap(\.items).map(\.id) == Array(0..<48).map(Int64.init),
+      "Batching must preserve each ID exactly once")
+check(IdleLegacyBatchPolicy.chunks(entries, limit: 1000).flatMap(\.items).count == 50,
+      "A caller cannot cause unbounded validation")
+check(IdleLegacyBatchPolicy.concurrency(thermalFair: false) == 2 &&
+      IdleLegacyBatchPolicy.concurrency(thermalFair: true) == 1,
+      "Thermal Fair lowers worker count")
+check(IdleLegacyBatchPolicy.cooldownSeconds(thermalFair: true) >
+      IdleLegacyBatchPolicy.cooldownSeconds(thermalFair: false),
+      "Warm devices receive a longer cooldown")
+print("Adaptive legacy batch plan checks passed")
