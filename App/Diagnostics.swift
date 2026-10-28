@@ -569,13 +569,14 @@ final class Diagnostics: ObservableObject {
             // These are extension-reported OCR packet timings, not inferred
             // physical screen-display latency or unobserved pre-OCR stages.
             if detailedCollection, let ocrDuration = p.ocrMs, ocrDuration >= 0 {
-                notePipelineDecision(candidate: p.candidateID,
+                appendStructured(candidate: stableCandidateID(p.candidateID),
                     frameIndex: p.frames, stage: "ocr_execution",
-                    reason: "completed", durationMs: ocrDuration)
+                    outcome: "completed", reason: "completed", durationMs: ocrDuration)
             }
             if detailedCollection, p.orient != nil {
-                notePipelineDecision(candidate: p.candidateID,
-                    frameIndex: p.frames, stage: "rotation", reason: "accepted")
+                appendStructured(candidate: stableCandidateID(p.candidateID),
+                    frameIndex: p.frames, stage: "rotation",
+                    outcome: "accepted", reason: "accepted")
             }
         } else if p.kind == "clear" {
             s.clearPackets += 1
