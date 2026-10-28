@@ -102,14 +102,67 @@ struct DiagnosticSessionExport: Codable, Identifiable {
 
 /// Encoding, disk I/O and decode validation run away from the UI actor.
 actor DiagnosticExportWriter {
+    /// Defense in depth: diagnostic event labels are fixed reason codes, never
+    /// raw OCR or translated text, even if a future producer calls us incorrectly.
+    private func redact(_ snapshot: DiagnosticSessionExport) -> DiagnosticSessionExport {
+        let stageCodes: Set<String> = [
+            "memory", "segmentation", "first OCR", "seen", "confirmed", "processing",
+            "speculating", "cache", "ready", "enqueued", "superseded", "cancelled",
+            "ocrCorrection", "language", "freshTranslation", "translationResult",
+            "frame_arrival", "rotation", "duplicate_detection", "ocr_filtering",
+            "stability", "text_grouping", "ocr_correction", "language_detection",
+            "memory_lookup", "translation", "pip_preparation", "pip_enqueue",
+            "cancellation"
+        ]
+        let eventCodes: Set<String> = Set(MemoryDiagnosticOutcome.allCases.map { $0.rawValue })
+            .union([
+                "observed", "cache_hit", "computed", "accepted", "rejected_duplicate",
+                "rejected_recent_fragment", "rejected_empty", "rejected_revision",
+                "rejected_unstable", "rejected_low_confidence", "rejected_stale",
+                "filtered", "confirmed", "speculative", "ready", "enqueued",
+                "cancelled", "redacted"
+            ]).union(stageCodes)
+        let safeEvents = snapshot.events.prefix(600).map { event in
+            StructuredDiagnosticEvent(id: event.id, timestamp: event.timestamp,
+                sessionID: event.sessionID, candidateID: event.candidateID,
+                frameID: event.frameID, unitID: event.unitID,
+                stage: stageCodes.contains(event.stage) ? event.stage : "other",
+                outcome: eventCodes.contains(event.outcome) ? event.outcome : "redacted",
+                reasonCode: eventCodes.contains(event.reasonCode) ? event.reasonCode : "redacted",
+                durationMs: event.durationMs.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil },
+                privacy: "metadataOnly")
+        }
+        let settingsKeys: Set<String> = [
+            "mode", "speed", "stability", "frameRot", "area", "adaptiveOCR",
+            "remember", "privateSession", "diagnosticsEnabled", "detailedCollection"
+        ]
+        let safeSettings = snapshot.settings.filter { pair in
+            settingsKeys.contains(pair.key) && pair.value.utf8.count <= 48 &&
+            pair.value.unicodeScalars.allSatisfy {
+                CharacterSet.alphanumerics.contains($0) || $0 == "." || $0 == "-" || $0 == "_"
+            }
+        }
+        let reason = snapshot.measurementBoundary
+        let safeBoundary = reason.utf8.count <= 512 &&
+            (reason.hasPrefix("First OCR sighting") || reason == "OCR through PiP enqueue") ?
+            reason : "OCR to PiP enqueue; detailed measurement boundary redacted"
+        return DiagnosticSessionExport(id: snapshot.id, startedAt: snapshot.startedAt,
+            endedAt: snapshot.endedAt, appVersion: snapshot.appVersion,
+            systemVersion: snapshot.systemVersion, settings: safeSettings,
+            health: snapshot.health, counters: snapshot.counters,
+            distributions: snapshot.distributions, events: safeEvents,
+            measurementBoundary: safeBoundary, textCapture: false)
+    }
+
     func encode(_ snapshot: DiagnosticSessionExport) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
-        let data = try encoder.encode(snapshot)
+        let safeSnapshot = redact(snapshot)
+        let data = try encoder.encode(safeSnapshot)
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
         let decoded = try decoder.decode(DiagnosticSessionExport.self, from: data)
-        guard decoded.id == snapshot.id, decoded.events.count == snapshot.events.count else {
+        guard decoded.id == safeSnapshot.id, decoded.events.count == safeSnapshot.events.count else {
             throw CocoaError(.fileWriteUnknown)
         }
         return data
@@ -130,7 +183,13 @@ actor DiagnosticExportWriter {
         var output: [(timestamp: Double, payload: Data)] = []
         var byteCount = 0
         for event in input.suffix(128) where event.privacy == "metadataOnly" {
-            let encoded = try encoder.encode(event)
+            let wrapper = DiagnosticSessionExport(id: event.sessionID,
+                startedAt: event.timestamp, endedAt: event.timestamp,
+                appVersion: "", systemVersion: "", settings: [:],
+                health: MemoryDiagnosticHealth(), counters: [:], distributions: [:],
+                events: [event], measurementBoundary: "", textCapture: false)
+            guard let safeEvent = redact(wrapper).events.first else { continue }
+            let encoded = try encoder.encode(safeEvent)
             // Selected events must fit a strict, predictable SQLite budget.
             guard encoded.count <= 4096 else { continue }
             if byteCount + encoded.count > 512 * 1024 { break }
