@@ -212,6 +212,26 @@ import SQLite3
         }
         let boundedSessions = try await sessionStore.loadDiagnosticSessions()
         precondition(boundedSessions.count == 20, "Diagnostic archive must retain at most 20 sessions")
+        let indexedMetadata = Data("{\\"stage\\":\\"memory\\",\\"privacy\\":\\"metadataOnly\\"}".utf8)
+        try await sessionStore.saveDiagnosticSession(id: "test-24",
+            startedAt: now, endedAt: now.addingTimeInterval(24),
+            payload: Data("replacement-session".utf8),
+            events: [(timestamp: now.timeIntervalSince1970, payload: indexedMetadata)])
+        let indexedBeforeClear = try await sessionStore.loadDiagnosticEvents(sessionID: "test-24")
+        precondition(indexedBeforeClear == [indexedMetadata],
+                     "Selected structured events must survive SQLite persistence")
+        let oversizedEvents = Array(
+            repeating: (timestamp: now.timeIntervalSince1970, payload: indexedMetadata),
+            count: 129)
+        do {
+            try await sessionStore.saveDiagnosticSession(id: "test-24",
+                startedAt: now, endedAt: now,
+                payload: Data("should-not-commit".utf8), events: oversizedEvents)
+            preconditionFailure("More than 128 diagnostic events must fail atomically")
+        } catch MemoryStoreError.tooLarge {
+            let stillIndexed = try await sessionStore.loadDiagnosticEvents(sessionID: "test-24")
+            precondition(stillIndexed == [indexedMetadata])
+        }
         do {
             try await sessionStore.saveDiagnosticSession(id: "oversized",
                 startedAt: now, endedAt: now,
@@ -226,6 +246,8 @@ import SQLite3
         let sessionsAfterDiagnosticClear = try await sessionStore.loadDiagnosticSessions()
         precondition(sessionsAfterDiagnosticClear.isEmpty,
                      "Diagnostic deletion must not depend on translation-memory deletion")
+        let deletedEvents = try await sessionStore.loadDiagnosticEvents(sessionID: "test-24")
+        precondition(deletedEvents.isEmpty, "Deleted diagnostic sessions must cascade to indexed events")
         print("Diagnostic session retention, size cap and independent deletion checks passed")
 
         let reopened = TranslationMemoryStore(directory: root.appendingPathComponent("db"))
