@@ -6,6 +6,9 @@ struct MemoryManagementView: View {
     @State private var entries: [MemoryStoredEntry] = []
     @State private var conflictingEntries: [MemoryStoredEntry] = []
     @State private var showConflicts = false
+    @State private var snapshotNames: [String] = []
+    @State private var selectedSnapshot: String?
+    @State private var confirmSnapshotMerge = false
     @State private var query = ""
     @State private var confirmClear = false
     @State private var message = ""
@@ -106,6 +109,25 @@ struct MemoryManagementView: View {
                 Button("Delete all translation memory", role: .destructive) { confirmClear = true }
                 if !message.isEmpty { Text(message) }
             }
+            Section("Recovery snapshots") {
+                Button("Inspect saved recovery snapshots") {
+                    Task {
+                        do {
+                            snapshotNames = try await engine.memoryStore.recoverySnapshots()
+                            if snapshotNames.isEmpty { message = "No recovery snapshots available" }
+                        } catch { message = "Cannot inspect recovery snapshots" }
+                    }
+                }
+                ForEach(snapshotNames, id: \.self) { name in
+                    Button(name) {
+                        selectedSnapshot = name
+                        confirmSnapshotMerge = true
+                    }
+                    .disabled(transferBusy || engine.pipActive)
+                }
+                Text("Recovering merges translations into the current database without replacing it. Conflicts remain protected from automatic reuse. Stop live translation before restoring.")
+                    .font(.footnote)
+            }
             Section("Entries · up to 100 matches") {
                 ForEach(entries) { entry in
                     VStack(alignment: .leading) {
@@ -167,6 +189,26 @@ struct MemoryManagementView: View {
                 entries = results
                 await engine.refreshMemoryHealth()
             } catch { message = "Memory is preparing or unavailable" }
+        }
+        .confirmationDialog("Merge a recovery snapshot with current memory? Existing entries will be preserved.", isPresented: $confirmSnapshotMerge, titleVisibility: .visible) {
+            Button("Merge snapshot") {
+                guard let name = selectedSnapshot, !engine.pipActive else {
+                    message = "Stop live translation before recovering memory"
+                    return
+                }
+                transferBusy = true
+                Task {
+                    defer { transferBusy = false }
+                    do {
+                        _ = try await engine.memoryStore.mergeRecoverySnapshot(named: name)
+                        engine.clearRAMCache()
+                        await engine.refreshMemoryHealth()
+                        message = "Recovery snapshot merged; conflicting alternatives retained"
+                    } catch {
+                        message = "Recovery merge failed; current memory preserved"
+                    }
+                }
+            }
         }
         .confirmationDialog("Delete translation memory? History and settings remain. Choose whether to retain recovery copies.", isPresented: $confirmClear, titleVisibility: .visible) {
             Button("Clear active memory (keep recovery copies)", role: .destructive) {
