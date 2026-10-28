@@ -83,6 +83,29 @@ import Foundation
         precondition(!exported.contains("v4|secret subtitle") &&
                      !exported.contains("private source text"))
 
+        // v1.4.1 whole-session evidence is strictly metadata-only and
+        // supports older ZIPs without the new optional interval field.
+        var withIntervals = snapshot
+        withIntervals.intervals = [
+            DiagnosticIntervalBucket(startedAt: Date(), elapsedSeconds: 15,
+                counters: ["ocrPackets": 3, "candidateEnqueued": 1,
+                           "private OCR text": 100, "captureFrames": -1],
+                thermalLevel: 2, lowPower: false, captureConnected: true)
+        ]
+        let intervalBytes = try await writer.encode(withIntervals)
+        let checkedInterval = try await writer.decode(intervalBytes)
+        precondition(checkedInterval.intervals?.count == 1)
+        precondition(checkedInterval.intervals?.first?.counters == [
+            "ocrPackets": 3, "candidateEnqueued": 1
+        ], "Unknown or negative metrics must never cross the ZIP privacy boundary")
+        precondition(!String(decoding: intervalBytes, as: UTF8.self).contains("private OCR text"))
+        var oldWithoutIntervals = try JSONSerialization.jsonObject(with: intervalBytes) as! [String: Any]
+        oldWithoutIntervals.removeValue(forKey: "intervals")
+        let previousBundle = try JSONSerialization.data(withJSONObject: oldWithoutIntervals)
+        let decodedPreviousBundle = try await writer.decode(previousBundle)
+        precondition(decodedPreviousBundle.intervals == nil,
+                     "Existing 1.4.0 diagnostic archives must remain decodable")
+
         let matching = DiagnosticPerformanceComparison(baseline: snapshot, current: snapshot)
         precondition(matching.comparable &&
                      abs(matching.p95Changes["memoryLookupMs", default: 100]) < 0.00001)
@@ -147,9 +170,12 @@ import Foundation
         let zipFooter = Array(zipBytes.suffix(22).prefix(4))
         precondition(zipFooter == [0x50, 0x4b, 0x05, 0x06],
                      "ZIP must have a valid end-of-central-directory signature")
-        let exportedZIP = try await writer.exportZIP(snapshot)
+        let exportedZIP = try await writer.exportZIP(withIntervals)
         defer { try? FileManager.default.removeItem(at: exportedZIP) }
         precondition(FileManager.default.fileExists(atPath: exportedZIP.path))
+        let exportedZipData = try Data(contentsOf: exportedZIP)
+        precondition(exportedZipData.range(of: Data("intervals.csv".utf8)) != nil,
+                     "New ZIP bundles must contain the full-session interval CSV")
         #if os(macOS)
         // Check interoperability with the system ZIP reader, not only our own
         // header checks, before considering bundles trustworthy for export.

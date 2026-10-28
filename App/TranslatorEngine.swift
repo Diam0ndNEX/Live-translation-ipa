@@ -206,6 +206,7 @@ final class TranslatorEngine: ObservableObject {
     private var savedKeys = Set<String>()
     private var confirmedKeys = Set<String>()
     private var subtitleRegions = SubtitleRegions()
+    private var movieTextFocus = MovieTextFocus()
     private var languageFailures = 0
     private var rulesSnapshot = "", rulesDigest = ""
     private var busy = false
@@ -226,6 +227,7 @@ final class TranslatorEngine: ObservableObject {
     private var specKeys = Set<String>()
     private var lastSpecText = ""
     private var lastWarm = Date.distantPast
+    private var lastUnresolvedWarmupNotice = Date.distantPast
     let memoryStore = TranslationMemoryStore(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ScreenLingo/TranslationMemory", isDirectory: true))
     @Published var memoryHealth: MemoryStoreHealth?
     @Published var memoryPendingWrites = 0
@@ -328,6 +330,7 @@ final class TranslatorEngine: ObservableObject {
         }
         presets.applyStartup()
         diag.log("App started \(AppVersion.full)")
+        diag.noteRuntimeState("app_started")
     }
 
     private func tick() {
@@ -420,6 +423,7 @@ final class TranslatorEngine: ObservableObject {
     }
 
     func pipelineSettingsChanged() {
+        diag.noteRuntimeState("capture_config_changed")
         invalidatePending()
         rotRev += 1
         syncConfig()
@@ -453,6 +457,7 @@ final class TranslatorEngine: ObservableObject {
                            speculate: speculationAllowed && flag("translateAhead", true), confidence: num("ocrConfidence", 0.3),
                            correction: flag("ocrCorrection", true), idleBackoff: flag("idleBackoff", true),
                            movieMode: mode == .movie,
+                           captureDiagnostics: diag.enabled,
                            adaptiveOCR: speed == .automatic || (speed == .balanced && flag("adaptiveOCR", true)),
                            adaptiveConfirmation: flag("adaptiveConfirmation", false), subtitleTracking: flag("subtitleTracking", true),
                            confirmationDeadline: num("confirmationDeadline", 0.6), smartCool: intelligentCool,
@@ -506,6 +511,7 @@ final class TranslatorEngine: ObservableObject {
         generation += 1
         drainTask?.cancel()
         activeCandidateID = nil; activeCandidateText = ""
+        movieTextFocus.reset()
         activeCandidateConfirmed = false; activeCandidatePresented = false
         cancelPresentation()
         queued = nil
@@ -847,7 +853,7 @@ final class TranslatorEngine: ObservableObject {
             if count { subtitleRegions = regions }
         }
         if count && diag.enabled { diag.s.blocksIn += allBlocks.count }
-        let blocks = selectBlocks(allBlocks)
+        let blocks = selectBlocks(allBlocks, diagnosticCount: count)
         if count && diag.enabled { diag.s.blocksKept += blocks.count }
         var texts: [String] = []
         for b in blocks {
@@ -936,12 +942,15 @@ final class TranslatorEngine: ObservableObject {
     }
 
     /// Movie mode keeps the dominant block(s); other modes keep everything that isn't tiny.
-    private func selectBlocks(_ blocks: [[OCRLine]]) -> [[OCRLine]] {
+    private func selectBlocks(_ blocks: [[OCRLine]], diagnosticCount: Bool) -> [[OCRLine]] {
         guard !blocks.isEmpty else { return [] }
         let maxH = blocks.map { blockHeight($0) }.max() ?? 0
         var kept = blocks
         if mode == .movie {
-            kept = blocks.filter { blockHeight($0) >= maxH * 0.7 }
+            let beforeHeightFilter = kept.count
+            // Tiny dialogue must not be excluded because a persistent label uses a larger font.
+            kept = blocks.filter { blockHeight($0) >= max(0.006, maxH * 0.20) }
+            if kept.isEmpty { kept = blocks }
             // Aligned visible lyrics are one reading group, even with separate OCR boxes.
             let sorted = kept.sorted { ($0.first?.y ?? 0) > ($1.first?.y ?? 0) }
             var groups: [[[OCRLine]]] = []
@@ -955,7 +964,22 @@ final class TranslatorEngine: ObservableObject {
                     return abs(px - x) <= 0.12 && abs(py - y) <= max(0.12, blockHeight(block) * 4.2)
                 }) { groups[i].append(block) } else { groups.append([block]) }
             }
-            kept = groups.max(by: { a, b in a.reduce(0) { $0 + blockWeight($1) } < b.reduce(0) { $0 + blockWeight($1) } }) ?? []
+            let summaries = groups.map { group -> MovieTextGroup in
+                let lines = group.flatMap { $0 }
+                let x = lines.reduce(0.0) { $0 + $1.x } / Double(max(1, lines.count))
+                let y = lines.reduce(0.0) { $0 + $1.y } / Double(max(1, lines.count))
+                return MovieTextGroup(text: lines.map(\.t).joined(separator: " "), x: x, y: y,
+                    weight: group.reduce(0.0) { $0 + blockWeight($1) })
+            }
+            // A label becomes background only after repeated, spatially stable OCR.
+            // A lone held subtitle/lyrics group remains eligible for translation.
+            let strongest = summaries.indices.max(by: { summaries[$0].weight < summaries[$1].weight })
+            let chosen = movieTextFocus.preferredIndex(in: summaries, at: Date().timeIntervalSince1970)
+            diag.noteMovieSelection(groups: groups.count,
+                filteredSmall: beforeHeightFilter - kept.count,
+                temporalOverride: chosen != nil && chosen != strongest,
+                confirmed: diagnosticCount)
+            if let chosen { kept = groups[chosen] } else { kept = [] }
         } else if area == .smart {
             kept = blocks.filter { blockHeight($0) >= maxH * 0.4 }
         }
@@ -1042,6 +1066,7 @@ final class TranslatorEngine: ObservableObject {
         generation += 1
         cancelPresentation()
         lastHandled = joined
+        if queued != nil { diag.noteQueueReplacement() }
         queued = blocks
         queuedAt = Date()
         startDrain()
@@ -1502,6 +1527,7 @@ final class TranslatorEngine: ObservableObject {
         if #available(iOS 26.0, *), installed {
             let k = "\(source.minimalIdentifier)>\(targetCode)"
             if directSession == nil || directKey != k {
+                diag.noteModelState("model_session_created")
                 directSession = TranslationSession(installedSource: source, target: target)
                 directKey = k
             }
@@ -1516,12 +1542,18 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func runBatch(_ session: TranslationSession, _ texts: [String]) async -> [String]? {
+        let began = ProcessInfo.processInfo.systemUptime
         let reqs = texts.enumerated().map { TranslationSession.Request(sourceText: $0.element, clientIdentifier: String($0.offset)) }
         do {
             let res = try await session.translations(from: reqs)
-            return PipelineSafety.orderedTranslations(res.map { ($0.clientIdentifier, $0.targetText) }, count: texts.count)
+            let result = PipelineSafety.orderedTranslations(res.map { ($0.clientIdentifier, $0.targetText) }, count: texts.count)
+            diag.noteModelState(result == nil ? "model_batch_failed" : "model_batch_completed",
+                durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
+            return result
         } catch {
             if Task.isCancelled { return nil }
+            diag.noteModelState("model_batch_failed",
+                durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
             diag.event(.error, "Translation engine failed: \(error.localizedDescription)")
             return nil
         }
@@ -1947,7 +1979,13 @@ final class TranslatorEngine: ObservableObject {
         if sourceCode != "auto" { code = sourceCode }
         else if let l = lockedLang { code = l }
         else if detectedLang != "–" { code = detectedLang }
-        else { return }
+        else {
+            if Date().timeIntervalSince(lastUnresolvedWarmupNotice) > 25 {
+                lastUnresolvedWarmupNotice = Date()
+                diag.noteModelState("warmup_source_unresolved")
+            }
+            return
+        }
         let workContext = contextRevision
         let destination = targetCode
         let src = Locale.Language(identifier: code)
@@ -1962,8 +2000,11 @@ final class TranslatorEngine: ObservableObject {
         guard #available(iOS 26.0, *) else { return }
         lastWarm = Date()
         let t0 = Date()
+        diag.noteModelState("warmup_started")
         let session = TranslationSession(installedSource: src, target: target)
-        _ = await runBatch(session, [word])
+        let warmed = await runBatch(session, [word])
+        diag.noteModelState(warmed == nil ? "warmup_failed" : "warmup_succeeded",
+            durationMs: Date().timeIntervalSince(t0) * 1000)
         if !busy, workContext == contextRevision, directSession == nil {
             directSession = session
             directKey = "\(src.minimalIdentifier)>\(destination)"

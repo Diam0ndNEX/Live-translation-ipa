@@ -31,6 +31,9 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var recognitionReason = "fixed preset"
     private var confirmationReason = "fixed reads"
     private var unchangedSkipped = 0, cadenceSkipped = 0, pausedSkipped = 0, retryCount = 0
+    private var visualChanges = 0, totalEmptyOCRPasses = 0
+    private var lastVisualChangeAt = Date.distantPast
+    private var effectiveOCRIntervalMs = 0.0
     private var feedback = RecognitionFeedback()
     private var lastChanged = Date()
     private var lastRecognizedKey = ""
@@ -91,21 +94,29 @@ class SampleHandler: RPBroadcastSampleHandler {
         recognitionReason = plan.reason
         let idleFactor = SubtitleAcquisitionPolicy.idleMultiplier(movie: cfg.movieMode ?? false,
             enabled: cfg.idleBackoff ?? true, secondsSinceText: now.timeIntervalSince(lastUsefulText))
+        effectiveOCRIntervalMs = plan.interval * idleFactor * 1000
         guard !cfg.paused else { pausedSkipped += 1; return }
         guard CaptureCadence.remaining(startedAt: lastRun.timeIntervalSince1970, now: now.timeIntervalSince1970,
                                        interval: plan.interval * idleFactor) <= 0 else { cadenceSkipped += 1; return }
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-        // Skip frames that look identical to the last one we read (saves battery, keeps things fast)
-        if (cfg.skipUnchanged ?? true) && candidateCount == 0 {
+        // When diagnostics are enabled, sample lightweight *numeric* visual change
+        // even if frame skipping is off; only the counters/timestamp leave the extension.
+        // This is NOT a subtitle-presence oracle: moving scenes also trigger it.
+        if (cfg.skipUnchanged ?? true) || (cfg.captureDiagnostics ?? false) {
             let sig = signature(pb)
-            if !sig.isEmpty, sig.count == ocrSig.count { feedback.motion = meanDiff(sig, ocrSig) }
-            if !sig.isEmpty, sig.count == ocrSig.count, now.timeIntervalSince(lastRun) < SubtitleAcquisitionPolicy.maximumUnchangedDelay(movie: cfg.movieMode ?? false),
-               !SubtitleAcquisitionPolicy.changed(previous: ocrSig, current: sig) {
+            let comparable = !sig.isEmpty && sig.count == ocrSig.count
+            let changed = comparable && SubtitleAcquisitionPolicy.changed(previous: ocrSig, current: sig)
+            if comparable { feedback.motion = meanDiff(sig, ocrSig) }
+            if changed { visualChanges += 1; lastVisualChangeAt = now }
+            if (cfg.skipUnchanged ?? true), candidateCount == 0,
+               comparable, now.timeIntervalSince(lastRun) <
+                    SubtitleAcquisitionPolicy.maximumUnchangedDelay(movie: cfg.movieMode ?? false),
+               !changed {
                 skipped += 1; unchangedSkipped += 1
                 return
             }
-            ocrSig = sig
+            if !sig.isEmpty { ocrSig = sig }
         }
 
         var orientation = CGImagePropertyOrientation.up
@@ -235,6 +246,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         var lines = ocr(boost == 2 ? enhanced(img) : img, cfg, y0, y1)
         if lines.isEmpty {
             emptyPasses += 1
+            totalEmptyOCRPasses += 1
             // Fallback for hard text (thin, outlined, low contrast): boost contrast and retry
             if boost == 1 && emptyPasses % 3 == 0 && freeMB() > 20 {
                 retryCount += 1
@@ -315,7 +327,12 @@ class SampleHandler: RPBroadcastSampleHandler {
                                              candidateID: kind == "ocr" ? candidateID : nil,
                                              recognitionReason: recognitionReason, confirmationReason: confirmationReason,
                                              unchangedSkipped: unchangedSkipped, cadenceSkipped: cadenceSkipped, pausedSkipped: pausedSkipped,
-                                             emptyReads: feedback.failures, retryCount: retryCount))
+                                             emptyReads: feedback.failures, retryCount: retryCount,
+                                             visualChanges: visualChanges,
+                                             totalEmptyOCRPasses: totalEmptyOCRPasses,
+                                             lastVisualChangeAt: lastVisualChangeAt == .distantPast ?
+                                                nil : lastVisualChangeAt.timeIntervalSince1970,
+                                             effectiveOCRIntervalMs: effectiveOCRIntervalMs))
         }
         var data = encode(lines)
         if let d = data, d.count > 60000 { data = encode(Array(lines.prefix(30))) }

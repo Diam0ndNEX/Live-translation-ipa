@@ -71,6 +71,11 @@ struct Packet: Codable {
     var pausedSkipped: Int? = nil
     var emptyReads: Int? = nil
     var retryCount: Int? = nil
+    // Numeric metadata only; retained across ping packets even when OCR sees no text.
+    var visualChanges: Int? = nil
+    var totalEmptyOCRPasses: Int? = nil
+    var lastVisualChangeAt: Double? = nil
+    var effectiveOCRIntervalMs: Double? = nil
 }
 
 /// App → extension (sent back over the same localhost link)
@@ -91,6 +96,7 @@ struct Config: Codable, Equatable {
     var correction: Bool? = nil
     var idleBackoff: Bool? = nil
     var movieMode: Bool? = nil
+    var captureDiagnostics: Bool? = nil
     var adaptiveOCR: Bool? = nil
     var adaptiveConfirmation: Bool? = nil
     var subtitleTracking: Bool? = nil

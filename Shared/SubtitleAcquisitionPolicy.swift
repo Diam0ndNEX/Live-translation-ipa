@@ -39,3 +39,64 @@ enum SubtitleAcquisitionPolicy {
         incomingConfirmed || !activeConfirmed || activePresented
     }
 }
+
+
+/// Session-only OCR group summary; never written to diagnostics or SQLite.
+struct MovieTextGroup {
+    let text: String
+    let x: Double
+    let y: Double
+    let weight: Double
+}
+
+/// A persistent label should not dominate newer subtitle text indefinitely.
+/// A single caption/lyric group is never removed, even if it remains unchanged.
+struct MovieTextFocus {
+    private struct Observation {
+        var text: String
+        var x: Double
+        var y: Double
+        var unchangedSince: TimeInterval
+        var lastSeen: TimeInterval
+        var repeats: Int
+    }
+    private var prior: [Observation] = []
+
+    mutating func reset() { prior.removeAll() }
+
+    mutating func preferredIndex(in groups: [MovieTextGroup], at now: TimeInterval) -> Int? {
+        guard !groups.isEmpty else { return nil }
+        let previous = prior.filter { now - $0.lastSeen >= 0 && now - $0.lastSeen < 5 }
+        var updated: [Observation] = []
+        var used = Set<Int>()
+        var stable: [Bool] = []
+        for group in groups.prefix(24) {
+            let text = TextSim.norm(group.text)
+            let matched = previous.indices
+                .filter { !used.contains($0) && abs(previous[$0].x - group.x) <= 0.15 &&
+                    abs(previous[$0].y - group.y) <= 0.09 }
+                .min { a, b in
+                    let da = abs(previous[a].x - group.x) + abs(previous[a].y - group.y)
+                    let db = abs(previous[b].x - group.x) + abs(previous[b].y - group.y)
+                    return da < db
+                }
+            if let matched { used.insert(matched) }
+            let old = matched.map { previous[$0] }
+            let unchanged = old.map { $0.text == text || TextSim.similar($0.text, text, 0.97) } ?? false
+            let since = unchanged ? (old?.unchangedSince ?? now) : now
+            let repeats = unchanged ? min(10000, (old?.repeats ?? 0) + 1) : 1
+            updated.append(Observation(text: text, x: group.x, y: group.y,
+                unchangedSince: since, lastSeen: now, repeats: repeats))
+            stable.append(!text.isEmpty && repeats >= 3 && now - since >= 1.2)
+        }
+        prior = Array(updated.prefix(24))
+        let count = min(groups.count, stable.count)
+        guard let fallback = (0..<count).max(by: { groups[$0].weight < groups[$1].weight }) else { return nil }
+        guard stable[fallback] else { return fallback }
+        // Do not mistake tiny transient UI labels for legitimate dialogue.
+        let minimumWeight = groups[fallback].weight * 0.16
+        let alternatives = (0..<count).filter { !stable[$0] && groups[$0].weight >= minimumWeight &&
+            TextSim.norm(groups[$0].text).count >= 3 }
+        return alternatives.max(by: { groups[$0].weight < groups[$1].weight }) ?? fallback
+    }
+}
