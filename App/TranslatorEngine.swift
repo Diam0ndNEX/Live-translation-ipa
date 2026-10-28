@@ -206,6 +206,7 @@ final class TranslatorEngine: ObservableObject {
     private var savedKeys = Set<String>()
     private var confirmedKeys = Set<String>()
     private var subtitleRegions = SubtitleRegions()
+    private var movieTextFocus = MovieTextFocus()
     private var languageFailures = 0
     private var rulesSnapshot = "", rulesDigest = ""
     private var busy = false
@@ -506,6 +507,7 @@ final class TranslatorEngine: ObservableObject {
         generation += 1
         drainTask?.cancel()
         activeCandidateID = nil; activeCandidateText = ""
+        movieTextFocus.reset()
         activeCandidateConfirmed = false; activeCandidatePresented = false
         cancelPresentation()
         queued = nil
@@ -941,7 +943,9 @@ final class TranslatorEngine: ObservableObject {
         let maxH = blocks.map { blockHeight($0) }.max() ?? 0
         var kept = blocks
         if mode == .movie {
-            kept = blocks.filter { blockHeight($0) >= maxH * 0.7 }
+            // Tiny dialogue must not be excluded because a persistent label uses a larger font.
+            kept = blocks.filter { blockHeight($0) >= max(0.006, maxH * 0.20) }
+            if kept.isEmpty { kept = blocks }
             // Aligned visible lyrics are one reading group, even with separate OCR boxes.
             let sorted = kept.sorted { ($0.first?.y ?? 0) > ($1.first?.y ?? 0) }
             var groups: [[[OCRLine]]] = []
@@ -955,7 +959,20 @@ final class TranslatorEngine: ObservableObject {
                     return abs(px - x) <= 0.12 && abs(py - y) <= max(0.12, blockHeight(block) * 4.2)
                 }) { groups[i].append(block) } else { groups.append([block]) }
             }
-            kept = groups.max(by: { a, b in a.reduce(0) { $0 + blockWeight($1) } < b.reduce(0) { $0 + blockWeight($1) } }) ?? []
+            let summaries = groups.map { group -> MovieTextGroup in
+                let lines = group.flatMap { $0 }
+                let x = lines.reduce(0.0) { $0 + $1.x } / Double(max(1, lines.count))
+                let y = lines.reduce(0.0) { $0 + $1.y } / Double(max(1, lines.count))
+                return MovieTextGroup(text: lines.map(\.t).joined(separator: " "), x: x, y: y,
+                    weight: group.reduce(0.0) { $0 + blockWeight($1) })
+            }
+            // A label becomes background only after repeated, spatially stable OCR.
+            // A lone held subtitle/lyrics group remains eligible for translation.
+            if let index = movieTextFocus.preferredIndex(in: summaries, at: Date().timeIntervalSince1970) {
+                kept = groups[index]
+            } else {
+                kept = []
+            }
         } else if area == .smart {
             kept = blocks.filter { blockHeight($0) >= maxH * 0.4 }
         }
