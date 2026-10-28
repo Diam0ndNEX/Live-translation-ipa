@@ -321,6 +321,19 @@ import CryptoKit
         _ = try await imported.prepare(legacyURLs: [])
         let importedHealth = try await imported.importData(exported)
         precondition(importedHealth.totalEntries == 3)
+        // Backward compatibility with exported JSON made by SQLite schema v1.
+        let oldFormatJSON = String(decoding: exported, as: UTF8.self)
+            .replacingOccurrences(of: "\"schemaVersion\":2",
+                                  with: "\"schemaVersion\":1")
+        precondition(oldFormatJSON != String(decoding: exported, as: UTF8.self),
+                     "Test must actually construct a v1 transfer envelope")
+        let oldImport = TranslationMemoryStore(
+            directory: root.appendingPathComponent("legacy-v1-json-import"))
+        _ = try await oldImport.prepare(legacyURLs: [])
+        let oldImportHealth = try await oldImport.importData(
+            Data(oldFormatJSON.utf8))
+        precondition(oldImportHealth.totalEntries == 3,
+                     "Old memory exports remain importable after schema migration")
         // A changed export must fail checksum verification without touching the store.
         var tampered = exported
         let original = Data("Alternative".utf8), replacement = Data("Mischievous".utf8)
@@ -377,6 +390,18 @@ import CryptoKit
         let snapshotURL = root.appendingPathComponent("db/recovery").appendingPathComponent(snapshotName)
         precondition(FileManager.default.fileExists(atPath: snapshotURL.path),
                      "Snapshot must be created through SQLite, not a WAL-blind file copy")
+        // A schema-v1 snapshot is still a valid source for explicit recovery
+        // after a v1→v2 app update. Keep the current snapshot unchanged.
+        let olderSnapshotName = "memory-legacy-v1-fixture.sqlite"
+        let olderSnapshotURL = snapshotURL.deletingLastPathComponent()
+            .appendingPathComponent(olderSnapshotName)
+        try FileManager.default.copyItem(at: snapshotURL, to: olderSnapshotURL)
+        var oldSnapshotConnection: OpaquePointer?
+        precondition(sqlite3_open(olderSnapshotURL.path, &oldSnapshotConnection) == SQLITE_OK)
+        precondition(sqlite3_exec(oldSnapshotConnection,
+            "PRAGMA user_version=1", nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(oldSnapshotConnection)
+        _ = try await store.mergeRecoverySnapshot(named: olderSnapshotName)
         let backupHealth = try await store.health()
         precondition(backupHealth.lastVerifiedBackup != nil,
                      "Health must expose a verified recovery snapshot timestamp")
