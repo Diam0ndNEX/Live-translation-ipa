@@ -35,10 +35,9 @@ enum TranslationUnitPlanning {
             let isEllipsis = pending.hasSuffix("...") || pending.hasSuffix("…")
             let lastScalar = pending.unicodeScalars.last
             let hasBoundary = lastScalar.map { terminators.contains($0) } ?? false
-            if !isEllipsis && hasBoundary && index < filtered.count - 1 {
+            if !isEllipsis && hasBoundary && index < filtered.count - 1 && units.count < maxUnits - 1 {
                 units.append(pending)
                 pending = ""
-                if units.count >= maxUnits - 1 { break }
             }
         }
         if !pending.isEmpty { units.append(pending) }
