@@ -176,6 +176,9 @@ struct DiagnosticSessionExport: Codable, Identifiable {
     let events: [StructuredDiagnosticEvent]
     /// Optional for backwards-compatible import of 1.4.0/early 1.4.1 bundles.
     var intervals: [DiagnosticIntervalBucket]? = nil
+    /// Recent high-resolution data. Optional so pre-v1.5 archives still decode.
+    var oneSecondIntervals: [DiagnosticIntervalBucket]? = nil
+    var fiveSecondIntervals: [DiagnosticIntervalBucket]? = nil
     let measurementBoundary: String
     let textCapture: Bool
 }
@@ -303,6 +306,12 @@ actor DiagnosticExportWriter {
             health: snapshot.health, counters: safeCounters,
             distributions: safeMetrics, events: safeEvents,
             intervals: snapshot.intervals.map { Array($0.suffix(960)).map { $0.sanitized() } },
+            oneSecondIntervals: snapshot.oneSecondIntervals.map {
+                Array($0.suffix(300)).map { $0.sanitized() }
+            },
+            fiveSecondIntervals: snapshot.fiveSecondIntervals.map {
+                Array($0.suffix(180)).map { $0.sanitized() }
+            },
             measurementBoundary: safeBoundary, textCapture: false)
     }
 
@@ -360,26 +369,31 @@ actor DiagnosticExportWriter {
         let counterNames = DiagnosticIntervalBucket.allowedCounters.sorted()
         let header = "start_time,elapsed_seconds,thermal_level,low_power,capture_connected,effective_ocr_interval_ms,visual_motion_proxy_ms,ocr_median_ms,ocr_p95_ms,translation_median_ms,translation_p95_ms,enqueue_median_ms,enqueue_p95_ms,model_batch_median_ms," +
             counterNames.joined(separator: ",")
-        let intervalRows = (safe.intervals ?? []).map { interval -> String in
-            var columns: [String] = [
-                String(Int(interval.startedAt.timeIntervalSince1970)),
-                String(interval.elapsedSeconds),
-                String(interval.thermalLevel),
-                interval.lowPower ? "1" : "0",
-                interval.captureConnected ? "1" : "0"
-            ]
-            let timings: [Double?] = [
-                interval.effectiveOCRIntervalMs, interval.visualChangeProxyMs,
-                interval.ocrMedianMs, interval.ocrP95Ms,
-                interval.translationMedianMs, interval.translationP95Ms,
-                interval.enqueueMedianMs, interval.enqueueP95Ms,
-                interval.modelBatchMedianMs
-            ]
-            columns.append(contentsOf: timings.map { $0.map { String($0) } ?? "" })
-            columns.append(contentsOf: counterNames.map { String(interval.counters[$0, default: 0]) })
-            return columns.joined(separator: ",")
+        func intervalCSV(_ intervals: [DiagnosticIntervalBucket]) -> Data {
+            let rows = intervals.map { interval -> String in
+                var columns: [String] = [
+                    String(Int(interval.startedAt.timeIntervalSince1970)),
+                    String(interval.elapsedSeconds),
+                    String(interval.thermalLevel),
+                    interval.lowPower ? "1" : "0",
+                    interval.captureConnected ? "1" : "0"
+                ]
+                let timings: [Double?] = [
+                    interval.effectiveOCRIntervalMs, interval.visualChangeProxyMs,
+                    interval.ocrMedianMs, interval.ocrP95Ms,
+                    interval.translationMedianMs, interval.translationP95Ms,
+                    interval.enqueueMedianMs, interval.enqueueP95Ms,
+                    interval.modelBatchMedianMs
+                ]
+                columns.append(contentsOf: timings.map { $0.map { String($0) } ?? "" })
+                columns.append(contentsOf: counterNames.map { String(interval.counters[$0, default: 0]) })
+                return columns.joined(separator: ",")
+            }
+            return Data(([header] + rows).joined(separator: "\n").utf8)
         }
-        let intervalsCSV = Data(([header] + intervalRows).joined(separator: "\n").utf8)
+        let intervalsCSV = intervalCSV(safe.intervals ?? [])
+        let secondsOneCSV = intervalCSV(safe.oneSecondIntervals ?? [])
+        let secondsFiveCSV = intervalCSV(safe.fiveSecondIntervals ?? [])
 
         // Flat, machine-readable timing distributions for spreadsheet-based A/B
         // checks. No source text or full raw screen content is included.
@@ -498,6 +512,7 @@ actor DiagnosticExportWriter {
 
         let names = [
             "manifest.json", "summary.md", "session.json", "intervals.csv",
+            "seconds_1.csv", "seconds_5.csv",
             "metrics.csv", "events.csv", "findings.json", "README.txt"
         ]
         let manifest: [String: Any] = [
@@ -512,6 +527,8 @@ actor DiagnosticExportWriter {
             "textIncluded": false,
             "boundedEvents": safe.events.count,
             "intervals": safe.intervals?.count ?? 0,
+            "oneSecondIntervals": safe.oneSecondIntervals?.count ?? 0,
+            "fiveSecondIntervals": safe.fiveSecondIntervals?.count ?? 0,
             "distributionCount": safe.distributions.count,
             "measuredUntil": "PiP sample-buffer enqueue (not physical display)"
         ]
@@ -522,7 +539,13 @@ actor DiagnosticExportWriter {
             candidate continuity. All numbers come from redacted session.json.
             manifest.json: ZIP format and session metadata.
             session.json: versioned canonical metadata (compatible with older readers).
-            intervals.csv: chronological 15-second counters and thermal state.
+            intervals.csv: chronological 15-second counters (long sessions).
+            seconds_1.csv: most recent 5 minutes at ~1s while detailed collection
+              is enabled; empty if detailed collection was off.
+            seconds_5.csv: most recent 15 minutes at ~5s.
+            Buckets record actual elapsed times; iOS scheduling can cause gaps.
+            Percentiles are calculated from original measurements in each bucket,
+            never averaged from the percentiles of shorter buckets.
             metrics.csv: sample count, mean, median, P90, P95, P99 by timing stage.
             events.csv: recent candidate/frame/unit event timeline with opaque UUIDs.
             findings.json: observed and suspected issues; heuristics, not verified errors.
@@ -542,6 +565,8 @@ actor DiagnosticExportWriter {
             (name: "summary.md", contents: summary),
             (name: "session.json", contents: sessionData),
             (name: "intervals.csv", contents: intervalsCSV),
+            (name: "seconds_1.csv", contents: secondsOneCSV),
+            (name: "seconds_5.csv", contents: secondsFiveCSV),
             (name: "metrics.csv", contents: metricsCSV),
             (name: "events.csv", contents: eventsCSV),
             (name: "findings.json", contents: findingsData),
@@ -692,7 +717,7 @@ enum DiagnosticIssueDetector {
 /// The ZIP CRC32 and central directory are verified by standard ZIP readers.
 enum DiagnosticStoredZIP {
     static func make(entries: [(name: String, contents: Data)]) throws -> Data {
-        guard !entries.isEmpty, entries.count <= 8 else { throw CocoaError(.fileWriteUnknown) }
+        guard !entries.isEmpty, entries.count <= 12 else { throw CocoaError(.fileWriteUnknown) }
         var body = Data()
         var central = Data()
         func write16(_ v: UInt16, to d: inout Data) {
