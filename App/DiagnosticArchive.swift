@@ -375,7 +375,7 @@ actor DiagnosticExportWriter {
                 interval.enqueueMedianMs, interval.enqueueP95Ms,
                 interval.modelBatchMedianMs
             ]
-            columns.append(contentsOf: timings.map { $0.map(String.init) ?? "" })
+            columns.append(contentsOf: timings.map { $0.map { String($0) } ?? "" })
             columns.append(contentsOf: counterNames.map { String(interval.counters[$0, default: 0]) })
             return columns.joined(separator: ",")
         }
@@ -388,11 +388,11 @@ actor DiagnosticExportWriter {
             guard let value = safe.distributions[name] else { return nil }
             let cells: [String] = [
                 name, String(value.count), String(value.mean),
-                value.p50.map(String.init) ?? "",
-                value.p90.map(String.init) ?? "",
-                value.p95.map(String.init) ?? "",
-                value.p99.map(String.init) ?? "",
-                value.maximum.map(String.init) ?? ""
+                value.p50.map { String($0) } ?? "",
+                value.p90.map { String($0) } ?? "",
+                value.p95.map { String($0) } ?? "",
+                value.p99.map { String($0) } ?? "",
+                value.maximum.map { String($0) } ?? ""
             ]
             return cells.joined(separator: ",")
         }
@@ -409,7 +409,7 @@ actor DiagnosticExportWriter {
                 event.frameID?.uuidString ?? "",
                 event.unitID?.uuidString ?? "",
                 event.stage, event.outcome, event.reasonCode,
-                event.durationMs.map(String.init) ?? ""
+                event.durationMs.map { String($0) } ?? ""
             ].joined(separator: ",")
         }
         let eventsCSV = Data(([eventsHeader] + eventsRows).joined(separator: "\n").utf8)
@@ -547,8 +547,12 @@ actor DiagnosticExportWriter {
             (name: "findings.json", contents: findingsData),
             (name: "README.txt", contents: readme)
         ])
+        let timestamp = ISO8601DateFormatter().string(from: safe.startedAt)
+            .replacingOccurrences(of: ":", with: "-")
+        let filename = "ScreenLingo-Diagnostics-" + timestamp + "-" +
+            String(safe.id.uuidString.prefix(8)) + ".zip"
         let url = FileManager.default.temporaryDirectory
-            .appendingPathComponent("screenlingo-diagnostics-" + UUID().uuidString + ".zip")
+            .appendingPathComponent(filename)
         try zip.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
         return url
     }
