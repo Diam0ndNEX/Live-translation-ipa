@@ -350,7 +350,8 @@ final class Diagnostics: ObservableObject {
         let allowed: Set<String> = [
             "warmup_started", "warmup_succeeded", "warmup_failed",
             "model_session_created", "model_batch_failed", "model_batch_completed",
-            "warmup_source_unresolved"
+            "warmup_source_unresolved", "legacy_idle_started",
+            "legacy_idle_completed", "legacy_idle_deferred"
         ]
         guard allowed.contains(reason) else { return }
         appendStructured(stage: "model_state", outcome: reason, reason: reason,
@@ -801,6 +802,10 @@ final class Diagnostics: ObservableObject {
             "speculativeDiscarded": s.specDiscarded,
             "legacyVerified": memoryHealth.legacyValidated,
             "legacySuperseded": memoryHealth.legacySuperseded,
+            "legacyOCRSuggestions": memoryHealth.suggestedOCRMatches,
+            "legacyFragmentSuggestions": memoryHealth.suggestedFragmentMatches,
+            "legacyIdleStarted": eventTotals["legacy_idle_started", default: 0],
+            "legacyIdleCompleted": eventTotals["legacy_idle_completed", default: 0],
             "ramHits": memoryOutcomes[.ramHit, default: 0],
             "persistentHits": memoryOutcomes[.persistentHit, default: 0],
             "speculativeHits": memoryOutcomes[.speculativeHit, default: 0],
