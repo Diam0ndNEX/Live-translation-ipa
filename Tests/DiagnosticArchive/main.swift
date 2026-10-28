@@ -16,7 +16,7 @@ import Foundation
             stage: "memory", outcome: "persistentHit", reasonCode: "persistentHit",
             durationMs: 0.25, privacy: "metadataOnly")
         let snapshot = DiagnosticSessionExport(id: session, startedAt: Date(),
-            endedAt: Date(), appVersion: "1.4.0", systemVersion: "test",
+            endedAt: Date(), appVersion: "1.4.0", systemVersion: "test", hardwareModel: "iPhoneTest1,1",
             settings: ["speed": "balanced"], health: MemoryDiagnosticHealth(),
             counters: ["persistentHit": 1], distributions: ["memoryLookupMs": dist],
             events: [event], measurementBoundary: "OCR through PiP enqueue",
@@ -53,6 +53,17 @@ import Foundation
         let matching = DiagnosticPerformanceComparison(baseline: snapshot, current: snapshot)
         precondition(matching.comparable &&
                      abs(matching.p95Changes["memoryLookupMs", default: 100]) < 0.00001)
+        // A matching OS and settings do not establish a comparable baseline if
+        // the device hardware changed or the older archive lacked a model code.
+        var differentHardware = snapshot
+        differentHardware.hardwareModel = "iPhoneOther2,1"
+        precondition(!DiagnosticPerformanceComparison(
+            baseline: snapshot, current: differentHardware).comparable)
+        var legacyHardware = snapshot
+        legacyHardware.hardwareModel = nil
+        precondition(!DiagnosticPerformanceComparison(
+            baseline: snapshot, current: legacyHardware).comparable)
+
         let mismatch = DiagnosticSessionExport(id: UUID(), startedAt: Date(), endedAt: Date(),
             appVersion: "1.4.0", systemVersion: "test",
             settings: ["speed": "sharp"], health: MemoryDiagnosticHealth(),
