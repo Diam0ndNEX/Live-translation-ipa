@@ -1591,14 +1591,21 @@ final class TranslatorEngine: ObservableObject {
     }
 
     func clearMemory() {
+        // Never discard uncommitted confirmed translations to perform a clear.
+        // The user can retry after the persistence queue has drained.
+        guard memoryReady, !memorySaving, pendingMemory.isEmpty else {
+            memoryFailure = "Wait for pending memory writes before deleting"
+            return
+        }
         clearRAMCache()
-        pendingMemory.removeAll(); memoryPendingWrites = 0
         memoryRevision += 1
         let revision = memoryRevision
         Task {
             do {
                 try await memoryStore.clear(revision: revision)
+                clearRAMCache()
                 await refreshMemoryHealth()
+                memoryFailure = nil
                 toast("Translation memory cleared")
             } catch { memoryFailure = "Memory could not be cleared" }
         }
