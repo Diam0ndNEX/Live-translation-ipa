@@ -479,6 +479,9 @@ actor TranslationMemoryStore {
     /// Exact language, NFC-equivalent source, and context must match. No fuzzy matching,
     /// no app-start mass validation, and no additional translation requests are made.
     private func reconcileLegacy(key: String, confirmedValue: String) throws {
+        // Common case after migration: no pending legacy rows, so avoid even an
+        // indexed SQLite lookup on the asynchronous confirmation-write path.
+        guard status.legacyUnverified > 0 else { return }
         guard let fresh = keyParts(key), fresh.rules != nil,
               !confirmedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let q = try statement("""
