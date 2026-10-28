@@ -44,7 +44,7 @@ struct MemoryStoredEntry: Codable, Identifiable, Sendable {
 /// SQL, or filenames and must never be copied into standard diagnostic reports.
 enum MemoryStoreError: String, Error, LocalizedError {
     case unavailable, databaseOpen, databaseOperation, unsupportedSchema, integrityFailure
-    case invalidImport, unsupportedImport, sourceUnreadable, backupFailed, tooLarge, staleRevision
+    case invalidImport, unsupportedImport, sourceUnreadable, backupFailed, tooLarge, staleRevision, memoryNotEmpty
     var errorDescription: String? { "Translation memory: \(rawValue)" }
 }
 
@@ -462,6 +462,11 @@ actor TranslationMemoryStore {
     /// success and can be retried without restoring deleted translations.
     func deletePreservedCopies(legacyURLs: [URL]) throws {
         guard active else { throw MemoryStoreError.unavailable }
+        // Enforce the destructive operation's precondition at the storage boundary,
+        // not only in the UI. Do not erase the last recovery sources of active data.
+        guard try scalar("SELECT COUNT(*) FROM memory_entries") == 0 else {
+            throw MemoryStoreError.memoryNotEmpty
+        }
         let permitted = Set(["translation-memory-v4.json", "translation-memory.json"])
         for url in legacyURLs {
             guard permitted.contains(url.lastPathComponent) else { throw MemoryStoreError.sourceUnreadable }
