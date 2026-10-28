@@ -206,6 +206,90 @@ import CryptoKit
         precondition(quarantinedHealth.needsValidation == 1,
                      "Legacy proof must never bypass a user's quarantine of a v4 key")
 
+        // A punctuation/segment association must not silently validate a
+        // historical translation or turn it into an authoritative cache hit.
+        let fuzzyPath = root.appendingPathComponent("ocr-variant-legacy.json")
+        let oldVariantKey = "v2|pt>en|0:|Olá, meu amigo!"
+        let newVariantKey = "v4|\(rules)|pt>en|0:|Olá meu amigo"
+        let fragmentOldKey = "v2|pt>en|0:|Onde é que vamos esta noite?"
+        let fragmentNewKey = "v4|\(rules)|pt>en|0:|é que vamos esta"
+        try JSONEncoder().encode([
+            oldVariantKey: "Hello my friend",
+            fragmentOldKey: "Where are we going tonight?"
+        ]).write(to: fuzzyPath)
+        let associationStore = TranslationMemoryStore(
+            directory: root.appendingPathComponent("legacy-association-db"))
+        _ = try await associationStore.prepare(legacyURLs: [fuzzyPath])
+        let assocHealth = try await associationStore.save([
+            newVariantKey: "Hello, my friend",
+            fragmentNewKey: "Where are we going"
+        ], revision: 1, independentlyConfirmedKeys: [newVariantKey, fragmentNewKey])
+        precondition(assocHealth.legacyUnverified == 2 &&
+                     assocHealth.suggestedOCRMatches == 1 &&
+                     assocHealth.suggestedFragmentMatches == 1,
+                     "Fuzzy and fragment associations must remain unverified suggestions")
+        let oldVariantHit = await associationStore.lookup(key: oldVariantKey,
+            timeoutMilliseconds: 50)
+        precondition(oldVariantHit.value == nil,
+                     "A suggestion alone must never become a legacy cache hit")
+
+        // Explicit idle validation independently retranslates the ORIGINAL
+        // source text. It creates a fresh current-key translation and marks
+        // the old row historical, without importing the old output as truth.
+        guard let idleCandidate = try await associationStore.nextLegacyIdleCandidate(
+            target: "en", selectedSource: "pt", after: 0),
+              idleCandidate.source == "pt" else {
+            preconditionFailure("Eligible idled legacy candidate missing")
+        }
+        let idleKey = "v4|\(rules)|pt>en|0:|\(idleCandidate.text)"
+        let idleHealth = try await associationStore.confirmIdleLegacy(
+            id: idleCandidate.id, currentKey: idleKey,
+            freshOutput: "Independent freshly translated text", revision: 2)
+        precondition(idleHealth.legacyUnverified == 1 &&
+                     idleHealth.readyEntries == 3,
+                     "Idle validation saves a current-rule result and retains old records")
+        let postIdleRows = try await associationStore.search(
+            query: idleCandidate.text, limit: 20)
+        precondition(postIdleRows.contains {
+            $0.id == idleCandidate.id &&
+            $0.validationState == "superseded_legacy"
+        }, "A valid differing translation preserves old wording for review")
+        let oldIdleKey = idleCandidate.text == "Olá, meu amigo!" ?
+            oldVariantKey : fragmentOldKey
+        let notReadyLegacy = await associationStore.lookup(key: oldIdleKey,
+            timeoutMilliseconds: 50)
+        precondition(notReadyLegacy.value == nil,
+                     "Idle-verified v2 key must remain excluded from automatic lookup")
+
+        // Regression: v1 SQLite databases from the previous installed release
+        // must upgrade in place to schema v2 without losing committed memory.
+        let upgradeDir = root.appendingPathComponent("memory-v1-upgrade")
+        let migratedEntry = "v4|\(rules)|pt>en|0:|Preserved through upgrade"
+        do {
+            let prior = TranslationMemoryStore(directory: upgradeDir)
+            _ = try await prior.prepare(legacyURLs: [])
+            _ = try await prior.save([migratedEntry: "Still saved"], revision: 1)
+        }
+        var downgradeConnection: OpaquePointer?
+        let databasePath = upgradeDir.appendingPathComponent("memory.sqlite")
+        precondition(sqlite3_open(databasePath.path, &downgradeConnection) == SQLITE_OK)
+        precondition(sqlite3_exec(downgradeConnection,
+            "DROP TABLE memory_legacy_associations", nil, nil, nil) == SQLITE_OK)
+        precondition(sqlite3_exec(downgradeConnection,
+            "DROP INDEX memory_legacy_pending", nil, nil, nil) == SQLITE_OK)
+        precondition(sqlite3_exec(downgradeConnection,
+            "PRAGMA user_version=1", nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(downgradeConnection)
+        let upgraded = TranslationMemoryStore(directory: upgradeDir)
+        let updatedHealth = try await upgraded.prepare(legacyURLs: [])
+        precondition(updatedHealth.schemaVersion == 2 && updatedHealth.totalEntries == 1 &&
+                     updatedHealth.readyEntries == 1,
+                     "Schema migration must preserve historical v1 SQLite data")
+        let migratedHit = await upgraded.lookup(key: migratedEntry,
+            timeoutMilliseconds: 50)
+        precondition(migratedHit.value == "Still saved",
+                     "Existing confirmed translation must survive schema migration")
+
         // A partially unreadable legacy file must not be silently described as migrated.
         let damagedLegacy = root.appendingPathComponent("corrupt-legacy.json")
         try Data("{broken json".utf8).write(to: damagedLegacy)
