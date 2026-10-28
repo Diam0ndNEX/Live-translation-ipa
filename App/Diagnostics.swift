@@ -243,7 +243,12 @@ final class Diagnostics: ObservableObject {
         guard detailedCollection, let candidate else { return }
         // Never export a caller's identifier: historical candidates can encode input text.
         guard let safeID = stableCandidateID(candidate) else { return }
-        let stages: Set<String> = ["first OCR", "seen", "confirmed", "processing", "speculating", "cache", "ready", "enqueued", "superseded", "memory", "cancelled"]
+        let stages: Set<String> = [
+            "first OCR", "seen", "confirmed", "processing", "speculating", "cache",
+            "ready", "enqueued", "superseded", "memory", "cancelled",
+            "ocrCorrection", "language", "segmentation", "freshTranslation",
+            "translationResult"
+        ]
         let safeStage = stages.contains(stage) ? stage : "other"
         appendStructured(candidate: safeID, frameIndex: frameIndex, stage: safeStage,
                          outcome: "observed", reason: safeStage, durationMs: nil, at: time)
