@@ -91,6 +91,9 @@ struct DiagnosticSessionExport: Codable, Identifiable {
     let endedAt: Date
     let appVersion: String
     let systemVersion: String
+    /// Hardware model code only (not a device name or unique identifier).
+    /// Older diagnostic exports decode as nil and are not compared as controlled runs.
+    var hardwareModel: String? = nil
     let settings: [String: String]
     let health: MemoryDiagnosticHealth
     let counters: [String: Int]
@@ -146,9 +149,18 @@ actor DiagnosticExportWriter {
         let safeBoundary = reason.utf8.count <= 512 &&
             (reason.hasPrefix("First OCR sighting") || reason == "OCR through PiP enqueue") ?
             reason : "OCR to PiP enqueue; detailed measurement boundary redacted"
+        let safeHardware = snapshot.hardwareModel.flatMap { model -> String? in
+            guard model.utf8.count <= 32,
+                  model.unicodeScalars.allSatisfy({
+                      CharacterSet.alphanumerics.contains($0) || $0 == "," ||
+                      $0 == "-" || $0 == "_"
+                  }) else { return nil }
+            return model
+        }
         return DiagnosticSessionExport(id: snapshot.id, startedAt: snapshot.startedAt,
             endedAt: snapshot.endedAt, appVersion: snapshot.appVersion,
-            systemVersion: snapshot.systemVersion, settings: safeSettings,
+            systemVersion: snapshot.systemVersion, hardwareModel: safeHardware,
+            settings: safeSettings,
             health: snapshot.health, counters: snapshot.counters,
             distributions: snapshot.distributions, events: safeEvents,
             measurementBoundary: safeBoundary, textCapture: false)
@@ -234,12 +246,14 @@ struct DiagnosticPerformanceComparison {
     let p95Changes: [String: Double]
 
     init(baseline: DiagnosticSessionExport, current: DiagnosticSessionExport) {
-        guard baseline.systemVersion == current.systemVersion,
+        guard let baselineModel = baseline.hardwareModel, !baselineModel.isEmpty,
+              baselineModel == current.hardwareModel,
+              baseline.systemVersion == current.systemVersion,
               baseline.measurementBoundary == current.measurementBoundary,
               baseline.settings == current.settings
         else {
             comparable = false
-            reason = "Different device settings or measurement boundaries; comparison withheld"
+            reason = "Hardware model, OS, settings or measurement boundaries differ or are unavailable; comparison withheld"
             p95Changes = [:]
             return
         }
