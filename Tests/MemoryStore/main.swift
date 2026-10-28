@@ -186,10 +186,12 @@ import SQLite3
             preconditionFailure("Diagnostic sessions larger than 1 MiB must be rejected")
         } catch MemoryStoreError.tooLarge { }
         try await sessionStore.clear(revision: 2)
-        precondition((try await sessionStore.loadDiagnosticSessions()).count == 20,
+        let sessionsAfterMemoryClear = try await sessionStore.loadDiagnosticSessions()
+        precondition(sessionsAfterMemoryClear.count == 20,
                      "Memory deletion must not erase independent diagnostic sessions")
         try await sessionStore.clearDiagnosticSessions()
-        precondition((try await sessionStore.loadDiagnosticSessions()).isEmpty,
+        let sessionsAfterDiagnosticClear = try await sessionStore.loadDiagnosticSessions()
+        precondition(sessionsAfterDiagnosticClear.isEmpty,
                      "Diagnostic deletion must not depend on translation-memory deletion")
         print("Diagnostic session retention, size cap and independent deletion checks passed")
 
