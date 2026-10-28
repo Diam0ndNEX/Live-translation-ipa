@@ -17,6 +17,38 @@ import SQLite3
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let rules = String(repeating: "a", count: 64)
         let key = "v4|\(rules)|pt>en|0:|Olá."
+        // Deterministic disk-full fault in the second INSERT of a transaction.
+        // A partial batch must roll back completely while prior memory survives.
+        #if MEMORY_FAULT_TESTING
+        let fullStore = TranslationMemoryStore(
+            directory: root.appendingPathComponent("simulated-low-storage"))
+        _ = try await fullStore.prepare(legacyURLs: [])
+        let intactKey = "v4|\(rules)|pt>en|0:|Original persisted memory"
+        let newKeyA = "v4|\(rules)|pt>en|0:|Pending low-storage entry A"
+        let newKeyB = "v4|\(rules)|pt>en|0:|Pending low-storage entry B"
+        _ = try await fullStore.save([intactKey: "Original output"], revision: 1)
+        await fullStore.injectStorageFull(afterSuccessfulInserts: 1)
+        do {
+            _ = try await fullStore.save(
+                [newKeyA: "First output", newKeyB: "Second output"], revision: 2)
+            preconditionFailure("Injected disk-full condition should abort the full batch")
+        } catch MemoryStoreError.storageFull { }
+        let afterFailedBatch = try await fullStore.health()
+        precondition(afterFailedBatch.totalEntries == 1 && afterFailedBatch.failedWrites >= 1,
+                     "Failed multi-insert commit must preserve the original durable data")
+        let intactHit = await fullStore.lookup(key: intactKey, timeoutMilliseconds: 50)
+        let missingA = await fullStore.lookup(key: newKeyA, timeoutMilliseconds: 50)
+        let missingB = await fullStore.lookup(key: newKeyB, timeoutMilliseconds: 50)
+        precondition(intactHit.value == "Original output" &&
+                     missingA.value == nil && missingB.value == nil,
+                     "Partially written low-storage transaction must not leak entries")
+        _ = try await fullStore.save(
+            [newKeyA: "First output", newKeyB: "Second output"], revision: 3)
+        let afterRecoveredWrite = try await fullStore.health()
+        precondition(afterRecoveredWrite.totalEntries == 3,
+                     "Confirmed writes can retry after storage capacity is restored")
+        #endif
+
         let legacy = root.appendingPathComponent("translation-memory-v4.json")
         try JSONEncoder().encode(MemoryEnvelope(entries: [key:"Hello."])).write(to: legacy)
         let store = TranslationMemoryStore(directory: root.appendingPathComponent("db"))
