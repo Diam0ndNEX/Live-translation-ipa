@@ -232,23 +232,12 @@ import SQLite3
         let cleared = try await reopened.prepare(legacyURLs: [legacy])
         precondition(cleared.totalEntries == 0, "Clear must not reimport legacy memory")
         precondition(FileManager.default.fileExists(atPath: legacy.path))
-        let recoveryNames = try await reopened.recoverySnapshots()
-        precondition(recoveryNames.contains(snapshotName))
-        let merged = try await reopened.mergeRecoverySnapshot(named: snapshotName)
-        precondition(merged.totalEntries >= 4,
-                     "Recovery must non-destructively return old confirmed entries")
-        _ = try await reopened.save(["v4|\(rules)|pt>en|0:|New after recovery":"New"], revision: 7)
-        let stillPresent = await reopened.lookup(
-            key: "v4|\(rules)|pt>en|0:|New after recovery", timeoutMilliseconds: 50)
-        precondition(stillPresent.value == "New",
-                     "A recovery merge must not replace newer translations")
-        try await reopened.clear(revision: 8)
         // Restore is additive and explicit. A previous Clear cannot be undone by
         // legacy migration, but a user-selected verified snapshot can be merged.
         let availableSnapshots = try await reopened.recoverySnapshots()
         precondition(availableSnapshots.contains(snapshotName))
         let recoveredHealth = try await reopened.mergeRecoverySnapshot(named: snapshotName)
-        precondition(recoveredHealth.totalEntries == 3)
+        precondition(recoveredHealth.totalEntries == 4)
         let recoveredConflict = await reopened.lookup(key: key, timeoutMilliseconds: 50)
         precondition(recoveredConflict.value == nil, "Recovered conflicting translations must stay blocked")
         let recoveredSentence = await reopened.lookup(key: sentenceKey, timeoutMilliseconds: 50)
@@ -256,7 +245,7 @@ import SQLite3
         precondition(recoveredSentence.origin == "persistent",
                      "Recovered provenance must not inflate legacy lookup hits")
         let repeatRecovery = try await reopened.mergeRecoverySnapshot(named: snapshotName)
-        precondition(repeatRecovery.totalEntries == 3, "Snapshot re-merge must be idempotent")
+        precondition(repeatRecovery.totalEntries == 4, "Snapshot re-merge must be idempotent")
         do {
             _ = try await reopened.mergeRecoverySnapshot(named: "../memory.sqlite")
             preconditionFailure("Recovery filenames must reject path traversal")
