@@ -2026,7 +2026,8 @@ final class TranslatorEngine: ObservableObject {
         diag.recordMemory(.ramEviction, count: victims.count)
     }
 
-    // MARK: Explicitly opt-in, foreground-only old memory reconciliation
+    // MARK: Bounded concurrent, foreground-only legacy validation
+
     private var mayRunIdleValidation: Bool {
         memoryReady && !memorySaving && !memoryMutationInProgress &&
         pendingMemory.isEmpty && !legacyValidationBusy && !warming &&
@@ -2038,19 +2039,60 @@ final class TranslatorEngine: ObservableObject {
         ProcessInfo.processInfo.thermalState != .critical
     }
 
-    func startLegacyValidation(maxEntries: Int = 5) {
+    /// After *every* suspension, capture and changed processing rules win over
+    /// idle work. Never commit translations created under outdated settings.
+    private func idleValidationStillSafe(revision: Int, target: String,
+                                         rules: String) -> Bool {
+        !Task.isCancelled && !captureAlive && !pipActive && !busy &&
+        UIApplication.shared.applicationState == .active &&
+        !flag("privateSession", false) && !flag("freshTranslationTest", false) &&
+        !ProcessInfo.processInfo.isLowPowerModeEnabled &&
+        ProcessInfo.processInfo.thermalState != .serious &&
+        ProcessInfo.processInfo.thermalState != .critical &&
+        contextRevision == revision && targetCode == target &&
+        memoryRuleToken == rules && !memorySaving &&
+        !memoryMutationInProgress && pendingMemory.isEmpty && memoryReady
+    }
+
+    func startLegacyValidation(maxEntries: Int = IdleLegacyBatchPolicy.manualEntries) {
         guard idleValidationTask == nil else { return }
+        if legacyValidationExhausted {
+            // Manual validation is a new scan after settings/model availability
+            // may have changed; automatic idle checks avoid repeated futile scans.
+            legacyValidationCursor = 0
+            legacyValidationExhausted = false
+        }
         idleValidationTask = Task { [weak self] in
             await self?.validateIdleLegacy(maxEntries: maxEntries)
             self?.idleValidationTask = nil
         }
     }
 
-    /// At most five translations on demand, or one per idle interval. The old
-    /// output never becomes authoritative; all model requests remain on-device.
-    func validateIdleLegacy(maxEntries: Int = 1) async {
+    /// One isolated model session per worker, with at most twelve texts in a
+    /// single call. No shared foreground session, no 50 simultaneous models.
+    private nonisolated static func translateIdleChunk(source: String, target: String,
+                                                       texts: [String]) async -> [String]? {
+        guard #available(iOS 26.0, *), !Task.isCancelled, !texts.isEmpty else { return nil }
+        let session = TranslationSession(installedSource: Locale.Language(identifier: source),
+                                         target: Locale.Language(identifier: target))
+        let requests = texts.enumerated().map {
+            TranslationSession.Request(sourceText: $0.element,
+                                       clientIdentifier: String($0.offset))
+        }
+        do {
+            let response = try await session.translations(from: requests)
+            guard !Task.isCancelled else { return nil }
+            return PipelineSafety.orderedTranslations(
+                response.map { ($0.clientIdentifier, $0.targetText) }, count: texts.count)
+        } catch { return nil }
+    }
+
+    /// Automatic batches of 24 or manual batches up to 48. Two concurrent
+    /// sessions in Nominal thermal state, one in Fair. Every result is checked
+    /// again before an all-or-nothing SQLite commit.
+    func validateIdleLegacy(maxEntries: Int = IdleLegacyBatchPolicy.automaticEntries) async {
         guard mayRunIdleValidation else {
-            legacyIdleValidationStatus = "Unavailable while capturing or under power pressure"
+            legacyIdleValidationStatus = "Unavailable during capture or under device pressure"
             return
         }
         guard #available(iOS 26.0, *) else {
@@ -2059,80 +2101,167 @@ final class TranslatorEngine: ObservableObject {
         }
         guard pairs("sourceFixes").isEmpty &&
               list("neverTranslate", lower: false).isEmpty else {
-            legacyIdleValidationStatus = "Source substitutions/protected words prevent safe idle validation"
+            legacyIdleValidationStatus = "Source substitutions or protected words prevent safe idle validation"
             return
         }
         lastIdleValidationAttempt = Date()
         legacyValidationBusy = true
-        legacyIdleValidationStatus = "Checking old translations…"
+        legacyBatchActive = true
+        legacyBatchCompleted = 0
+        legacyBatchSkipped = 0
+        legacyBatchTotal = 0
+        let maxCount = max(1, min(IdleLegacyBatchPolicy.maximumEntries, maxEntries))
+        let fair = ProcessInfo.processInfo.thermalState == .fair
+        let workers = IdleLegacyBatchPolicy.concurrency(thermalFair: fair)
+        legacyBatchWorkers = workers
+        legacyIdleValidationStatus = "Scanning up to \(maxCount) older entries…"
         diag.noteModelState("legacy_idle_started")
-        defer { legacyValidationBusy = false }
+        defer {
+            legacyValidationBusy = false
+            legacyBatchActive = false
+            lastIdleValidationAttempt = Date()
+        }
+
         let originalRevision = contextRevision
         let target = targetCode
-        let source: String? = sourceCode == "auto" ? nil : sourceCode
-        var completed = 0
-        for _ in 0..<max(1, min(5, maxEntries)) {
-            guard !Task.isCancelled && !captureAlive && !pipActive && !busy &&
-                  UIApplication.shared.applicationState == .active &&
-                  !ProcessInfo.processInfo.isLowPowerModeEnabled &&
-                  ProcessInfo.processInfo.thermalState != .serious &&
-                  ProcessInfo.processInfo.thermalState != .critical &&
-                  contextRevision == originalRevision && targetCode == target &&
-                  !memorySaving && pendingMemory.isEmpty else { break }
-            do {
-                guard let candidate = try await memoryStore.nextLegacyIdleCandidate(
-                    target: target, selectedSource: source,
-                    after: legacyValidationCursor) else {
-                    if completed == 0 { legacyIdleValidationStatus = "No eligible older entries for this language pair" }
-                    break
+        let rules = memoryRuleToken
+        let sourceFilter: String? = sourceCode == "auto" ? nil : sourceCode
+        var selected: [TranslationMemoryStore.LegacyIdleCandidate] = []
+        var scanned = 0
+        var exhausted = false
+        do {
+            while selected.count < maxCount && scanned < 384 {
+                guard idleValidationStillSafe(revision: originalRevision, target: target, rules: rules)
+                else { return }
+                let rows = try await memoryStore.nextLegacyIdleCandidates(
+                    target: target, selectedSource: sourceFilter,
+                    after: legacyValidationCursor, limit: 64)
+                if rows.isEmpty { exhausted = true; break }
+                for entry in rows {
+                    legacyValidationCursor = entry.id
+                    scanned += 1
+                    guard !entry.source.isEmpty && !entry.text.isEmpty,
+                          (!flag("cleanOCR", true) ||
+                           TextIntel.cleanOCR(entry.text) == entry.text),
+                          (!flag("slang", true) ||
+                           TextIntel.expandSlang(entry.text, lang: entry.source) == entry.text)
+                    else { legacyBatchSkipped += 1; continue }
+                    let sentences = splitSentences(entry.text)
+                    guard sentences.count == 1 && sentences[0] == entry.text
+                    else { legacyBatchSkipped += 1; continue }
+                    selected.append(entry)
+                    if selected.count >= maxCount { break }
                 }
-                legacyValidationCursor = candidate.id
-                let text = candidate.text
-                guard !text.isEmpty && !candidate.source.isEmpty else { continue }
-                // Existing OCR cleanup, slang, and sentence splitting rules may
-                // change a historical string. Never store an incorrect v4 key.
-                guard (!flag("cleanOCR", true) || TextIntel.cleanOCR(text) == text),
-                      (!flag("slang", true) ||
-                       TextIntel.expandSlang(text, lang: candidate.source) == text)
-                else { continue }
-                let segments = splitSentences(text)
-                guard segments.count == 1 && segments[0] == text else { continue }
-                let src = Locale.Language(identifier: candidate.source)
-                let dst = Locale.Language(identifier: target)
-                guard src.languageCode != dst.languageCode else { continue }
-                guard await pairStatus(src, dst) == .installed else { continue }
-                guard !Task.isCancelled && !captureAlive && !pipActive && !busy &&
-                      contextRevision == originalRevision else { break }
-                let outputs = await translateBatch([text], source: src,
-                    target: dst, installed: true)
-                guard !Task.isCancelled && !captureAlive && !pipActive && !busy &&
-                      contextRevision == originalRevision &&
-                      UIApplication.shared.applicationState == .active &&
-                      !ProcessInfo.processInfo.isLowPowerModeEnabled &&
-                      ProcessInfo.processInfo.thermalState != .serious &&
-                      ProcessInfo.processInfo.thermalState != .critical &&
-                      !memorySaving && !memoryMutationInProgress &&
-                      pendingMemory.isEmpty else { break }
-                guard let translation = outputs?.first, !translation.isEmpty else { continue }
-                let key = PipelineSafety.cacheKey(source: candidate.source,
-                    target: target, text: text, protectedWords: [],
-                    rules: memoryRuleToken)
-                memoryRevision += 1
-                memoryHealth = try await memoryStore.confirmIdleLegacy(
-                    id: candidate.id, currentKey: key,
-                    freshOutput: translation, revision: memoryRevision)
-                legacyValidatedThisSession += 1
-                completed += 1
-                await refreshMemoryHealth()
-            } catch {
-                legacyIdleValidationStatus = "Deferred; saved memory preserved"
-                diag.noteModelState("legacy_idle_deferred")
-                break
+            }
+        } catch {
+            legacyIdleValidationStatus = "Memory scan deferred; originals preserved"
+            diag.noteModelState("legacy_idle_deferred")
+            return
+        }
+        guard idleValidationStillSafe(revision: originalRevision, target: target, rules: rules)
+        else { return }
+        if exhausted { legacyValidationExhausted = true }
+        if selected.isEmpty {
+            legacyIdleValidationStatus = exhausted ?
+                "No more eligible entries; pending records may need review" :
+                "Skipped \(legacyBatchSkipped) incompatible older entries"
+            return
+        }
+
+        // Model availability varies by source when the user selects Automatic.
+        var installed = Set<String>()
+        for source in Set(selected.map(\.source)).sorted() {
+            guard idleValidationStillSafe(revision: originalRevision, target: target, rules: rules)
+            else { return }
+            let from = Locale.Language(identifier: source)
+            let to = Locale.Language(identifier: target)
+            if from.languageCode != to.languageCode,
+               await pairStatus(from, to) == .installed { installed.insert(source) }
+        }
+        guard idleValidationStillSafe(revision: originalRevision, target: target, rules: rules)
+        else { return }
+        let eligible = selected.filter { installed.contains($0.source) }
+        legacyBatchSkipped += selected.count - eligible.count
+        let items = eligible.map { IdleLegacyWorkItem(id: $0.id, source: $0.source, text: $0.text) }
+        let chunks = IdleLegacyBatchPolicy.chunks(items, limit: maxCount)
+        legacyBatchTotal = items.count
+        guard !chunks.isEmpty else {
+            legacyIdleValidationStatus = "No installed models for these older entries"
+            return
+        }
+        legacyIdleValidationStatus = "Translating \(items.count) entries with \(workers) workers…"
+
+        // Task-group concurrency is bounded. Results contain only strings; the
+        // SQLite actor alone owns durable writes after all sessions finish.
+        let results: [(Int, [String]?)] = await withTaskGroup(
+            of: (Int, [String]?).self, returning: [(Int, [String]?)].self
+        ) { group in
+            var next = 0
+            func enqueue() {
+                guard next < chunks.count else { return }
+                let i = next
+                next += 1
+                let chunk = chunks[i]
+                group.addTask {
+                    let values = await Self.translateIdleChunk(
+                        source: chunk.source, target: target, texts: chunk.items.map(\.text))
+                    return (i, values)
+                }
+            }
+            for _ in 0..<min(workers, chunks.count) { enqueue() }
+            var output: [(Int, [String]?)] = []
+            while let value = await group.next() {
+                output.append(value)
+                if idleValidationStillSafe(revision: originalRevision, target: target, rules: rules) {
+                    enqueue()
+                } else { group.cancelAll() }
+            }
+            return output
+        }
+        guard idleValidationStillSafe(revision: originalRevision, target: target, rules: rules)
+        else {
+            legacyIdleValidationStatus = "Stopped for live translation; old memory unchanged"
+            diag.noteModelState("legacy_idle_deferred")
+            return
+        }
+        var commits: [TranslationMemoryStore.LegacyIdleConfirmation] = []
+        for (index, values) in results {
+            let chunk = chunks[index]
+            guard let values, values.count == chunk.items.count else {
+                legacyBatchSkipped += chunk.items.count
+                continue
+            }
+            for (item, translated) in zip(chunk.items, values) {
+                guard !translated.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                    legacyBatchSkipped += 1
+                    continue
+                }
+                commits.append(.init(id: item.id,
+                    currentKey: PipelineSafety.cacheKey(
+                        source: item.source, target: target, text: item.text,
+                        protectedWords: [], rules: rules),
+                    freshOutput: translated))
             }
         }
-        if completed > 0 {
-            legacyIdleValidationStatus = "Verified \(completed) older entries in this batch"
+        guard !commits.isEmpty else {
+            legacyIdleValidationStatus = "Models returned no valid translations; originals preserved"
+            diag.noteModelState("legacy_idle_deferred")
+            return
+        }
+        guard idleValidationStillSafe(revision: originalRevision, target: target, rules: rules)
+        else { return }
+        do {
+            memoryRevision += 1
+            memoryHealth = try await memoryStore.confirmIdleLegacyBatch(
+                commits, revision: memoryRevision)
+            legacyValidatedThisSession += commits.count
+            legacyBatchCompleted = commits.count
+            await refreshMemoryHealth()
+            legacyIdleValidationStatus = "Validated \(commits.count)/\(items.count), skipped \(legacyBatchSkipped)"
             diag.noteModelState("legacy_idle_completed")
+        } catch {
+            legacyIdleValidationStatus = "Batch deferred; original memory preserved"
+            diag.noteModelState("legacy_idle_deferred")
         }
     }
 
