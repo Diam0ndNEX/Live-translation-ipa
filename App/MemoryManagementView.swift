@@ -62,18 +62,25 @@ struct MemoryManagementView: View {
                     Label("Storage management threshold reached. No entries were deleted.", systemImage: "externaldrive.badge.exclamationmark")
                         .font(.footnote)
                 }
-                Text("Older entries are checked only when an independently generated, confirmed translation matches their language, text and context. They remain preserved for review; only the fresh current-rule translation is reused. This adds no background model work.").font(.footnote)
+                Text("Live validation uses independently confirmed model output; optional idle validation makes bounded on-device model requests when screen capture is stopped. Originals remain preserved.").font(.footnote)
                 Text("Thresholds do not delete translations. RAM eviction preserves committed entries.").font(.footnote)
             }
             Section("Legacy memory review · optional") {
                 Toggle("Automatically validate while idle", isOn: $legacyIdleValidationEnabled)
-                Text("Off by default. When enabled, validates one eligible older entry at a time while ScreenLingo is in the foreground and capture/PiP are stopped. Never runs in Low Power Mode or serious thermal pressure.")
+                Text("Off by default. Automatic batches check up to 24 eligible entries every 8 seconds after the prior batch finishes (20 seconds when warm). Each model call translates up to 12 entries; up to 2 independent sessions operate concurrently (1 when warm). Only runs in the foreground without capture or PiP.")
                     .font(.footnote).foregroundStyle(.secondary)
-                Button("Validate up to 5 entries now") {
-                    engine.startLegacyValidation(maxEntries: 5)
+                Button("Validate up to 48 entries now") {
+                    engine.startLegacyValidation(maxEntries: IdleLegacyBatchPolicy.manualEntries)
                 }.disabled(captureInProgress || transferBusy ||
                     engine.memoryHealth == nil)
                 LabeledContent("Validation activity", value: engine.legacyIdleValidationStatus)
+                if engine.legacyBatchActive {
+                    ProgressView("Batch processing")
+                }
+                LabeledContent("Concurrent model workers", value: String(engine.legacyBatchWorkers))
+                LabeledContent("Last batch selected", value: String(engine.legacyBatchTotal))
+                LabeledContent("Last batch validated", value: String(engine.legacyBatchCompleted))
+                LabeledContent("Skipped or unsupported", value: String(engine.legacyBatchSkipped))
                 LabeledContent("Verified this session", value: String(engine.legacyValidatedThisSession))
                 if let h = engine.memoryHealth {
                     LabeledContent("OCR-related suggestions", value: String(h.suggestedOCRMatches))
