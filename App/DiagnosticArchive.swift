@@ -120,6 +120,27 @@ actor DiagnosticExportWriter {
         try data.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
         return url
     }
+    /// Export only metadata-only events with a bounded indexed retention window.
+    /// This runs on the archive actor, outside the live OCR and PiP pipeline.
+    func encodeIndexedEvents(_ input: [StructuredDiagnosticEvent])
+        throws -> [(timestamp: Double, payload: Data)] {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        var output: [(timestamp: Double, payload: Data)] = []
+        var byteCount = 0
+        for event in input.suffix(128) where event.privacy == "metadataOnly" {
+            let encoded = try encoder.encode(event)
+            // Selected events must fit a strict, predictable SQLite budget.
+            guard encoded.count <= 4096 else { continue }
+            if byteCount + encoded.count > 512 * 1024 { break }
+            byteCount += encoded.count
+            output.append((timestamp: event.timestamp.timeIntervalSince1970,
+                           payload: encoded))
+        }
+        return output
+    }
+
     func decode(_ data: Data) throws -> DiagnosticSessionExport {
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(DiagnosticSessionExport.self, from: data)
