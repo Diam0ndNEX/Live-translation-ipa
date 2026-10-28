@@ -352,7 +352,9 @@ actor TranslationMemoryStore {
             let query = try statement("SELECT id,translated_text,EXISTS(SELECT 1 FROM memory_provenance p WHERE p.entry_id=memory_entries.id AND p.source_format IN ('envelope_v4','legacy_dictionary','envelope_v3','envelope_v2')) FROM memory_entries WHERE canonical_key=? AND validation_state='ready' AND confirmation_state='persisted' LIMIT 2", [.text(key)])
             defer { sqlite3_finalize(query) }
             let first = sqlite3_step(query)
-            if first == SQLITE_DONE { return result(nil, "none", "miss") }
+            if first == SQLITE_DONE {
+                return try lookupNormalized(key: key, started: started, deadline: deadline)
+            }
             guard first == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
             let value = text(query, 1), imported = sqlite3_column_int(query, 2) != 0
             let second = sqlite3_step(query)
@@ -361,6 +363,73 @@ actor TranslationMemoryStore {
             guard ProcessInfo.processInfo.systemUptime < deadline else { return result(nil, "none", "timeout") }
             return result(value, imported ? "legacy" : "persistent", "hit")
         } catch { return result(nil, "none", "database_error") }
+    }
+
+
+    /// Canonical Unicode equivalence is the only automatic normalized reuse.
+    /// Never remove punctuation, whitespace, names or context to manufacture a hit.
+    /// The language/normalized_source index bounds work before compatibility checks.
+    private func lookupNormalized(key: String, started: Double, deadline: Double) throws -> MemoryLookupResult {
+        func result(_ value: String? = nil, _ origin: String = "none", _ outcome: String) -> MemoryLookupResult {
+            MemoryLookupResult(value: value, origin: origin, outcome: outcome,
+                durationMs: (ProcessInfo.processInfo.systemUptime - started) * 1000)
+        }
+        guard let requested = keyParts(key), let rules = requested.rules
+        else { return result(nil, "none", "incompatible") }
+        let composed = requested.sourceText.precomposedStringWithCanonicalMapping
+        let query = try statement("""
+            SELECT canonical_key,translated_text,validation_state,confirmation_state
+            FROM memory_entries
+            WHERE source_language=? AND target_language=? AND normalized_source=?
+            LIMIT 16
+            """, [.text(requested.source), .text(requested.target),
+                   .text(normalized(requested.sourceText))])
+        defer { sqlite3_finalize(query) }
+        var matched: String?
+        var scanned = 0
+        while true {
+            guard ProcessInfo.processInfo.systemUptime < deadline
+            else { return result(nil, "none", "timeout") }
+            let state = sqlite3_step(query)
+            if state == SQLITE_DONE { break }
+            guard state == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
+            scanned += 1
+            // If more matches might be unseen, refuse to guess.
+            if scanned == 16 { return result(nil, "none", "ambiguous") }
+            guard let parts = keyParts(text(query, 0)),
+                  parts.rules == rules,
+                  parts.context == requested.context,
+                  parts.source == requested.source,
+                  parts.target == requested.target,
+                  parts.sourceText.precomposedStringWithCanonicalMapping == composed
+            else { continue }
+            // A quarantined canonical-equivalent variant must block automatic
+            // normalized reuse instead of being bypassed by a different byte form.
+            guard text(query, 2) == "ready", text(query, 3) == "persisted"
+            else { return result(nil, "none", "incompatible") }
+            if matched != nil { return result(nil, "none", "conflict") }
+            matched = text(query, 1)
+        }
+        guard ProcessInfo.processInfo.systemUptime < deadline
+        else { return result(nil, "none", "timeout") }
+        return matched.map { result($0, "normalized", "normalized_hit") }
+            ?? result(nil, "none", "miss")
+    }
+
+    /// Safely quarantine suspect entries for fresh translation. The original text
+    /// remains persisted and inspectable; user history and settings are untouched.
+    func quarantineEntries(ids: [Int64]) throws -> MemoryStoreHealth {
+        guard active else { throw MemoryStoreError.unavailable }
+        try transaction {
+            for id in Set(ids) {
+                try execute("""
+                    UPDATE memory_entries SET validation_state='needs_validation',
+                    confirmation_state='needs_validation',updated_at=?
+                    WHERE id=?
+                    """, [.real(Date().timeIntervalSince1970), .integer(id)])
+            }
+        }
+        return try health()
     }
 
     /// The caller supplies only confirmed eligible results. Return means COMMIT has

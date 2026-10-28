@@ -55,3 +55,23 @@ Live TranslatorEngine now uses asynchronous SQLite preparation/lookup, additive 
 - Latest commit had no associated PR-triggered workflow run at inspection. Build and tests for these changes are UNVERIFIED.
 - Remaining high-priority review: verify asynchronous clear/write interleavings and failed-clear cache behavior; exercise migration interruptions, corruption, low-storage, and selected-entry deletion concurrency; verify combined IPA CI and device in-place upgrade.
 - Exact next step: trigger/check the combined branch's IPA CI, fix any failures, then add deterministic concurrent write/clear tests. Do not merge into main or claim release readiness without device validation.
+
+
+## v1.4.0 integrated-batch changes (branch codex/screenlingo-v1.4.0-integration)
+The isolated batch deliberately creates Git blobs first and moves its feature branch
+only once all code, UI and tests are prepared. It must not be represented as an
+individually tested feature release. Final validation is a single integrated
+GitHub macOS run after the composite commit, plus a real installed-IPA upgrade.
+- Indexed strict NFC-equivalent memory lookup; preserves language, rules, context,
+  whitespace, punctuation and ambiguity rejection.
+- Explicit per-entry quarantine and safe revalidation after a fresh confirmed save.
+- Engine barrier for memory imports, review changes and recovery merges.
+- Recovery snapshot inspection and non-destructive merge controls in memory settings.
+- Diagnostic category aggregate persistence with backward-compatible decoding,
+  explicit normalized-hit attribution, and settings-gated p95 comparisons.
+- Conservative classifier: speaker cues and ellipses rather than length-only guesses.
+- Regression tests for normalization isolation, quarantine, recovery, and old
+  diagnostics. Integrated CI adds a bounded 3k/25k database benchmark.
+Remaining mandatory manual release gates: installed-IPA upgrade preserving app
+container/history/settings, device p50/p95/p99, long-session PiP, thermal and
+battery evidence, and verified offline behavior. Do not merge into main.

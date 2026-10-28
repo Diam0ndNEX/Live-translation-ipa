@@ -16,6 +16,12 @@ enum MemoryUnitClassifier {
         let lines = text.split(whereSeparator: { $0.isNewline })
             .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         if lines.count > 1 { return .subtitleFragment }
+        // Speaker change markers and unfinished ellipses have stronger evidence
+        // of a subtitle fragment than raw length or word count.
+        if text.hasPrefix("— ") || text.hasPrefix("– ") || text.hasPrefix("- ") {
+            return .subtitleFragment
+        }
+        if text.hasSuffix("…") || text.hasSuffix("...") { return .subtitleFragment }
         let tokens = text.split(whereSeparator: { $0.isWhitespace })
         guard !tokens.isEmpty else { return .unknown }
         if tokens.count == 1 {
@@ -26,8 +32,8 @@ enum MemoryUnitClassifier {
             return acceptable ? .word : .unknown
         }
         if let last = text.last, ".!?。！？؟".contains(last) { return .sentence }
-        if text.hasSuffix("…") || text.hasSuffix("...") { return .subtitleFragment }
-        if tokens.count >= 7 { return .subtitleFragment }
+        // A long phrase without sentence-final punctuation is still a phrase;
+        // do not guess that OCR has captured an incomplete subtitle from length.
         return .phrase
     }
 }

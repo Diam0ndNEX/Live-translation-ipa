@@ -13,11 +13,35 @@ struct MemoryDiagnosticHealth: Codable {
     var pendingWrites = 0
     var failedWrites = 0
     var ramEntries = 0
+    var categoryCounts: [String: Int] = [:]
+
+    // Old saved sessions lack categoryCounts. Keep them readable after upgrades.
+    private enum CodingKeys: String, CodingKey {
+        case schemaVersion, totalEntries, readyEntries, needsValidation, conflicts
+        case databaseBytes, migrationStatus, integrity, pendingWrites, failedWrites
+        case ramEntries, categoryCounts
+    }
+    init() {}
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        schemaVersion = try c.decodeIfPresent(Int.self, forKey: .schemaVersion) ?? 1
+        totalEntries = try c.decodeIfPresent(Int.self, forKey: .totalEntries) ?? 0
+        readyEntries = try c.decodeIfPresent(Int.self, forKey: .readyEntries) ?? 0
+        needsValidation = try c.decodeIfPresent(Int.self, forKey: .needsValidation) ?? 0
+        conflicts = try c.decodeIfPresent(Int.self, forKey: .conflicts) ?? 0
+        databaseBytes = try c.decodeIfPresent(Int64.self, forKey: .databaseBytes) ?? 0
+        migrationStatus = try c.decodeIfPresent(String.self, forKey: .migrationStatus) ?? "not started"
+        integrity = try c.decodeIfPresent(String.self, forKey: .integrity) ?? "not verified"
+        pendingWrites = try c.decodeIfPresent(Int.self, forKey: .pendingWrites) ?? 0
+        failedWrites = try c.decodeIfPresent(Int.self, forKey: .failedWrites) ?? 0
+        ramEntries = try c.decodeIfPresent(Int.self, forKey: .ramEntries) ?? 0
+        categoryCounts = try c.decodeIfPresent([String: Int].self, forKey: .categoryCounts) ?? [:]
+    }
 }
 
 enum MemoryDiagnosticOutcome: String, Codable, CaseIterable {
     case ramHit, persistentHit, legacyHit, speculativeHit, miss, timeout
-    case compatibilityRejected, databaseUnavailable, persisted, writeFailed, ramEviction, cancelled
+    case compatibilityRejected, normalizedHit, databaseUnavailable, persisted, writeFailed, ramEviction, cancelled
 }
 
 struct StructuredDiagnosticEvent: Codable, Identifiable {
@@ -99,5 +123,39 @@ actor DiagnosticExportWriter {
     func decode(_ data: Data) throws -> DiagnosticSessionExport {
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(DiagnosticSessionExport.self, from: data)
+    }
+}
+
+
+/// Controlled comparison is permitted only for matching diagnostic boundaries,
+/// device OS, settings and adequate sample counts. It is not a causal claim.
+struct DiagnosticPerformanceComparison {
+    let comparable: Bool
+    let reason: String
+    let p95Changes: [String: Double]
+
+    init(baseline: DiagnosticSessionExport, current: DiagnosticSessionExport) {
+        guard baseline.systemVersion == current.systemVersion,
+              baseline.measurementBoundary == current.measurementBoundary,
+              baseline.settings == current.settings
+        else {
+            comparable = false
+            reason = "Different device settings or measurement boundaries; comparison withheld"
+            p95Changes = [:]
+            return
+        }
+        var differences: [String: Double] = [:]
+        for name in baseline.distributions.keys.sorted() {
+            guard let before = baseline.distributions[name],
+                  let after = current.distributions[name],
+                  before.count >= 20, after.count >= 20,
+                  let baselineP95 = before.p95, baselineP95 > 0,
+                  let currentP95 = after.p95, currentP95.isFinite else { continue }
+            differences[name] = 100 * (currentP95 - baselineP95) / baselineP95
+        }
+        p95Changes = differences
+        comparable = !differences.isEmpty
+        reason = comparable ? "Comparable settings; different subtitles may affect results"
+            : "At least 20 samples per session are required to compare p95"
     }
 }
