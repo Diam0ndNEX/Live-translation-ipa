@@ -139,7 +139,7 @@ actor DiagnosticExportWriter {
             "mode", "speed", "stability", "frameRot", "area", "adaptiveOCR",
             "remember", "privateSession", "diagnosticsEnabled", "detailedCollection",
             "skipUnchanged", "idleBackoff", "adaptiveConfirmation", "subtitleTracking",
-            "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence"
+            "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest"
         ]
         let safeSettings = snapshot.settings.filter { pair in
             settingsKeys.contains(pair.key) && pair.value.utf8.count <= 48 &&
