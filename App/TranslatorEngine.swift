@@ -1675,7 +1675,8 @@ final class TranslatorEngine: ObservableObject {
         return await translateLegacy(texts, source: source, target: target)
     }
 
-    private func runBatch(_ session: TranslationSession, _ texts: [String]) async -> [String]? {
+    private func runBatch(_ session: TranslationSession, _ texts: [String],
+                          warmup: Bool = false) async -> [String]? {
         let began = ProcessInfo.processInfo.systemUptime
         let reqs = texts.enumerated().map { TranslationSession.Request(sourceText: $0.element, clientIdentifier: String($0.offset)) }
         do {
@@ -1683,7 +1684,7 @@ final class TranslatorEngine: ObservableObject {
             let result = PipelineSafety.orderedTranslations(res.map { ($0.clientIdentifier, $0.targetText) }, count: texts.count)
             diag.noteModelState(result == nil ? "model_batch_failed" : "model_batch_completed",
                 durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
-            if let started = sessionStarted,
+            if !warmup, let started = sessionStarted,
                Date().timeIntervalSince(started) >= 0,
                Date().timeIntervalSince(started) <= 30 {
                 diag.noteModelState("model_batch_first_30s",
@@ -2456,7 +2457,7 @@ final class TranslatorEngine: ObservableObject {
         diag.noteModelState("warmup_started")
         if predicted { diag.noteModelState("warmup_predicted_source") }
         let session = TranslationSession(installedSource: src, target: target)
-        let warmed = await runBatch(session, [word])
+        let warmed = await runBatch(session, [word], warmup: true)
         guard !Task.isCancelled, workContext == contextRevision else {
             warmupStatus = "Deferred for live translation"
             diag.noteModelState("warmup_preempted")
