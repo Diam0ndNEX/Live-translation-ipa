@@ -99,10 +99,10 @@ final class TranslatorEngine: ObservableObject {
         "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode", "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "smartCool", "steadyCaptions", "languageRecovery", "deduplicateCopies", "continuousRotation", "contextualLanguage"
     ]
     /// App look & behaviour that presets do not touch.
-    static let interfaceKeys = ["memoryRAMCapacity", "memorySoftLimit", "persistDiagnosticSessions", "legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
+    static let interfaceKeys = ["memoryRAMCapacity", "memorySoftLimit", "persistDiagnosticSessions", "directPiPBuffer", "legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
     static var settingKeys: [String] { presetKeys + interfaceKeys }
     static let defaults: [String: Any] = [
-        "memoryRAMCapacity": 3000, "memorySoftLimit": 100000, "persistDiagnosticSessions": false,
+        "memoryRAMCapacity": 3000, "memorySoftLimit": 100000, "persistDiagnosticSessions": false, "directPiPBuffer": false,
         "source": "auto", "target": "en", "mode": "movie", "area": "smart", "customY0": 0.0, "customY1": 0.5,
         "speed": "balanced", "stability": 2, "minTextH": 0.0, "ignoreList": "", "frameRot": "auto",
         "dropNoise": true, "boost": 1, "skipUnchanged": true, "subtitleAwareChangeDetection": false, "preserveRelatedMovieGroups": false, "cleanOCR": true, "slang": true,
@@ -270,6 +270,7 @@ final class TranslatorEngine: ObservableObject {
     private var lastTextDate = Date()
     private var lastShowDate = Date.distantPast
     private var cache: [String: String] = [:]
+    private let modelPerf = OSSignposter(subsystem: "com.diam0ndnex.screenlingo", category: "model")
     private var directSession: TranslationSession?
     private var directKey = ""
     private var clearTask: Task<Void, Never>?
@@ -1846,6 +1847,8 @@ final class TranslatorEngine: ObservableObject {
     private func runBatch(_ session: TranslationSession, _ texts: [String],
                           warmup: Bool = false, speculative: Bool = false,
                           partial: (@MainActor (Int, String) -> Void)? = nil) async -> [String]? {
+        let marker = modelPerf.beginInterval("TranslationBatch")
+        defer { modelPerf.endInterval("TranslationBatch", marker) }
         let began = ProcessInfo.processInfo.systemUptime
         let modelCandidate = warmup ? nil : currentPacket?.candidateID
         let first30s = !warmup && sessionStarted.map {
