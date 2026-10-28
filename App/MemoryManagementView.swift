@@ -17,6 +17,7 @@ struct MemoryManagementView: View {
     @State private var exporting = false
     @State private var importing = false
     @State private var transferBusy = false
+    @AppStorage("legacyIdleValidationEnabled") private var legacyIdleValidationEnabled = false
     @AppStorage("memoryRAMCapacity") private var ramCapacity = 3000
     @AppStorage("memorySoftLimit") private var softLimit = 100000
 
@@ -63,6 +64,23 @@ struct MemoryManagementView: View {
                 }
                 Text("Older entries are checked only when an independently generated, confirmed translation matches their language, text and context. They remain preserved for review; only the fresh current-rule translation is reused. This adds no background model work.").font(.footnote)
                 Text("Thresholds do not delete translations. RAM eviction preserves committed entries.").font(.footnote)
+            }
+            Section("Legacy memory review · optional") {
+                Toggle("Automatically validate while idle", isOn: $legacyIdleValidationEnabled)
+                Text("Off by default. When enabled, validates one eligible older entry at a time while ScreenLingo is in the foreground and capture/PiP are stopped. Never runs in Low Power Mode or serious thermal pressure.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Button("Validate up to 5 entries now") {
+                    Task { await engine.validateIdleLegacy(maxEntries: 5) }
+                }.disabled(captureInProgress || transferBusy ||
+                    engine.memoryHealth == nil)
+                LabeledContent("Validation activity", value: engine.legacyIdleValidationStatus)
+                LabeledContent("Verified this session", value: String(engine.legacyValidatedThisSession))
+                if let h = engine.memoryHealth {
+                    LabeledContent("OCR-related suggestions", value: String(h.suggestedOCRMatches))
+                    LabeledContent("Fragment alignment suggestions", value: String(h.suggestedFragmentMatches))
+                }
+                Text("Similar text is a review suggestion only, not a trusted cache hit. Older answers are preserved, including alternative wording.")
+                    .font(.footnote).foregroundStyle(.secondary)
             }
             Section("Transfer") {
                 Button(transferBusy ? "Preparing…" : "Export translation memory") {
