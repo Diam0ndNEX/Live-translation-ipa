@@ -233,6 +233,17 @@ import Foundation
         let exportedZipData = try Data(contentsOf: exportedZIP)
         precondition(exportedZipData.range(of: Data("intervals.csv".utf8)) != nil,
                      "New ZIP bundles must contain the full-session interval CSV")
+        for filename in ["manifest.json", "summary.md", "session.json",
+                         "intervals.csv", "metrics.csv", "events.csv",
+                         "findings.json", "README.txt"] {
+            precondition(exportedZipData.range(of: Data(filename.utf8)) != nil,
+                         "Version 3 evidence ZIP must include \(filename)")
+        }
+        precondition(exportedZipData.range(of: Data("private OCR text".utf8)) == nil,
+                     "Diagnostic ZIP must never include raw text from unsafe fields")
+        precondition(exportedZipData.range(of: Data("original subtitle".utf8)) == nil,
+                     "Structured evidence must remain content-free")
+
         #if os(macOS)
         // Check interoperability with the system ZIP reader, not only our own
         // header checks, before considering bundles trustworthy for export.
@@ -244,6 +255,37 @@ import Foundation
         try archiveCheck.run()
         archiveCheck.waitUntilExit()
         precondition(archiveCheck.terminationStatus == 0, "ZIP bundle must pass unzip -t")
+
+        func entry(_ name: String) throws -> Data {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+            task.arguments = ["-p", exportedZIP.path, name]
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            try task.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            task.waitUntilExit()
+            precondition(task.terminationStatus == 0, "ZIP entry must be readable: \(name)")
+            return data
+        }
+        let manifestData = try entry("manifest.json")
+        let manifest = try JSONSerialization.jsonObject(with: manifestData) as! [String: Any]
+        precondition(manifest["bundleSchemaVersion"] as? Int == 3 &&
+                     manifest["privacy"] as? String == "metadataOnly" &&
+                     manifest["textIncluded"] as? Bool == false,
+                     "Manifest must declare v3 structure and no content capture")
+        let summary = String(decoding: try entry("summary.md"), as: UTF8.self)
+        precondition(summary.contains("Confirmed but superseded before enqueue") &&
+                     summary.contains("physical display") &&
+                     summary.contains("median"),
+                     "Readable summary must distinguish continuity, normal timing and boundaries")
+        let metrics = String(decoding: try entry("metrics.csv"), as: UTF8.self)
+        precondition(metrics.hasPrefix("metric,samples,mean_ms,p50_ms,p90_ms,p95_ms,p99_ms,max_ms"),
+                     "Timing CSV must carry sample counts, typical and tail percentiles")
+        let eventsCSV = String(decoding: try entry("events.csv"), as: UTF8.self)
+        precondition(eventsCSV.contains("candidate_id") &&
+                     !eventsCSV.contains("private OCR text"),
+                     "Event CSV must retain anonymized correlations without source text")
         #endif
         let unsafeEvent = StructuredDiagnosticEvent(id: UUID(), timestamp: Date(),
             sessionID: session, candidateID: UUID(), frameID: nil, unitID: nil,
