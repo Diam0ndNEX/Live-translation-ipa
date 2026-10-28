@@ -164,6 +164,8 @@ struct Stats {
     var unchangedSkipped = 0, cadenceSkipped = 0, pausedSkipped = 0, emptyReads = 0, retryCount = 0
     var captureDrops = 0
     var rotationTries = 0
+    var confirmedCandidatePackets = 0, deferredEarlyCandidates = 0
+    var supersededUnpresentedConfirmed = 0, enqueuedCandidateFrames = 0
 }
 
 // MARK: - Recorder
@@ -202,6 +204,7 @@ final class Diagnostics: ObservableObject {
     var memoryStore: TranslationMemoryStore?
     private let exportWriter = DiagnosticExportWriter()
     private var diagnosticSessionID = UUID()
+    private var lastRecordedThermalState: String?
     private var candidateIDs: [String: UUID] = [:]
     private var frameIDs: [Int: UUID] = [:]
     private var unitIDs: [String: UUID] = [:]
@@ -225,7 +228,7 @@ final class Diagnostics: ObservableObject {
     private func stableCandidateID(_ candidate: String?) -> UUID? {
         guard let candidate else { return nil }
         if let existing = candidateIDs[candidate] { return existing }
-        if candidateIDs.count >= 600 { candidateIDs.removeAll(keepingCapacity: true) }
+        if candidateIDs.count >= 2400 { candidateIDs.removeAll(keepingCapacity: true) }
         let id = UUID()
         candidateIDs[candidate] = id
         return id
@@ -234,7 +237,7 @@ final class Diagnostics: ObservableObject {
     private func stableFrameID(_ index: Int?) -> UUID? {
         guard let index else { return nil }
         if let id = frameIDs[index] { return id }
-        if frameIDs.count >= 600 { frameIDs.removeAll(keepingCapacity: true) }
+        if frameIDs.count >= 2400 { frameIDs.removeAll(keepingCapacity: true) }
         let id = UUID(); frameIDs[index] = id
         return id
     }
@@ -242,7 +245,7 @@ final class Diagnostics: ObservableObject {
     private func stableUnitID(_ canonicalKey: String?) -> UUID? {
         guard let canonicalKey else { return nil }
         if let id = unitIDs[canonicalKey] { return id }
-        if unitIDs.count >= 600 { unitIDs.removeAll(keepingCapacity: true) }
+        if unitIDs.count >= 2400 { unitIDs.removeAll(keepingCapacity: true) }
         let id = UUID(); unitIDs[canonicalKey] = id
         return id
     }
@@ -282,7 +285,7 @@ final class Diagnostics: ObservableObject {
         let allowedReasons: Set<String> = [
             "accepted", "completed", "rejected_duplicate", "rejected_recent_fragment",
             "rejected_empty", "rejected_revision", "rejected_unstable",
-            "rejected_low_confidence", "rejected_stale", "filtered",
+            "rejected_low_confidence", "rejected_stale", "filtered", "deferred_early_candidate",
             "confirmed", "speculative", "ready", "enqueued", "cancelled"
         ]
         guard allowedStages.contains(stage), allowedReasons.contains(reason) else { return }
@@ -293,6 +296,34 @@ final class Diagnostics: ObservableObject {
 
     /// Bounded, privacy-safe segmentation timing. Source text and cache keys are
     /// never stored in structured events; only opaque candidate IDs are emitted.
+    /// Keep state transitions even when there is no OCR candidate. This is how
+    /// 'translation suddenly stopped' can be distinguished from missed text.
+    func noteRuntimeState(_ reason: String) {
+        guard enabled else { return }
+        let allowed: Set<String> = [
+            "heartbeat_timeout", "capture_connected", "idle_auto_pause", "session_time_limit",
+            "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical"
+        ]
+        guard allowed.contains(reason) else { return }
+        appendStructured(stage: "runtime_state", outcome: reason, reason: reason,
+                         durationMs: nil)
+    }
+
+    func noteThermalState() {
+        guard enabled else { return }
+        let reason: String
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: reason = "thermal_nominal"
+        case .fair: reason = "thermal_fair"
+        case .serious: reason = "thermal_serious"
+        case .critical: reason = "thermal_critical"
+        @unknown default: return
+        }
+        guard lastRecordedThermalState != reason else { return }
+        lastRecordedThermalState = reason
+        noteRuntimeState(reason)
+    }
+
     func noteSegmentation(candidate: String?, reused: Bool, durationMs: Double) {
         let token = beginRecorder(); defer { endRecorder(token) }
         guard detailedCollection else { return }
@@ -309,7 +340,7 @@ final class Diagnostics: ObservableObject {
             frameID: stableFrameID(frameIndex), unitID: stableUnitID(unitKey),
             stage: stage, outcome: outcome, reasonCode: reason,
             durationMs: durationMs.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }, privacy: "metadataOnly"))
-        if structuredEvents.count > 600 { structuredEvents.removeFirst(structuredEvents.count - 600) }
+        if structuredEvents.count > 2400 { structuredEvents.removeFirst(structuredEvents.count - 2400) }
     }
 
     /// Counts one lookup outcome per unit; persistence and eviction counters have separate denominators.
@@ -342,7 +373,9 @@ final class Diagnostics: ObservableObject {
 
     func sessionSnapshot() -> DiagnosticSessionExport {
         // Explicit allowlist excludes glossary, protected names, source fixes, user text and paths.
-        let keys = ["mode", "speed", "stability", "frameRot", "area", "adaptiveOCR", "remember", "privateSession", "diagnosticsEnabled", "detailedCollection"]
+        let keys = ["mode", "speed", "stability", "frameRot", "area", "adaptiveOCR", "remember", "privateSession", "diagnosticsEnabled", "detailedCollection",
+                    "skipUnchanged", "idleBackoff", "adaptiveConfirmation", "subtitleTracking",
+                    "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest"]
         var settings: [String: String] = [:]
         for key in keys {
             if let value = UserDefaults.standard.object(forKey: key) { settings[key] = String(describing: value) }
@@ -354,6 +387,17 @@ final class Diagnostics: ObservableObject {
         counters["lookupMisses"] = s.cacheMisses
         counters["speculativeModelRequests"] = s.specModelRequests
         counters["supersededSpeculativePipelines"] = s.specDiscarded
+        counters["confirmedCandidatePackets"] = s.confirmedCandidatePackets
+        counters["deferredEarlyCandidates"] = s.deferredEarlyCandidates
+        counters["supersededUnpresentedConfirmed"] = s.supersededUnpresentedConfirmed
+        counters["enqueuedCandidateFrames"] = s.enqueuedCandidateFrames
+        counters["unchangedSkippedFrames"] = s.unchangedSkipped
+        counters["cadenceSkippedFrames"] = s.cadenceSkipped
+        counters["pausedSkippedFrames"] = s.pausedSkipped
+        counters["emptyReads"] = s.emptyReads
+        counters["contrastRetries"] = s.retryCount
+        counters["captureFrames"] = s.frames
+        counters["capturePasses"] = s.passes
         return DiagnosticSessionExport(id: diagnosticSessionID, startedAt: started, endedAt: Date(),
             appVersion: AppVersion.full, systemVersion: UIDevice.current.systemVersion,
             hardwareModel: Self.hardwareModelCode, settings: settings, health: memoryHealth, counters: counters,
@@ -536,6 +580,7 @@ final class Diagnostics: ObservableObject {
     func reset() {
         persistSession()
         diagnosticSessionID = UUID(); candidateIDs = [:]; frameIDs = [:]; unitIDs = [:]; structuredEvents = []
+        lastRecordedThermalState = nil
         memoryOutcomes = [:]; lookupSamples = []; writeSamples = []
         started = Date()
         subtitleTraces = []; recorderCosts = RecorderCosts()

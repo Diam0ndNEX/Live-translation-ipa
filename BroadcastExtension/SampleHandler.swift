@@ -89,7 +89,8 @@ class SampleHandler: RPBroadcastSampleHandler {
             enabled: cfg.adaptiveOCR ?? false, cool: cfg.smartCool ?? false,
             pressure: cfg.pressure ?? false, feedback: feedback, ceiling: cfg.detailCeiling ?? 2400)
         recognitionReason = plan.reason
-        let idleFactor = (cfg.idleBackoff ?? true) && now.timeIntervalSince(lastUsefulText) > 8 ? 2.5 : 1.0
+        let idleFactor = SubtitleAcquisitionPolicy.idleMultiplier(movie: cfg.movieMode ?? false,
+            enabled: cfg.idleBackoff ?? true, secondsSinceText: now.timeIntervalSince(lastUsefulText))
         guard !cfg.paused else { pausedSkipped += 1; return }
         guard CaptureCadence.remaining(startedAt: lastRun.timeIntervalSince1970, now: now.timeIntervalSince1970,
                                        interval: plan.interval * idleFactor) <= 0 else { cadenceSkipped += 1; return }
@@ -99,8 +100,8 @@ class SampleHandler: RPBroadcastSampleHandler {
         if (cfg.skipUnchanged ?? true) && candidateCount == 0 {
             let sig = signature(pb)
             if !sig.isEmpty, sig.count == ocrSig.count { feedback.motion = meanDiff(sig, ocrSig) }
-            if !sig.isEmpty, sig.count == ocrSig.count, now.timeIntervalSince(lastRun) < 2.0,
-               meanDiff(sig, ocrSig) <= 1.5 {
+            if !sig.isEmpty, sig.count == ocrSig.count, now.timeIntervalSince(lastRun) < SubtitleAcquisitionPolicy.maximumUnchangedDelay(movie: cfg.movieMode ?? false),
+               !SubtitleAcquisitionPolicy.changed(previous: ocrSig, current: sig) {
                 skipped += 1; unchangedSkipped += 1
                 return
             }

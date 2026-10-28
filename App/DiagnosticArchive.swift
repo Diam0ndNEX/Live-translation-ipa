@@ -112,9 +112,9 @@ actor DiagnosticExportWriter {
             "memory", "segmentation", "first OCR", "seen", "confirmed", "processing",
             "speculating", "cache", "ready", "enqueued", "superseded", "cancelled",
             "ocrCorrection", "language", "freshTranslation", "translationResult",
-            "frame_arrival", "rotation", "duplicate_detection", "ocr_filtering",
+            "frame_arrival", "rotation", "ocr_execution", "duplicate_detection", "ocr_filtering",
             "stability", "text_grouping", "ocr_correction", "language_detection",
-            "memory_lookup", "translation", "pip_preparation", "pip_enqueue",
+            "memory_lookup", "translation", "pip_preparation", "pip_enqueue", "runtime_state",
             "cancellation"
         ]
         let eventCodes: Set<String> = Set(MemoryDiagnosticOutcome.allCases.map { $0.rawValue })
@@ -123,9 +123,11 @@ actor DiagnosticExportWriter {
                 "rejected_recent_fragment", "rejected_empty", "rejected_revision",
                 "rejected_unstable", "rejected_low_confidence", "rejected_stale",
                 "filtered", "confirmed", "speculative", "ready", "enqueued",
-                "cancelled", "redacted"
+                "cancelled", "redacted", "completed", "deferred_early_candidate",
+                "heartbeat_timeout", "capture_connected", "idle_auto_pause", "session_time_limit",
+                "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical"
             ]).union(stageCodes)
-        let safeEvents = snapshot.events.prefix(600).map { event in
+        let safeEvents = snapshot.events.suffix(2400).map { event in
             StructuredDiagnosticEvent(id: event.id, timestamp: event.timestamp,
                 sessionID: event.sessionID, candidateID: event.candidateID,
                 frameID: event.frameID, unitID: event.unitID,
@@ -137,7 +139,9 @@ actor DiagnosticExportWriter {
         }
         let settingsKeys: Set<String> = [
             "mode", "speed", "stability", "frameRot", "area", "adaptiveOCR",
-            "remember", "privateSession", "diagnosticsEnabled", "detailedCollection"
+            "remember", "privateSession", "diagnosticsEnabled", "detailedCollection",
+            "skipUnchanged", "idleBackoff", "adaptiveConfirmation", "subtitleTracking",
+            "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest"
         ]
         let safeSettings = snapshot.settings.filter { pair in
             settingsKeys.contains(pair.key) && pair.value.utf8.count <= 48 &&
@@ -426,7 +430,7 @@ struct DiagnosticReviewedCandidate: Identifiable {
     let status: String
 }
 
-/// Off the live path: only process the recorder's bounded last 600 events.
+/// Off the live path: only process the recorder's bounded last 2400 events.
 /// This is an explanation of *instrumented* stages, not a reconstruction of
 /// unobserved OCR, model accuracy, or the physical PiP display.
 enum DiagnosticTraceReview {
@@ -434,7 +438,7 @@ enum DiagnosticTraceReview {
         "frame_arrival", "rotation", "duplicate_detection", "ocr_filtering",
         "stability", "text_grouping", "ocr_correction", "language_detection",
         "segmentation", "memory_lookup", "translation", "pip_preparation",
-        "pip_enqueue", "cancellation", "first OCR", "seen", "confirmed",
+        "pip_enqueue", "cancellation", "runtime_state", "first OCR", "seen", "confirmed",
         "processing", "speculating", "cache", "ready", "enqueued",
         "superseded", "memory", "cancelled", "ocrCorrection", "language",
         "freshTranslation", "translationResult"
@@ -442,7 +446,9 @@ enum DiagnosticTraceReview {
     private static let allowedReasons: Set<String> = [
         "accepted", "rejected_duplicate", "rejected_recent_fragment",
         "rejected_empty", "rejected_revision", "rejected_unstable",
-        "rejected_low_confidence", "rejected_stale", "filtered",
+        "rejected_low_confidence", "rejected_stale", "filtered", "deferred_early_candidate",
+        "heartbeat_timeout", "capture_connected", "idle_auto_pause", "session_time_limit",
+        "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical",
         "confirmed", "speculative", "ready", "enqueued", "cancelled",
         "observed", "cache_hit", "computed", "ramHit", "persistentHit",
         "legacyHit", "normalizedHit", "speculativeHit", "miss", "timeout",
@@ -451,7 +457,7 @@ enum DiagnosticTraceReview {
     ]
     static func review(_ input: [StructuredDiagnosticEvent], limit: Int = 12)
         -> [DiagnosticReviewedCandidate] {
-        let bounded = input.suffix(600)
+        let bounded = input.suffix(2400)
             .filter { $0.privacy == "metadataOnly" && $0.candidateID != nil }
         var byCandidate: [UUID: [StructuredDiagnosticEvent]] = [:]
         for event in bounded {

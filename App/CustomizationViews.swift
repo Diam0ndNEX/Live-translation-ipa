@@ -127,7 +127,6 @@ struct FeedbackStorageSettings: View {
     @AppStorage("autoCopyFormat") private var copyFormat = "translation"
     @AppStorage("interruptSpeech") private var interrupt = true
     @AppStorage("historyCapacity") private var history = 500
-    @AppStorage("memoryCapacity") private var memory = 3000
     @AppStorage("diagSamples") private var samples = 600
     var body: some View {
         List {
@@ -141,12 +140,12 @@ struct FeedbackStorageSettings: View {
             }
             Section {
                 Picker("History limit", selection: $history) { Text("100 entries").tag(100); Text("250 entries").tag(250); Text("500 entries").tag(500); Text("1000 entries").tag(1000) }
-                Picker("Translation memory limit", selection: $memory) { Text("1000 sentences").tag(1000); Text("3000 sentences").tag(3000); Text("6000 sentences").tag(6000) }
+                NavigationLink("Manage translation memory") { MemoryManagementView() }
                 Picker("Diagnostic samples per series", selection: $samples) { Text("300").tag(300); Text("600").tag(600); Text("1200").tag(1200) }
             } header: { Text("Storage budgets") } footer: {
-                Text("Higher limits use more memory in the main app. Lowering a limit trims older entries when you leave this page; export your library first if needed.")
+                Text("History and diagnostic sample limits are separate from Translation Memory 2.0. The memory page controls RAM cache and SQLite management thresholds without deleting committed translations.")
             }
-            Section { Button("Reset feedback & budgets", role: .destructive) { engine.resetKeys(["hapticStrength", "autoCopyFormat", "interruptSpeech", "historyCapacity", "memoryCapacity", "diagSamples"]) } }
+            Section { Button("Reset feedback & budgets", role: .destructive) { engine.resetKeys(["hapticStrength", "autoCopyFormat", "interruptSpeech", "historyCapacity", "diagSamples"]) } }
         }.navigationTitle("Feedback & storage").navigationBarTitleDisplayMode(.inline)
             .onDisappear { engine.applyStorageSettings() }
     }

@@ -68,6 +68,35 @@ check(ExportFormat.normalizedArea(-1, 2) == 0...1, "Capture area must stay withi
 check(abs(ExportFormat.normalizedArea(0.5, 0.5).upperBound - 0.6) < 0.00001, "Capture area must have a usable minimum height")
 print("Export and capture-area checks passed")
 
+// v1.4.1: short subtitles must not be hidden by whole-screen mean differences.
+let quietSignature = Array(repeating: UInt8(120), count: 576)
+var sparseSubtitle = quietSignature
+sparseSubtitle[14] = 184
+sparseSubtitle[15] = 184
+check(SubtitleAcquisitionPolicy.changed(previous: quietSignature, current: sparseSubtitle),
+      "Two high-contrast changed samples must wake OCR even if global average is low")
+check(!SubtitleAcquisitionPolicy.changed(previous: quietSignature, current: quietSignature),
+      "Unchanged frames may be skipped within a bounded deadline")
+check(SubtitleAcquisitionPolicy.changed(previous: [], current: quietSignature),
+      "The first sampled frame must always be recognized")
+check(SubtitleAcquisitionPolicy.maximumUnchangedDelay(movie: true) < 0.6,
+      "Movie subtitles must not wait up to two seconds for an OCR retry")
+check(SubtitleAcquisitionPolicy.idleMultiplier(movie: true, enabled: true, secondsSinceText: 10) < 1.3,
+      "Movie capture should not slow down 2.5x after a quiet scene")
+check(SubtitleAcquisitionPolicy.idleMultiplier(movie: false, enabled: true, secondsSinceText: 10) == 2.5,
+      "Other reading modes retain the previous power-saving policy")
+check(SubtitleAcquisitionPolicy.idleMultiplier(movie: true, enabled: false, secondsSinceText: 10) == 1,
+      "Disabling idle backoff must always mean no idle slow-down")
+check(!SubtitleAcquisitionPolicy.shouldSupersedeActive(activeConfirmed: true, activePresented: false, incomingConfirmed: false),
+      "A tentative subtitle cannot cancel a confirmed translation")
+check(SubtitleAcquisitionPolicy.shouldSupersedeActive(activeConfirmed: true, activePresented: false, incomingConfirmed: true),
+      "A confirmed new subtitle may replace stale confirmed output")
+check(SubtitleAcquisitionPolicy.shouldSupersedeActive(activeConfirmed: false, activePresented: false, incomingConfirmed: false),
+      "Early OCR may update other unconfirmed candidates")
+check(SubtitleAcquisitionPolicy.shouldSupersedeActive(activeConfirmed: true, activePresented: true, incomingConfirmed: false),
+      "The next early subtitle may translate ahead once the previous one was presented")
+print("Subtitle acquisition and confirmed-caption continuity checks passed")
+
 // Cadence removes only redundant waiting: accuracy, pass count and resolution are unchanged.
 check(CaptureCadence.remaining(startedAt: 10, now: 10.242, interval: 0.22) == 0, "An OCR pass longer than its interval must not incur a second interval")
 check(abs(CaptureCadence.remaining(startedAt: 10, now: 10.1, interval: 0.22) - 0.12) < 0.000001, "Short passes must respect their configured cadence")

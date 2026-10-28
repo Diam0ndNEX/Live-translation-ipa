@@ -484,6 +484,7 @@ struct PerformanceSettings: View {
     @AppStorage("keepWarm") private var keepWarm = true
     @AppStorage("remember") private var remember = true
     @AppStorage("idleBackoff") private var idleBackoff = true
+    @AppStorage("freshTranslationTest") private var freshTranslationTest = false
 
     var body: some View {
         List {
@@ -514,16 +515,22 @@ struct PerformanceSettings: View {
             } footer: {
                 Text("Adaptive performance reads less often when the phone gets hot, Low Power Mode is on, or the capture extension is running low on memory. Auto-pause saves battery during long gaps.")
             }
+            Section("Controlled comparison") {
+                Toggle("Fresh translation test (no memory reuse)", isOn: $freshTranslationTest)
+                Text("For same-video comparisons only. Temporarily bypasses RAM/SQLite reuse and translation-ahead, without deleting remembered translations. It can be slower, warmer and use more power. Turn it off after testing.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
             Section {
                 DiagnosticsCollectionControls()
                 Button("Reset diagnostics counters") { engine.diag.reset(); engine.toast("Counters reset") }
             }
-            ResetSection(keys: ["coolMode", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember", "idleBackoff"])
+            ResetSection(keys: ["coolMode", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember", "idleBackoff", "freshTranslationTest"])
         }
         .settingsPage("Performance & power")
         .onChange(of: adaptive) { _, _ in engine.syncConfig() }
         .onChange(of: translateAhead) { _, _ in engine.syncConfig() }
         .onChange(of: idleBackoff) { _, _ in engine.syncConfig() }
+        .onChange(of: freshTranslationTest) { _, _ in engine.pipelineSettingsChanged() }
     }
 }
 
