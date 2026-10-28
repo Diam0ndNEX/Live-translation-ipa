@@ -248,11 +248,28 @@ actor DiagnosticExportWriter {
                   }) else { return nil }
             return model
         }
+        // Defense in depth for all top-level counters too. The live producer
+        // currently uses fixed keys, but the archive boundary must not rely
+        // on future callers never accidentally supplying a source-text key.
+        let extraCounters: Set<String> = [
+            "sessionCacheHits", "savedMemoryHits", "speculativeModelRequests",
+            "supersededSpeculativePipelines", "confirmedCandidatePackets",
+            "deferredEarlyCandidates", "supersededUnpresentedConfirmed",
+            "enqueuedCandidateFrames", "unchangedSkippedFrames",
+            "cadenceSkippedFrames", "pausedSkippedFrames", "emptyReads",
+            "contrastRetries", "emptyOCRPasses"
+        ]
+        let allowedCounters = DiagnosticIntervalBucket.allowedCounters
+            .union(MemoryDiagnosticOutcome.allCases.map { $0.rawValue })
+            .union(extraCounters)
+        let safeCounters = snapshot.counters.filter {
+            allowedCounters.contains($0.key) && $0.value >= 0
+        }
         return DiagnosticSessionExport(id: snapshot.id, startedAt: snapshot.startedAt,
             endedAt: snapshot.endedAt, appVersion: snapshot.appVersion,
             systemVersion: snapshot.systemVersion, hardwareModel: safeHardware,
             settings: safeSettings,
-            health: snapshot.health, counters: snapshot.counters,
+            health: snapshot.health, counters: safeCounters,
             distributions: snapshot.distributions, events: safeEvents,
             intervals: snapshot.intervals.map { Array($0.suffix(960)).map { $0.sanitized() } },
             measurementBoundary: safeBoundary, textCapture: false)
