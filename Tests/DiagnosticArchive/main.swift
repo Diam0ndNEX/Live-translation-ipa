@@ -54,6 +54,27 @@ import Foundation
         let oldSession = try await writer.decode(oldArchive)
         precondition(oldSession.health.categoryCounts.isEmpty,
                      "Legacy diagnostic sessions must remain readable")
+
+        var healthWithConflict = MemoryDiagnosticHealth()
+        healthWithConflict.conflicts = 2
+        healthWithConflict.failedWrites = 1
+        healthWithConflict.migrationStatus = "partial_recovery"
+        let evidence = DiagnosticSessionExport(id: UUID(), startedAt: Date(),
+            endedAt: Date(), appVersion: "1.4.0", systemVersion: "test",
+            settings: ["speed": "balanced"], health: healthWithConflict,
+            counters: ["timeout": 4, "persistentHit": 16, "writeFailed": 1],
+            distributions: [:], events: [], measurementBoundary: "test", textCapture: false)
+        let findings = DiagnosticIssueDetector.assess(evidence)
+        precondition(Set(findings.map(\\.code)) == Set([
+            "memory_write_failure", "memory_conflict", "migration_recovery", "memory_lookup_timeouts"
+        ]), "Only evidence-backed diagnostic signals should be emitted")
+        precondition(findings.first(where: { $0.code == "memory_lookup_timeouts" })?.classification == "suspected")
+        let insufficient = DiagnosticSessionExport(id: UUID(), startedAt: Date(), endedAt: Date(),
+            appVersion: "1.4.0", systemVersion: "test", settings: [:], health: MemoryDiagnosticHealth(),
+            counters: ["timeout": 1, "persistentHit": 1], distributions: [:], events: [],
+            measurementBoundary: "test", textCapture: false)
+        precondition(DiagnosticIssueDetector.assess(insufficient).isEmpty,
+                     "Low sample counts cannot justify a latency regression finding")
         print("Diagnostic percentile, privacy, correlation, compatibility and comparison passed")
     }
 }
