@@ -95,7 +95,7 @@ final class TranslatorEngine: ObservableObject {
         "frameRot", "dropNoise", "boost", "skipUnchanged", "subtitleAwareChangeDetection", "preserveRelatedMovieGroups", "cleanOCR", "slang", "speakerDetect", "highlightNames",
         "langLock", "neverTranslate", "sourceFixes", "glossary", "winSize", "theme", "textSize", "pipFont",
         "showOriginal", "autoClear", "clearHold", "minDisplay", "autoOpenPiP", "haptics", "speak", "speechRate",
-        "autoCopy", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember", "lowLatencyTranslation", "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
+        "autoCopy", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember", "lowLatencyTranslation", "incrementalBatchRecovery", "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
         "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode", "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "smartCool", "steadyCaptions", "languageRecovery", "deduplicateCopies", "continuousRotation", "contextualLanguage"
     ]
     /// App look & behaviour that presets do not touch.
@@ -110,7 +110,7 @@ final class TranslatorEngine: ObservableObject {
         "glossary": "", "winSize": "normal", "theme": "dark", "textSize": "auto", "pipFont": "standard",
         "showOriginal": false, "autoClear": true, "clearHold": 1.0, "minDisplay": 0.0, "autoOpenPiP": true,
         "haptics": false, "speak": false, "speechRate": 0.5, "autoCopy": false, "adaptive": true, "idleMinutes": 0,
-        "translateAhead": true, "keepWarm": true, "remember": true, "lowLatencyTranslation": false,
+        "translateAhead": true, "keepWarm": true, "remember": true, "lowLatencyTranslation": false, "incrementalBatchRecovery": false,
         "adaptiveSpeculation": true, "protectConfirmedPresentation": true, "predictiveWarmup": true,
         "displayPolicy": "immediate", "pipWeight": "bold", "pipAlignment": "left", "pipLineSpacing": 0.0,
         "pipPadding": 24.0, "originalFraction": 0.27, "pipScale": 1.0, "speakerAccent": "blue", "heartbeatInterval": 1.0,
@@ -1679,7 +1679,30 @@ final class TranslatorEngine: ObservableObject {
                 diag.trace(workCandidate, stage: "freshTranslation",
                            detail: "Uncached units submitted to on-device translation")
             }
-            let batch = await translateBatch(plan.unique, source: src, target: target, installed: installed, speculative: !display)
+            let streamPartials = !display && installed && flag("incrementalBatchRecovery", false)
+            let partialHandler: (@MainActor (Int, String) -> Void)? = streamPartials ? { [self] index, value in
+                // The incremental API can complete units out of order. Only
+                // retain a valid, uniquely mapped exact-context sentence.
+                guard index >= 0, index < plan.unique.count,
+                      workContext == contextRevision, rules == memoryRuleToken,
+                      destination == targetCode, !bypassMemory,
+                      !flag("freshTranslationTest", false) else { return }
+                let text = plan.unique[index]
+                let matches = items.filter { $0.text == text }
+                let keys = Set(matches.map(\.key))
+                guard keys.count == 1, let key = keys.first,
+                      !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      cache[key] == nil else { return }
+                cache[key] = value
+                specKeys.insert(key)
+                if let speculativeID { speculativeOrigins[key] = speculativeID }
+                savedKeys.remove(key)
+                touchCache(key)
+                trimCache()
+                if diag.enabled { diag.s.specRetainedUnits += 1 }
+            } : nil
+            let batch = await translateBatch(plan.unique, source: src, target: target, installed: installed,
+                                             speculative: !display, partial: partialHandler)
             if !display, !isCurrent() {
                 // Cancellation is cooperative: the model can finish after a
                 // different caption arrives. Recover only completed exact-key
@@ -1796,7 +1819,8 @@ final class TranslatorEngine: ObservableObject {
 
     /// Translates many sentences in one call.
     private func translateBatch(_ texts: [String], source: Locale.Language, target: Locale.Language,
-                                installed: Bool, speculative: Bool = false) async -> [String]? {
+                                installed: Bool, speculative: Bool = false,
+                                partial: (@MainActor (Int, String) -> Void)? = nil) async -> [String]? {
         if #available(iOS 26.0, *), installed {
             let k = "\(source.minimalIdentifier)>\(targetCode)|\(flag("lowLatencyTranslation", false) ? "low" : "default")"
             if directSession == nil || directKey != k {
@@ -1810,7 +1834,7 @@ final class TranslatorEngine: ObservableObject {
             }
             if diag.enabled { diag.s.sessionKind = "Direct session (iOS 26)" }
             guard let session = directSession else { return nil }
-            let r = await runBatch(session, texts, speculative: speculative)
+            let r = await runBatch(session, texts, speculative: speculative, partial: partial)
             if r == nil { directSession = nil }
             else { warmupStatus = "Ready" }
             return r
@@ -1820,7 +1844,8 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func runBatch(_ session: TranslationSession, _ texts: [String],
-                          warmup: Bool = false, speculative: Bool = false) async -> [String]? {
+                          warmup: Bool = false, speculative: Bool = false,
+                          partial: (@MainActor (Int, String) -> Void)? = nil) async -> [String]? {
         let began = ProcessInfo.processInfo.systemUptime
         let modelCandidate = warmup ? nil : currentPacket?.candidateID
         let first30s = !warmup && sessionStarted.map {
@@ -1831,8 +1856,27 @@ final class TranslatorEngine: ObservableObject {
             (speculative ? "speculative_model_submitted" : "confirmed_model_submitted"), candidate: modelCandidate)
         let reqs = texts.enumerated().map { TranslationSession.Request(sourceText: $0.element, clientIdentifier: String($0.offset)) }
         do {
-            let res = try await session.translations(from: reqs)
-            let result = PipelineSafety.orderedTranslations(res.map { ($0.clientIdentifier, $0.targetText) }, count: texts.count)
+            let result: [String]?
+            if partial != nil && texts.count > 1 {
+                // Never present partial subtitles. Store only completed units
+                // in exact-context volatile memory. A failed batch stays failed.
+                var collected: [Int: String] = [:]
+                for try await response in session.translate(batch: reqs) {
+                    guard let id = response.clientIdentifier,
+                          let index = Int(id), index >= 0, index < texts.count,
+                          collected[index] == nil else { continue }
+                    let value = response.targetText
+                    guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
+                    collected[index] = value
+                    partial?(index, value)
+                }
+                result = collected.count == texts.count ?
+                    (0..<texts.count).compactMap { collected[$0] } : nil
+            } else {
+                let res = try await session.translations(from: reqs)
+                result = PipelineSafety.orderedTranslations(
+                    res.map { ($0.clientIdentifier, $0.targetText) }, count: texts.count)
+            }
             diag.noteModelState(result == nil ? "model_batch_failed" : "model_batch_completed",
                 durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
             if result != nil {
