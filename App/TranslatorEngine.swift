@@ -200,6 +200,7 @@ final class TranslatorEngine: ObservableObject {
     private var savedRequests = 0
     private var warming = false
     private var legacyValidationBusy = false
+    private var idleValidationTask: Task<Void, Never>?
     private var legacyValidationCursor: Int64 = 0
     private var lastIdleValidationAttempt = Date.distantPast
     private var languageCache: [String: (NLLanguage?, [NLLanguage: Double])] = [:]
@@ -364,7 +365,7 @@ final class TranslatorEngine: ObservableObject {
         if tickCount % 60 == 0, flag("legacyIdleValidationEnabled", false),
            Date().timeIntervalSince(lastIdleValidationAttempt) > 90,
            mayRunIdleValidation {
-            Task { await validateIdleLegacy(maxEntries: 1) }
+            startLegacyValidation(maxEntries: 1)
         }
         if alive, !paused, tickCount % 10 == 0, Date().timeIntervalSince(lastTextDate) > 8,
            Date().timeIntervalSince(lastWarm) > 25 {
@@ -725,6 +726,8 @@ final class TranslatorEngine: ObservableObject {
         diag.onPacket(p, transport: p.ts.map { max(0, now.timeIntervalSince1970 - $0) * 1000 })
 
         if !wasAlive {
+            idleValidationTask?.cancel()
+            idleValidationTask = nil
             sessionStarted = now
             sessionTranslations = 0; sessionCharacters = 0
             diag.log("Capture connected (extension v\(p.version))")
@@ -2026,6 +2029,14 @@ final class TranslatorEngine: ObservableObject {
         ProcessInfo.processInfo.thermalState != .critical
     }
 
+    func startLegacyValidation(maxEntries: Int = 5) {
+        guard idleValidationTask == nil else { return }
+        idleValidationTask = Task { [weak self] in
+            await self?.validateIdleLegacy(maxEntries: maxEntries)
+            self?.idleValidationTask = nil
+        }
+    }
+
     /// At most five translations on demand, or one per idle interval. The old
     /// output never becomes authoritative; all model requests remain on-device.
     func validateIdleLegacy(maxEntries: Int = 1) async {
@@ -2045,13 +2056,14 @@ final class TranslatorEngine: ObservableObject {
         lastIdleValidationAttempt = Date()
         legacyValidationBusy = true
         legacyIdleValidationStatus = "Checking old translations…"
+        diag.noteModelState("legacy_idle_started")
         defer { legacyValidationBusy = false }
         let originalRevision = contextRevision
         let target = targetCode
         let source: String? = sourceCode == "auto" ? nil : sourceCode
         var completed = 0
         for _ in 0..<max(1, min(5, maxEntries)) {
-            guard !captureAlive && !pipActive && !busy &&
+            guard !Task.isCancelled && !captureAlive && !pipActive && !busy &&
                   UIApplication.shared.applicationState == .active &&
                   !ProcessInfo.processInfo.isLowPowerModeEnabled &&
                   ProcessInfo.processInfo.thermalState != .serious &&
@@ -2080,11 +2092,11 @@ final class TranslatorEngine: ObservableObject {
                 let dst = Locale.Language(identifier: target)
                 guard src.languageCode != dst.languageCode else { continue }
                 guard await pairStatus(src, dst) == .installed else { continue }
-                guard !captureAlive && !pipActive && !busy &&
+                guard !Task.isCancelled && !captureAlive && !pipActive && !busy &&
                       contextRevision == originalRevision else { break }
                 let outputs = await translateBatch([text], source: src,
                     target: dst, installed: true)
-                guard !captureAlive && !pipActive && !busy &&
+                guard !Task.isCancelled && !captureAlive && !pipActive && !busy &&
                       contextRevision == originalRevision &&
                       UIApplication.shared.applicationState == .active &&
                       !ProcessInfo.processInfo.isLowPowerModeEnabled &&
@@ -2105,11 +2117,13 @@ final class TranslatorEngine: ObservableObject {
                 await refreshMemoryHealth()
             } catch {
                 legacyIdleValidationStatus = "Deferred; saved memory preserved"
+                diag.noteModelState("legacy_idle_deferred")
                 break
             }
         }
         if completed > 0 {
             legacyIdleValidationStatus = "Verified \(completed) older entries in this batch"
+            diag.noteModelState("legacy_idle_completed")
         }
     }
 
