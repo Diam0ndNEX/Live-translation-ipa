@@ -79,6 +79,7 @@ import Foundation
             health: MemoryDiagnosticHealth(),
             counters: ["slowTailEnqueues": 1, "handoffDeferred": 1,
                        "legacyInventoryPending": 103, "legacySkipSegmentation": 12, "specPreemptionRequested": 9,
+                       "specRetainedUnits": 3,
                        "legacyBatchVerified": 24, "actualModelBatches": 7, "confirmedModelBatches": 2,
                        "speculativeModelBatches": 4, "warmupModelBatches": 1, "first30sModelBatches": 5,
                        "handoffReplayed": 1, "enqueueFailed": 1, "source text": 100],
@@ -92,6 +93,7 @@ import Foundation
                      performanceRestored.counters["legacyInventoryPending"] == 103 &&
                      performanceRestored.counters["legacySkipSegmentation"] == 12 &&
                      performanceRestored.counters["specPreemptionRequested"] == 9 &&
+                     performanceRestored.counters["specRetainedUnits"] == 3 &&
                      performanceRestored.counters["first30sModelBatches"] == 5 &&
                      performanceRestored.counters["handoffReplayed"] == 1 &&
                      performanceRestored.counters["enqueueFailed"] == 1 &&
@@ -136,23 +138,52 @@ import Foundation
                            "private OCR text": 100, "captureFrames": -1],
                 thermalLevel: 2, lowPower: false, captureConnected: true)
         ]
+        withIntervals.oneSecondIntervals = [
+            DiagnosticIntervalBucket(startedAt: Date(), elapsedSeconds: 1,
+                counters: ["candidateConfirmed": 1, "enqueueFailed": 1],
+                thermalLevel: 0, lowPower: false, captureConnected: true)
+        ]
+        withIntervals.fiveSecondIntervals = [
+            DiagnosticIntervalBucket(startedAt: Date(), elapsedSeconds: 5,
+                counters: ["candidateConfirmed": 4, "enqueueFailed": 1],
+                thermalLevel: 0, lowPower: false, captureConnected: true)
+        ]
         let intervalBytes = try await writer.encode(withIntervals)
         let checkedInterval = try await writer.decode(intervalBytes)
         precondition(checkedInterval.intervals?.count == 1)
+        precondition(checkedInterval.oneSecondIntervals?.first?.elapsedSeconds == 1 &&
+                     checkedInterval.fiveSecondIntervals?.first?.elapsedSeconds == 5,
+                     "Both high-resolution interval types must survive diagnostic encoding")
         precondition(checkedInterval.intervals?.first?.counters == [
             "ocrPackets": 3, "candidateEnqueued": 1
         ], "Unknown or negative metrics must never cross the ZIP privacy boundary")
         precondition(!String(decoding: intervalBytes, as: UTF8.self).contains("private OCR text"))
         var oldWithoutIntervals = try JSONSerialization.jsonObject(with: intervalBytes) as! [String: Any]
         oldWithoutIntervals.removeValue(forKey: "intervals")
+        oldWithoutIntervals.removeValue(forKey: "oneSecondIntervals")
+        oldWithoutIntervals.removeValue(forKey: "fiveSecondIntervals")
         let previousBundle = try JSONSerialization.data(withJSONObject: oldWithoutIntervals)
         let decodedPreviousBundle = try await writer.decode(previousBundle)
+        precondition(decodedPreviousBundle.oneSecondIntervals == nil &&
+                     decodedPreviousBundle.fiveSecondIntervals == nil,
+                     "Pre-1.5.0 archives without high-resolution buckets must decode")
         precondition(decodedPreviousBundle.intervals == nil,
                      "Existing 1.4.0 diagnostic archives must remain decodable")
 
         let matching = DiagnosticPerformanceComparison(baseline: snapshot, current: snapshot)
         precondition(matching.comparable &&
                      abs(matching.p95Changes["memoryLookupMs", default: 100]) < 0.00001)
+        let mixedTiming = DiagnosticSessionExport(id: UUID(), startedAt: Date(), endedAt: Date(),
+            appVersion: "1.5.0", systemVersion: snapshot.systemVersion, hardwareModel: snapshot.hardwareModel,
+            settings: snapshot.settings, health: snapshot.health, counters: [:],
+            distributions: ["memoryLookupMs": DiagnosticDistribution(
+                Array(repeating: 60.0, count: 90) + Array(repeating: 90.0, count: 10))],
+            events: [], measurementBoundary: snapshot.measurementBoundary, textCapture: false)
+        let mixedComparison = DiagnosticPerformanceComparison(baseline: snapshot, current: mixedTiming)
+        precondition(mixedComparison.comparable &&
+                     mixedComparison.medianChanges["memoryLookupMs", default: 0] > 0 &&
+                     mixedComparison.p95Changes["memoryLookupMs", default: 0] < 0,
+                     "A better tail must never conceal a slower typical result")
         // A matching OS and settings do not establish a comparable baseline if
         // the device hardware changed or the older archive lacked a model code.
         var differentHardware = snapshot
@@ -203,6 +234,53 @@ import Foundation
             measurementBoundary: "test", textCapture: false)
         precondition(DiagnosticIssueDetector.assess(insufficient).isEmpty,
                      "Low sample counts cannot justify a latency regression finding")
+        var continuityEvidence = insufficient
+        continuityEvidence = DiagnosticSessionExport(
+            id: UUID(), startedAt: Date(), endedAt: Date(),
+            appVersion: "1.5.0", systemVersion: "test",
+            settings: ["lowLatencyTranslation": "true", "directPiPBuffer": "false"],
+            health: MemoryDiagnosticHealth(),
+            counters: [
+                "confirmedCandidatePackets": 100, "supersededUnpresentedConfirmed": 11,
+                "enqueueFailed": 2
+            ],
+            distributions: [
+                "enqueueLatencyMs": DiagnosticDistribution(
+                    Array(repeating: 1500.0, count: 94) + Array(repeating: 4400.0, count: 6))
+            ],
+            events: [], measurementBoundary: "OCR through PiP enqueue", textCapture: false)
+        let continuityFindings = DiagnosticIssueDetector.assess(continuityEvidence)
+        precondition(Set(continuityFindings.map(\.code)).isSuperset(of: [
+            "confirmed_continuity_loss", "pip_enqueue_failure",
+            "enqueue_slow_tail", "enqueue_typical_latency"
+        ]), "Diagnostic findings must identify normal latency, slow tail and continuity separately")
+        let safeContinuity = try await writer.decode(try await writer.encode(continuityEvidence))
+        precondition(safeContinuity.settings["lowLatencyTranslation"] == "true" &&
+                     safeContinuity.settings["directPiPBuffer"] == "false",
+                     "Current model and PiP experiment flags must survive redacted exports")
+        let unsafeDistribution = DiagnosticSessionExport(
+            id: UUID(), startedAt: Date(), endedAt: Date(),
+            appVersion: "1.5.0", systemVersion: "test",
+            settings: ["lowLatencyTranslation": "true"], health: MemoryDiagnosticHealth(),
+            counters: [:],
+            distributions: [
+                "enqueueLatencyMs": DiagnosticDistribution([12.0]),
+                "private subtitle text": DiagnosticDistribution([1.0])
+            ],
+            events: [], measurementBoundary: "OCR through PiP enqueue", textCapture: false)
+        let safeDistribution = try await writer.decode(try await writer.encode(unsafeDistribution))
+        precondition(safeDistribution.distributions["private subtitle text"] == nil,
+                     "Dynamic metric labels must not bypass the privacy allowlist")
+        let tooSmall = DiagnosticSessionExport(
+            id: UUID(), startedAt: Date(), endedAt: Date(),
+            appVersion: "1.5.0", systemVersion: "test",
+            settings: [:], health: MemoryDiagnosticHealth(),
+            counters: ["confirmedCandidatePackets": 6, "supersededUnpresentedConfirmed": 1],
+            distributions: ["enqueueLatencyMs": DiagnosticDistribution([4000])],
+            events: [], measurementBoundary: "test", textCapture: false)
+        precondition(DiagnosticIssueDetector.assess(tooSmall).isEmpty,
+                     "A short run must not be treated as a statistical regression")
+
         let zipBytes = try DiagnosticStoredZIP.make(entries: [
             (name: "session.json", contents: bytes),
             (name: "README.txt", contents: Data("Offline diagnostics only".utf8))
@@ -220,6 +298,18 @@ import Foundation
         let exportedZipData = try Data(contentsOf: exportedZIP)
         precondition(exportedZipData.range(of: Data("intervals.csv".utf8)) != nil,
                      "New ZIP bundles must contain the full-session interval CSV")
+        for filename in ["manifest.json", "summary.md", "session.json",
+                         "intervals.csv", "seconds_1.csv", "seconds_5.csv",
+                         "metrics.csv", "events.csv",
+                         "findings.json", "README.txt"] {
+            precondition(exportedZipData.range(of: Data(filename.utf8)) != nil,
+                         "Version 3 evidence ZIP must include \(filename)")
+        }
+        precondition(exportedZipData.range(of: Data("private OCR text".utf8)) == nil,
+                     "Diagnostic ZIP must never include raw text from unsafe fields")
+        precondition(exportedZipData.range(of: Data("original subtitle".utf8)) == nil,
+                     "Structured evidence must remain content-free")
+
         #if os(macOS)
         // Check interoperability with the system ZIP reader, not only our own
         // header checks, before considering bundles trustworthy for export.
@@ -231,6 +321,44 @@ import Foundation
         try archiveCheck.run()
         archiveCheck.waitUntilExit()
         precondition(archiveCheck.terminationStatus == 0, "ZIP bundle must pass unzip -t")
+
+        func entry(_ name: String) throws -> Data {
+            let task = Process()
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/unzip")
+            task.arguments = ["-p", exportedZIP.path, name]
+            let pipe = Pipe()
+            task.standardOutput = pipe
+            try task.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            task.waitUntilExit()
+            precondition(task.terminationStatus == 0, "ZIP entry must be readable: \(name)")
+            return data
+        }
+        let manifestData = try entry("manifest.json")
+        let manifest = try JSONSerialization.jsonObject(with: manifestData) as! [String: Any]
+        precondition(manifest["bundleSchemaVersion"] as? Int == 3 &&
+                     manifest["privacy"] as? String == "metadataOnly" &&
+                     manifest["textIncluded"] as? Bool == false,
+                     "Manifest must declare v3 structure and no content capture")
+        let summary = String(decoding: try entry("summary.md"), as: UTF8.self)
+        precondition(summary.contains("Confirmed but superseded before enqueue") &&
+                     summary.contains("physical display") &&
+                     summary.contains("## Normal performance") &&
+                     summary.contains("unavailable (0 samples)"),
+                     "Readable summary must distinguish continuity, timing boundaries and missing measurements")
+        let fastCSV = String(decoding: try entry("seconds_1.csv"), as: UTF8.self)
+        let shortCSV = String(decoding: try entry("seconds_5.csv"), as: UTF8.self)
+        precondition(fastCSV.contains("elapsed_seconds") &&
+                     fastCSV.contains("candidateConfirmed") &&
+                     shortCSV.contains("enqueueFailed"),
+                     "High-resolution buckets must preserve the time and events needed to inspect stalls")
+        let metrics = String(decoding: try entry("metrics.csv"), as: UTF8.self)
+        precondition(metrics.hasPrefix("metric,samples,mean_ms,p50_ms,p90_ms,p95_ms,p99_ms,max_ms"),
+                     "Timing CSV must carry sample counts, typical and tail percentiles")
+        let eventsCSV = String(decoding: try entry("events.csv"), as: UTF8.self)
+        precondition(eventsCSV.contains("candidate_id") &&
+                     !eventsCSV.contains("private OCR text"),
+                     "Event CSV must retain anonymized correlations without source text")
         #endif
         let unsafeEvent = StructuredDiagnosticEvent(id: UUID(), timestamp: Date(),
             sessionID: session, candidateID: UUID(), frameID: nil, unitID: nil,
@@ -280,6 +408,19 @@ import Foundation
                      secondCandidate.status == "Superseded or cancelled",
                      "Privacy-incompatible events must be ignored")
         precondition(DiagnosticTraceReview.review([], limit: 5).isEmpty)
+        let failedEnqueue = DiagnosticTraceReview.review([
+            traceEvent(candidateA, 0, "model_state", "confirmed_model_completed"),
+            traceEvent(candidateA, 0.1, "pip_enqueue", "enqueue_failed")
+        ])
+        precondition(failedEnqueue.first?.status == "PiP frame preparation or enqueue failed" &&
+                     failedEnqueue.first?.stages.first?.stage == "model_state",
+                     "A failed enqueue must never be labelled as successful presentation")
+        let recoveredEnqueue = DiagnosticTraceReview.review([
+            traceEvent(candidateA, 0, "pip_enqueue", "enqueue_failed"),
+            traceEvent(candidateA, 0.1, "enqueued", "enqueued")
+        ])
+        precondition(recoveredEnqueue.first?.status.contains("PiP buffer enqueued") == true,
+                     "An actual later successful enqueue must remain visible")
         print("Diagnostic percentile, privacy, correlation, compatibility and comparison passed")
     }
 }

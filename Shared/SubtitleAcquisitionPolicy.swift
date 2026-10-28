@@ -1,5 +1,16 @@
 import Foundation
 
+/// Tracks primary empty reads while letting a successful contrast fallback
+/// terminate the streak before clear/backoff decisions are made.
+struct OCREmptyReadStreak {
+    private(set) var count = 0
+    mutating func reset() { count = 0 }
+    mutating func primaryEmpty() { count += 1 }
+    mutating func finish(foundText: Bool) { if foundText { count = 0 } }
+    var needsContrastRetry: Bool { count > 0 && count.isMultiple(of: 3) }
+    var mayClear: Bool { count >= 4 }
+}
+
 /// Conservative, testable screen-change and live-caption scheduling policy.
 /// A missed subtitle is more costly than an occasional extra OCR pass.
 enum SubtitleAcquisitionPolicy {

@@ -160,6 +160,7 @@ struct Stats {
     var adaptiveSpeculationSkipped = 0, confirmedHandoffDeferred = 0
     var slowTailEnqueues = 0
     var specPreemptionRequested = 0, specMatchingConfirmation = 0
+    var specRetainedUnits = 0
     var legacyBatchEntries = 0, legacyBatchVerified = 0, legacyBatchSkipped = 0
     var legacyBatchPeakWorkers = 0, legacyBatchElapsedMs = 0.0
     var specProcessingMs = 0.0, specDiscardedMs = 0.0
@@ -218,6 +219,14 @@ final class Diagnostics: ObservableObject {
     private var intervalStart = Date()
     private var intervalBaseline: [String: Int] = [:]
     private var intervalHistory: [DiagnosticIntervalBucket] = []
+    // Independent 1s and 5s buckets preserve timing distributions from the
+    // actual samples. Never average medians from smaller buckets.
+    private var oneSecondStart = Date()
+    private var oneSecondBaseline: [String: Int] = [:]
+    private var oneSecondHistory: [DiagnosticIntervalBucket] = []
+    private var fiveSecondStart = Date()
+    private var fiveSecondBaseline: [String: Int] = [:]
+    private var fiveSecondHistory: [DiagnosticIntervalBucket] = []
     private var openingEvents: [StructuredDiagnosticEvent] = []
     private var earlyEventsSeen = 0
     private var eventTotals: [String: Int] = [:]
@@ -502,7 +511,12 @@ final class Diagnostics: ObservableObject {
                     "clearHold", "autoClear", "keepWarm", "langLock",
                     "selectiveSpeculation", "speculationConfidence", "confirmationDeadline",
                     "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest",
-                    "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup"]
+                    "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
+                    "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer",
+                    "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
+                    "deduplicateCopies", "contextualLanguage", "languageRecovery",
+                    "continuousRotation", "smartCool", "persistDiagnosticSessions",
+                    "diagSamples", "heartbeatInterval", "keepAwake"]
         var settings: [String: String] = [:]
         for key in keys {
             if let value = UserDefaults.standard.object(forKey: key) ?? TranslatorEngine.defaults[key] {
@@ -561,6 +575,8 @@ final class Diagnostics: ObservableObject {
                 }.compactMap(\.durationMs))],
             events: exportEventWindow(),
             intervals: diagnosticIntervals(at: Date()),
+            oneSecondIntervals: detailedCollection ? recentIntervals(at: Date(), period: 1) : nil,
+            fiveSecondIntervals: diagnosticIntervals(at: Date(), period: 5),
             measurementBoundary: "First OCR sighting to PiP sample-buffer enqueue; physical display unmeasured. Distributions use the latest bounded samples within this session, not all-time aggregates. Stages can overlap.",
             textCapture: false)
     }
@@ -745,8 +761,11 @@ final class Diagnostics: ObservableObject {
         diagnosticSessionID = UUID(); candidateIDs = [:]; frameIDs = [:]; unitIDs = [:]; structuredEvents = []
         legacyValidationSnapshot = [:]; legacyValidationPair = [:]
         eventTotals = [:]; intervalHistory = []; intervalStart = Date()
+        oneSecondHistory = []; oneSecondStart = Date()
+        fiveSecondHistory = []; fiveSecondStart = Date()
         openingEvents = []; earlyEventsSeen = 0
-        intervalBaseline = [:]; lastCaptureConnected = false
+        intervalBaseline = [:]; oneSecondBaseline = [:]; fiveSecondBaseline = [:]
+        lastCaptureConnected = false
         lastRecordedThermalState = nil
         memoryOutcomes = [:]; lookupSamples = []; writeSamples = []
         started = Date()
@@ -842,9 +861,35 @@ final class Diagnostics: ObservableObject {
             lastState = st
         }
         lastCaptureConnected = alive
-        if Date().timeIntervalSince(intervalStart) >= 15 {
-            let now = Date()
-            if let completed = makeInterval(at: now) {
+        let now = Date()
+        // Fine-grained data is bounded: latest 5 minutes at 1s, latest
+        // 15 minutes at 5s; 15s buckets remain for long sessions/old readers.
+        if detailedCollection && now.timeIntervalSince(oneSecondStart) >= 1 {
+            if let completed = makeInterval(at: now, start: oneSecondStart, baseline: oneSecondBaseline) {
+                oneSecondHistory.append(completed)
+                if oneSecondHistory.count > 300 {
+                    oneSecondHistory.removeFirst(oneSecondHistory.count - 300)
+                }
+            }
+            oneSecondStart = now
+            oneSecondBaseline = cumulativeCounters()
+        } else if !detailedCollection {
+            oneSecondHistory = []
+            oneSecondStart = now
+            oneSecondBaseline = cumulativeCounters()
+        }
+        if now.timeIntervalSince(fiveSecondStart) >= 5 {
+            if let completed = makeInterval(at: now, start: fiveSecondStart, baseline: fiveSecondBaseline) {
+                fiveSecondHistory.append(completed)
+                if fiveSecondHistory.count > 180 {
+                    fiveSecondHistory.removeFirst(fiveSecondHistory.count - 180)
+                }
+            }
+            fiveSecondStart = now
+            fiveSecondBaseline = cumulativeCounters()
+        }
+        if now.timeIntervalSince(intervalStart) >= 15 {
+            if let completed = makeInterval(at: now, start: intervalStart, baseline: intervalBaseline) {
                 intervalHistory.append(completed)
                 if intervalHistory.count > 960 { intervalHistory.removeFirst(intervalHistory.count - 960) }
             }
@@ -866,6 +911,7 @@ final class Diagnostics: ObservableObject {
             "speculativeRequests": s.specModelRequests,
             "specPreemptionRequested": s.specPreemptionRequested,
             "specMatchingConfirmation": s.specMatchingConfirmation,
+            "specRetainedUnits": s.specRetainedUnits,
             "speculativeDiscarded": s.specDiscarded,
             "legacyVerified": memoryHealth.legacyValidated,
             "legacySuperseded": memoryHealth.legacySuperseded,
@@ -912,18 +958,19 @@ final class Diagnostics: ObservableObject {
         ]
     }
 
-    private func makeInterval(at now: Date) -> DiagnosticIntervalBucket? {
-        let elapsed = now.timeIntervalSince(intervalStart)
+    private func makeInterval(at now: Date, start: Date,
+                              baseline: [String: Int]) -> DiagnosticIntervalBucket? {
+        let elapsed = now.timeIntervalSince(start)
         guard elapsed > 0 else { return nil }
         let current = cumulativeCounters()
         var delta = current.reduce(into: [String: Int]()) { result, entry in
-            result[entry.key] = max(0, entry.value - intervalBaseline[entry.key, default: 0])
+            result[entry.key] = max(0, entry.value - baseline[entry.key, default: 0])
         }
-        let ocrTimes = ocr.filter { $0.t >= intervalStart && $0.t <= now }.map(\.v)
-        let translationTimes = translate.filter { $0.t >= intervalStart && $0.t <= now }.map(\.v)
-        let enqueueTimes = latency.filter { $0.t >= intervalStart && $0.t <= now }.map(\.v)
+        let ocrTimes = ocr.filter { $0.t >= start && $0.t <= now }.map(\.v)
+        let translationTimes = translate.filter { $0.t >= start && $0.t <= now }.map(\.v)
+        let enqueueTimes = latency.filter { $0.t >= start && $0.t <= now }.map(\.v)
         let modelTimes = structuredEvents.filter {
-            $0.timestamp >= intervalStart && $0.timestamp <= now &&
+            $0.timestamp >= start && $0.timestamp <= now &&
             $0.stage == "model_state" && $0.reasonCode == "model_batch_completed"
         }.compactMap(\.durationMs)
         delta["ocrMeasurementCount"] = ocrTimes.count
@@ -941,7 +988,7 @@ final class Diagnostics: ObservableObject {
         case .critical: thermal = 3
         @unknown default: thermal = 0
         }
-        return DiagnosticIntervalBucket(startedAt: intervalStart,
+        return DiagnosticIntervalBucket(startedAt: start,
             elapsedSeconds: min(1800, elapsed), counters: delta,
             thermalLevel: thermal,
             lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled,
@@ -958,8 +1005,35 @@ final class Diagnostics: ObservableObject {
 
     private func diagnosticIntervals(at now: Date) -> [DiagnosticIntervalBucket] {
         var all = intervalHistory
-        if let current = makeInterval(at: now) { all.append(current) }
+        if let current = makeInterval(at: now, start: intervalStart, baseline: intervalBaseline) {
+            all.append(current)
+        }
         return Array(all.suffix(960))
+    }
+
+    /// Read-only completed buckets for the live diagnostic UI. Does not
+    /// recalculate statistics or store unbounded samples during rendering.
+    func completedIntervals(seconds: Int) -> [DiagnosticIntervalBucket] {
+        switch seconds {
+        case 1: return oneSecondHistory
+        case 5: return fiveSecondHistory
+        default: return intervalHistory
+        }
+    }
+
+    private func recentIntervals(at now: Date, period: Int) -> [DiagnosticIntervalBucket] {
+        let isOneSecond = period == 1
+        let start = isOneSecond ? oneSecondStart : fiveSecondStart
+        let baseline = isOneSecond ? oneSecondBaseline : fiveSecondBaseline
+        var all = isOneSecond ? oneSecondHistory : fiveSecondHistory
+        if let current = makeInterval(at: now, start: start, baseline: baseline) {
+            all.append(current)
+        }
+        return Array(all.suffix(isOneSecond ? 300 : 180))
+    }
+
+    private func diagnosticIntervals(at now: Date, period: Int) -> [DiagnosticIntervalBucket] {
+        recentIntervals(at: now, period: period)
     }
 
     private func sampleDevice(alive: Bool) {
@@ -1142,6 +1216,9 @@ final class Diagnostics: ObservableObject {
         l.append("Source choice modes: " + SourceLanguageOrigin.allCases.map { "\($0.title)=\(sourceUsage.origins[$0, default: 0])" }.joined(separator: ", "))
         l.append("Execution phase \(executionPhase), PiP \(engine.pipActive ? "active" : "inactive"); last packet \(lastPacketAt?.ISO8601Format() ?? "none"), last device sample \(lastDeviceSampleAt?.ISO8601Format() ?? "none").")
         l.append("Settings: mode=\(UserDefaults.standard.string(forKey: "mode") ?? "movie"), area=\(UserDefaults.standard.string(forKey: "area") ?? "smart"), speed=\(UserDefaults.standard.string(forKey: "speed") ?? "balanced"), configured rotation=\(UserDefaults.standard.string(forKey: "frameRot") ?? "auto"), confirmation reads=\((UserDefaults.standard.object(forKey: "stability") as? Int) ?? 2)")
+        l.append("v1.5.0 experiments: low-latency model \(UserDefaults.standard.bool(forKey: "lowLatencyTranslation")), incremental recovery \(UserDefaults.standard.bool(forKey: "incrementalBatchRecovery")), subtitle-area sampling \(UserDefaults.standard.bool(forKey: "subtitleAwareChangeDetection")), additional lyric groups \(UserDefaults.standard.bool(forKey: "preserveRelatedMovieGroups")), direct PiP drawing \(UserDefaults.standard.bool(forKey: "directPiPBuffer")).")
+        l.append("Continuity: confirmed candidates \(s.confirmedCandidatePackets), successful PiP enqueues \(s.enqueuedCandidateFrames), superseded before enqueue \(s.supersededUnpresentedConfirmed), deferred handoffs \(s.confirmedHandoffDeferred); these are not unique-subtitle or physical-presentation counts.")
+        l.append("Speculation: discarded pipelines \(s.specDiscarded), completed superseded units retained \(s.specRetainedUnits), adaptive skips \(s.adaptiveSpeculationSkipped).")
         if UserDefaults.standard.bool(forKey: "diagIncludeText"), !UserDefaults.standard.bool(forKey: "privateSession") {
             l.append("Speakers: \(names.joined(separator: ", "))")
         }
@@ -1488,6 +1565,7 @@ private struct DiagnosticsBody: View {
     @State private var confirmReset = false
     @State private var showSimulator = false
     @State private var confirmDeleteSessions = false
+    @State private var bucketSeconds = 1
     @AppStorage("persistDiagnosticSessions") private var persistSessions = false
 
     private var page: DiagPage { DiagPage(rawValue: pageRaw) ?? .overview }
@@ -1555,7 +1633,7 @@ private struct DiagnosticsBody: View {
                             Label(diag.exportInProgress ? "Preparing JSON…" : "Export structured JSON", systemImage: "curlybraces")
                         }.disabled(diag.exportInProgress)
                         Button { Task { await diag.exportZIP() } } label: {
-                            Label(diag.exportInProgress ? "Preparing bundle…" : "Export diagnostic ZIP", systemImage: "archivebox")
+                            Label(diag.exportInProgress ? "Preparing bundle…" : "Export complete evidence ZIP", systemImage: "archivebox")
                         }.disabled(diag.exportInProgress)
                         Button { Sharer.shareFile(text: diag.csv(), name: "translator-data-\(Sharer.stamp()).csv") } label: {
                             Label("Export data (CSV)", systemImage: "tablecells")
@@ -1589,6 +1667,7 @@ private struct DiagnosticsBody: View {
         let cutoff = Date().addingTimeInterval(-120)
         return VStack(spacing: 14) {
             healthCard(a)
+            diagnosticEvidenceCard
             adaptivePipelineCard
             if !a.issues.isEmpty { suggestions(a.issues, limit: 3) }
             liveFeed
@@ -1606,6 +1685,73 @@ private struct DiagnosticsBody: View {
                 Text("Summary collection is active. Timing history and events are off.").font(.footnote).foregroundStyle(.secondary).card()
             }
         }
+    }
+
+    /// Actionable health overview without pretending enqueue is display.
+    /// Uses already collected counters, so drawing this card triggers no OCR.
+    private var diagnosticEvidenceCard: some View {
+        let stats = diag.s
+        let delay = Diagnostics.summarize(diag.latency)
+        let model = Diagnostics.summarize(diag.translate)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Test evidence", systemImage: "chart.xyaxis.line")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("v1.5.0")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            if delay.n > 0 {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Typical delay").font(.caption).foregroundStyle(.secondary)
+                        Text("\(Int(delay.p50)) ms")
+                            .font(.title3.weight(.semibold)).monospacedDigit()
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Average").font(.caption).foregroundStyle(.secondary)
+                        Text("\(Int(delay.avg)) ms")
+                            .font(.title3.weight(.semibold)).monospacedDigit()
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Slow tail · P95").font(.caption).foregroundStyle(.secondary)
+                        Text("\(Int(delay.p95)) ms")
+                            .font(.title3.weight(.semibold)).monospacedDigit()
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                Text("No complete OCR-to-PiP enqueue samples yet.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Text("Measured from first OCR sighting to PiP buffer enqueue; physical display is not measured. \(delay.n) matched samples.")
+                .font(.caption).foregroundStyle(.secondary)
+            Divider()
+            LabeledContent("Confirmed candidate packets", value: "\(stats.confirmedCandidatePackets)")
+            LabeledContent("Successful PiP candidate enqueues", value: "\(stats.enqueuedCandidateFrames)")
+            LabeledContent("Confirmed but superseded before enqueue", value: "\(stats.supersededUnpresentedConfirmed)")
+            LabeledContent("Speculative pipelines discarded", value: "\(stats.specDiscarded)")
+            LabeledContent("Superseded units retained in RAM", value: "\(stats.specRetainedUnits)")
+            LabeledContent("Pre-translated sentence hits", value: "\(stats.specHits)")
+            if model.n > 0 {
+                Text("Model processing: median \(Int(model.p50)) ms · mean \(Int(model.avg)) ms · P95 \(Int(model.p95)) ms.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Text("Candidates, sentence hits and model requests count different events. A lower delay with more lost confirmed candidates is not necessarily an improvement.")
+                .font(.caption).foregroundStyle(.secondary)
+            Button {
+                Task { await diag.exportZIP() }
+            } label: {
+                Label(diag.exportInProgress ? "Preparing evidence ZIP…" : "Export complete diagnostic ZIP",
+                      systemImage: "archivebox")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(diag.exportInProgress)
+            Text(diag.archiveStatus)
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .font(.footnote)
+        .card()
     }
 
     private var statusLine: String {
@@ -1640,6 +1786,18 @@ private struct DiagnosticsBody: View {
                 StatTile(title: "Total delay", value: delay > 0 ? "\(Int(delay)) ms" : "–",
                          tint: level(d.avg, d.n, 1200, 2000), icon: "timer")
             }
+            if collectDetails {
+                let timing = DiagnosticDistribution(diag.latency.map(\.v))
+                HStack {
+                    LabeledContent("Median", value: timing.p50.map { "\(Int($0)) ms" } ?? "–")
+                    Spacer()
+                    LabeledContent("P90", value: timing.p90.map { "\(Int($0)) ms" } ?? "–")
+                }.font(.caption)
+            }
+            LabeledContent("Confirmed replaced before enqueue", value: "\(diag.s.supersededUnpresentedConfirmed)")
+                .font(.footnote)
+            Text("Latency covers successful frame enqueues. Replaced work is excluded, so lower latency alone does not establish better subtitle continuity. Counts are candidates, not unique subtitle lines.")
+                .font(.caption).foregroundStyle(.secondary)
         }
         .card()
     }
@@ -1830,11 +1988,14 @@ private struct DiagnosticsBody: View {
                 let current = diag.archivedSessions[0]
                 let comparison = DiagnosticPerformanceComparison(baseline: baseline, current: current)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Recent session p95 comparison").font(.subheadline.weight(.semibold))
+                    Text("Recent session timing comparison").font(.subheadline.weight(.semibold))
                     if comparison.comparable {
                         ForEach(comparison.p95Changes.keys.sorted(), id: \.self) { metric in
-                            let difference = comparison.p95Changes[metric, default: 0]
-                            LabeledContent(metric, value: String(format: "%+.1f%%", difference))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(metric).font(.caption.weight(.semibold))
+                                Text(comparisonTiming(comparison, metric: metric))
+                                    .font(.caption).monospacedDigit()
+                            }
                         }
                         Text("Indicative only: different subtitle workloads can change latency.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -1848,6 +2009,13 @@ private struct DiagnosticsBody: View {
     }
 
     // MARK: Overview
+    private func comparisonTiming(_ comparison: DiagnosticPerformanceComparison, metric: String) -> String {
+        [("Median", comparison.medianChanges), ("Mean", comparison.meanChanges),
+         ("P90", comparison.p90Changes), ("P95", comparison.p95Changes)]
+            .compactMap { label, values in values[metric].map { label + String(format: " %+.1f%%", $0) } }
+            .joined(separator: " · ")
+    }
+
     private var liveFraction: Double {
         let now = Date()
         let total = now.timeIntervalSince(diag.started)
@@ -1860,6 +2028,7 @@ private struct DiagnosticsBody: View {
         let a = diag.assessment(alive: engine.captureAlive, paused: engine.paused)
         return VStack(spacing: 14) {
             healthCard(a)
+            diagnosticEvidenceCard
             pipelineStrip
             adaptivePipelineCard
             sessionGrid
@@ -1977,7 +2146,51 @@ private struct DiagnosticsBody: View {
             HistogramCard(title: "How long reading takes", values: slice(diag.ocr).map { $0.v }, color: Color.green)
             HistogramCard(title: "How long the total delay is", values: slice(diag.latency).map { $0.v }, color: Color.orange)
             PairedTimingCard(samples: diag.pipeline.filter { $0.date >= rangeStart })
+            granularityCard
         }
+    }
+
+    /// Raw bucketed counts are useful for short bursts even when timing
+    /// percentile sample sizes are too small to interpret meaningfully.
+    private var granularityCard: some View {
+        let buckets = diag.completedIntervals(seconds: bucketSeconds)
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Short-interval evidence")
+                .font(.subheadline.weight(.semibold))
+            Picker("Time resolution", selection: $bucketSeconds) {
+                Text("1 second").tag(1)
+                Text("5 seconds").tag(5)
+                Text("15 seconds").tag(15)
+            }
+            .pickerStyle(.segmented)
+            if buckets.isEmpty {
+                Text(bucketSeconds == 1
+                     ? "No one-second buckets yet. Enable Detailed diagnostics and run capture."
+                     : "No completed buckets yet at this resolution.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            } else {
+                ForEach(Array(buckets.suffix(12)), id: \.startedAt) { bucket in
+                    HStack(alignment: .top) {
+                        Text(bucket.startedAt.formatted(date: .omitted, time: .standard))
+                            .font(.caption.monospacedDigit())
+                            .frame(width: 76, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Confirmed \(bucket.counters["candidateConfirmed", default: 0]) · enqueued \(bucket.counters["candidateEnqueued", default: 0])")
+                                .font(.caption)
+                            Text("Superseded \(bucket.counters["unpresentedConfirmed", default: 0]) · enqueue failures \(bucket.counters["enqueueFailed", default: 0])")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 2)
+                        Text(String(format: "%.1f s", bucket.elapsedSeconds))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Text("Buckets use actual elapsed time. For precise event order and durations, export events.csv; for longer sessions, use 15-second intervals. Individual buckets may have too few timings for useful P95.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .card()
     }
 
     // MARK: Timeline
@@ -2147,7 +2360,7 @@ private struct DiagnosticsBody: View {
             Text("\(s.recognitionReason) · \(s.confirmationReason)").font(.caption).foregroundStyle(.secondary)
             Text("Cache sentences · session \(s.cacheHits) · saved \(s.savedHits) · pre-translated \(s.specHits)").font(.footnote)
             Text("Speculative jobs · started \(s.specStarted) · completed \(s.specCompleted) · discarded \(s.specDiscarded) · declined \(s.specSkipped)").font(.footnote)
-            Text("v1.4.5 · Spec throttled \(s.adaptiveSpeculationSkipped) · confirmed handoffs \(s.confirmedHandoffDeferred) · slow tails \(s.slowTailEnqueues)").font(.footnote)
+            Text("Spec throttled \(s.adaptiveSpeculationSkipped) · confirmed handoffs \(s.confirmedHandoffDeferred) · slow tails \(s.slowTailEnqueues)").font(.footnote)
             Text("Discarded work: \(Int(s.specDiscardedMs)) ms. Unconsumed cached results: \(engine.unconsumedSpeculation). Completed results may still be reused later.").font(.caption).foregroundStyle(.secondary)
             Text("Skipped frames · unchanged \(s.unchangedSkipped) · cadence \(s.cadenceSkipped) · paused \(s.pausedSkipped)").font(.caption)
             Text("Recorder self-time · simple \(String(format: "%.1f", diag.recorderCosts.simpleMs)) ms · detailed \(String(format: "%.1f", diag.recorderCosts.detailedMs)) ms. Excludes chart drawing and model work; these are different workloads.").font(.caption).foregroundStyle(.secondary)

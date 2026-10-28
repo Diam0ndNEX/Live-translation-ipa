@@ -2,6 +2,8 @@
 import AVKit
 import UIKit
 import SwiftUI
+import os
+import os.signpost
 
 enum PiPTheme: String, CaseIterable, Identifiable {
     case dark, light, yellow, blue, sepia, contrast
@@ -107,6 +109,7 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
     let displayLayer = AVSampleBufferDisplayLayer()
     private var pip: AVPictureInPictureController?
     private var size = CGSize(width: 720, height: 360)
+    private let perf = OSSignposter(subsystem: "com.diam0ndnex.screenlingo", category: "presentation")
     private var frameBuffer: CVPixelBuffer?
     private var frameFormat: CMVideoFormatDescription?
     private var framePool: CVPixelBufferPool?
@@ -148,7 +151,7 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
     func configureHeartbeat() {
         heartbeat?.invalidate()
         let interval = max(0.5, min(2, (UserDefaults.standard.object(forKey: "heartbeatInterval") as? Double) ?? 1))
-        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in self?.enqueueCurrentFrame() }
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in self?.enqueueCurrentFrame(heartbeat: true) }
         RunLoop.main.add(timer, forMode: .common)
         heartbeat = timer
     }
@@ -179,9 +182,17 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
     func render(original: String, translated: String, showOriginal: Bool,
                 size newSize: CGSize? = nil) -> Bool {
         if let newSize { size = newSize }
-        let img = PiPRenderer.image(original: original, translated: translated, showOriginal: showOriginal,
-                                    size: size, style: style)
-        guard let cg = img.cgImage, prepareFrame(cg), enqueueCurrentFrame() else { return false }
+        let marker = perf.beginInterval("PiPFrame")
+        defer { perf.endInterval("PiPFrame", marker) }
+        let prepared: Bool
+        if UserDefaults.standard.bool(forKey: "directPiPBuffer") {
+            prepared = prepareDirectFrame(original: original, translated: translated, showOriginal: showOriginal)
+        } else {
+            let img = PiPRenderer.image(original: original, translated: translated, showOriginal: showOriginal,
+                                        size: size, style: style)
+            prepared = img.cgImage.map { prepareFrame($0) } ?? false
+        }
+        guard prepared, enqueueCurrentFrame() else { return false }
         lastOriginal = original; lastTranslated = translated; lastShowOriginal = showOriginal
         return true
     }
@@ -192,8 +203,17 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
         let fmt = UIGraphicsImageRendererFormat()
         fmt.scale = 1; fmt.opaque = true
         return UIGraphicsImageRenderer(size: size, format: fmt).image { ctx in
-            style.bg.setFill()
-            ctx.fill(CGRect(origin: .zero, size: size))
+            draw(original: original, translated: translated, showOriginal: showOriginal,
+                 size: size, style: style, context: ctx.cgContext)
+        }
+    }
+
+    private static func draw(original: String, translated: String, showOriginal: Bool,
+                             size: CGSize, style: PiPStyle, context: CGContext) {
+        UIGraphicsPushContext(context)
+        defer { UIGraphicsPopContext() }
+        style.bg.setFill()
+        context.fill(CGRect(origin: .zero, size: size))
             let w = size.width - style.padding * 2
             var y: CGFloat = 16
             if showOriginal && !original.isEmpty {
@@ -212,7 +232,6 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
                 }
             }
             att.draw(with: r2, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], context: nil)
-        }
     }
 
     private static func fittingFont(_ text: String, rect: CGRect, weight: UIFont.Weight,
@@ -240,11 +259,79 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
         return base
     }
 
+    /// Experimental direct render: reuse the pixel-buffer pool, avoid UIImage
+    /// creation and its subsequent CGContext copy. The default UIImage path
+    /// remains available as an immediate fallback in settings.
+    private func prepareDirectFrame(original: String, translated: String, showOriginal: Bool) -> Bool {
+        let w = max(1, Int(size.width.rounded()))
+        let h = max(1, Int(size.height.rounded()))
+        let dimensions = CGSize(width: w, height: h)
+        if framePool == nil || poolSize != dimensions {
+            let attrs: [CFString: Any] = [
+                kCVPixelBufferWidthKey: w,
+                kCVPixelBufferHeightKey: h,
+                kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferCGImageCompatibilityKey: true,
+                kCVPixelBufferCGBitmapContextCompatibilityKey: true,
+                kCVPixelBufferIOSurfacePropertiesKey: [:]]
+            var pool: CVPixelBufferPool?
+            CVPixelBufferPoolCreate(kCFAllocatorDefault, nil, attrs as CFDictionary, &pool)
+            framePool = pool
+            poolSize = dimensions
+            frameFormat = nil
+        }
+        var pb: CVPixelBuffer?
+        if let pool = framePool {
+            CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &pb)
+        }
+        if pb == nil {
+            let attrs: [CFString: Any] = [
+                kCVPixelBufferCGImageCompatibilityKey: true,
+                kCVPixelBufferCGBitmapContextCompatibilityKey: true,
+                kCVPixelBufferIOSurfacePropertiesKey: [:]]
+            CVPixelBufferCreate(kCFAllocatorDefault, w, h, kCVPixelFormatType_32BGRA,
+                                attrs as CFDictionary, &pb)
+        }
+        guard let pb else { return false }
+        CVPixelBufferLockBaseAddress(pb, [])
+        let context = CGContext(data: CVPixelBufferGetBaseAddress(pb),
+                                width: w, height: h, bitsPerComponent: 8,
+                                bytesPerRow: CVPixelBufferGetBytesPerRow(pb),
+                                space: CGColorSpaceCreateDeviceRGB(),
+                                bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue |
+                                    CGBitmapInfo.byteOrder32Little.rawValue)
+        if let context {
+            // Match UIKit's top-left coordinate system.
+            context.translateBy(x: 0, y: CGFloat(h))
+            context.scaleBy(x: 1, y: -1)
+            Self.draw(original: original, translated: translated, showOriginal: showOriginal,
+                      size: dimensions, style: style, context: context)
+        }
+        CVPixelBufferUnlockBaseAddress(pb, [])
+        guard context != nil else { return false }
+        var fmt = frameFormat
+        if let previous = frameBuffer,
+           CVPixelBufferGetWidth(previous) != w || CVPixelBufferGetHeight(previous) != h {
+            fmt = nil
+        }
+        if fmt == nil {
+            CMVideoFormatDescriptionCreateForImageBuffer(
+                allocator: nil, imageBuffer: pb, formatDescriptionOut: &fmt)
+        }
+        guard let fmt else { return false }
+        frameBuffer = pb
+        frameFormat = fmt
+        return true
+    }
+
     @discardableResult
-    private func enqueueCurrentFrame() -> Bool {
-        guard let sb = makeSampleBuffer() else { return false }
+    private func enqueueCurrentFrame(heartbeat: Bool = false) -> Bool {
         let r = displayLayer.sampleBufferRenderer
         if r.status == .failed { r.flush() }
+        // Only avoid redundant heartbeat frames when the display queue is full.
+        // Newly translated subtitles must still be enqueued immediately.
+        if heartbeat && !r.isReadyForMoreMediaData { return true }
+        guard let sb = makeSampleBuffer() else { return false }
         r.enqueue(sb)
         return r.status != .failed
     }

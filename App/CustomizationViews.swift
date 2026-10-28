@@ -5,36 +5,63 @@ struct ResponsivenessSettings: View {
     @AppStorage("displayPolicy") private var policy = "immediate"
     @AppStorage("minDisplay") private var minimum = 0.0
     @AppStorage("heartbeatInterval") private var heartbeat = 1.0
-    @AppStorage("translateAhead") private var ahead = true
-    private var key: String { "\(policy)|\(minimum)|\(heartbeat)|\(ahead)" }
+    @AppStorage("steadyCaptions") private var steadyCaptions = true
+    @AppStorage("protectConfirmedPresentation") private var protectConfirmed = true
+
+    private var timingKey: String { "\(policy)|\(minimum)|\(heartbeat)" }
+    private var continuityKey: String { "\(steadyCaptions)|\(protectConfirmed)" }
+
     var body: some View {
         List {
             Section {
-                Picker("When a translation is ready", selection: $policy) {
-                    Text("Show confirmed results immediately").tag("immediate")
-                    Text("Keep each result readable").tag("readable")
+                Picker("When translation is ready", selection: $policy) {
+                    Text("Show immediately").tag("immediate")
+                    Text("Keep results readable").tag("readable")
                 }
                 if policy == "readable" {
-                    Stepper("Minimum visible time · \(minimum, specifier: "%.1f") s", value: $minimum, in: 0...4, step: 0.1)
+                    Stepper("Minimum visible time · \(minimum, specifier: "%.1f") s",
+                            value: $minimum, in: 0...4, step: 0.1)
                 }
-                Toggle("Prepare translations before OCR confirmation", isOn: $ahead)
-            } header: { Text("Waiting & display") } footer: {
-                Text("Both modes keep OCR confirmation and complete translations. Readable mode holds only the finished result; it no longer delays translation work. Immediate mode removes that optional hold. Translate-ahead never displays unconfirmed text.")
-            }
+                Text("Immediate shows completed, confirmed translations as soon as they're ready. Readable can briefly hold an already translated caption.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            } header: { Text("Display timing") }
+
+            Section {
+                Toggle("Stable caption transitions", isOn: $steadyCaptions)
+                Text("Keeps a confirmed caption visible instead of replacing it with a tentative OCR reading.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Toggle("Protect confirmed captions during handoff", isOn: $protectConfirmed)
+                    .disabled(!steadyCaptions)
+                Text("Allows an already-confirmed subtitle a short, bounded chance to complete before a newer confirmed subtitle replaces it.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            } header: { Text("Subtitle continuity") }
+
             Section {
                 Picker("Idle PiP heartbeat", selection: $heartbeat) {
-                    Text("0.5 seconds").tag(0.5); Text("1 second").tag(1.0); Text("2 seconds").tag(2.0)
+                    Text("0.5 seconds").tag(0.5)
+                    Text("1 second").tag(1.0)
+                    Text("2 seconds").tag(2.0)
                 }
-            } header: { Text("Floating window keep-alive") } footer: {
-                Text("New results always enqueue immediately. The heartbeat only repeats the current image while idle; it is not a delay before a new translation.")
-            }
+                Text("Repeats the current frame to keep PiP alive. New subtitles still submit immediately.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            } header: { Text("Floating window") }
+
             LatencyDetail(monitor: engine.latency)
             Section {
-                Button("Copy timing report") { UIPasteboard.general.string = engine.diag.report(engine: engine); engine.toast("Timing report copied") }
-                Button("Reset timing controls", role: .destructive) { engine.resetKeys(["displayPolicy", "minDisplay", "heartbeatInterval", "translateAhead"]) }
+                Button("Copy timing report") {
+                    UIPasteboard.general.string = engine.diag.report(engine: engine)
+                    engine.toast("Timing report copied")
+                }
+                Button("Reset subtitle timing", role: .destructive) {
+                    engine.resetKeys(["displayPolicy", "minDisplay", "heartbeatInterval",
+                                      "steadyCaptions", "protectConfirmedPresentation"])
+                }
             }
-        }.navigationTitle("Timing & responsiveness").navigationBarTitleDisplayMode(.inline)
-            .onChange(of: key) { _, _ in engine.timingSettingsChanged() }
+        }
+        .navigationTitle("Subtitle timing")
+        .navigationBarTitleDisplayMode(.inline)
+        .onChange(of: timingKey) { _, _ in engine.timingSettingsChanged() }
+        .onChange(of: continuityKey) { _, _ in engine.pipelineSettingsChanged() }
     }
 }
 
@@ -89,15 +116,18 @@ struct ReaderWorkspaceSettings: View {
     @AppStorage("readerWidth") private var width = "full"
     @AppStorage("photoOCREdge") private var edge = 2400
     @AppStorage("photoAutoTranslate") private var autoTranslate = false
-    @AppStorage("homeMetrics") private var metrics = true
-    @AppStorage("homeQuickExpanded") private var quick = false
-    @AppStorage("homeDetailsExpanded") private var details = false
+
     var body: some View {
         List {
             Section("Focus reader") {
-                Picker("Reader font", selection: $font) { ForEach(PiPFont.allCases) { Text($0.title).tag($0.rawValue) } }
+                Picker("Reader font", selection: $font) {
+                    ForEach(PiPFont.allCases) { Text($0.title).tag($0.rawValue) }
+                }
                 Stepper("Line spacing · \(Int(spacing))", value: $spacing, in: 0...16, step: 1)
-                Picker("Reading width", selection: $width) { Text("Full width").tag("full"); Text("Narrow column").tag("narrow") }
+                Picker("Reading width", selection: $width) {
+                    Text("Full width").tag("full")
+                    Text("Narrow column").tag("narrow")
+                }
             }
             Section {
                 Picker("Photo OCR resolution", selection: $edge) {
@@ -106,47 +136,69 @@ struct ReaderWorkspaceSettings: View {
                     Text("3200 px · more small-text detail").tag(3200)
                 }
                 Toggle("Translate after reading a photo", isOn: $autoTranslate)
-            } header: { Text("Text & photo workspace") } footer: {
-                Text("2400 px keeps the previous default. Larger photos may take longer to read and use more main-app memory. This setting does not affect live screen capture.")
+            } header: { Text("Photo translation") } footer: {
+                Text("Higher resolution can detect smaller text but use more memory. This does not affect live screen capture.")
             }
-            Section("Live screen") {
-                Toggle("Show timing cards", isOn: $metrics)
-                Toggle("Keep quick settings expanded", isOn: $quick)
-                Toggle("Keep troubleshooting expanded", isOn: $details)
-            }
-            Section {
-                Button("Reset reader & workspace", role: .destructive) { engine.resetKeys(["readerFont", "readerSpacing", "readerWidth", "photoOCREdge", "photoAutoTranslate", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded"]) }
-            }
-        }.navigationTitle("Reader & workspace").navigationBarTitleDisplayMode(.inline)
+            ResetSection(keys: [
+                "readerFont", "readerSpacing", "readerWidth",
+                "photoOCREdge", "photoAutoTranslate"
+            ])
+        }
+        .navigationTitle("Reader & photos")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
 struct FeedbackStorageSettings: View {
     @EnvironmentObject private var engine: TranslatorEngine
-    @AppStorage("hapticStrength") private var haptics = "light"
-    @AppStorage("autoCopyFormat") private var copyFormat = "translation"
+    @AppStorage("haptics") private var haptics = false
+    @AppStorage("hapticStrength") private var hapticStrength = "light"
+    @AppStorage("autoCopy") private var autoCopy = false
+    @AppStorage("autoCopyFormat") private var autoCopyFormat = "translation"
+    @AppStorage("speak") private var speak = false
+    @AppStorage("speechRate") private var speechRate = 0.5
     @AppStorage("interruptSpeech") private var interrupt = true
-    @AppStorage("historyCapacity") private var history = 500
-    @AppStorage("diagSamples") private var samples = 600
+
     var body: some View {
         List {
-            Section("Feedback behaviour") {
-                Picker("Haptic strength", selection: $haptics) { Text("Light").tag("light"); Text("Medium").tag("medium"); Text("Strong").tag("strong") }
-                Picker("Automatic clipboard format", selection: $copyFormat) {
-                    Text("Translation").tag("translation"); Text("Original").tag("original"); Text("Both").tag("bilingual")
+            Section {
+                Toggle("Vibrate on new translation", isOn: $haptics)
+                Picker("Vibration strength", selection: $hapticStrength) {
+                    Text("Light").tag("light")
+                    Text("Medium").tag("medium")
+                    Text("Strong").tag("strong")
+                }.disabled(!haptics)
+            } header: { Text("Vibration") }
+
+            Section {
+                Toggle("Copy translations automatically", isOn: $autoCopy)
+                Picker("What to copy", selection: $autoCopyFormat) {
+                    Text("Translation").tag("translation")
+                    Text("Original").tag("original")
+                    Text("Both").tag("bilingual")
+                }.disabled(!autoCopy)
+                Text("Automatic copying changes your clipboard whenever a translation is shown.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            } header: { Text("Clipboard") }
+
+            Section {
+                Toggle("Speak translations aloud", isOn: $speak)
+                if speak {
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Speech speed").font(.subheadline)
+                        Slider(value: $speechRate, in: 0.3...0.65)
+                    }
                 }
                 Toggle("New speech interrupts previous speech", isOn: $interrupt)
-                Text("Haptics, automatic copying and speech must also be enabled in Floating window settings.").font(.footnote).foregroundStyle(.secondary)
-            }
-            Section {
-                Picker("History limit", selection: $history) { Text("100 entries").tag(100); Text("250 entries").tag(250); Text("500 entries").tag(500); Text("1000 entries").tag(1000) }
-                NavigationLink("Manage translation memory") { MemoryManagementView() }
-                Picker("Diagnostic samples per series", selection: $samples) { Text("300").tag(300); Text("600").tag(600); Text("1200").tag(1200) }
-            } header: { Text("Storage budgets") } footer: {
-                Text("History and diagnostic sample limits are separate from Translation Memory 2.0. The memory page controls RAM cache and SQLite management thresholds without deleting committed translations.")
-            }
-            Section { Button("Reset feedback & budgets", role: .destructive) { engine.resetKeys(["hapticStrength", "autoCopyFormat", "interruptSpeech", "historyCapacity", "diagSamples"]) } }
-        }.navigationTitle("Feedback & storage").navigationBarTitleDisplayMode(.inline)
-            .onDisappear { engine.applyStorageSettings() }
+                    .disabled(!speak)
+            } header: { Text("Speech") }
+
+            ResetSection(keys: [
+                "haptics", "hapticStrength", "autoCopy", "autoCopyFormat",
+                "speak", "speechRate", "interruptSpeech"
+            ])
+        }
+        .navigationTitle("Feedback & sharing")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }

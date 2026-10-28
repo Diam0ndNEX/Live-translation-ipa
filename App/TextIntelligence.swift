@@ -119,13 +119,40 @@ enum TextIntel {
 
     // MARK: Never-translate words
     static func protect(_ text: String, words: [String]) -> (text: String, tokens: [(String, String)]) {
-        var out = text
-        var tokens: [(String, String)] = []
-        for w in words.prefix(20) where !w.isEmpty && out.range(of: w, options: .caseInsensitive) != nil {
-            let token = "Zq" + String(UnicodeScalar(UInt8(97 + tokens.count)))
-            tokens.append((token, w))
-            out = out.replacingOccurrences(of: w, with: token, options: .caseInsensitive)
+        var names: [String] = []
+        for word in words.prefix(20) where !word.isEmpty {
+            if text.range(of: word, options: .caseInsensitive) != nil,
+               !names.contains(where: { $0.caseInsensitiveCompare(word) == .orderedSame }) {
+                names.append(word)
+            }
         }
+        guard !names.isEmpty else { return (text, []) }
+        // Match the original once, longest names first. Sequential replacement
+        // could modify a placeholder inserted for an earlier protected word.
+        let pattern = names.sorted { $0.count > $1.count }
+            .map(NSRegularExpression.escapedPattern(for:)).joined(separator: "|")
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive)
+        else { return (text, []) }
+        let original = text as NSString
+        let matches = regex.matches(in: text, range: NSRange(location: 0, length: original.length))
+        var out = "", cursor = 0
+        var tokens: [(String, String)] = []
+        for match in matches {
+            let found = original.substring(with: match.range)
+            guard let name = names.first(where: { $0.caseInsensitiveCompare(found) == .orderedSame }) else { continue }
+            let token: String
+            if let existing = tokens.first(where: { $0.1 == name }) { token = existing.0 }
+            else {
+                var candidate = "Zq" + String(UnicodeScalar(UInt8(97 + tokens.count)))
+                // Literal placeholder-like text must survive restoration intact.
+                while text.range(of: candidate, options: .caseInsensitive) != nil { candidate += "q" }
+                token = candidate
+                tokens.append((token, name))
+            }
+            out += original.substring(with: NSRange(location: cursor, length: match.range.location - cursor)) + token
+            cursor = match.range.location + match.range.length
+        }
+        out += original.substring(from: cursor)
         return (out, tokens)
     }
 

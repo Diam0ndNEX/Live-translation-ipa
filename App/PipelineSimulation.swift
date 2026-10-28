@@ -64,9 +64,9 @@ enum PipelineSimulation {
     static let optionGroups: [(String, [String])] = [
         ("Capture & recognition", ["mode","area","customY0","customY1","speed","frameRot","continuousRotation","stability","minTextH","boost","skipUnchanged","ocrConfidence","ocrCorrection","idleBackoff","adaptiveOCR","adaptiveConfirmation","subtitleTracking","confirmationDeadline"]),
         ("Language & understanding", ["source","target","langLock","contextualLanguage","languageRecovery","cleanOCR","slang","speakerDetect","neverTranslate","sourceFixes","glossary","dropNoise","ignoreList","deduplicateCopies"]),
-        ("Translation & memory", ["translateAhead","selectiveSpeculation","speculationConfidence","keepWarm","remember","memoryCapacity","privateSession"]),
-        ("Scheduling & PiP", ["steadyCaptions","displayPolicy","minDisplay","autoClear","clearHold","winSize","theme","textSize","pipFont","showOriginal","highlightNames","pipWeight","pipAlignment","pipLineSpacing","pipPadding","originalFraction","pipScale","speakerAccent","heartbeatInterval","autoOpenPiP"]),
-        ("Power, feedback & retention", ["adaptive","coolMode","smartCool","keepAwake","idleMinutes","sessionLimit","saveHistory","historyCapacity","historyRetentionDays","haptics","hapticStrength","speak","speechRate","interruptSpeech","autoCopy","autoCopyFormat","diagnosticsEnabled","detailedCollection","diagSamples","diagIncludeText","showSessionSpeakers"])
+        ("Translation & memory", ["translateAhead","selectiveSpeculation","adaptiveSpeculation","speculationConfidence","keepWarm","predictiveWarmup","remember","memoryRAMCapacity","memorySoftLimit","freshTranslationTest","privateSession"]),
+        ("Scheduling & PiP", ["steadyCaptions","protectConfirmedPresentation","displayPolicy","minDisplay","autoClear","clearHold","winSize","theme","textSize","pipFont","showOriginal","highlightNames","pipWeight","pipAlignment","pipLineSpacing","pipPadding","originalFraction","pipScale","speakerAccent","heartbeatInterval","autoOpenPiP"]),
+        ("Power, feedback & retention", ["adaptive","coolMode","smartCool","keepAwake","idleMinutes","sessionLimit","saveHistory","historyCapacity","historyRetentionDays","haptics","hapticStrength","speak","speechRate","interruptSpeech","autoCopy","autoCopyFormat","diagnosticsEnabled","detailedCollection","persistDiagnosticSessions","diagSamples","diagIncludeText","showSessionSpeakers"])
     ]
     static func effect(for key: String) -> String {
         for (group, keys) in optionGroups where keys.contains(key) { return group }
@@ -124,7 +124,7 @@ enum PipelineSimulation {
         lines = lines.filter { range.contains($0.y) && $0.h >= n("minTextH",0) }
         add("Crop & workload plan", "ReplayKit extension", "\(Int(plan.edge)) px · \(Int(plan.interval*1000)) ms", "\(plan.reason). Crop y=\(String(format:"%.2f",range.lowerBound))…\(String(format:"%.2f",range.upperBound)); \(lines.count) boxes retained. Resolution is a ceiling; native image detail is not invented.", ["area","customY0","customY1","minTextH","speed","adaptiveOCR","adaptive","coolMode","smartCool","idleBackoff"])
         if b("skipUnchanged",true), s.unchangedSeconds > 0, s.motion <= 1.5 {
-            add("Unchanged-frame gate", "ReplayKit extension", "defer", "A matching frame signature can skip a pass for up to two seconds; pending confirmation still gets fresh reads. This run shows the next eligible pass.", ["skipUnchanged"])
+            add("Unchanged-frame gate", "ReplayKit extension", "defer", "A matching signature can defer a pass up to \(SubtitleAcquisitionPolicy.maximumUnchangedDelay(movie: (o["mode"] ?? "movie") == "movie")) seconds; pending confirmation still gets fresh reads. This run shows the next eligible pass.", ["skipUnchanged"])
         }
         let readMs = max(0,s.ocrMs)
         let floor = max(0.1,min(0.95,n("ocrConfidence",0.3)))
@@ -133,7 +133,13 @@ enum PipelineSimulation {
         if lines.isEmpty { add("Recognition recovery", "ReplayKit extension", "retry later", "Empty/low-confidence reads request more detail when adaptive recognition is enabled. Contrast fallback can retry every third empty pass. Nothing is sent to the model.", ["boost","adaptiveOCR","idleBackoff"]); return r }
         var tracker = SubtitleTracker()
         let required = max(1, min(3,Int(n("stability",2))))
-        let cadenceMs = max(plan.interval*1000,readMs)
+        let pendingInterval = SubtitlePerformancePolicy.confirmationInterval(
+            planned: plan.interval * SubtitleAcquisitionPolicy.idleMultiplier(
+                movie: (o["mode"] ?? "movie") == "movie", enabled: b("idleBackoff",true),
+                secondsSinceText: s.unchangedSeconds),
+            pending: true, movie: (o["mode"] ?? "movie") == "movie",
+            pressure: cool || s.lowPower || s.thermal != "nominal", processingMs: readMs)
+        let cadenceMs = max(pendingInterval*1000,readMs)
         var confirmationMs = 0.0, confirmed = false, reason = "fixed read count"
         for index in 0..<12 {
             let time = Double(index)*cadenceMs/1000
@@ -188,10 +194,10 @@ enum PipelineSimulation {
         let protected = TextIntel.protect(text,words:words)
         add("Understanding & grouping", "Main app", "\(blocks.count) regions · \(names.count) labels", "OCR clean-up/source fixes precede language handling. Slang, speaker splitting and protected tokens precede sentence batching. Sample after processing: \(protected.text)", ["cleanOCR","sourceFixes","slang","speakerDetect","neverTranslate","glossary"])
         let persistentOrigin = ["saved", "sqlite", "legacy"].contains(s.cacheOrigin)
-        let origin = persistentOrigin && (!b("remember",true) || b("privateSession")) ? "fresh" : s.cacheOrigin
-        let speculate = b("translateAhead",true) && !s.lowPower && s.thermal != "serious" && s.thermal != "critical" && (!cool || (smartCool && readMs<100 && s.thermal=="nominal"))
+        let origin = b("freshTranslationTest") || (persistentOrigin && (!b("remember",true) || b("privateSession"))) ? "fresh" : s.cacheOrigin
+        let speculate = !b("freshTranslationTest") && b("translateAhead",true) && !s.lowPower && s.thermal != "serious" && s.thermal != "critical" && (!cool || (smartCool && readMs<100 && s.thermal=="nominal"))
             && (!b("selectiveSpeculation",true) || SpeculationPolicy.credible(lines:lines,threshold:cool ? max(0.95,n("speculationConfidence",0.85)) : n("speculationConfidence",0.85)))
-        add("Speculative-work gate", "Main app", speculate ? "credible early work" : "wait for confirmation", "Early work starts after the first OCR pass. Uncertain/near-duplicate candidates are declined, only the newest candidate is queued, and superseded results are never published. Model cancellation is cooperative.", ["translateAhead","selectiveSpeculation","speculationConfidence","coolMode","smartCool"])
+        add("Speculative-work gate", "Main app", speculate ? "credible early work" : "wait for confirmation", "Early work starts after the first OCR pass. Uncertain/near-duplicate candidates are declined, only the newest candidate is queued, and superseded results are never published. Model cancellation is cooperative. Adaptive throttling depends on runtime history and is not predicted here.", ["translateAhead","selectiveSpeculation","speculationConfidence","coolMode","smartCool"])
         add("Translation memory lookup", "Main app", origin, "Session, saved-memory and speculative hits are separate. Rule fingerprints, source/target and protected-token context namespace every entry. Memory capacity changes retention, not wording.", ["remember","memoryCapacity","privateSession","glossary"])
         let memoryCost = s.memoryLookupMs.isFinite ? min(50, max(0, s.memoryLookupMs)) : 3
         if ["sqlite", "legacy", "miss", "incompatible", "migration failed", "database unavailable"].contains(origin) {
@@ -208,7 +214,7 @@ enum PipelineSimulation {
         add("Queue & request coalescing", "Main app", "\(Int(queue)) ms assumed", "Confirmed work has priority. Exact sentence requests are coalesced while preserving block order and protected-name context; unchanged sentences can hit memory when one lyric row changes.", ["translateAhead","selectiveSpeculation"],modelStart-queue,queue)
         add("Translation model / cache response", "Translation framework", isHit ? "cache result" : "\(Int(modelMs)) ms assumed", "This screen does not call a translation model or download packs. It simulates response timing; translated wording and correctness are not predicted. Keep warm affects readiness in the real app, but its speed benefit is not invented here.", ["source","target","keepWarm","remember"],modelStart,modelMs)
         let current = CandidateValidity.isCurrent("sample-1",active:s.superseded ? "sample-2" : "sample-1",enabled:b("steadyCaptions",true))
-        add("Generation & candidate validation", "Main app", current && !s.frozen ? "current" : "rejected", "Language/context changes, newer confirmed generations and frozen output still gate publication. Stable transitions additionally invalidate work on a newer unconfirmed filtered candidate.", ["steadyCaptions"],readyAt)
+        add("Generation & candidate validation", "Main app", current && !s.frozen ? "current" : "rejected", "Language/context changes, newer confirmed generations and frozen output still gate publication. A newer unconfirmed sighting cannot erase ongoing confirmed work; confirmed replacements remain subject to the bounded handoff.", ["steadyCaptions"],readyAt)
         if !current || s.frozen { return r }
         let hold = PresentationSchedule.remaining(policy:o["displayPolicy"] ?? "immediate",minimum:n("minDisplay",0),lastShown:0,now:readyAt/1000)*1000
         add("Optional readability hold", "Main app", "\(Int(hold)) ms", "Model processing overlaps optional readability time; only the remaining hold is applied once the result is ready.", ["displayPolicy","minDisplay"],readyAt,hold)
@@ -224,3 +230,4 @@ enum PipelineSimulation {
         return r
     }
 }
+

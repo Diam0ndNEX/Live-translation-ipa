@@ -5,11 +5,11 @@ actor MemoryWriter {
     private var latestRevision = 0
     func save(_ snapshot: [String: String], to url: URL, revision: Int) -> Bool {
         guard revision > latestRevision else { return true }
-        latestRevision = revision
         do {
             let data = try JSONEncoder().encode(MemoryEnvelope(entries: snapshot))
             try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try data.write(to: url, options: .atomic)
+            latestRevision = revision
             return true
         } catch { return false }
     }

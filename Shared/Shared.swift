@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.4.7"
-    static let build = 51
+    static let version = "1.5.0"
+    static let build = 53
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("1.5.0", "Restored speculative head starts and recovered exact completed work; stable localhost capture transport; successful OCR fallback resets; disposable warm-up and idle model cancellation; fewer duplicate database health queries; protected-name, photo-workspace and private-history fixes; median/mean/P90/P95 comparisons and continuity evidence. Retains selective legacy cleanup."),
         ("1.4.7", "Selective deletion of unvalidated legacy records; exported validation inventory and exclusions; candidate-linked confirmed/speculative model timings and preemption counters; stronger bounded backoff for sustained ineffective speculation."),
         ("1.4.6", "Legacy-validation inventory, explicit skip reasons and rescan control; automatic scans recover after language/rule/database/model availability changes. Failed tentative batches yield retries to confirmed translation."),
         ("1.4.5", "Faster independent confirmation reads under nominal load, reusable accurate OCR requests and PiP buffers, representative startup warm-up, rolling diagnostic-independent speculation control, bounded confirmed handoff and stage-by-stage latency evidence."),
@@ -22,7 +23,7 @@ enum AppVersion {
         ("1.0.0", "Nonblocking readability holds: translation works before optional display waits, and stale pending results are cancelled safely. Replaced residual waiting/display estimates with matched stage measurements. Added timing, caption layout, reader/photo, feedback and storage controls; clarified per-process memory headroom. Existing OCR quality and confirmation defaults remain unchanged."),
         ("0.9.0", "New screen-and-translation icon and redesigned Live interface. Start-based OCR cadence removes redundant waiting while preserving accuracy and confirmation passes. Exact request coalescing, bounded language-evidence caching, faster font fitting, reusable heartbeat frames and display-before-history ordering reduce repeated work. Added honest first-sighting-to-enqueue timing and protected-name cache isolation."),
         ("0.8.0", "Major workspace overhaul: photo/text translation, visual capture-area editor, focus reader, session controls, searchable history with notes, CSV/JSON export and restore, undo deletion, private sessions, OCR tuning and idle power saving."),
-        ("1.5.0", "Integrated the latest main redesign, custom presets, diagnostics charts, translation memory and translate-ahead. Preserved ScreenLingo identity, small text, lyric rows and fragment protection. Fixed stale output, batch validation, frozen output and legacy timeouts."),
+        ("Early development", "Integrated the latest main redesign, custom presets, diagnostics charts, translation memory and translate-ahead. Preserved ScreenLingo identity, small text, lyric rows and fragment protection. Fixed stale output, batch validation, frozen output and legacy timeouts."),
         ("0.11.0", "Faster translation with identical wording: translate-ahead (starts translating on first sight, shows when confirmed), warm translator, translation memory kept between launches, cached language-pack check. Sharing now goes through real files (fixes the endless Loading…)."),
         ("0.10.0", "Diagnostics rebuilt: Simple view (health score, plain-language fixes with one-tap buttons, live feed) and Detailed view with 7 pages. Real charts for speed, delay, frames per second, memory, temperature and battery, histograms, a session timeline of Live / Paused / Idle with event markers, translations per minute, a pipeline funnel and filter breakdown, language and cache charts, a searchable filterable event log, CSV export and a shareable report."),
         ("0.9.0", "Redesigned app. Custom presets (save, edit, duplicate, reorder, start-up preset) with icons and colours. New Home with live status badge, quick tiles and recent language pairs. Reader view, share-as-image, toasts, onboarding, keep-screen-awake, auto-copy, speech speed, saved history with search, stars and day groups, accent colours, Home sections you can hide, settings search and per-page reset."),
@@ -97,6 +98,7 @@ struct Config: Codable, Equatable {
     var rev: Int?          // bumps whenever rot changes so stale packets can be ignored
     var boost: Int?        // 0 = off, 1 = only when nothing is found, 2 = always
     var skipUnchanged: Bool?
+    var subtitleAwareChangeDetection: Bool? = nil
     var speculate: Bool?   // send an early "first sighting" so the app can translate ahead
     var confidence: Double? = nil
     var correction: Bool? = nil
@@ -113,6 +115,14 @@ struct Config: Codable, Equatable {
     var speculationConfidence: Double? = nil
     var detailCeiling: Double? = nil
     var confirmationBurst: Bool? = nil
+}
+
+/// Keeps the old memory context exactly unchanged unless a genuinely
+/// different user-selected model strategy is active.
+enum TranslationModelMemoryPolicy {
+    static func rulesContext(base: String, lowLatency: Bool) -> String {
+        lowLatency ? base + "\u{1F}translationStrategy=lowLatency" : base
+    }
 }
 
 enum TextSim {

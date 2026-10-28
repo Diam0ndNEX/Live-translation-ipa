@@ -1,7 +1,7 @@
 name: Build ScreenLingo IPA
 on:
   push:
-    branches: [codex/screenlingo-v0.7.0, codex/screenlingo-v0.8.0, codex/screenlingo-v0.9.0, codex/screenlingo-v1.0.0, codex/screenlingo-v1.1.0, codex/screenlingo-v1.2.0, codex/screenlingo-v1.2.1, codex/screenlingo-v1.3.0, codex/screenlingo-v1.4.1, codex/screenlingo-v1.4.1-static-overlay, codex/screenlingo-v1.4.1-diagnostics, codex/screenlingo-v1.4.2, codex/screenlingo-v1.4.3-batch-memory, codex/screenlingo-v1.4.4-performance, codex/screenlingo-v1.4.5-latency, codex/screenlingo-v1.4.6-validation, codex/screenlingo-v1.4.7-intelligence]
+    branches: [codex/screenlingo-v0.7.0, codex/screenlingo-v0.8.0, codex/screenlingo-v0.9.0, codex/screenlingo-v1.0.0, codex/screenlingo-v1.1.0, codex/screenlingo-v1.2.0, codex/screenlingo-v1.2.1, codex/screenlingo-v1.3.0, codex/screenlingo-v1.4.1, codex/screenlingo-v1.4.1-static-overlay, codex/screenlingo-v1.4.1-diagnostics, codex/screenlingo-v1.4.2, codex/screenlingo-v1.4.3-batch-memory, codex/screenlingo-v1.4.4-performance, codex/screenlingo-v1.4.5-latency, codex/screenlingo-v1.4.6-validation, codex/screenlingo-v1.4.7-intelligence, codex/screenlingo-v1.4.8-continuity, codex/screenlingo-v1.5.0-refinement]
   pull_request:
     branches: [codex/screenlingo-v1.3.0, codex/screenlingo-v1.4.0, codex/screenlingo-v1.4.1, codex/screenlingo-v1.4.2, codex/screenlingo-v1.4.3-batch-memory, codex/screenlingo-v1.4.4-performance, codex/screenlingo-v1.4.5-latency, codex/screenlingo-v1.4.6-validation, "codex/memory2-**"]
   workflow_dispatch:
@@ -29,8 +29,12 @@ jobs:
         run: |
           swiftc Shared/*.swift App/TextIntelligence.swift App/MemoryWriter.swift App/PipelineSimulation.swift Tests/main.swift -o /tmp/pipeline-tests
           /tmp/pipeline-tests
+      - name: Verify Experimental Features controls
+        run: python3 scripts/test_experimental_settings.py
       - name: Check SQLite memory migration
         run: bash scripts/test_memory.sh
+      - name: Check local capture transport
+        run: bash scripts/test_transport.sh
       - name: Check diagnostic archive privacy and correlation
         run: bash scripts/test_diagnostics.sh
       - name: Storage scaling smoke benchmark

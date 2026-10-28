@@ -1,6 +1,20 @@
-# ScreenLingo v1.3.0 · build 43
+# ScreenLingo v1.5.0 · build 53
 
-This release upgrades recognition, candidate tracking, speculative work, memory, presentation and diagnostic accounting. It preserves Fast/Balanced/Sharp and the fixed Instant/Normal/Careful read controls. New strategies are in **Settings → Smart pipeline**, saved with presets and backups.
+Version 1.5.0 prioritizes consistent subtitle delivery and normal latency. It
+restores the 1.4.6 speculative cadence, recovers completed exact-context work
+into bounded RAM, reduces duplicate database health work and makes capture
+activation idempotent. It also fixes OCR fallback streaks, protected-name token
+collisions, stale photo task ownership, private-history edits and misleading
+enqueue/comparison diagnostics. Selective unvalidated legacy cleanup is retained.
+
+[Release changes, research and acceptance checks](docs/v1.5.0-acceptance.md)
+cover the source review, automated evidence and physical-device checks still
+required. CI does not prove an on-device speedup or translation-quality parity.
+
+Run the existing pipeline compilation in `.github/workflows/build.yml`, plus
+`bash scripts/test_memory.sh`, `bash scripts/test_transport.sh`,
+`bash scripts/test_diagnostics.sh` and
+`bash scripts/benchmark_memory.sh 3000 25000` on macOS/Xcode.
 
 ## Behavior and controls
 
@@ -12,7 +26,7 @@ This release upgrades recognition, candidate tracking, speculative work, memory,
 | Subtitle tracking | On | Tracks the complete visible subtitle/lyric group by content, geometry and lifetime; a changed candidate invalidates older pending work |
 | Merge duplicate copies | On | Coalesces duplicate whole regions and keeps a stable spatial anchor; repeated lyric rows within a region remain intact |
 | Selective pre-translation | On | Declines early text below the configurable confidence floor; existing Translate ahead remains the master control |
-| Stable caption transitions | On | Cancels superseded work where supported and prevents outdated candidates from storing results or reaching PiP; the previous valid caption remains until replacement/normal auto-clear |
+| Stable caption transitions | On | Cancels superseded work where supported and prevents outdated candidates from reaching PiP; completed tentative exact-key units may seed bounded RAM only while their context remains valid; the previous valid caption remains until replacement/normal auto-clear |
 | Smart Cool controller | On | Applies when Cool Mode is enabled; changes frequency before detail and permits only exceptionally clear speculation under nominal thermal/low workload conditions |
 | Automatic recovery | On | Resets source evidence after repeated engine failures; missing packs are surfaced, not treated as evidence of a wrong language |
 
