@@ -1,48 +1,92 @@
 #!/usr/bin/env python3
-"""Fast structural checks for the consolidated Experimental Features tab."""
+"""Fast structural regression checks for Settings navigation, ownership and defaults."""
+import re
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
-home = (root / "App" / "SettingsViews.swift").read_text()
-experiments = (root / "App" / "ExperimentalFeaturesView.swift").read_text()
-legacy = (root / "App" / "SmartPipelineSettings.swift").read_text()
+sources = {
+    name: (root / "App" / name).read_text()
+    for name in (
+        "SettingsViews.swift", "CustomizationViews.swift", "SettingsCategories.swift",
+        "ExperimentalFeaturesView.swift", "SmartPipelineSettings.swift",
+        "MemoryManagementView.swift"
+    )
+}
+home = sources["SettingsViews.swift"]
+extra = sources["ExperimentalFeaturesView.swift"]
 engine = (root / "App" / "TranslatorEngine.swift").read_text()
 
-experiment_keys = {
-    "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer",
-    "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
-    "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "deduplicateCopies",
-    "selectiveSpeculation", "adaptiveSpeculation", "speculationConfidence",
-    "confirmationDeadline", "steadyCaptions", "protectConfirmedPresentation",
-    "smartCool", "contextualLanguage", "continuousRotation", "languageRecovery",
-    "predictiveWarmup", "freshTranslationTest",
-}
-for key in experiment_keys:
-    binding = f'@AppStorage("{key}")'
-    assert experiments.count(binding) == 1, f"Experimental UI missing/duplicates {key}"
-    assert binding not in home, f"Legacy Settings page duplicates {key}"
-    assert f'"{key}"' in engine, f"Engine cannot backup/reset {key}"
-    assert experiments.count(f'"{key}"') >= 2, f"Reset key missing from Experimental UI: {key}"
+# Every editable option has one owner page, except these two read-only
+# prerequisites which the Experimental page only observes to disable controls.
+owners = {}
+for name, source in sources.items():
+    for key in re.findall(r'@AppStorage\("([^"]+)"\)', source):
+        owners.setdefault(key, []).append(name)
+for key, names in owners.items():
+    if key in {"mode", "skipUnchanged"}:
+        assert sorted(names) == ["ExperimentalFeaturesView.swift", "SettingsViews.swift"]
+    else:
+        assert len(names) == 1, f"{key} duplicated across Settings: {names}"
 
-assert "NavigationLink { ExperimentalFeaturesView() }" in home
-assert 'Label("Experimental Features"' in home
-assert "ExperimentalFeaturesView()" in legacy, "Old Smart pipeline route must remain compatible"
-assert 'Toggle("Skip unchanged frames"' in home, "Normal OCR controls must remain accessible"
-assert 'Toggle("Translate ahead"' in home, "Normal translation control must remain accessible"
-assert 'Toggle("Remember translations"' in home, "Normal translation memory control must remain accessible"
-assert '.onChange(of: lowLatencyTranslation) { _, _ in engine.translationStrategyChanged() }' in experiments
-assert '.onChange(of: directPiPBuffer) { _, _ in engine.applyStyle() }' in experiments
-assert '.onChange(of: pipelineSignature) { _, _ in engine.pipelineSettingsChanged() }' in experiments
-assert 'if #available(iOS 26.4, *)' in experiments
-assert "enabled: $subtitleAwareChangeDetection," in experiments
-assert "available: skipUnchanged" in experiments
-assert "enabled: $preserveRelatedMovieGroups," in experiments
-assert "available: mode == TranslateMode.movie.rawValue" in experiments
-for important in ("adaptiveOCR", "subtitleTracking", "steadyCaptions", "smartCool", "predictiveWarmup"):
-    assert f'@AppStorage("{important}") private var' in experiments
-assert '"lowLatencyTranslation": false' in engine
-assert '"incrementalBatchRecovery": false' in engine
-assert '"directPiPBuffer": false' in engine
-assert '"subtitleAwareChangeDetection": false' in engine
-assert '"preserveRelatedMovieGroups": false' in engine
-print(f"Experimental Features: {len(experiment_keys)} saved controls consolidated, defaults preserved")
+expected = {
+    "ExperimentalFeaturesView.swift": {
+        "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer",
+        "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
+        "adaptiveConfirmation", "confirmationDeadline", "continuousRotation",
+    },
+    "SettingsViews.swift": {
+        "adaptiveOCR", "subtitleTracking", "deduplicateCopies",
+        "contextualLanguage", "languageRecovery", "steadyCaptions",
+        "protectConfirmedPresentation", "smartCool", "keepAwake",
+        "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded",
+    },
+    "SettingsCategories.swift": {
+        "translateAhead", "keepWarm", "remember", "predictiveWarmup",
+        "selectiveSpeculation", "adaptiveSpeculation", "speculationConfidence",
+        "saveHistory", "historyRetentionDays", "historyCapacity",
+        "diagSamples", "persistDiagnosticSessions", "freshTranslationTest",
+    },
+    "CustomizationViews.swift": {
+        "displayPolicy", "minDisplay", "heartbeatInterval",
+        "haptics", "hapticStrength", "autoCopy", "autoCopyFormat",
+        "speak", "speechRate", "interruptSpeech",
+    },
+}
+for file, keys in expected.items():
+    for key in keys:
+        assert owners.get(key) == [file], f"{key} should be on {file}: {owners.get(key)}"
+        assert f'"{key}"' in engine, f"Setting {key} is missing from engine backup/reset"
+        assert sources[file].count(f'"{key}"') >= 2, f"{key} missing from page reset keys"
+
+nav = [
+    "ReadingSettings()", "IntelligenceSettings()", "TranslationSettings()",
+    "WindowSettings()", "ResponsivenessSettings()", "FeedbackStorageSettings()",
+    "InterfaceSettings()", "ReaderWorkspaceSettings()", "HistoryStorageSettings()",
+    "PerformanceSettings()", "ExperimentalFeaturesView()", "DiagnosticsSettings()",
+    "PrivacySettings()", "BackupSettings()", "AboutSettings()",
+]
+for page in nav:
+    assert f"destination: {page}" in home, f"Settings route missing: {page}"
+assert 'PresetsLinkRow(store: engine.presets)' in home
+assert "ExperimentalFeaturesView()" in sources["SmartPipelineSettings.swift"]
+assert "PipelineSimulatorView()" in sources["SettingsCategories.swift"]
+assert 'NavigationLink { CaptionAppearanceSettings() }' not in home
+
+for key in ("lowLatencyTranslation", "incrementalBatchRecovery",
+            "directPiPBuffer", "subtitleAwareChangeDetection", "preserveRelatedMovieGroups"):
+    assert f'"{key}": false' in engine, f"New experiment {key} must remain off by default"
+assert 'if #available(iOS 26.4, *)' in extra
+assert "available: skipUnchanged" in extra
+assert "available: mode == TranslateMode.movie.rawValue" in extra
+assert '.onChange(of: lowLatencyTranslation) { _, _ in engine.translationStrategyChanged() }' in extra
+assert '.onChange(of: pipelineSignature) { _, _ in engine.pipelineSettingsChanged() }' in extra
+assert '.onChange(of: directPiPBuffer) { _, _ in engine.applyStyle() }' in extra
+
+# Ensure the data controls and their destructive confirmation live in History
+# rather than the unrelated Home appearance or feedback screens.
+assert "engine.eraseHistory()" in sources["SettingsCategories.swift"]
+assert "engine.eraseHistory()" not in home
+assert 'Toggle("Copy translations automatically"' in sources["CustomizationViews.swift"]
+assert 'Toggle("Vibrate on new translation"' in sources["CustomizationViews.swift"]
+assert 'Toggle("Save translation history"' in sources["SettingsCategories.swift"]
+print(f"Settings redesign regression checks passed: {len(owners)} saved keys, {len(nav)} routes, no duplicated switches")
