@@ -45,7 +45,7 @@ import Foundation
 
         // A fresh authoritative sentence receives an explicit category. Unknown legacy
         // keys keep their restricted validation state and must not be reclassified as ready.
-        let sentenceKey = "v4|\\(rules)|pt>en|0:|How are you?"
+        let sentenceKey = "v4|\(rules)|pt>en|0:|How are you?"
         _ = try await store.save([sentenceKey:"Como você está?"], revision: 2)
         let classified = try await store.search(query: "How are you?", limit: 5)
         precondition(classified.count == 1 && classified[0].sourceText == "How are you?")
