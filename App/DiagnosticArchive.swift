@@ -149,7 +149,7 @@ actor DiagnosticExportWriter {
             "frame_arrival", "rotation", "ocr_execution", "duplicate_detection", "ocr_filtering",
             "stability", "text_grouping", "ocr_correction", "language_detection",
             "memory_lookup", "translation", "pip_preparation", "pip_enqueue", "runtime_state",
-            "cancellation"
+            "model_state", "cancellation"
         ]
         let eventCodes: Set<String> = Set(MemoryDiagnosticOutcome.allCases.map { $0.rawValue })
             .union([
@@ -159,7 +159,10 @@ actor DiagnosticExportWriter {
                 "filtered", "confirmed", "speculative", "ready", "enqueued",
                 "cancelled", "redacted", "completed", "deferred_early_candidate",
                 "heartbeat_timeout", "capture_connected", "idle_auto_pause", "session_time_limit",
-                "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical"
+                "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical",
+                "changing_group_preferred", "dominant_group", "queue_replaced",
+                "warmup_started", "warmup_succeeded", "warmup_failed",
+                "model_session_created", "model_batch_completed", "model_batch_failed"
             ]).union(stageCodes)
         let safeEvents = snapshot.events.suffix(2400).map { event in
             StructuredDiagnosticEvent(id: event.id, timestamp: event.timestamp,
@@ -173,6 +176,10 @@ actor DiagnosticExportWriter {
         }
         let settingsKeys: Set<String> = [
             "mode", "speed", "stability", "frameRot", "area", "adaptiveOCR",
+            "source", "target", "customY0", "customY1", "minTextH", "dropNoise",
+            "boost", "ocrCorrection", "adaptive", "displayPolicy", "minDisplay",
+            "clearHold", "autoClear", "keepWarm", "langLock",
+            "selectiveSpeculation", "speculationConfidence", "confirmationDeadline",
             "remember", "privateSession", "diagnosticsEnabled", "detailedCollection",
             "skipUnchanged", "idleBackoff", "adaptiveConfirmation", "subtitleTracking",
             "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest"
