@@ -103,6 +103,13 @@ struct MemoryManagementView: View {
                     }
                 }.disabled(transferBusy || captureInProgress)
                 Text("Snapshots protect stored memory, but restoring an older snapshot can omit newer translations. No automatic rollback is performed.").font(.footnote)
+                if engine.memoryPendingWrites > 0 {
+                    Button("Retry pending confirmed-memory writes") {
+                        engine.saveMemory(force: true)
+                        message = "Persistence retry requested; verify that pending writes reach zero."
+                    }
+                    .disabled(transferBusy || captureInProgress || engine.memoryHealth == nil)
+                }
                 Button("Clear RAM cache") { engine.clearRAMCache() }
                 Button("Verify integrity") {
                     Task {
