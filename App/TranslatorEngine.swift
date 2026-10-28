@@ -716,8 +716,18 @@ final class TranslatorEngine: ObservableObject {
         if let rev = p.rev, rev != rotRev { return }
         if p.kind == "clear" { invalidatePending(); latestBlocks = []; handleClear(); return }
         guard p.kind == "ocr" else { return }
+        if diag.detailedCollection {
+            diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
+                                      stage: "frame_arrival", reason: "accepted")
+        }
         let candidateTexts = extractTexts(p.lines, count: p.stable != false)
-        guard !candidateTexts.isEmpty else { return }
+        guard !candidateTexts.isEmpty else {
+            if diag.detailedCollection {
+                diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
+                                          stage: "ocr_filtering", reason: "rejected_empty")
+            }
+            return
+        }
         let candidateText = candidateTexts.map(TextSim.norm).joined(separator: "\n")
         if flag("steadyCaptions", true), let candidate = p.candidateID, activeCandidateText != candidateText {
             if let previous = activeCandidateID {
@@ -742,6 +752,10 @@ final class TranslatorEngine: ObservableObject {
             if speculationAllowed && flag("translateAhead", true) {
                 if flag("selectiveSpeculation", true), !SpeculationPolicy.credible(lines: p.lines, threshold: flag("coolMode", false) ? max(0.95, num("speculationConfidence", 0.85)) : num("speculationConfidence", 0.85)) {
                     if diag.enabled { diag.s.specSkipped += 1 }
+                    if diag.detailedCollection {
+                        diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
+                            stage: "stability", reason: "rejected_low_confidence")
+                    }
                     return
                 }
                 specPacket = p
@@ -755,11 +769,23 @@ final class TranslatorEngine: ObservableObject {
         // Is text arriving upside down? Votes only count packets made with the current rotation.
         let revision = rotRev
         updateOrderVote(removeOwnOutput(p.lines))
-        guard revision == rotRev else { return }
+        guard revision == rotRev else {
+            if diag.detailedCollection {
+                diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
+                                          stage: "rotation", reason: "rejected_revision")
+            }
+            return
+        }
 
         let texts = candidateTexts
         guard !PipelineSafety.isRecentFragment(texts.joined(separator: "\n"), of: original,
-                                               age: Date().timeIntervalSince(lastShowDate)) else { return }
+                                               age: Date().timeIntervalSince(lastShowDate)) else {
+            if diag.detailedCollection {
+                diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
+                    stage: "duplicate_detection", reason: "rejected_recent_fragment")
+            }
+            return
+        }
         latestBlocks = texts
         clearTask?.cancel()
         clearTask = nil
