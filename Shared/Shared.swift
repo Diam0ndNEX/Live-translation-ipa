@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.4.4"
-    static let build = 48
+    static let version = "1.4.5"
+    static let build = 49
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("1.4.5", "Faster independent confirmation reads under nominal load, reusable accurate OCR requests and PiP buffers, representative startup warm-up, rolling diagnostic-independent speculation control, bounded confirmed handoff and stage-by-stage latency evidence."),
         ("1.4.4", "Predictive on-device warm-up for recently confirmed Auto source, bounded speculative workload, confirmed-caption continuity, tail-latency instrumentation, and memory-validation observability."),
         ("1.4.3", "Faster legacy validation: 24-item automatic batches, up to 48 on demand, controlled parallel model sessions, adaptive cooldown, atomic SQLite batch commits, progress and live-capture preemption."),
         ("1.4.2", "Conservative lazy validation of legacy memory using independently confirmed translations, startup and subtitle continuity improvements, and richer diagnostics for tail latency and memory validation."),
@@ -109,6 +110,7 @@ struct Config: Codable, Equatable {
     var selectiveSpeculation: Bool? = nil
     var speculationConfidence: Double? = nil
     var detailCeiling: Double? = nil
+    var confirmationBurst: Bool? = nil
 }
 
 enum TextSim {
@@ -137,3 +139,4 @@ enum TextSim {
         return Double(g.intersection(set).count) / Double(g.count)
     }
 }
+

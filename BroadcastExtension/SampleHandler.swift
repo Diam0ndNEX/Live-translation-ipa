@@ -23,6 +23,10 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var lastOCRConfig: Config?
     private var emptyPasses = 0
     private var lastOcrMs: Double = 0
+    // Recognition callbacks are serialized by recognitionLock. Reuse only the
+    // request configuration; Vision replaces results on every perform call.
+    private var cachedRequest: VNRecognizeTextRequest?
+    private var cachedRequestKey = ""
     private var lastUsefulText = Date()
     private var ocrSig: [UInt8] = []
     private var tracker = SubtitleTracker()
@@ -94,10 +98,17 @@ class SampleHandler: RPBroadcastSampleHandler {
         recognitionReason = plan.reason
         let idleFactor = SubtitleAcquisitionPolicy.idleMultiplier(movie: cfg.movieMode ?? false,
             enabled: cfg.idleBackoff ?? true, secondsSinceText: now.timeIntervalSince(lastUsefulText))
-        effectiveOCRIntervalMs = plan.interval * idleFactor * 1000
+        let interval = SubtitlePerformancePolicy.confirmationInterval(
+            planned: plan.interval * idleFactor, pending: candidateCount > 0,
+            movie: cfg.movieMode ?? false,
+            pressure: cfg.confirmationBurst == false || (cfg.pressure ?? false) || (cfg.smartCool ?? false) ||
+                ProcessInfo.processInfo.isLowPowerModeEnabled ||
+                ProcessInfo.processInfo.thermalState != .nominal,
+            processingMs: lastOcrMs)
+        effectiveOCRIntervalMs = interval * 1000
         guard !cfg.paused else { pausedSkipped += 1; return }
         guard CaptureCadence.remaining(startedAt: lastRun.timeIntervalSince1970, now: now.timeIntervalSince1970,
-                                       interval: plan.interval * idleFactor) <= 0 else { cadenceSkipped += 1; return }
+                                       interval: interval) <= 0 else { cadenceSkipped += 1; return }
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
         // When diagnostics are enabled, sample lightweight *numeric* visual change
@@ -176,6 +187,8 @@ class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func makeRequest(_ cfg: Config, span: Double) -> VNRecognizeTextRequest {
+        let key = "\(cfg.lang)|\(cfg.correction ?? true)|\(span)"
+        if key == cachedRequestKey, let request = cachedRequest { return request }
         let r = VNRecognizeTextRequest()
         r.recognitionLevel = .accurate
         r.usesLanguageCorrection = cfg.correction ?? true
@@ -187,6 +200,8 @@ class SampleHandler: RPBroadcastSampleHandler {
             r.automaticallyDetectsLanguage = true
             if !recognitionLanguages.isEmpty { r.recognitionLanguages = recognitionLanguages }
         }
+        cachedRequest = r
+        cachedRequestKey = key
         return r
     }
 
@@ -340,3 +355,4 @@ class SampleHandler: RPBroadcastSampleHandler {
         conn?.send(content: d, completion: .contentProcessed { _ in })
     }
 }
+

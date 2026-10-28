@@ -99,6 +99,51 @@ print("Subtitle acquisition and confirmed-caption continuity checks passed")
 
 // Cadence removes only redundant waiting: accuracy, pass count and resolution are unchanged.
 check(CaptureCadence.remaining(startedAt: 10, now: 10.242, interval: 0.22) == 0, "An OCR pass longer than its interval must not incur a second interval")
+check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.22, pending: true,
+    movie: true, pressure: false, processingMs: 134) == 0.134,
+    "Pending subtitle confirmation removes idle spacing while retaining another independent frame")
+check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.22, pending: false,
+    movie: true, pressure: false, processingMs: 134) == 0.22,
+    "A settled caption must not continuously burst OCR")
+check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.4, pending: true,
+    movie: true, pressure: true, processingMs: 134) == 0.4,
+    "Thermal, power and Cool pressure must retain their full cadence")
+check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.12, pending: true,
+    movie: true, pressure: false, processingMs: 250) == 0.12,
+    "A confirmation burst must never delay an already faster cadence")
+check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.4, pending: true,
+    movie: false, pressure: false, processingMs: 134) == 0.4,
+    "Non-Movie modes retain their existing scheduling")
+check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.22, pending: true,
+    movie: true, pressure: false, processingMs: .nan) == 0.22,
+    "Invalid timing evidence must preserve configured scheduling")
+check(abs(SubtitlePerformancePolicy.confirmedHandoffDelay(age: 0.1) - 0.35) < 0.000001,
+    "Early confirmed handoff retains an absolute 450ms deadline")
+check(SubtitlePerformancePolicy.confirmedHandoffDelay(age: 0.6) == 0.12,
+    "An older confirmed caption gets only a short completion opportunity")
+check(abs(SubtitlePerformancePolicy.confirmedHandoffDelay(age: 0.85) - 0.05) < 0.000001 &&
+    SubtitlePerformancePolicy.confirmedHandoffDelay(age: 0.9) == 0 &&
+    SubtitlePerformancePolicy.confirmedHandoffDelay(age: .nan) == 0,
+    "Handoff never extends beyond the freshness cap or accepts invalid ages")
+var speculationHistory = SpeculativeWorkWindow()
+for _ in 0..<24 {
+    let id = speculationHistory.begin()
+    speculationHistory.finish(id, discarded: true)
+}
+let firstSpeculationOpportunity = speculationHistory.allowsOpportunity(enabled: true)
+let secondSpeculationOpportunity = speculationHistory.allowsOpportunity(enabled: true)
+check(!firstSpeculationOpportunity && secondSpeculationOpportunity,
+    "Runtime evidence throttles low-yield work with diagnostics absent and keeps recovery probes")
+for _ in 0..<32 {
+    let id = speculationHistory.begin()
+    speculationHistory.finish(id, discarded: false)
+    speculationHistory.reuse(id)
+    speculationHistory.reuse(id)
+}
+check(speculationHistory.allowsOpportunity(enabled: true),
+    "A new useful scene ages out old discarded work; repeated sentence hits do not inflate pipeline usefulness")
+check(speculationHistory.allowsOpportunity(enabled: false),
+    "The user can disable speculative throttling")
 check(abs(CaptureCadence.remaining(startedAt: 10, now: 10.1, interval: 0.22) - 0.12) < 0.000001, "Short passes must respect their configured cadence")
 let plan = TranslationBatchPlan(["Olá.", "Olá.", "Como vai?", "Olá."])
 check(plan.unique == ["Olá.", "Como vai?"], "Only exact repeated sentences may share a request")
@@ -530,3 +575,4 @@ check(SubtitlePerformancePolicy.predictiveSource(
     ageSeconds: 100, enabled: false) == nil,
     "User can disable predictive warm-up")
 print("v1.4.4 speculative, confirmed-handoff and predictive-warmup checks passed")
+

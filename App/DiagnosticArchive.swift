@@ -129,7 +129,9 @@ struct DiagnosticIntervalBucket: Codable {
         "unpresentedConfirmed", "capturePackets", "modelBatches",
         "modelFailures", "warmupAttempts", "warmupSucceeded",
         "warmupPredicted", "coldModelBatches", "adaptiveSpeculationSkipped",
-        "handoffDeferred", "slowTailEnqueues",
+        "handoffDeferred", "slowTailEnqueues", "handoffReplayed", "handoffExpired", "enqueueFailed",
+        "actualModelBatches", "confirmedModelBatches", "speculativeModelBatches",
+        "warmupModelBatches", "first30sModelBatches", "cancelledModelBatches",
         "legacyBatchEntries", "legacyBatchVerified", "legacyBatchSkipped",
         "runtimeTransitions", "visualChanges",
         "ocrMeasurementCount", "translationMeasurementCount", "enqueueMeasurementCount"
@@ -201,8 +203,9 @@ actor DiagnosticExportWriter {
                 "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical",
                 "changing_group_preferred", "dominant_group", "queue_replaced",
                 "preserved_confirmed_work", "confirmed_handoff_deferred",
-                "adaptive_speculation_backoff", "slow_tail",
+                "adaptive_speculation_backoff", "slow_tail", "handoff_expired", "handoff_replayed", "enqueue_failed",
                 "warmup_started", "warmup_succeeded", "warmup_failed",
+                "warmup_model_submitted", "speculative_model_submitted", "confirmed_model_submitted", "model_batch_cancelled",
                 "model_session_created", "model_batch_completed", "model_batch_failed",
                 "warmup_source_unresolved", "warmup_predicted_source", "warmup_preempted",
                 "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started", "legacy_idle_completed",
@@ -326,7 +329,7 @@ actor DiagnosticExportWriter {
     func exportZIP(_ snapshot: DiagnosticSessionExport) throws -> URL {
         let json = try encode(snapshot)
         let readme = Data("""
-        ScreenLingo offline diagnostics — 1.4.1
+        ScreenLingo offline diagnostics — 1.4.5
         session.json: bounded recent metadata-only candidate events, timing distributions,
         configuration, memory diagnostics and whole-session interval summaries.
         intervals.csv: chronological 15-second counters, thermal and capture state.
@@ -336,6 +339,12 @@ actor DiagnosticExportWriter {
         ground truth. A caption invisible to OCR cannot be recovered from these statistics.
         No screen frames, recognized words, translated words, audio or identifying file paths.
         Physical PiP presentation time is NOT measured; 'enqueued' is a buffer enqueue.
+        modelBatches is the legacy confirmed logical-batch counter. actualModelBatches
+        counts API submissions, partitioned into confirmed/speculative/warmupModelBatches.
+        first30sModelBatches (and legacy coldModelBatches) counts completions of work
+        submitted in the first 30 capture seconds; it does NOT prove a cold model load.
+        Stage timing distributions are bounded matched enqueue samples, not additive.
+        Legacy validation health/legacyVerified may include entries from earlier sessions.
         Settings, OS version, cache history and source content affect A/B comparisons.
         Nothing is automatically uploaded. This ZIP is generated at user request.
         """.utf8)
@@ -639,3 +648,4 @@ enum DiagnosticTraceReview {
         .map { $0 }
     }
 }
+

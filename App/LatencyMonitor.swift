@@ -37,7 +37,7 @@ struct LatencyDetail: View {
             row("OCR recognition", monitor.last.recognition)
             row("Confirmation window", monitor.last.confirmation)
             row("Delivery & filtering", monitor.last.delivery)
-            row("Queue & display hold", monitor.last.queue)
+            row("Translation queue", monitor.last.queue)
             row("Translation processing", monitor.last.translation)
             row("Readability hold", monitor.last.displayHold)
             row("Frame preparation", monitor.last.rendering)
@@ -82,3 +82,4 @@ struct PairedTimingCard: View {
         HStack { Text(title); Spacer(); Text("\(Int(value)) ms").monospacedDigit() }.font(.footnote)
     }
 }
+

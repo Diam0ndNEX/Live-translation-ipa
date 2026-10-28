@@ -198,6 +198,7 @@ final class TranslatorEngine: ObservableObject {
     private var contextRevision = 0
     private var generation = 0
     private var legacyRequestID = UUID()
+    private var legacySpeculative = false
     private var latestBlocks: [String] = []
     private var lastHandled = ""
     private var queued: [String]?
@@ -227,7 +228,8 @@ final class TranslatorEngine: ObservableObject {
     private var deferredConfirmedPacket: Packet?
     private var confirmedHandoffDeadlineTask: Task<Void, Never>?
     private var deferredConfirmedReceivedAt = Date.distantPast
-    private var speculationOpportunity = 0
+    private var speculationWindow = SpeculativeWorkWindow()
+    private var speculativeOrigins: [String: UInt64] = [:]
     private var specPacket: Packet?
     private var savedKeys = Set<String>()
     private var confirmedKeys = Set<String>()
@@ -509,7 +511,8 @@ final class TranslatorEngine: ObservableObject {
                            confirmationDeadline: num("confirmationDeadline", 0.6), smartCool: intelligentCool,
                            pressure: flag("adaptive", true) && (intelligentCool || speed == .automatic || (speed == .balanced && flag("adaptiveOCR", true))) && (ProcessInfo.processInfo.thermalState != .nominal || (busy && queued != nil)),
                            selectiveSpeculation: flag("selectiveSpeculation", true), speculationConfidence: num("speculationConfidence", 0.85),
-                           detailCeiling: (ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical || (extFreeMB > 0 && extFreeMB < 12)) ? maxEdge : 2400))
+                           detailCeiling: (ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical || (extFreeMB > 0 && extFreeMB < 12)) ? maxEdge : 2400,
+                           confirmationBurst: !flag("coolMode", false)))
     }
 
     // MARK: PiP
@@ -556,6 +559,9 @@ final class TranslatorEngine: ObservableObject {
         contextRevision += 1
         generation += 1
         drainTask?.cancel()
+        deferredConfirmedPacket = nil
+        confirmedHandoffDeadlineTask?.cancel()
+        confirmedHandoffDeadlineTask = nil
         activeCandidateID = nil; activeCandidateText = ""
         movieTextFocus.reset()
         activeCandidateConfirmed = false; activeCandidatePresented = false
@@ -745,7 +751,7 @@ final class TranslatorEngine: ObservableObject {
 
     // MARK: Packets from the extension
     private func handle(_ incoming: Packet) {
-        var p = incoming
+        let p = incoming
         let now = Date()
         let wasAlive = captureAlive
         lastPacketDate = now
@@ -767,7 +773,8 @@ final class TranslatorEngine: ObservableObject {
             diag.noteRuntimeState("capture_connected")
             lastTextDate = now
             syncConfig()
-            Task { await prewarm() }
+            // Do not launch a second synthetic model job as capture starts.
+            // Startup preparation runs before capture; live text owns first use.
             // Capture just started: make sure the floating window is up too.
             if flag("autoOpenPiP", true), !pip.isActive, UIApplication.shared.applicationState == .active { startPiP() }
         }
@@ -779,6 +786,24 @@ final class TranslatorEngine: ObservableObject {
             lastCaptureOrientation = orientation
         }
         if p.kind == "ping" { syncConfig(); return }          // keeps the extension's settings fresh
+        handleContent(p, receivedAt: now)
+    }
+
+    /// Local handoffs never masquerade as fresh transport packets, extend the
+    /// capture heartbeat, or count OCR/confirmation work twice.
+    private func handleContent(_ incoming: Packet, receivedAt: Date, replayed: Bool = false) {
+        var p = incoming
+        let now = Date()
+        if replayed {
+            guard captureAlive, now.timeIntervalSince(receivedAt) >= 0,
+                  now.timeIntervalSince(receivedAt) < 1.2 else {
+                diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
+                    stage: "stability", reason: "handoff_expired")
+                return
+            }
+            diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
+                stage: "stability", reason: "handoff_replayed")
+        }
         if paused || manualMode { return }
         if let rev = p.rev, rev != rotRev { return }
         if p.kind == "clear" {
@@ -788,11 +813,11 @@ final class TranslatorEngine: ObservableObject {
             invalidatePending(); latestBlocks = []; handleClear(); return
         }
         guard p.kind == "ocr" else { return }
-        if diag.detailedCollection {
+        if diag.detailedCollection && !replayed {
             diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
                                       stage: "frame_arrival", reason: "accepted")
         }
-        let candidateTexts = extractTexts(p.lines, count: p.stable != false)
+        let candidateTexts = extractTexts(p.lines, count: p.stable != false && !replayed)
         guard !candidateTexts.isEmpty else {
             if diag.detailedCollection {
                 diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
@@ -801,36 +826,36 @@ final class TranslatorEngine: ObservableObject {
             return
         }
         let candidateText = candidateTexts.map(TextSim.norm).joined(separator: "\n")
+        if p.stable != false && !replayed && diag.enabled { diag.s.confirmedCandidatePackets += 1 }
         let equivalentActiveCaption = SubtitleAcquisitionPolicy.isSameUnpresentedCaption(
             activeConfirmed: activeCandidateConfirmed,
             activePresented: activeCandidatePresented,
             previousBlocks: latestBlocks,
             incomingBlocks: candidateTexts)
-        if flag("protectConfirmedPresentation", true),
+        let handoffDelay = SubtitlePerformancePolicy.confirmedHandoffDelay(
+            age: now.timeIntervalSince(activeCandidateConfirmedAt))
+        if !replayed, handoffDelay > 0, flag("protectConfirmedPresentation", true),
            flag("steadyCaptions", true), p.candidateID != nil,
            activeCandidateText != candidateText,
-           SubtitlePerformancePolicy.deferConfirmedReplacement(
-               activeConfirmed: activeCandidateConfirmed,
-               activePresented: activeCandidatePresented,
-               incomingConfirmed: p.stable != false,
-               workPending: busy || queued != nil || waitingToDisplay,
-               ageSeconds: now.timeIntervalSince(activeCandidateConfirmedAt),
-               equivalent: equivalentActiveCaption) {
-            // One-slot, latest-wins handoff. New confirmed captions must never
-            // be lost, but a previous confirmed caption gets a 450ms chance.
+           activeCandidateConfirmed, !activeCandidatePresented,
+           p.stable != false, busy || queued != nil || waitingToDisplay,
+           !equivalentActiveCaption {
+            // One-slot, latest-wins handoff. The existing result gets a bounded
+            // completion opportunity; replacement never renews the deadline.
             deferredConfirmedPacket = p
-            deferredConfirmedReceivedAt = now
-            confirmedHandoffDeadlineTask?.cancel()
-            let untilDeadline = max(0.01, 0.47 - now.timeIntervalSince(activeCandidateConfirmedAt))
-            confirmedHandoffDeadlineTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(untilDeadline))
-                guard let self, !Task.isCancelled,
-                      let pending = self.deferredConfirmedPacket else { return }
-                self.deferredConfirmedPacket = nil
-                self.confirmedHandoffDeadlineTask = nil
-                // Once the 450ms protection window has elapsed, supersession
-                // follows the existing confirmed candidate freshness logic.
-                self.handle(pending)
+            deferredConfirmedReceivedAt = receivedAt
+            // Keep the first deadline when the one-slot replacement changes.
+            // Repeated packets cannot renew the grace period indefinitely.
+            if confirmedHandoffDeadlineTask == nil {
+                confirmedHandoffDeadlineTask = Task { [weak self] in
+                    try? await Task.sleep(for: .seconds(handoffDelay))
+                    guard let self, !Task.isCancelled,
+                          let pending = self.deferredConfirmedPacket else { return }
+                    self.deferredConfirmedPacket = nil
+                    self.confirmedHandoffDeadlineTask = nil
+                    // Replay once, bypassing handoff protection to prevent a loop.
+                    self.handleContent(pending, receivedAt: self.deferredConfirmedReceivedAt, replayed: true)
+                }
             }
             if diag.enabled { diag.s.confirmedHandoffDeferred += 1 }
             diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
@@ -876,7 +901,6 @@ final class TranslatorEngine: ObservableObject {
                     reason: "preserved_confirmed_work")
             }
         }
-        if p.stable != false && diag.enabled { diag.s.confirmedCandidatePackets += 1 }
         // Overlay-only OCR changes must not supersede the same filtered subtitle.
         if flag("steadyCaptions", true), p.candidateID != nil { p.candidateID = activeCandidateID }
         if p.stable == false, let firstSeen = p.firstSeenAt {
@@ -887,11 +911,7 @@ final class TranslatorEngine: ObservableObject {
         // First, unconfirmed sighting: translate quietly now so the result is ready the moment the text is confirmed.
         if p.stable == false {
             if speculationAllowed && flag("translateAhead", true) {
-                speculationOpportunity += 1
-                if !SubtitlePerformancePolicy.allowSpeculation(
-                    attempts: diag.s.specStarted, discarded: diag.s.specDiscarded,
-                    hits: diag.s.specHits, opportunity: speculationOpportunity,
-                    enabled: flag("adaptiveSpeculation", true)) {
+                if !speculationWindow.allowsOpportunity(enabled: flag("adaptiveSpeculation", true)) {
                     if diag.enabled { diag.s.adaptiveSpeculationSkipped += 1 }
                     diag.notePipelineDecision(candidate: p.candidateID,
                         frameIndex: p.frames, stage: "stability",
@@ -1252,9 +1272,8 @@ final class TranslatorEngine: ObservableObject {
         deferredConfirmedPacket = nil
         confirmedHandoffDeadlineTask?.cancel()
         confirmedHandoffDeadlineTask = nil
-        guard !paused, !manualMode, captureAlive,
-              Date().timeIntervalSince(deferredConfirmedReceivedAt) < 1.2 else { return }
-        handle(packet)
+        guard !paused, !manualMode, captureAlive else { return }
+        handleContent(packet, receivedAt: deferredConfirmedReceivedAt, replayed: true)
     }
 
     // MARK: Translation
@@ -1364,8 +1383,11 @@ final class TranslatorEngine: ObservableObject {
         let destination = targetCode
         let speculativeStart = Date()
         let diagnosticEpoch = diag.started
+        let speculativeID: UInt64? = display ? nil : speculationWindow.begin()
         if !display && diag.enabled { diag.s.specStarted += 1 }
         defer {
+            let discarded = Task.isCancelled || workContext != contextRevision || workCandidate != activeCandidateID
+            if let speculativeID { speculationWindow.finish(speculativeID, discarded: discarded) }
             if !display && diag.enabled && diag.started == diagnosticEpoch {
                 let ms = Date().timeIntervalSince(speculativeStart) * 1000
                 diag.s.specProcessingMs += ms
@@ -1412,7 +1434,10 @@ final class TranslatorEngine: ObservableObject {
             }
             memoryDirty = true
             touchCache(key)
-            if !display { specKeys.insert(key) }
+            if !display {
+                specKeys.insert(key)
+                if let speculativeID { speculativeOrigins[key] = speculativeID }
+            }
         }
 
         for (bi, raw) in blocks.enumerated() {
@@ -1509,6 +1534,9 @@ final class TranslatorEngine: ObservableObject {
                         outs.append(hit); translatedAny = true
                         if display {
                             let speculativeHit = specKeys.remove(key) != nil
+                            if speculativeHit, let origin = speculativeOrigins.removeValue(forKey: key) {
+                                speculationWindow.reuse(origin)
+                            }
                             let savedHit = diskHit || savedKeys.remove(key) != nil
                             if !diskHit { diag.recordMemory(speculativeHit ? .speculativeHit : .ramHit,
                                                                   durationMs: (ProcessInfo.processInfo.systemUptime - lookupStart) * 1000,
@@ -1566,7 +1594,7 @@ final class TranslatorEngine: ObservableObject {
                 diag.trace(workCandidate, stage: "freshTranslation",
                            detail: "Uncached units submitted to on-device translation")
             }
-            let batch = await translateBatch(plan.unique, source: src, target: target, installed: installed)
+            let batch = await translateBatch(plan.unique, source: src, target: target, installed: installed, speculative: !display)
             guard isCurrent() else { return }
             if display && diag.detailedCollection {
                 diag.trace(workCandidate, stage: "translationResult",
@@ -1583,7 +1611,7 @@ final class TranslatorEngine: ObservableObject {
                 for sentence in plan.unique {
                     guard isCurrent() else { return }
                     if !display && diag.enabled { diag.s.specModelRequests += 1 }
-                    let result = await translateBatch([sentence], source: src, target: target, installed: installed)
+                    let result = await translateBatch([sentence], source: src, target: target, installed: installed, speculative: !display)
                     uniqueResults.append(result?.count == 1 ? result?.first : nil)
                 }
             }
@@ -1656,7 +1684,7 @@ final class TranslatorEngine: ObservableObject {
 
     /// Translates many sentences in one call.
     private func translateBatch(_ texts: [String], source: Locale.Language, target: Locale.Language,
-                                installed: Bool) async -> [String]? {
+                                installed: Bool, speculative: Bool = false) async -> [String]? {
         if #available(iOS 26.0, *), installed {
             let k = "\(source.minimalIdentifier)>\(targetCode)"
             if directSession == nil || directKey != k {
@@ -1666,33 +1694,41 @@ final class TranslatorEngine: ObservableObject {
             }
             if diag.enabled { diag.s.sessionKind = "Direct session (iOS 26)" }
             guard let session = directSession else { return nil }
-            let r = await runBatch(session, texts)
+            let r = await runBatch(session, texts, speculative: speculative)
             if r == nil { directSession = nil }
             else { warmupStatus = "Ready" }
             return r
         }
         if diag.enabled { diag.s.sessionKind = "Hosted view (iOS 18)" }
-        return await translateLegacy(texts, source: source, target: target)
+        return await translateLegacy(texts, source: source, target: target, speculative: speculative)
     }
 
     private func runBatch(_ session: TranslationSession, _ texts: [String],
-                          warmup: Bool = false) async -> [String]? {
+                          warmup: Bool = false, speculative: Bool = false) async -> [String]? {
         let began = ProcessInfo.processInfo.systemUptime
+        let first30s = !warmup && sessionStarted.map {
+            let age = Date().timeIntervalSince($0)
+            return age >= 0 && age <= 30
+        } == true
+        diag.noteModelState(warmup ? "warmup_model_submitted" :
+            (speculative ? "speculative_model_submitted" : "confirmed_model_submitted"))
         let reqs = texts.enumerated().map { TranslationSession.Request(sourceText: $0.element, clientIdentifier: String($0.offset)) }
         do {
             let res = try await session.translations(from: reqs)
             let result = PipelineSafety.orderedTranslations(res.map { ($0.clientIdentifier, $0.targetText) }, count: texts.count)
             diag.noteModelState(result == nil ? "model_batch_failed" : "model_batch_completed",
                 durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
-            if !warmup, let started = sessionStarted,
-               Date().timeIntervalSince(started) >= 0,
-               Date().timeIntervalSince(started) <= 30 {
+            if first30s {
                 diag.noteModelState("model_batch_first_30s",
                     durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
             }
             return result
         } catch {
-            if Task.isCancelled { return nil }
+            if Task.isCancelled {
+                diag.noteModelState("model_batch_cancelled",
+                    durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
+                return nil
+            }
             diag.noteModelState("model_batch_failed",
                 durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
             diag.event(.error, "Translation engine failed: \(error.localizedDescription)")
@@ -1743,15 +1779,21 @@ final class TranslatorEngine: ObservableObject {
         guard !frozen, (!paused || manualMode),
               CandidateValidity.isCurrent(timing.packet?.candidateID, active: activeCandidateID, enabled: flag("steadyCaptions", true), allowLegacy: true) else { return }
         guard !PipelineSafety.isRecentFragment(text, of: original, age: Date().timeIntervalSince(lastShowDate)) else { return }
+        let renderStart = Date()
+        pip.style = pipStyle
+        guard pip.render(original: text, translated: result, showOriginal: showOriginal,
+                         size: windowSize.size) else {
+            lastHandled = ""
+            status = "Frame preparation failed – keeping the previous subtitle. Tap Retry."
+            diag.notePipelineDecision(candidate: timing.packet?.candidateID,
+                frameIndex: timing.packet?.frames, stage: "pip_enqueue", reason: "enqueue_failed")
+            return
+        }
         original = text
         translated = result
         showing = true
         lastTextDate = Date()
         lastShowDate = Date()
-        let renderStart = Date()
-        pip.setSize(windowSize.size)
-        pip.style = pipStyle
-        pip.render(original: text, translated: result, showOriginal: showOriginal)
         let presented = Date()
         let packet = timing.packet
         let sent = packet?.ts ?? timing.queuedAt.timeIntervalSince1970
@@ -1982,7 +2024,7 @@ final class TranslatorEngine: ObservableObject {
         invalidatePending()
         cache.removeAll(); cacheUse.removeAll()
         segmentationCache.clear()
-        specKeys.removeAll(); savedKeys.removeAll(); confirmedKeys.removeAll()
+        specKeys.removeAll(); speculativeOrigins.removeAll(); savedKeys.removeAll(); confirmedKeys.removeAll()
     }
 
     func removeMemoryEntries(ids: [Int64]) async throws {
@@ -2130,7 +2172,7 @@ final class TranslatorEngine: ObservableObject {
         }
         for key in victims {
             cache[key] = nil; cacheUse[key] = nil
-            specKeys.remove(key); savedKeys.remove(key); confirmedKeys.remove(key)
+            specKeys.remove(key); speculativeOrigins.removeValue(forKey: key); savedKeys.remove(key); confirmedKeys.remove(key)
         }
         // Report entries evicted, not maintenance batches; persistence is untouched.
         diag.recordMemory(.ramEviction, count: victims.count)
@@ -2404,11 +2446,23 @@ final class TranslatorEngine: ObservableObject {
     // MARK: Keep the translator warm
     private static let warmWords = ["en": "Hello.", "pt": "Olá.", "es": "Hola.", "fr": "Bonjour.", "de": "Hallo.",
                                     "it": "Ciao.", "ja": "こんにちは。", "ko": "안녕하세요.", "zh": "你好。", "ru": "Привет."]
+    private static let warmSentences = [
+        "en": "We need to find out what happened here.",
+        "pt": "Precisamos descobrir o que aconteceu aqui.",
+        "es": "Tenemos que descubrir qué pasó aquí.",
+        "fr": "Nous devons découvrir ce qui s’est passé ici.",
+        "de": "Wir müssen herausfinden, was hier passiert ist.",
+        "it": "Dobbiamo scoprire cosa è successo qui.",
+        "ja": "ここで何が起きたのか調べなければなりません。",
+        "ko": "여기서 무슨 일이 있었는지 알아봐야 합니다.",
+        "zh": "我们需要弄清楚这里发生了什么。",
+        "ru": "Нам нужно выяснить, что здесь произошло."]
 
     /// Loads the translation models before they're needed so the first real sentence isn't slow.
     func prewarm() async {
-        guard runtimePolicy.allowsPrewarming, flag("keepWarm", true), !paused,
+        guard !Task.isCancelled, runtimePolicy.allowsPrewarming, flag("keepWarm", true), !paused,
               !legacyValidationBusy, !busy, !warming,
+              queued == nil, !waitingToDisplay,
               Date().timeIntervalSince(lastWarm) > 25 else { return }
         warming = true
         defer { warming = false }
@@ -2445,7 +2499,8 @@ final class TranslatorEngine: ObservableObject {
             warmupStatus = "Ready"
             return
         }
-        guard await pairStatus(src, target) == .installed, workContext == contextRevision, !busy,
+        guard await pairStatus(src, target) == .installed, !Task.isCancelled,
+              workContext == contextRevision, !busy, queued == nil,
               !ProcessInfo.processInfo.isLowPowerModeEnabled,
               ProcessInfo.processInfo.thermalState != .serious,
               ProcessInfo.processInfo.thermalState != .critical else { return }
@@ -2457,7 +2512,10 @@ final class TranslatorEngine: ObservableObject {
         diag.noteModelState("warmup_started")
         if predicted { diag.noteModelState("warmup_predicted_source") }
         let session = TranslationSession(installedSource: src, target: target)
-        let warmed = await runBatch(session, [word], warmup: true)
+        // Exercise both a short word and a subtitle-length sentence on the same
+        // retained session. Synthetic output never enters memory/history/PiP.
+        let sample = Self.warmSentences[src.languageCode?.identifier ?? code]
+        let warmed = await runBatch(session, [word] + (sample.map { [$0] } ?? []), warmup: true)
         guard !Task.isCancelled, workContext == contextRevision else {
             warmupStatus = "Deferred for live translation"
             diag.noteModelState("warmup_preempted")
@@ -2482,7 +2540,7 @@ final class TranslatorEngine: ObservableObject {
         guard !original.isEmpty else { return }
         invalidatePending()
         cache.removeAll()
-        specKeys.removeAll(); savedKeys.removeAll(); confirmedKeys.removeAll()
+        specKeys.removeAll(); speculativeOrigins.removeAll(); savedKeys.removeAll(); confirmedKeys.removeAll()
         bypassMemory = true
         lastHandled = ""
         let blocks = original.components(separatedBy: "\n")
@@ -2497,7 +2555,8 @@ final class TranslatorEngine: ObservableObject {
     }
 
     // iOS 18 path (needs the hosted .translationTask view in RootView)
-    private func translateLegacy(_ texts: [String], source: Locale.Language, target: Locale.Language) async -> [String]? {
+    private func translateLegacy(_ texts: [String], source: Locale.Language, target: Locale.Language,
+                                 speculative: Bool = false) async -> [String]? {
         let requestID = UUID()
         return await withTaskCancellationHandler {
             guard !Task.isCancelled else { return nil }
@@ -2505,6 +2564,7 @@ final class TranslatorEngine: ObservableObject {
                 legacyRequestID = requestID
                 legacyContinuation = cont
                 pendingTexts = texts
+                legacySpeculative = speculative
                 if var c = legacyConfig, c.source == source, c.target == target {
                     c.invalidate(); legacyConfig = c
                 } else {
@@ -2526,7 +2586,8 @@ final class TranslatorEngine: ObservableObject {
     func runLegacy(_ session: TranslationSession) async {
         let requestID = legacyRequestID
         let texts = pendingTexts
-        let result = await runBatch(session, texts)
+        let speculative = legacySpeculative
+        let result = await runBatch(session, texts, speculative: speculative)
         if legacyRequestID == requestID { finishLegacy(result) }
     }
     private func finishLegacy(_ r: [String]?) {
@@ -2720,3 +2781,4 @@ final class LoopbackServer {
         }
     }
 }
+

@@ -32,7 +32,7 @@ struct SmartPipelineSettings: View {
                 Toggle("Merge duplicate subtitle copies", isOn: $deduplicate)
                 Toggle("Stable caption transitions", isOn: $steady)
                 Toggle("Protect confirmed captions during short handoffs", isOn: $protectConfirmed)
-                Text("Gives an already confirmed subtitle up to 450 ms to complete before processing the newest confirmed replacement; never blocks a fresh subtitle indefinitely.").font(.footnote).foregroundStyle(.secondary)
+                Text("Lets a confirmed subtitle finish within a bounded handoff. A later replacement can wait up to 0.12 seconds; the protection deadline never renews. Turn off to favor the newest confirmed caption immediately.").font(.footnote).foregroundStyle(.secondary)
                 Text("Tracking follows the complete visible group, including lyric rows. Duplicate copies are matched by complete region text; repeated rows within a group remain intact. Stable transitions cancel obsolete work when a newer candidate arrives, while keeping the last valid caption until its replacement is ready.").font(.footnote).foregroundStyle(.secondary)
             } header: { Text("Subtitle continuity") }
             Section {
@@ -66,3 +66,4 @@ struct SmartPipelineSettings: View {
         .onChange(of: signature) { _, _ in engine.pipelineSettingsChanged() }
     }
 }
+
