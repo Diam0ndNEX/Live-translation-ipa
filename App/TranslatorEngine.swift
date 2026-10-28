@@ -236,6 +236,7 @@ final class TranslatorEngine: ObservableObject {
     private var memoryReady = false
     private var cacheUse: [String: UInt64] = [:]
     private var cacheClock: UInt64 = 0
+    private var segmentationCache = SegmentationCache(capacity: 512)
     private var bypassMemory = false
     private var memoryRevision = 0
     private var memoryDirty = false
@@ -1103,16 +1104,33 @@ final class TranslatorEngine: ObservableObject {
     /// Splits a block into sentences so each is translated on its own (better quality, cacheable).
     private func splitSentences(_ text: String) -> [String] {
         guard text.count > 24 else { return [text] }
-        let tok = NLTokenizer(unit: .sentence)
-        tok.string = text
-        var out: [String] = []
-        tok.enumerateTokens(in: text.startIndex..<text.endIndex) { r, _ in
-            let s = String(text[r]).trimmingCharacters(in: .whitespacesAndNewlines)
-            if s.isEmpty { return true }
-            if s.count < 4, let last = out.popLast() { out.append(last + " " + s) } else { out.append(s) }
+        // Include effective language context: an OCR language correction must not
+        // borrow the segmentation calculated for a different configuration.
+        let key = "seg1|\(sourceCode)|\(detectedLang)|\(targetCode)|\(text)"
+        let started = ProcessInfo.processInfo.systemUptime
+        if let cached = segmentationCache.lookup(key) {
+            diag.noteSegmentation(candidate: activeCandidateID, reused: true,
+                durationMs: (ProcessInfo.processInfo.systemUptime - started) * 1000)
+            return cached
+        }
+        let tokenizer = NLTokenizer(unit: .sentence)
+        tokenizer.string = text
+        var units: [String] = []
+        tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
+            let sentence = String(text[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if sentence.isEmpty { return true }
+            if sentence.count < 4, let previous = units.popLast() {
+                units.append(previous + " " + sentence)
+            } else {
+                units.append(sentence)
+            }
             return true
         }
-        return out.isEmpty ? [text] : out
+        let result = units.isEmpty ? [text] : units
+        segmentationCache.insert(key, units: result)
+        diag.noteSegmentation(candidate: activeCandidateID, reused: false,
+            durationMs: (ProcessInfo.processInfo.systemUptime - started) * 1000)
+        return result
     }
 
     /// User glossary ("word=replacement" lines) applied to the finished translation.
@@ -1612,6 +1630,7 @@ final class TranslatorEngine: ObservableObject {
     func clearRAMCache() {
         invalidatePending()
         cache.removeAll(); cacheUse.removeAll()
+        segmentationCache.clear()
         specKeys.removeAll(); savedKeys.removeAll(); confirmedKeys.removeAll()
     }
 
