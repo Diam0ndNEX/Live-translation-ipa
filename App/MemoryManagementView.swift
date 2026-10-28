@@ -168,15 +168,30 @@ struct MemoryManagementView: View {
                 await engine.refreshMemoryHealth()
             } catch { message = "Memory is preparing or unavailable" }
         }
-        .confirmationDialog("Permanently delete translation memory? History and settings remain.", isPresented: $confirmClear, titleVisibility: .visible) {
-            Button("Delete translation memory", role: .destructive) {
+        .confirmationDialog("Delete translation memory? History and settings remain. Choose whether to retain recovery copies.", isPresented: $confirmClear, titleVisibility: .visible) {
+            Button("Clear active memory (keep recovery copies)", role: .destructive) {
                 Task {
                     let committed = await engine.clearMemoryConfirmed()
                     if committed {
                         entries.removeAll()
-                        message = "Translation memory deleted; history and settings retained"
+                        message = "Active memory cleared. Legacy originals and recovery snapshots were retained."
                     } else {
                         message = engine.memoryFailure ?? "Memory deletion was not completed"
+                    }
+                }
+            }
+            Button("Clear memory and erase recovery copies", role: .destructive) {
+                Task {
+                    guard await engine.clearMemoryConfirmed() else {
+                        message = engine.memoryFailure ?? "Memory deletion was not completed"
+                        return
+                    }
+                    entries.removeAll()
+                    do {
+                        try await engine.purgePreservedMemoryCopies()
+                        message = "Active memory and preserved app memory copies erased; history and settings retained"
+                    } catch {
+                        message = "Active memory cleared, but some recovery copies could not be erased; retry required"
                     }
                 }
             }
