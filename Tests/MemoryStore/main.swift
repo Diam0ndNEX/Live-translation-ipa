@@ -133,6 +133,37 @@ import SQLite3
             precondition(size > 0)
         }
 
+        // Actor serialization must make revisions deterministic independent of
+        // task scheduling. A higher-revision clear always defeats an older save.
+        let raceStore = TranslationMemoryStore(directory: root.appendingPathComponent("race-db"))
+        _ = try await raceStore.prepare(legacyURLs: [])
+        let olderSave = Task {
+            try? await raceStore.save([key: "Older confirmation"], revision: 7)
+        }
+        let newerClear = Task {
+            try? await raceStore.clear(revision: 8)
+        }
+        _ = await olderSave.value
+        _ = await newerClear.value
+        let afterClearRace = try await raceStore.health()
+        precondition(afterClearRace.totalEntries == 0,
+                     "A late older save must never resurrect entries after a clear")
+
+        // Conversely, a newer confirmed translation is retained even if an older
+        // clear is interleaved before or after the new commit.
+        let newerSave = Task {
+            try? await raceStore.save([key: "Newer confirmation"], revision: 10)
+        }
+        let olderClear = Task {
+            try? await raceStore.clear(revision: 9)
+        }
+        _ = await newerSave.value
+        _ = await olderClear.value
+        let afterNewerRace = await raceStore.lookup(key: key, timeoutMilliseconds: 50)
+        precondition(afterNewerRace.value == "Newer confirmation",
+                     "An older clear must never destroy a newer confirmed write")
+        print("Concurrent revision-fence checks passed")
+
         let reopened = TranslationMemoryStore(directory: root.appendingPathComponent("db"))
         let cleared = try await reopened.prepare(legacyURLs: [legacy])
         precondition(cleared.totalEntries == 0, "Clear must not reimport legacy memory")
