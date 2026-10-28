@@ -9,6 +9,7 @@ struct MemoryManagementView: View {
     @State private var snapshotNames: [String] = []
     @State private var selectedSnapshot: String?
     @State private var confirmSnapshotMerge = false
+    @State private var confirmUnavailableRestore = false
     @State private var query = ""
     @State private var confirmClear = false
     @State private var message = ""
@@ -121,11 +122,15 @@ struct MemoryManagementView: View {
                 ForEach(snapshotNames, id: \.self) { name in
                     Button(name) {
                         selectedSnapshot = name
-                        confirmSnapshotMerge = true
+                        if engine.memoryHealth == nil {
+                            confirmUnavailableRestore = true
+                        } else {
+                            confirmSnapshotMerge = true
+                        }
                     }
                     .disabled(transferBusy || engine.pipActive)
                 }
-                Text("Recovering merges translations into the current database without replacing it. Conflicts remain protected from automatic reuse. Stop live translation before restoring.")
+                Text("If the database is healthy, recovery merges translations without replacing it. If the database cannot open, an explicit restore preserves its damaged files but may exclude newer translations not in the snapshot. Stop live translation before restoring.")
                     .font(.footnote)
             }
             Section("Entries · up to 100 matches") {
@@ -196,6 +201,25 @@ struct MemoryManagementView: View {
                 entries = results
                 await engine.refreshMemoryHealth()
             } catch { message = "Memory is preparing or unavailable" }
+        }
+        .confirmationDialog("Restore an unavailable database from this snapshot? The unreadable database and its journals will be preserved separately. Translations newer than the snapshot may not be in the restored database.", isPresented: $confirmUnavailableRestore, titleVisibility: .visible) {
+            Button("Restore from verified snapshot", role: .destructive) {
+                guard let name = selectedSnapshot, !engine.pipActive else {
+                    message = "Stop live translation before restoring the database"
+                    return
+                }
+                transferBusy = true
+                Task {
+                    defer { transferBusy = false }
+                    do {
+                        try await engine.restoreUnavailableMemoryFromSnapshot(named: name)
+                        entries = try await engine.memoryStore.search(query: query, limit: 100)
+                        message = "Memory recovered. Original unreadable SQLite files were preserved."
+                    } catch {
+                        message = "Database recovery failed. Original files were preserved; fresh translation remains available."
+                    }
+                }
+            }
         }
         .confirmationDialog("Merge a recovery snapshot with current memory? Existing entries will be preserved.", isPresented: $confirmSnapshotMerge, titleVisibility: .visible) {
             Button("Merge snapshot") {
