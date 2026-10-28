@@ -114,7 +114,7 @@ actor DiagnosticExportWriter {
             "ocrCorrection", "language", "freshTranslation", "translationResult",
             "frame_arrival", "rotation", "ocr_execution", "duplicate_detection", "ocr_filtering",
             "stability", "text_grouping", "ocr_correction", "language_detection",
-            "memory_lookup", "translation", "pip_preparation", "pip_enqueue", "ocr_execution",
+            "memory_lookup", "translation", "pip_preparation", "pip_enqueue",
             "cancellation"
         ]
         let eventCodes: Set<String> = Set(MemoryDiagnosticOutcome.allCases.map { $0.rawValue })
@@ -428,7 +428,7 @@ struct DiagnosticReviewedCandidate: Identifiable {
     let status: String
 }
 
-/// Off the live path: only process the recorder's bounded last 600 events.
+/// Off the live path: only process the recorder's bounded last 2400 events.
 /// This is an explanation of *instrumented* stages, not a reconstruction of
 /// unobserved OCR, model accuracy, or the physical PiP display.
 enum DiagnosticTraceReview {
