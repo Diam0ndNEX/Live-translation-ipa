@@ -136,9 +136,9 @@ actor DiagnosticExportWriter {
             "mode", "speed", "stability", "frameRot", "area", "adaptiveOCR",
             "remember", "privateSession", "diagnosticsEnabled", "detailedCollection"
         ]
-        let safeSettings = snapshot.settings.filter { key, value in
-            settingsKeys.contains(key) && value.utf8.count <= 48 &&
-            value.unicodeScalars.allSatisfy {
+        let safeSettings = snapshot.settings.filter { pair in
+            settingsKeys.contains(pair.key) && pair.value.utf8.count <= 48 &&
+            pair.value.unicodeScalars.allSatisfy {
                 CharacterSet.alphanumerics.contains($0) || $0 == "." || $0 == "-" || $0 == "_"
             }
         }
