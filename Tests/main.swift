@@ -21,6 +21,18 @@ check(PipelineSafety.isDuplicate(["Olá, amigo!"], previous: ["Olá amigo"]), "P
 let a = PipelineSafety.cacheKey(source: "pt", target: "en", text: "Zqa chegou", protectedWords: ["Maria"])
 let b = PipelineSafety.cacheKey(source: "pt", target: "en", text: "Zqa chegou", protectedWords: ["Joana"])
 check(a != b, "Protected names must have independent cache entries")
+var segmentation = SegmentationCache(capacity: 2)
+segmentation.insert("pt/en:Olá mundo!", units: ["Olá mundo!"])
+segmentation.insert("pt/en:Como vai?", units: ["Como vai?"])
+check(segmentation.lookup("pt/en:Olá mundo!") == ["Olá mundo!"], "Repeated segmentation should reuse bounded in-memory result")
+segmentation.insert("pt/en:Nova frase", units: ["Nova frase"])
+check(segmentation.count == 2 && segmentation.lookup("pt/en:Como vai?") == nil,
+      "Segmentation LRU must evict the least recently used entry")
+check(segmentation.lookup("pt/en:Olá mundo!") == ["Olá mundo!"],
+      "Cache eviction must preserve most recent segmentation")
+segmentation.clear()
+check(segmentation.count == 0, "Explicit RAM clear must drop temporary segmentation results")
+print("Bounded segmentation cache regression checks passed")
 print("Pipeline regression checks passed")
 
 let firstHalf = OCRLine(t: "Olá meu amigo", x: 0.30, y: 0.20, h: 0.03, w: 0.30)
