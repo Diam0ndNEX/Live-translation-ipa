@@ -204,6 +204,7 @@ final class Diagnostics: ObservableObject {
     var memoryStore: TranslationMemoryStore?
     private let exportWriter = DiagnosticExportWriter()
     private var diagnosticSessionID = UUID()
+    private var lastRecordedThermalState: String?
     private var candidateIDs: [String: UUID] = [:]
     private var frameIDs: [Int: UUID] = [:]
     private var unitIDs: [String: UUID] = [:]
@@ -295,6 +296,34 @@ final class Diagnostics: ObservableObject {
 
     /// Bounded, privacy-safe segmentation timing. Source text and cache keys are
     /// never stored in structured events; only opaque candidate IDs are emitted.
+    /// Keep state transitions even when there is no OCR candidate. This is how
+    /// 'translation suddenly stopped' can be distinguished from missed text.
+    func noteRuntimeState(_ reason: String) {
+        guard enabled else { return }
+        let allowed: Set<String> = [
+            "heartbeat_timeout", "capture_connected", "idle_auto_pause",
+            "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical"
+        ]
+        guard allowed.contains(reason) else { return }
+        appendStructured(stage: "runtime_state", outcome: reason, reason: reason,
+                         durationMs: nil)
+    }
+
+    func noteThermalState() {
+        guard enabled else { return }
+        let reason: String
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: reason = "thermal_nominal"
+        case .fair: reason = "thermal_fair"
+        case .serious: reason = "thermal_serious"
+        case .critical: reason = "thermal_critical"
+        @unknown default: return
+        }
+        guard lastRecordedThermalState != reason else { return }
+        lastRecordedThermalState = reason
+        noteRuntimeState(reason)
+    }
+
     func noteSegmentation(candidate: String?, reused: Bool, durationMs: Double) {
         let token = beginRecorder(); defer { endRecorder(token) }
         guard detailedCollection else { return }
@@ -551,6 +580,7 @@ final class Diagnostics: ObservableObject {
     func reset() {
         persistSession()
         diagnosticSessionID = UUID(); candidateIDs = [:]; frameIDs = [:]; unitIDs = [:]; structuredEvents = []
+        lastRecordedThermalState = nil
         memoryOutcomes = [:]; lookupSamples = []; writeSamples = []
         started = Date()
         subtitleTraces = []; recorderCosts = RecorderCosts()
