@@ -1212,6 +1212,7 @@ final class TranslatorEngine: ObservableObject {
                 for (si, s) in sentences.enumerated() {
                     let key = PipelineSafety.cacheKey(source: id, target: destination, text: s, protectedWords: prot.tokens.map { "\($0.0)=\($0.1)" }, rules: rules)
                     if memoryEligible { eligibleMemoryKeys.insert(key) }
+                    let lookupStart = ProcessInfo.processInfo.systemUptime
                     var resolvedHit = bypassMemory ? nil : cache[key]
                     var diskHit = false
                     if resolvedHit == nil, !bypassMemory, memoryReady, flag("remember", true), !flag("privateSession", false) {
@@ -1230,6 +1231,7 @@ final class TranslatorEngine: ObservableObject {
                         if display {
                             let speculativeHit = specKeys.remove(key) != nil
                             let savedHit = diskHit || savedKeys.remove(key) != nil
+                            if !diskHit { diag.recordMemory(speculativeHit ? .speculativeHit : .ramHit, durationMs: (ProcessInfo.processInfo.systemUptime - lookupStart) * 1000) }
                             if memoryEligible && confirmedKeys.insert(key).inserted { queueMemory(key, hit) }
                             if diag.enabled {
                                 if speculativeHit { diag.s.specHits += 1 }
@@ -1541,7 +1543,9 @@ final class TranslatorEngine: ObservableObject {
             let writeStart = ProcessInfo.processInfo.systemUptime
             do {
                 self.memoryHealth = try await self.memoryStore.save(snapshot, revision: revision)
-                for (key, value) in snapshot where self.pendingMemory[key] == value { self.pendingMemory[key] = nil }
+                if self.memoryRevision == revision {
+                    for (key, value) in snapshot where self.pendingMemory[key] == value { self.pendingMemory[key] = nil }
+                }
                 self.memoryFailure = nil
                 self.diag.recordMemory(.persisted, durationMs: (ProcessInfo.processInfo.systemUptime - writeStart) * 1000)
             } catch {

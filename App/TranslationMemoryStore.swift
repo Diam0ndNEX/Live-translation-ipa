@@ -139,8 +139,9 @@ actor TranslationMemoryStore {
                 sqlite3_busy_timeout(connection, 4)
                 // WAL + FULL means a successful commit is synced, not merely queued.
                 let mode = try statement("PRAGMA journal_mode=WAL")
-                defer { sqlite3_finalize(mode) }
-                guard sqlite3_step(mode) == SQLITE_ROW, text(mode, 0).lowercased() == "wal" else { throw MemoryStoreError.databaseOperation }
+                let walReady = sqlite3_step(mode) == SQLITE_ROW && text(mode, 0).lowercased() == "wal"
+                sqlite3_finalize(mode)
+                guard walReady else { throw MemoryStoreError.databaseOperation }
                 try execute("PRAGMA synchronous=FULL")
                 try execute("PRAGMA foreign_keys=ON")
                 try execute("PRAGMA trusted_schema=OFF")
@@ -249,7 +250,13 @@ actor TranslationMemoryStore {
         let query = try statement("SELECT id FROM memory_entries WHERE canonical_key=? AND translated_text=?", [.text(key), .text(value)])
         defer { sqlite3_finalize(query) }
         let found = sqlite3_step(query)
-        if found == SQLITE_ROW { return (sqlite3_column_int64(query, 0), false) }
+        if found == SQLITE_ROW {
+            let existingID = sqlite3_column_int64(query, 0)
+            if reusable && confirmed {
+                try execute("UPDATE memory_entries SET validation_state='ready',confirmation_state='persisted',updated_at=?,confirmation_count=confirmation_count+1 WHERE id=?", [.real(now), .integer(existingID)])
+            }
+            return (existingID, false)
+        }
         guard found == SQLITE_DONE else { throw MemoryStoreError.databaseOperation }
         try execute("""
             INSERT INTO memory_entries(canonical_key,source_text,translated_text,normalized_source,source_language,target_language,
