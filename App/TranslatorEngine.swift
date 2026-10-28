@@ -5,6 +5,7 @@ import Translation
 import NaturalLanguage
 import AVFoundation
 import os
+import os.signpost
 
 enum TranslateMode: String, CaseIterable, Identifiable {
     case movie, game, comic
