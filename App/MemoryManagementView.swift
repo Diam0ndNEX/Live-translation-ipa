@@ -4,6 +4,8 @@ import UniformTypeIdentifiers
 struct MemoryManagementView: View {
     @EnvironmentObject private var engine: TranslatorEngine
     @State private var entries: [MemoryStoredEntry] = []
+    @State private var conflictingEntries: [MemoryStoredEntry] = []
+    @State private var showConflicts = false
     @State private var query = ""
     @State private var confirmClear = false
     @State private var message = ""
@@ -58,6 +60,28 @@ struct MemoryManagementView: View {
                 }.disabled(transferBusy)
                 Button("Import translation memory") { importing = true }.disabled(transferBusy)
                 Text("Memory exports contain source and translated text. Choose where to save them.").font(.footnote)
+            }
+            Section("Conflicts") {
+                Button(showConflicts ? "Refresh conflict inspection" : "Inspect conflicting translations") {
+                    Task {
+                        do {
+                            conflictingEntries = try await engine.memoryStore.conflictingEntries(limit: 100)
+                            showConflicts = true
+                        } catch { message = "Conflict inspection unavailable; memory unchanged" }
+                    }
+                }
+                if showConflicts {
+                    if conflictingEntries.isEmpty { Text("No unresolved conflicts").foregroundStyle(.secondary) }
+                    ForEach(conflictingEntries) { entry in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(entry.sourceText)
+                            Text(entry.translatedText).foregroundStyle(.secondary)
+                            Text("\(entry.sourceLanguage) → \(entry.targetLanguage) · \(entry.validationState)")
+                                .font(.caption)
+                        }
+                    }
+                }
+                Text("Conflicting alternatives are preserved. Inspect them before removing any entry.").font(.footnote)
             }
             Section("Maintenance") {
                 Button(transferBusy ? "Preparing snapshot…" : "Create recovery snapshot") {
