@@ -316,6 +316,8 @@ final class Diagnostics: ObservableObject {
         guard enabled else { return }
         let allowed: Set<String> = [
             "heartbeat_timeout", "capture_connected", "idle_auto_pause", "session_time_limit",
+            "app_started", "capture_config_changed", "capture_idle", "capture_live",
+            "capture_paused", "capture_frozen",
             "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical"
         ]
         guard allowed.contains(reason) else { return }
@@ -346,7 +348,8 @@ final class Diagnostics: ObservableObject {
         guard enabled else { return }
         let allowed: Set<String> = [
             "warmup_started", "warmup_succeeded", "warmup_failed",
-            "model_session_created", "model_batch_failed", "model_batch_completed"
+            "model_session_created", "model_batch_failed", "model_batch_completed",
+            "warmup_source_unresolved"
         ]
         guard allowed.contains(reason) else { return }
         appendStructured(stage: "model_state", outcome: reason, reason: reason,
@@ -761,6 +764,12 @@ final class Diagnostics: ObservableObject {
             if spans.count > 300 { spans.removeFirst() }
             if let prev = lastState, prev != .idle, st == .idle { s.captureDrops += 1 }
             event(.state, "Now \(st.title)")
+            switch st {
+            case .idle: noteRuntimeState("capture_idle")
+            case .live: noteRuntimeState("capture_live")
+            case .paused: noteRuntimeState("capture_paused")
+            case .frozen: noteRuntimeState("capture_frozen")
+            }
             lastState = st
         }
         lastCaptureConnected = alive
