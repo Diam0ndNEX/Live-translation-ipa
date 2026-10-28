@@ -3,6 +3,7 @@ import AVKit
 import UIKit
 import SwiftUI
 import os
+import os.signpost
 
 enum PiPTheme: String, CaseIterable, Identifiable {
     case dark, light, yellow, blue, sepia, contrast
