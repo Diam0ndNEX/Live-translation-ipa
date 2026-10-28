@@ -166,6 +166,10 @@ struct Stats {
     var rotationTries = 0
     var confirmedCandidatePackets = 0, deferredEarlyCandidates = 0
     var supersededUnpresentedConfirmed = 0, enqueuedCandidateFrames = 0
+    var movieSelections = 0, movieTemporalOverrides = 0, movieRejectedSmall = 0
+    var queueReplacements = 0, visualChanges = 0, emptyOCRPasses = 0
+    var firstSightVisualChangeLagMs = 0.0
+    var effectiveOCRIntervalMs = 0.0
 }
 
 // MARK: - Recorder
@@ -204,6 +208,13 @@ final class Diagnostics: ObservableObject {
     var memoryStore: TranslationMemoryStore?
     private let exportWriter = DiagnosticExportWriter()
     private var diagnosticSessionID = UUID()
+    // A 15-second full-session summary survives recent-event ring eviction.
+    // No user text, OCR boxes, cache keys or untrusted labels enter these buckets.
+    private var intervalStart = Date()
+    private var intervalBaseline: [String: Int] = [:]
+    private var intervalHistory: [DiagnosticIntervalBucket] = []
+    private var eventTotals: [String: Int] = [:]
+    private var lastCaptureConnected = false
     private var lastRecordedThermalState: String?
     private var candidateIDs: [String: UUID] = [:]
     private var frameIDs: [Int: UUID] = [:]
@@ -309,6 +320,45 @@ final class Diagnostics: ObservableObject {
                          durationMs: nil)
     }
 
+    /// Only count events after the selection is known; never record the label text.
+    func noteMovieSelection(groups: Int, filteredSmall: Int, temporalOverride: Bool,
+                            confirmed: Bool) {
+        guard enabled, confirmed else { return }
+        s.movieSelections += 1
+        s.movieRejectedSmall += max(0, filteredSmall)
+        if temporalOverride {
+            s.movieTemporalOverrides += 1
+            if detailedCollection {
+                appendStructured(stage: "text_grouping", outcome: "changing_group_preferred",
+                    reason: "changing_group_preferred", durationMs: nil)
+            }
+        } else if detailedCollection && groups > 1 && s.movieSelections % 24 == 0 {
+            // Sample aggregate selections; avoid flooding the short candidate ring.
+            appendStructured(stage: "text_grouping", outcome: "dominant_group",
+                reason: "dominant_group", durationMs: nil)
+        }
+    }
+
+    func noteModelState(_ reason: String, durationMs: Double? = nil) {
+        guard enabled else { return }
+        let allowed: Set<String> = [
+            "warmup_started", "warmup_succeeded", "warmup_failed",
+            "model_session_created", "model_batch_failed", "model_batch_completed"
+        ]
+        guard allowed.contains(reason) else { return }
+        appendStructured(stage: "model_state", outcome: reason, reason: reason,
+            durationMs: durationMs)
+    }
+
+    func noteQueueReplacement() {
+        guard enabled else { return }
+        s.queueReplacements += 1
+        if detailedCollection {
+            appendStructured(stage: "cancellation", outcome: "queue_replaced",
+                reason: "queue_replaced", durationMs: nil)
+        }
+    }
+
     func noteThermalState() {
         guard enabled else { return }
         let reason: String
@@ -335,6 +385,16 @@ final class Diagnostics: ObservableObject {
     private func appendStructured(candidate: UUID? = nil, frameIndex: Int? = nil,
                                   unitKey: String? = nil, stage: String, outcome: String,
                                   reason: String, durationMs: Double?, at time: Date = Date()) {
+        let key: String?
+        switch stage {
+        case "first OCR": key = "firstSeen"
+        case "superseded": key = "superseded"
+        case "cancelled", "cancellation": key = "cancelled"
+        case "runtime_state": key = "runtimeTransition"
+        case "model_state": key = reason
+        default: key = nil
+        }
+        if let key { eventTotals[key, default: 0] += 1 }
         structuredEvents.append(StructuredDiagnosticEvent(id: UUID(), timestamp: time,
             sessionID: diagnosticSessionID, candidateID: candidate,
             frameID: stableFrameID(frameIndex), unitID: stableUnitID(unitKey),
@@ -398,6 +458,12 @@ final class Diagnostics: ObservableObject {
         counters["contrastRetries"] = s.retryCount
         counters["captureFrames"] = s.frames
         counters["capturePasses"] = s.passes
+        counters["movieSelections"] = s.movieSelections
+        counters["movieTemporalOverrides"] = s.movieTemporalOverrides
+        counters["movieRejectedSmall"] = s.movieRejectedSmall
+        counters["queueReplacements"] = s.queueReplacements
+        counters["visualChanges"] = s.visualChanges
+        counters["emptyOCRPasses"] = s.emptyOCRPasses
         return DiagnosticSessionExport(id: diagnosticSessionID, startedAt: started, endedAt: Date(),
             appVersion: AppVersion.full, systemVersion: UIDevice.current.systemVersion,
             hardwareModel: Self.hardwareModelCode, settings: settings, health: memoryHealth, counters: counters,
@@ -405,6 +471,7 @@ final class Diagnostics: ObservableObject {
                 "ocrMs": DiagnosticDistribution(ocr.map { $0.v }), "translationMs": DiagnosticDistribution(translate.map { $0.v }),
                 "enqueueLatencyMs": DiagnosticDistribution(latency.map { $0.v })],
             events: structuredEvents,
+            intervals: diagnosticIntervals(at: Date()),
             measurementBoundary: "First OCR sighting to PiP sample-buffer enqueue; physical display unmeasured. Distributions use the latest bounded samples within this session, not all-time aggregates. Stages can overlap.",
             textCapture: false)
     }
@@ -580,6 +647,8 @@ final class Diagnostics: ObservableObject {
     func reset() {
         persistSession()
         diagnosticSessionID = UUID(); candidateIDs = [:]; frameIDs = [:]; unitIDs = [:]; structuredEvents = []
+        eventTotals = [:]; intervalHistory = []; intervalStart = Date()
+        intervalBaseline = [:]; lastCaptureConnected = false
         lastRecordedThermalState = nil
         memoryOutcomes = [:]; lookupSamples = []; writeSamples = []
         started = Date()
@@ -607,6 +676,13 @@ final class Diagnostics: ObservableObject {
         s.pausedSkipped = p.pausedSkipped ?? s.pausedSkipped
         s.emptyReads = p.emptyReads ?? s.emptyReads
         s.retryCount = p.retryCount ?? s.retryCount
+        s.visualChanges = p.visualChanges ?? s.visualChanges
+        s.emptyOCRPasses = p.totalEmptyOCRPasses ?? s.emptyOCRPasses
+        s.effectiveOCRIntervalMs = p.effectiveOCRIntervalMs ?? s.effectiveOCRIntervalMs
+        if let first = p.firstSeenAt, let visual = p.lastVisualChangeAt,
+           visual > 0, first >= visual, first - visual < 6 {
+            s.firstSightVisualChangeLagMs = (first - visual) * 1000
+        }
         s.packets += 1
         if p.kind == "ocr" {
             s.ocrPackets += 1
@@ -661,7 +737,76 @@ final class Diagnostics: ObservableObject {
             event(.state, "Now \(st.title)")
             lastState = st
         }
+        lastCaptureConnected = alive
+        if Date().timeIntervalSince(intervalStart) >= 15 {
+            let now = Date()
+            if let completed = makeInterval(at: now) {
+                intervalHistory.append(completed)
+                if intervalHistory.count > 960 { intervalHistory.removeFirst(intervalHistory.count - 960) }
+            }
+            intervalStart = now
+            intervalBaseline = cumulativeCounters()
+        }
         if detailedCollection && tickN % 2 == 0 { sampleDevice(alive: alive) }
+    }
+
+    private func cumulativeCounters() -> [String: Int] {
+        [
+            "captureFrames": s.frames, "capturePasses": s.passes,
+            "capturePackets": s.packets, "ocrPackets": s.ocrPackets,
+            "candidateConfirmed": s.confirmedCandidatePackets,
+            "candidateEnqueued": s.enqueuedCandidateFrames,
+            "candidateSuperseded": eventTotals["superseded", default: 0],
+            "candidateCancelled": eventTotals["cancelled", default: 0],
+            "candidateFirstSeen": eventTotals["firstSeen", default: 0],
+            "speculativeRequests": s.specModelRequests,
+            "speculativeDiscarded": s.specDiscarded,
+            "ramHits": memoryOutcomes[.ramHit, default: 0],
+            "persistentHits": memoryOutcomes[.persistentHit, default: 0],
+            "speculativeHits": memoryOutcomes[.speculativeHit, default: 0],
+            "lookupMisses": memoryOutcomes[.miss, default: 0],
+            "unchangedSkips": s.unchangedSkipped, "cadenceSkips": s.cadenceSkipped,
+            "pausedSkips": s.pausedSkipped, "emptyOCRPasses": s.emptyOCRPasses,
+            "contrastRetries": s.retryCount, "movieSelections": s.movieSelections,
+            "movieTemporalOverrides": s.movieTemporalOverrides,
+            "movieRejectedSmall": s.movieRejectedSmall,
+            "queueReplacements": s.queueReplacements,
+            "earlyDeferred": s.deferredEarlyCandidates,
+            "unpresentedConfirmed": s.supersededUnpresentedConfirmed,
+            "modelBatches": s.batches, "modelFailures": s.failures,
+            "warmupAttempts": eventTotals["warmup_started", default: 0],
+            "warmupSucceeded": eventTotals["warmup_succeeded", default: 0],
+            "runtimeTransitions": eventTotals["runtimeTransition", default: 0],
+            "visualChanges": s.visualChanges
+        ]
+    }
+
+    private func makeInterval(at now: Date) -> DiagnosticIntervalBucket? {
+        let elapsed = now.timeIntervalSince(intervalStart)
+        guard elapsed > 0 else { return nil }
+        let current = cumulativeCounters()
+        let delta = current.reduce(into: [String: Int]()) { result, entry in
+            result[entry.key] = max(0, entry.value - intervalBaseline[entry.key, default: 0])
+        }
+        let thermal: Int
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: thermal = 0
+        case .fair: thermal = 1
+        case .serious: thermal = 2
+        case .critical: thermal = 3
+        @unknown default: thermal = 0
+        }
+        return DiagnosticIntervalBucket(startedAt: intervalStart,
+            elapsedSeconds: min(1800, elapsed), counters: delta,
+            thermalLevel: thermal,
+            lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled,
+            captureConnected: lastCaptureConnected)
+    }
+
+    private func diagnosticIntervals(at now: Date) -> [DiagnosticIntervalBucket] {
+        var all = intervalHistory
+        if let current = makeInterval(at: now) { all.append(current) }
+        return Array(all.suffix(960))
     }
 
     private func sampleDevice(alive: Bool) {
