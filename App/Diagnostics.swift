@@ -1565,7 +1565,7 @@ private struct DiagnosticsBody: View {
                             Label(diag.exportInProgress ? "Preparing JSON…" : "Export structured JSON", systemImage: "curlybraces")
                         }.disabled(diag.exportInProgress)
                         Button { Task { await diag.exportZIP() } } label: {
-                            Label(diag.exportInProgress ? "Preparing bundle…" : "Export diagnostic ZIP", systemImage: "archivebox")
+                            Label(diag.exportInProgress ? "Preparing bundle…" : "Export complete evidence ZIP", systemImage: "archivebox")
                         }.disabled(diag.exportInProgress)
                         Button { Sharer.shareFile(text: diag.csv(), name: "translator-data-\(Sharer.stamp()).csv") } label: {
                             Label("Export data (CSV)", systemImage: "tablecells")
@@ -1599,6 +1599,7 @@ private struct DiagnosticsBody: View {
         let cutoff = Date().addingTimeInterval(-120)
         return VStack(spacing: 14) {
             healthCard(a)
+            diagnosticEvidenceCard
             adaptivePipelineCard
             if !a.issues.isEmpty { suggestions(a.issues, limit: 3) }
             liveFeed
@@ -1616,6 +1617,73 @@ private struct DiagnosticsBody: View {
                 Text("Summary collection is active. Timing history and events are off.").font(.footnote).foregroundStyle(.secondary).card()
             }
         }
+    }
+
+    /// Actionable health overview without pretending enqueue is display.
+    /// Uses already collected counters, so drawing this card triggers no OCR.
+    private var diagnosticEvidenceCard: some View {
+        let stats = diag.s
+        let delay = Diagnostics.summarize(diag.latency)
+        let model = Diagnostics.summarize(diag.translate)
+        return VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("Test evidence", systemImage: "chart.xyaxis.line")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Text("v1.5.0")
+                    .font(.caption2.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            if delay.n > 0 {
+                HStack(spacing: 10) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Typical delay").font(.caption).foregroundStyle(.secondary)
+                        Text("\(Int(delay.p50)) ms")
+                            .font(.title3.weight(.semibold)).monospacedDigit()
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Average").font(.caption).foregroundStyle(.secondary)
+                        Text("\(Int(delay.avg)) ms")
+                            .font(.title3.weight(.semibold)).monospacedDigit()
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Slow tail · P95").font(.caption).foregroundStyle(.secondary)
+                        Text("\(Int(delay.p95)) ms")
+                            .font(.title3.weight(.semibold)).monospacedDigit()
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                Text("No complete OCR-to-PiP enqueue samples yet.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            }
+            Text("Measured from first OCR sighting to PiP buffer enqueue; physical display is not measured. \(delay.n) matched samples.")
+                .font(.caption).foregroundStyle(.secondary)
+            Divider()
+            LabeledContent("Confirmed candidate packets", value: "\(stats.confirmedCandidatePackets)")
+            LabeledContent("Successful PiP candidate enqueues", value: "\(stats.enqueuedCandidateFrames)")
+            LabeledContent("Confirmed but superseded before enqueue", value: "\(stats.supersededUnpresentedConfirmed)")
+            LabeledContent("Speculative pipelines discarded", value: "\(stats.specDiscarded)")
+            LabeledContent("Superseded units retained in RAM", value: "\(stats.specRetainedUnits)")
+            LabeledContent("Pre-translated sentence hits", value: "\(stats.specHits)")
+            if model.n > 0 {
+                Text("Model processing: median \(Int(model.p50)) ms · mean \(Int(model.avg)) ms · P95 \(Int(model.p95)) ms.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Text("Candidates, sentence hits and model requests count different events. A lower delay with more lost confirmed candidates is not necessarily an improvement.")
+                .font(.caption).foregroundStyle(.secondary)
+            Button {
+                Task { await diag.exportZIP() }
+            } label: {
+                Label(diag.exportInProgress ? "Preparing evidence ZIP…" : "Export complete diagnostic ZIP",
+                      systemImage: "archivebox")
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(diag.exportInProgress)
+            Text(diag.archiveStatus)
+                .font(.caption2).foregroundStyle(.secondary)
+        }
+        .font(.footnote)
+        .card()
     }
 
     private var statusLine: String {
@@ -1892,6 +1960,7 @@ private struct DiagnosticsBody: View {
         let a = diag.assessment(alive: engine.captureAlive, paused: engine.paused)
         return VStack(spacing: 14) {
             healthCard(a)
+            diagnosticEvidenceCard
             pipelineStrip
             adaptivePipelineCard
             sessionGrid
@@ -2179,7 +2248,7 @@ private struct DiagnosticsBody: View {
             Text("\(s.recognitionReason) · \(s.confirmationReason)").font(.caption).foregroundStyle(.secondary)
             Text("Cache sentences · session \(s.cacheHits) · saved \(s.savedHits) · pre-translated \(s.specHits)").font(.footnote)
             Text("Speculative jobs · started \(s.specStarted) · completed \(s.specCompleted) · discarded \(s.specDiscarded) · declined \(s.specSkipped)").font(.footnote)
-            Text("v1.4.5 · Spec throttled \(s.adaptiveSpeculationSkipped) · confirmed handoffs \(s.confirmedHandoffDeferred) · slow tails \(s.slowTailEnqueues)").font(.footnote)
+            Text("Spec throttled \(s.adaptiveSpeculationSkipped) · confirmed handoffs \(s.confirmedHandoffDeferred) · slow tails \(s.slowTailEnqueues)").font(.footnote)
             Text("Discarded work: \(Int(s.specDiscardedMs)) ms. Unconsumed cached results: \(engine.unconsumedSpeculation). Completed results may still be reused later.").font(.caption).foregroundStyle(.secondary)
             Text("Skipped frames · unchanged \(s.unchangedSkipped) · cadence \(s.cadenceSkipped) · paused \(s.pausedSkipped)").font(.caption)
             Text("Recorder self-time · simple \(String(format: "%.1f", diag.recorderCosts.simpleMs)) ms · detailed \(String(format: "%.1f", diag.recorderCosts.detailedMs)) ms. Excludes chart drawing and model work; these are different workloads.").font(.caption).foregroundStyle(.secondary)
