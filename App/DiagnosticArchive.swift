@@ -2,13 +2,15 @@ import Foundation
 
 /// Metadata only: no source text, translations, cache keys, filenames or model errors.
 struct MemoryDiagnosticHealth: Codable {
-    var schemaVersion = 1
+    var schemaVersion = 2
     var totalEntries = 0
     var readyEntries = 0
     var needsValidation = 0
     var legacyValidated = 0
     var legacySuperseded = 0
     var legacyUnverified = 0
+    var suggestedOCRMatches = 0
+    var suggestedFragmentMatches = 0
     var conflicts = 0
     var databaseBytes: Int64 = 0
     var migrationStatus = "not started"
@@ -22,6 +24,7 @@ struct MemoryDiagnosticHealth: Codable {
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, totalEntries, readyEntries, needsValidation, conflicts
         case legacyValidated, legacySuperseded, legacyUnverified
+        case suggestedOCRMatches, suggestedFragmentMatches
         case databaseBytes, migrationStatus, integrity, pendingWrites, failedWrites
         case ramEntries, categoryCounts
     }
@@ -35,6 +38,8 @@ struct MemoryDiagnosticHealth: Codable {
         legacyValidated = try c.decodeIfPresent(Int.self, forKey: .legacyValidated) ?? 0
         legacySuperseded = try c.decodeIfPresent(Int.self, forKey: .legacySuperseded) ?? 0
         legacyUnverified = try c.decodeIfPresent(Int.self, forKey: .legacyUnverified) ?? 0
+        suggestedOCRMatches = try c.decodeIfPresent(Int.self, forKey: .suggestedOCRMatches) ?? 0
+        suggestedFragmentMatches = try c.decodeIfPresent(Int.self, forKey: .suggestedFragmentMatches) ?? 0
         conflicts = try c.decodeIfPresent(Int.self, forKey: .conflicts) ?? 0
         databaseBytes = try c.decodeIfPresent(Int64.self, forKey: .databaseBytes) ?? 0
         migrationStatus = try c.decodeIfPresent(String.self, forKey: .migrationStatus) ?? "not started"
