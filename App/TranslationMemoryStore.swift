@@ -14,6 +14,7 @@ struct MemoryStoreHealth: Codable, Sendable {
     var failedWrites = 0
     var importedEntries = 0
     var duplicateEntries = 0
+    var categoryCounts: [String: Int] = [:]
 }
 
 struct MemoryLookupResult: Sendable {
@@ -260,11 +261,12 @@ actor TranslationMemoryStore {
         guard found == SQLITE_DONE else { throw MemoryStoreError.databaseOperation }
         try execute("""
             INSERT INTO memory_entries(canonical_key,source_text,translated_text,normalized_source,source_language,target_language,
-            context_fingerprint,rules_version,normalization_version,segmentation_version,engine_identifier,
+            unit_type,context_fingerprint,rules_version,normalization_version,segmentation_version,engine_identifier,
             validation_state,confirmation_state,created_at,updated_at)
-            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """, [.text(key), .text(parts?.sourceText ?? ""), .text(value), .text(normalized(parts?.sourceText ?? "")),
                    parts.map { .text($0.source) } ?? .null, parts.map { .text($0.target) } ?? .null,
+                   .text(MemoryUnitClassifier.classify(parts?.sourceText ?? "").rawValue),
                    parts.map { .text(digest(Data($0.context.utf8))) } ?? .null,
                    parts?.rules.map { .text($0) } ?? .null,
                    reusable ? .integer(1) : .null, reusable ? .integer(1) : .null,
@@ -384,6 +386,16 @@ actor TranslationMemoryStore {
         status.conflicts = Int(try scalar("SELECT COUNT(*) FROM memory_conflicts WHERE resolved=0"))
         status.importedEntries = Int(try scalar("SELECT COALESCE(SUM(imported),0) FROM migration_runs WHERE state='ready'"))
         status.duplicateEntries = Int(try scalar("SELECT COALESCE(SUM(duplicates),0) FROM migration_runs WHERE state='ready'"))
+        let categories = try statement("SELECT unit_type,COUNT(*) FROM memory_entries GROUP BY unit_type")
+        defer { sqlite3_finalize(categories) }
+        var counts: [String: Int] = [:]
+        while true {
+            let code = sqlite3_step(categories)
+            if code == SQLITE_DONE { break }
+            guard code == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
+            counts[text(categories, 0)] = Int(sqlite3_column_int64(categories, 1))
+        }
+        status.categoryCounts = counts
         status.databaseBytes = ["memory.sqlite","memory.sqlite-wal","memory.sqlite-shm"].reduce(0) {
             $0 + ((try? FileManager.default.attributesOfItem(atPath: directory.appendingPathComponent($1).path)[.size] as? NSNumber)?.int64Value ?? 0)
         }
