@@ -232,6 +232,7 @@ final class TranslatorEngine: ObservableObject {
     private var memorySaving = false
     private var memoryMutationInProgress = false
     private var memoryRetryAttempts = 0
+    private var storageFullRetryNotBefore = Date.distantPast
     private var memoryPressureCapacity: Int?
     private var memoryReady = false
     private var cacheUse: [String: UInt64] = [:]
@@ -1638,7 +1639,8 @@ final class TranslatorEngine: ObservableObject {
     }
 
     func saveMemory(force: Bool = false) {
-        guard memoryReady, !memorySaving, !memoryMutationInProgress, !pendingMemory.isEmpty else { return }
+        guard memoryReady, !memorySaving, !memoryMutationInProgress, !pendingMemory.isEmpty,
+              force || Date() >= storageFullRetryNotBefore else { return }
         memorySaving = true
         let snapshot = pendingMemory
         memoryRevision += 1
@@ -1647,6 +1649,7 @@ final class TranslatorEngine: ObservableObject {
             guard let self else { return }
             let writeStart = ProcessInfo.processInfo.systemUptime
             var committed = false
+            var storageFull = false
             do {
                 self.memoryHealth = try await self.memoryStore.save(snapshot, revision: revision)
                 committed = true
@@ -1655,20 +1658,32 @@ final class TranslatorEngine: ObservableObject {
                 }
                 self.memoryFailure = nil
                 self.diag.recordMemory(.persisted, durationMs: (ProcessInfo.processInfo.systemUptime - writeStart) * 1000)
+            } catch MemoryStoreError.storageFull {
+                storageFull = true
+                // Avoid retry storms on every changed subtitle when storage is full.
+                // Confirmed results remain pending for the next explicit/periodic retry.
+                self.storageFullRetryNotBefore = Date().addingTimeInterval(30)
+                self.memoryFailure = "Device storage full; remembered translations are pending, not saved"
+                self.diag.recordMemory(.writeFailed,
+                    durationMs: (ProcessInfo.processInfo.systemUptime - writeStart) * 1000)
             } catch {
                 self.memoryFailure = "Memory write failed; pending entries will retry"
-                self.diag.recordMemory(.writeFailed, durationMs: (ProcessInfo.processInfo.systemUptime - writeStart) * 1000)
+                self.diag.recordMemory(.writeFailed,
+                    durationMs: (ProcessInfo.processInfo.systemUptime - writeStart) * 1000)
             }
             self.memorySaving = false
             self.memoryPendingWrites = self.pendingMemory.count
             self.memoryDirty = !self.pendingMemory.isEmpty
-            if committed { self.memoryRetryAttempts = 0 }
+            if committed {
+                self.memoryRetryAttempts = 0
+                self.storageFullRetryNotBefore = .distantPast
+            }
             await self.refreshMemoryHealth()
             guard !self.pendingMemory.isEmpty else { return }
             if committed {
                 // Confirmations queued during the previous commit must not get stranded.
                 self.saveMemory(force: true)
-            } else if self.memoryRetryAttempts < 3 {
+            } else if !storageFull && self.memoryRetryAttempts < 3 {
                 self.memoryRetryAttempts += 1
                 let delay: UInt64 = [2, 5, 15][self.memoryRetryAttempts - 1] * 1_000_000_000
                 Task { [weak self] in
