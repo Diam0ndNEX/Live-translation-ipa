@@ -542,7 +542,7 @@ actor TranslationMemoryStore {
                     VALUES(?,?,?,?,?,?,?)
                     """, [.integer(result.id), .text("recovery_snapshot"),
                         .text(fingerprint), .text(key), .text(batch), .real(now),
-                        .text("{\\"kind\\":\\"verified_snapshot\\"}")])
+                        .text("verified_snapshot")])
             }
             try execute("""
                 INSERT INTO migration_runs(
