@@ -216,6 +216,45 @@ import Foundation
             measurementBoundary: "test", textCapture: false)
         precondition(DiagnosticIssueDetector.assess(insufficient).isEmpty,
                      "Low sample counts cannot justify a latency regression finding")
+        var continuityEvidence = insufficient
+        continuityEvidence = DiagnosticSessionExport(
+            id: UUID(), startedAt: Date(), endedAt: Date(),
+            appVersion: "1.5.0", systemVersion: "test",
+            settings: ["lowLatencyTranslation": "true", "directPiPBuffer": "false"],
+            health: MemoryDiagnosticHealth(),
+            counters: [
+                "confirmedCandidatePackets": 100, "supersededUnpresentedConfirmed": 11,
+                "enqueueFailed": 2
+            ],
+            distributions: [
+                "enqueueLatencyMs": DiagnosticDistribution(
+                    Array(repeating: 1500.0, count: 94) + Array(repeating: 4400.0, count: 6))
+            ],
+            events: [], measurementBoundary: "OCR through PiP enqueue", textCapture: false)
+        let continuityFindings = DiagnosticIssueDetector.assess(continuityEvidence)
+        precondition(Set(continuityFindings.map(\.code)).isSuperset(of: [
+            "confirmed_continuity_loss", "pip_enqueue_failure",
+            "enqueue_slow_tail", "enqueue_typical_latency"
+        ]), "Diagnostic findings must identify normal latency, slow tail and continuity separately")
+        let safeContinuity = try await writer.decode(try await writer.encode(continuityEvidence))
+        precondition(safeContinuity.settings["lowLatencyTranslation"] == "true" &&
+                     safeContinuity.settings["directPiPBuffer"] == "false",
+                     "Current model and PiP experiment flags must survive redacted exports")
+        var unsafeDistribution = continuityEvidence
+        unsafeDistribution.distributions["private subtitle text"] = DiagnosticDistribution([1.0])
+        let safeDistribution = try await writer.decode(try await writer.encode(unsafeDistribution))
+        precondition(safeDistribution.distributions["private subtitle text"] == nil,
+                     "Dynamic metric labels must not bypass the privacy allowlist")
+        let tooSmall = DiagnosticSessionExport(
+            id: UUID(), startedAt: Date(), endedAt: Date(),
+            appVersion: "1.5.0", systemVersion: "test",
+            settings: [:], health: MemoryDiagnosticHealth(),
+            counters: ["confirmedCandidatePackets": 6, "supersededUnpresentedConfirmed": 1],
+            distributions: ["enqueueLatencyMs": DiagnosticDistribution([4000])],
+            events: [], measurementBoundary: "test", textCapture: false)
+        precondition(DiagnosticIssueDetector.assess(tooSmall).isEmpty,
+                     "A short run must not be treated as a statistical regression")
+
         let zipBytes = try DiagnosticStoredZIP.make(entries: [
             (name: "session.json", contents: bytes),
             (name: "README.txt", contents: Data("Offline diagnostics only".utf8))
