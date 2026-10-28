@@ -245,7 +245,8 @@ actor TranslationMemoryStore {
         // Conservative: case and punctuation carry meaning and are retained.
         text.precomposedStringWithCanonicalMapping.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
-    private func insert(key: String, value: String, compatible: Bool, confirmed: Bool = true) throws -> (id: Int64, inserted: Bool) {
+    private func insert(key: String, value: String, compatible: Bool, confirmed: Bool = true,
+                        revalidateExisting: Bool = true) throws -> (id: Int64, inserted: Bool) {
         let parts = keyParts(key)
         let reusable = compatible && parts?.rules != nil && !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         let now = Date().timeIntervalSince1970
@@ -254,7 +255,7 @@ actor TranslationMemoryStore {
         let found = sqlite3_step(query)
         if found == SQLITE_ROW {
             let existingID = sqlite3_column_int64(query, 0)
-            if reusable && confirmed {
+            if reusable && confirmed && revalidateExisting {
                 try execute("UPDATE memory_entries SET validation_state='ready',confirmation_state='persisted',updated_at=?,confirmation_count=confirmation_count+1 WHERE id=?", [.real(now), .integer(existingID)])
             }
             return (existingID, false)
@@ -437,7 +438,6 @@ actor TranslationMemoryStore {
     func save(_ entries: [String:String], revision: Int) throws -> MemoryStoreHealth {
         guard active else { throw MemoryStoreError.unavailable }
         guard revision > latestRevision else { throw MemoryStoreError.staleRevision }
-        latestRevision = revision
         do {
             try transaction {
                 for (key, value) in entries {
@@ -446,6 +446,7 @@ actor TranslationMemoryStore {
                 }
             }
         } catch { status.failedWrites += 1; throw error }
+        latestRevision = revision // Only acknowledge the revision after SQLite COMMIT.
         return try health()
     }
 
@@ -602,7 +603,8 @@ actor TranslationMemoryStore {
                 let compatible = text(reader, 2) == "ready" &&
                     text(reader, 3) == "persisted"
                 let result = try insert(key: key, value: value,
-                    compatible: compatible, confirmed: compatible)
+                    compatible: compatible, confirmed: compatible,
+                    revalidateExisting: false)
                 if result.inserted { imported += 1 } else { duplicates += 1 }
                 try execute("""
                     INSERT OR IGNORE INTO memory_provenance(
@@ -744,13 +746,13 @@ actor TranslationMemoryStore {
     func clear(revision: Int) throws {
         guard active else { throw MemoryStoreError.unavailable }
         guard revision > latestRevision else { throw MemoryStoreError.staleRevision }
-        latestRevision = revision
         try transaction {
             try execute("DELETE FROM memory_entries")
             // Retain migration receipts so intentionally deleted entries are not
             // silently reimported from protected legacy originals at next launch.
             try setMetadata("last_explicit_clear", String(Date().timeIntervalSince1970))
         }
+        latestRevision = revision // A rolled-back clear must remain retryable.
     }
     func delete(ids: [Int64]) throws {
         guard active else { throw MemoryStoreError.unavailable }
@@ -832,7 +834,8 @@ actor TranslationMemoryStore {
         try transaction {
             for entry in envelope.entries {
                 _ = try insert(key: entry.key, value: entry.translatedText,
-                    compatible: entry.validationState == "ready" && entry.confirmationState == "persisted")
+                    compatible: entry.validationState == "ready" && entry.confirmationState == "persisted",
+                    revalidateExisting: false)
             }
         }
         return try health()
