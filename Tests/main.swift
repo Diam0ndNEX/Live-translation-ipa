@@ -369,3 +369,29 @@ check(!TranslationUnitPlanning.mayRemember("Hello.", confirmed: false),
 check(TranslationUnitPlanning.mayRemember("Olá.", confirmed: true),
     "Confirmed language-bearing entries remain eligible for persistence")
 print("Translation-unit segmentation, context and persistence safety checks passed")
+
+
+// v1.4.1: the subtitle can be shorter/smaller than a stationary movie overlay.
+// Only prefer changing dialogue once a separate label is confirmed persistent.
+var movieFocus = MovieTextFocus()
+let stationaryOverlay = MovieTextGroup(text: "Streaming channel", x: 0.5, y: 0.40, weight: 4)
+let dialogue = MovieTextGroup(text: "Where are you going?", x: 0.5, y: 0.13, weight: 1.1)
+check(movieFocus.preferredIndex(in: [stationaryOverlay], at: 0) == 0,
+      "Static text must remain translatable when it is the only visible group")
+check(movieFocus.preferredIndex(in: [stationaryOverlay], at: 0.5) == 0,
+      "Do not prematurely classify the only text as noise")
+check(movieFocus.preferredIndex(in: [stationaryOverlay], at: 1.4) == 0,
+      "Long-held text must remain readable when no competing subtitle exists")
+check(movieFocus.preferredIndex(in: [stationaryOverlay, dialogue], at: 1.5) == 1,
+      "New dialogue must beat a repeatedly recognized stationary label")
+check(movieFocus.preferredIndex(in: [stationaryOverlay, dialogue], at: 1.7) == 1,
+      "Continuing subtitle must remain selected while it is still new")
+let nextDialogue = MovieTextGroup(text: "I am leaving!", x: 0.5, y: 0.13, weight: 1.1)
+check(movieFocus.preferredIndex(in: [stationaryOverlay, nextDialogue], at: 2) == 1,
+      "Different dialogue in the same region must restart temporal freshness")
+check(movieFocus.preferredIndex(in: [stationaryOverlay], at: 4) == 0,
+      "Returning to a single group should never suppress its content")
+movieFocus.reset()
+check(movieFocus.preferredIndex(in: [dialogue], at: 5) == 0,
+      "Context changes clear the stale overlay preference")
+print("Movie static-overlay and subtitle freshness checks passed")
