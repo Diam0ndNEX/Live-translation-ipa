@@ -336,13 +336,16 @@ final class TranslatorEngine: ObservableObject {
         if captureAlive && !alive {
             status = "Capture stopped – iOS may have closed the capture extension. Tap the broadcast icon again (try Speed: Fast)."
             diag.log("Capture stopped")
+            diag.noteRuntimeState("heartbeat_timeout")
         }
         if captureAlive != alive { captureAlive = alive }
         if alive, let started = sessionStarted, int("sessionLimit", 0) > 0,
            Date().timeIntervalSince(started) >= Double(int("sessionLimit", 0)) * 60, !paused {
             paused = true
             toast("Session timer reached – translation paused")
+            diag.noteRuntimeState("session_time_limit")
         }
+        diag.noteThermalState()
         diag.tick(alive: alive, paused: paused, frozen: frozen)
         if tickCount % 5 == 0 { saveMemory() }
         if tickCount % 60 == 0 { applyHistoryRetention() }
@@ -357,6 +360,7 @@ final class TranslatorEngine: ObservableObject {
             paused = true
             status = "Paused after \(idle) min without text. Turn Pause off to resume."
             diag.log("Auto-paused (idle)")
+            diag.noteRuntimeState("idle_auto_pause")
         }
     }
 
@@ -704,6 +708,7 @@ final class TranslatorEngine: ObservableObject {
             sessionStarted = now
             sessionTranslations = 0; sessionCharacters = 0
             diag.log("Capture connected (extension v\(p.version))")
+            diag.noteRuntimeState("capture_connected")
             lastTextDate = now
             syncConfig()
             Task { await prewarm() }
