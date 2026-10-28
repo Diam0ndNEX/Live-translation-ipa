@@ -489,6 +489,29 @@ actor TranslationMemoryStore {
         }
         return entries
     }
+    /// Explicit management-only query. Never enumerate conflicts in live OCR lookup.
+    /// Both alternatives remain intact until an informed user takes action.
+    func conflictingEntries(limit: Int = 100) throws -> [MemoryStoredEntry] {
+        guard active else { throw MemoryStoreError.unavailable }
+        let sql = try statement("""
+            SELECT \(entryColumns) FROM memory_entries
+            WHERE id IN (
+                SELECT entry_id FROM memory_conflicts WHERE resolved=0
+                UNION SELECT alternative_id FROM memory_conflicts WHERE resolved=0
+            )
+            ORDER BY updated_at DESC LIMIT ?
+            """, [.integer(Int64(min(100, max(1, limit))))])
+        defer { sqlite3_finalize(sql) }
+        var entries: [MemoryStoredEntry] = []
+        while true {
+            let code = sqlite3_step(sql)
+            if code == SQLITE_DONE { break }
+            guard code == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
+            entries.append(readEntry(sql))
+        }
+        return entries
+    }
+
     private struct ExportEnvelope: Codable {
         let formatVersion: Int
         let schemaVersion: Int
