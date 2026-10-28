@@ -252,6 +252,16 @@ final class Diagnostics: ObservableObject {
     }
 
 
+    /// Bounded, privacy-safe segmentation timing. Source text and cache keys are
+    /// never stored in structured events; only opaque candidate IDs are emitted.
+    func noteSegmentation(candidate: String?, reused: Bool, durationMs: Double) {
+        let token = beginRecorder(); defer { endRecorder(token) }
+        guard detailedCollection else { return }
+        let outcome = reused ? "cache_hit" : "computed"
+        appendStructured(candidate: stableCandidateID(candidate), stage: "segmentation",
+                         outcome: outcome, reason: outcome, durationMs: durationMs)
+    }
+
     private func appendStructured(candidate: UUID? = nil, frameIndex: Int? = nil,
                                   unitKey: String? = nil, stage: String, outcome: String,
                                   reason: String, durationMs: Double?, at time: Date = Date()) {
