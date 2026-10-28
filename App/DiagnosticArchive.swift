@@ -128,6 +128,8 @@ struct DiagnosticIntervalBucket: Codable {
         "movieRejectedSmall", "queueReplacements", "earlyDeferred",
         "unpresentedConfirmed", "capturePackets", "modelBatches",
         "modelFailures", "warmupAttempts", "warmupSucceeded",
+        "warmupPredicted", "coldModelBatches", "adaptiveSpeculationSkipped",
+        "handoffDeferred", "slowTailEnqueues",
         "runtimeTransitions", "visualChanges",
         "ocrMeasurementCount", "translationMeasurementCount", "enqueueMeasurementCount"
     ]
@@ -197,10 +199,12 @@ actor DiagnosticExportWriter {
                 "heartbeat_timeout", "capture_connected", "idle_auto_pause", "session_time_limit",
                 "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical",
                 "changing_group_preferred", "dominant_group", "queue_replaced",
-                "preserved_confirmed_work",
+                "preserved_confirmed_work", "confirmed_handoff_deferred",
+                "adaptive_speculation_backoff", "slow_tail",
                 "warmup_started", "warmup_succeeded", "warmup_failed",
                 "model_session_created", "model_batch_completed", "model_batch_failed",
-                "warmup_source_unresolved", "legacy_idle_started", "legacy_idle_completed",
+                "warmup_source_unresolved", "warmup_predicted_source",
+                "model_batch_first_30s", "legacy_idle_started", "legacy_idle_completed",
                 "legacy_idle_deferred", "app_started", "capture_config_changed",
                 "capture_idle", "capture_live", "capture_paused", "capture_frozen"
             ]).union(stageCodes)
@@ -222,7 +226,8 @@ actor DiagnosticExportWriter {
             "selectiveSpeculation", "speculationConfidence", "confirmationDeadline",
             "remember", "privateSession", "diagnosticsEnabled", "detailedCollection",
             "skipUnchanged", "idleBackoff", "adaptiveConfirmation", "subtitleTracking",
-            "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest"
+            "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest",
+            "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup"
         ]
         let safeSettings = snapshot.settings.filter { pair in
             settingsKeys.contains(pair.key) && pair.value.utf8.count <= 48 &&
