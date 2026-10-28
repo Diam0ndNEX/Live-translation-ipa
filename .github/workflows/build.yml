@@ -31,6 +31,8 @@ jobs:
           /tmp/pipeline-tests
       - name: Check SQLite memory migration
         run: bash scripts/test_memory.sh
+      - name: Check diagnostic archive privacy and correlation
+        run: bash scripts/test_diagnostics.sh
       - name: Generate app icon
         run: |
           python3 -m venv .venv
