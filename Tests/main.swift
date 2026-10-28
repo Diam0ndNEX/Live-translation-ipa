@@ -32,6 +32,20 @@ let nextRow = OCRLine(t: "Uma segunda linha", x: 0.32, y: 0.16, h: 0.03, w: 0.32
 check(OCRGrouping.makeBlocks([nextRow, firstHalf], movie: true).count == 1, "Stacked subtitle lines preserve sentence context")
 let distantRow = OCRLine(t: "Outro diálogo", x: 0.3, y: 0.05, h: 0.03, w: 0.3)
 check(OCRGrouping.makeBlocks([distantRow, firstHalf], movie: true).count == 2, "Distant text must not bridge dialogue regions")
+// Shadow OCR sometimes reports the same subtitle twice at effectively the
+// same screen coordinates. This must not multiply translation units.
+let shadowA = OCRLine(t: "Olá, amigo!", x: 0.45, y: 0.21, h: 0.035, w: 0.25, confidence: 0.65)
+let shadowB = OCRLine(t: "Olá, amigo!", x: 0.451, y: 0.211, h: 0.035, w: 0.25, confidence: 0.94)
+let distantRepeat = OCRLine(t: "Olá, amigo!", x: 0.45, y: 0.08, h: 0.035, w: 0.25, confidence: 0.91)
+let deduplicated = OCRGrouping.removeNearbyDuplicates([shadowA, shadowB, distantRepeat])
+check(deduplicated.count == 2, "Only spatially coincident OCR copies may be suppressed")
+check(deduplicated.first?.confidence == 0.94, "Keep the higher-confidence OCR observation")
+check(OCRGrouping.makeBlocks([shadowA, shadowB], movie: true).flatMap { $0 }.count == 1,
+      "Movie mode removes near-duplicate subtitle shadows")
+check(OCRGrouping.makeBlocks([shadowA, shadowB], movie: false).flatMap { $0 }.count == 2,
+      "Comic mode must preserve independently observed text")
+check(OCRGrouping.makeBlocks([shadowA, distantRepeat], movie: true).flatMap { $0 }.count == 2,
+      "Distant repeated dialogue is not a near-duplicate")
 print("OCR grouping checks passed")
 
 check(ExportFormat.csv([["hello, world", "a\"b", "line\nbreak"]]) == "\"hello, world\",\"a\"\"b\",\"line\nbreak\"", "CSV must preserve commas, quotes and line breaks")
