@@ -55,6 +55,9 @@ import Foundation
         _ = try await store.save([key:"Alternative"], revision: 3)
         let conflict = await store.lookup(key: key, timeoutMilliseconds: 50)
         precondition(conflict.value == nil, "Conflicting outputs must force fresh translation")
+        let alternatives = try await store.conflictingEntries(limit: 10)
+        precondition(Set(alternatives.map(\.translatedText)).isSuperset(of: ["Hello.", "Alternative"]),
+                     "Both legitimate conflicting translations must stay inspectable")
         let exported = try await store.exportData()
         let imported = TranslationMemoryStore(directory: root.appendingPathComponent("roundtrip"))
         _ = try await imported.prepare(legacyURLs: [])
