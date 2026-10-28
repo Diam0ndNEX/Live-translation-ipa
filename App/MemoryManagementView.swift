@@ -20,6 +20,9 @@ struct MemoryManagementView: View {
     @AppStorage("memoryRAMCapacity") private var ramCapacity = 3000
     @AppStorage("memorySoftLimit") private var softLimit = 100000
 
+    /// Bulk database operations must not compete with active OCR/PiP lookups.
+    private var captureInProgress: Bool { engine.captureAlive || engine.pipActive }
+
     var body: some View {
         List {
             Section("Storage") {
@@ -61,8 +64,8 @@ struct MemoryManagementView: View {
                         do { transfer = MemoryTransferDocument(data: try await engine.memoryStore.exportData()); exporting = true }
                         catch { message = "Export failed; memory unchanged" }
                     }
-                }.disabled(transferBusy)
-                Button("Import translation memory") { importing = true }.disabled(transferBusy)
+                }.disabled(transferBusy || captureInProgress)
+                Button("Import translation memory") { importing = true }.disabled(transferBusy || captureInProgress)
                 Text("Memory exports contain source and translated text. Choose where to save them.").font(.footnote)
             }
             Section("Conflicts") {
@@ -98,7 +101,7 @@ struct MemoryManagementView: View {
                             message = "Verified recovery snapshot created. Existing memory preserved."
                         } catch { message = "Recovery snapshot failed; existing memory unchanged" }
                     }
-                }.disabled(transferBusy)
+                }.disabled(transferBusy || captureInProgress)
                 Text("Snapshots protect stored memory, but restoring an older snapshot can omit newer translations. No automatic rollback is performed.").font(.footnote)
                 Button("Clear RAM cache") { engine.clearRAMCache() }
                 Button("Verify integrity") {
@@ -106,8 +109,13 @@ struct MemoryManagementView: View {
                         do { message = try await engine.memoryStore.verifyIntegrity(); await engine.refreshMemoryHealth() }
                         catch { message = "Integrity verification failed; data preserved" }
                     }
-                }
+                }.disabled(captureInProgress || transferBusy)
                 Button("Delete all translation memory", role: .destructive) { confirmClear = true }
+                    .disabled(captureInProgress || transferBusy)
+                if captureInProgress {
+                    Text("Stop screen capture and PiP before running database maintenance.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
                 if !message.isEmpty { Text(message) }
             }
             Section("Recovery snapshots") {
@@ -128,7 +136,7 @@ struct MemoryManagementView: View {
                             confirmSnapshotMerge = true
                         }
                     }
-                    .disabled(transferBusy || engine.pipActive)
+                    .disabled(transferBusy || captureInProgress)
                 }
                 Text("If the database is healthy, recovery merges translations without replacing it. If the database cannot open, an explicit restore preserves its damaged files but may exclude newer translations not in the snapshot. Stop live translation before restoring.")
                     .font(.footnote)
@@ -168,6 +176,7 @@ struct MemoryManagementView: View {
             }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
+            guard !captureInProgress else { message = "Stop screen capture before importing memory"; return }
             guard case .success(let url) = result else { message = "Import cancelled or failed"; return }
             transferBusy = true
             Task {
@@ -204,7 +213,7 @@ struct MemoryManagementView: View {
         }
         .confirmationDialog("Restore an unavailable database from this snapshot? The unreadable database and its journals will be preserved separately. Translations newer than the snapshot may not be in the restored database.", isPresented: $confirmUnavailableRestore, titleVisibility: .visible) {
             Button("Restore from verified snapshot", role: .destructive) {
-                guard let name = selectedSnapshot, !engine.pipActive else {
+                guard let name = selectedSnapshot, !captureInProgress else {
                     message = "Stop live translation before restoring the database"
                     return
                 }
