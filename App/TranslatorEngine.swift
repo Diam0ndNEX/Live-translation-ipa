@@ -92,7 +92,7 @@ final class TranslatorEngine: ObservableObject {
     /// Everything a preset remembers.
     static let presetKeys = [
         "source", "target", "mode", "area", "customY0", "customY1", "speed", "stability", "minTextH", "ignoreList",
-        "frameRot", "dropNoise", "boost", "skipUnchanged", "cleanOCR", "slang", "speakerDetect", "highlightNames",
+        "frameRot", "dropNoise", "boost", "skipUnchanged", "subtitleAwareChangeDetection", "preserveRelatedMovieGroups", "cleanOCR", "slang", "speakerDetect", "highlightNames",
         "langLock", "neverTranslate", "sourceFixes", "glossary", "winSize", "theme", "textSize", "pipFont",
         "showOriginal", "autoClear", "clearHold", "minDisplay", "autoOpenPiP", "haptics", "speak", "speechRate",
         "autoCopy", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember", "lowLatencyTranslation", "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
@@ -105,7 +105,7 @@ final class TranslatorEngine: ObservableObject {
         "memoryRAMCapacity": 3000, "memorySoftLimit": 100000, "persistDiagnosticSessions": false,
         "source": "auto", "target": "en", "mode": "movie", "area": "smart", "customY0": 0.0, "customY1": 0.5,
         "speed": "balanced", "stability": 2, "minTextH": 0.0, "ignoreList": "", "frameRot": "auto",
-        "dropNoise": true, "boost": 1, "skipUnchanged": true, "cleanOCR": true, "slang": true,
+        "dropNoise": true, "boost": 1, "skipUnchanged": true, "subtitleAwareChangeDetection": false, "preserveRelatedMovieGroups": false, "cleanOCR": true, "slang": true,
         "speakerDetect": true, "highlightNames": true, "langLock": true, "neverTranslate": "", "sourceFixes": "",
         "glossary": "", "winSize": "normal", "theme": "dark", "textSize": "auto", "pipFont": "standard",
         "showOriginal": false, "autoClear": true, "clearHold": 1.0, "minDisplay": 0.0, "autoOpenPiP": true,
@@ -541,6 +541,7 @@ final class TranslatorEngine: ObservableObject {
                            maxEdge: maxEdge, interval: interval, paused: paused || manualMode,
                            stability: int("stability", 2), rot: effectiveRot, rev: rotRev,
                            boost: int("boost", 1), skipUnchanged: flag("skipUnchanged", true),
+                           subtitleAwareChangeDetection: flag("subtitleAwareChangeDetection", false),
                            speculate: speculationAllowed && flag("translateAhead", true), confidence: num("ocrConfidence", 0.3),
                            correction: flag("ocrCorrection", true), idleBackoff: flag("idleBackoff", true),
                            movieMode: mode == .movie,
@@ -1155,7 +1156,20 @@ final class TranslatorEngine: ObservableObject {
                 filteredSmall: beforeHeightFilter - kept.count,
                 temporalOverride: chosen != nil && chosen != strongest,
                 confirmed: diagnosticCount)
-            if let chosen { kept = groups[chosen] } else { kept = [] }
+            if let chosen {
+                kept = groups[chosen]
+                if flag("preserveRelatedMovieGroups", false) {
+                    // Opt-in lyrics mode: keep only nearby aligned secondary groups.
+                    let focus = summaries[chosen]
+                    for index in groups.indices where index != chosen {
+                        let other = summaries[index]
+                        let aligned = abs(focus.x - other.x) <= 0.10
+                        let close = abs(focus.y - other.y) <= 0.24
+                        let substantial = other.weight >= focus.weight * 0.26
+                        if aligned && close && substantial { kept.append(contentsOf: groups[index]) }
+                    }
+                }
+            } else { kept = [] }
         } else if area == .smart {
             kept = blocks.filter { blockHeight($0) >= maxH * 0.4 }
         }
