@@ -100,7 +100,7 @@ final class TranslatorEngine: ObservableObject {
         "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode", "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "smartCool", "steadyCaptions", "languageRecovery", "deduplicateCopies", "continuousRotation", "contextualLanguage"
     ]
     /// App look & behaviour that presets do not touch.
-    static let interfaceKeys = ["accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
+    static let interfaceKeys = ["accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
     static var settingKeys: [String] { presetKeys + interfaceKeys }
     static let defaults: [String: Any] = [
         "source": "auto", "target": "en", "mode": "movie", "area": "smart", "customY0": 0.0, "customY1": 0.5,
@@ -120,7 +120,7 @@ final class TranslatorEngine: ObservableObject {
         "adaptiveOCR": true, "adaptiveConfirmation": false, "subtitleTracking": true, "selectiveSpeculation": true,
         "speculationConfidence": 0.85, "confirmationDeadline": 0.6, "smartCool": true, "steadyCaptions": true,
         "languageRecovery": true, "deduplicateCopies": true, "continuousRotation": false, "contextualLanguage": true,
-        "coolMode": false, "diagnosticsEnabled": true, "detailedCollection": false, "showSessionSpeakers": true,
+        "coolMode": false, "diagnosticsEnabled": true, "detailedCollection": false, "freshTranslationTest": false, "showSessionSpeakers": true,
         "privateSession": false, "diagIncludeText": false, "sessionLimit": 0, "readerSize": 28.0,
         "readerOriginal": true, "readerAlignment": false, "ocrConfidence": 0.3, "ocrCorrection": true, "idleBackoff": true
     ]
@@ -394,6 +394,7 @@ final class TranslatorEngine: ObservableObject {
 
     var unconsumedSpeculation: Int { specKeys.count }
     private var speculationAllowed: Bool {
+        if flag("freshTranslationTest", false) { return false }
         if !flag("coolMode", false) { return true }
         return flag("smartCool", true) && ocrMs < 100 && queued == nil
             && !ProcessInfo.processInfo.isLowPowerModeEnabled && ProcessInfo.processInfo.thermalState == .nominal
@@ -1316,9 +1317,10 @@ final class TranslatorEngine: ObservableObject {
                         eligibleMemoryKeys.insert(key)
                     }
                     let lookupStart = ProcessInfo.processInfo.systemUptime
-                    var resolvedHit = bypassMemory ? nil : cache[key]
+                    let bypassReuse = bypassMemory || flag("freshTranslationTest", false)
+                    var resolvedHit = bypassReuse ? nil : cache[key]
                     var diskHit = false
-                    if resolvedHit == nil, !bypassMemory, memoryReady, flag("remember", true), !flag("privateSession", false) {
+                    if resolvedHit == nil, !bypassReuse, memoryReady, flag("remember", true), !flag("privateSession", false) {
                         let lookup = await memoryStore.lookup(key: key)
                         guard isCurrent() else {
                             if display {
@@ -1658,7 +1660,8 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func queueMemory(_ key: String, _ value: String) {
-        guard flag("remember", true), !flag("privateSession", false) else { return }
+        guard flag("remember", true), !flag("privateSession", false),
+              !flag("freshTranslationTest", false) else { return }
         // Bound pending writes without claiming unsaved entries are durable.
         guard pendingMemory[key] != nil || pendingMemory.count < 3000 else {
             memoryFailure = "Memory write queue full; new entries remain session-only"
