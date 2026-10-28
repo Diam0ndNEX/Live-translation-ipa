@@ -431,39 +431,32 @@ struct WindowSettings: View {
     @AppStorage("autoOpenPiP") private var autoOpenPiP = true
     @AppStorage("autoClear") private var autoClear = true
     @AppStorage("clearHold") private var clearHold = 1.0
-    @AppStorage("minDisplay") private var minDisplay = 0.0
-    @AppStorage("haptics") private var haptics = false
-    @AppStorage("speak") private var speak = false
-    @AppStorage("speechRate") private var speechRate = 0.5
-    @AppStorage("autoCopy") private var autoCopy = false
 
     private var styleKey: String { "\(theme)|\(textSize)|\(pipFont)|\(highlightNames)" }
-
     private var previewImage: UIImage {
-        var st = PiPStyle.make(theme: PiPTheme(rawValue: theme) ?? .dark,
-                               size: PiPTextSize(rawValue: textSize) ?? .auto,
-                               font: PiPFont(rawValue: pipFont) ?? .standard)
-        st.highlightNames = highlightNames
+        var style = PiPStyle.make(theme: PiPTheme(rawValue: theme) ?? .dark,
+                                  size: PiPTextSize(rawValue: textSize) ?? .auto,
+                                  font: PiPFont(rawValue: pipFont) ?? .standard)
+        style.highlightNames = highlightNames
         return PiPRenderer.image(original: "Rem: O-o Subaru é filho de um Deus?",
                                  translated: "Rem: W-wait, is Subaru the son of a God? Why didn't he ever tell us?",
                                  showOriginal: showOriginal,
-                                 size: (WindowSize(rawValue: winSize) ?? .normal).size, style: st)
+                                 size: (WindowSize(rawValue: winSize) ?? .normal).size, style: style)
     }
 
     var body: some View {
         List {
-            Section("Preview") {
+            Section("Live preview") {
                 Image(uiImage: previewImage)
-                    .resizable()
-                    .scaledToFit()
+                    .resizable().scaledToFit()
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .listRowInsets(EdgeInsets())
             }
-            Section("Look") {
+            Section("Appearance") {
                 Picker("Window size", selection: $winSize) {
                     ForEach(WindowSize.allCases) { Text($0.title).tag($0.rawValue) }
                 }
-                Picker("Appearance", selection: $theme) {
+                Picker("Theme", selection: $theme) {
                     ForEach(PiPTheme.allCases) { Text($0.title).tag($0.rawValue) }
                 }
                 Picker("Text size", selection: $textSize) {
@@ -474,41 +467,31 @@ struct WindowSettings: View {
                 }
                 Toggle("Colour speaker names", isOn: $highlightNames)
                 Toggle("Show original text", isOn: $showOriginal)
+                NavigationLink {
+                    CaptionAppearanceSettings()
+                } label: {
+                    Label("Advanced typography & layout", systemImage: "textformat.size")
+                }
             }
             Section {
-                Toggle("Open automatically when capture starts", isOn: $autoOpenPiP)
-                Toggle("Clear when text ends", isOn: $autoClear)
+                Toggle("Open PiP when capture starts", isOn: $autoOpenPiP)
+                Toggle("Clear subtitle when text ends", isOn: $autoClear)
                 if autoClear {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("Keep the translation \(String(format: "%.1f", clearHold)) s after the text ends")
+                        Text("Keep text after it disappears · \(String(format: "%.1f", clearHold)) s")
                             .font(.subheadline)
                         Slider(value: $clearHold, in: 0...5, step: 0.5)
                     }
                 }
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Show each translation at least \(String(format: "%.1f", minDisplay)) s").font(.subheadline)
-                    Slider(value: $minDisplay, in: 0...4, step: 0.5)
-                }
-            } header: {
-                Text("Behaviour")
-            } footer: {
-                Text("Minimum display time applies in Readable mode under Timing & responsiveness. Immediate mode shows fully confirmed results as soon as they are ready.")
+            } header: { Text("Floating window behavior") } footer: {
+                Text("Subtitle timing and transitions are under Subtitle timing; speech, clipboard and vibration are under Feedback & sharing.")
             }
-            Section("Feedback") {
-                Toggle("Vibrate on new translation", isOn: $haptics)
-                Toggle("Copy every translation to the clipboard", isOn: $autoCopy)
-                Toggle("Speak translation aloud", isOn: $speak)
-                if speak {
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("Speaking speed").font(.subheadline)
-                        Slider(value: $speechRate, in: 0.3...0.65)
-                    }
-                }
-            }
-            ResetSection(keys: ["winSize", "theme", "textSize", "pipFont", "highlightNames", "showOriginal", "autoOpenPiP",
-                                "autoClear", "clearHold", "minDisplay", "haptics", "speak", "speechRate", "autoCopy"])
+            ResetSection(keys: [
+                "winSize", "theme", "textSize", "pipFont", "highlightNames",
+                "showOriginal", "autoOpenPiP", "autoClear", "clearHold"
+            ])
         }
-        .settingsPage("Floating window")
+        .settingsPage("Floating subtitles")
         .onChange(of: styleKey) { _, _ in engine.applyStyle() }
         .onChange(of: showOriginal) { _, _ in engine.applyStyle() }
         .onChange(of: winSize) { _, _ in engine.applyWindowSize() }
@@ -524,68 +507,50 @@ struct InterfaceSettings: View {
     @AppStorage("homeQuick") private var homeQuick = true
     @AppStorage("homeStatus") private var homeStatus = true
     @AppStorage("homeRecent") private var homeRecent = true
+    @AppStorage("homeMetrics") private var homeMetrics = true
+    @AppStorage("homeQuickExpanded") private var homeQuickExpanded = false
+    @AppStorage("homeDetailsExpanded") private var homeDetailsExpanded = false
     @AppStorage("uiHaptics") private var uiHaptics = true
-    @AppStorage("keepAwake") private var keepAwake = true
-    @AppStorage("saveHistory") private var saveHistory = true
-    @AppStorage("historyRetentionDays") private var historyRetentionDays = 0
-    @State private var confirmClear = false
 
     var body: some View {
         List {
-            Section("Accent colour") {
+            Section("Accent color") {
                 HStack(spacing: 14) {
-                    ForEach(AccentChoice.allCases) { a in
+                    ForEach(AccentChoice.allCases) { color in
                         Circle()
-                            .fill(LinearGradient(colors: [a.start, a.end], startPoint: .topLeading, endPoint: .bottomTrailing))
+                            .fill(LinearGradient(colors: [color.start, color.end],
+                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
                             .frame(width: 34, height: 34)
-                            .overlay(Circle().stroke(Color.white, lineWidth: accent == a.rawValue ? 3 : 0))
-                            .onTapGesture { accent = a.rawValue; engine.tap() }
-                            .accessibilityLabel(a.title)
+                            .overlay(Circle().stroke(Color.white, lineWidth: accent == color.rawValue ? 3 : 0))
+                            .onTapGesture { accent = color.rawValue; engine.tap() }
+                            .accessibilityLabel(color.title)
                     }
-                }
-                .padding(.vertical, 4)
+                }.padding(.vertical, 4)
             }
             Section {
                 Toggle("Presets", isOn: $homePresets)
-                Toggle("Tools under the preview", isOn: $homeTools)
+                Toggle("Tools under preview", isOn: $homeTools)
                 Toggle("Quick settings", isOn: $homeQuick)
                 Toggle("Recent language pairs", isOn: $homeRecent)
                 Toggle("Status & diagnostics summary", isOn: $homeStatus)
-            } header: {
-                Text("Home screen")
-            } footer: {
-                Text("Hide what you don't use for a calmer Home screen.")
-            }
-            Section("Behaviour") {
-                Toggle("Tap feedback (haptics)", isOn: $uiHaptics)
-                Toggle("Keep screen awake while capturing", isOn: $keepAwake)
+                Toggle("Show timing cards", isOn: $homeMetrics)
+            } header: { Text("Home screen sections") } footer: {
+                Text("Hide sections you rarely use for a simpler Home screen.")
             }
             Section {
-                Toggle("Remember history between launches", isOn: $saveHistory)
-                Picker("Keep unstarred history", selection: $historyRetentionDays) {
-                    Text("Forever").tag(0)
-                    Text("1 day").tag(1)
-                    Text("7 days").tag(7)
-                    Text("30 days").tag(30)
-                }
-                Button("Clear all history", role: .destructive) { confirmClear = true }
-            } header: {
-                Text("History")
+                Toggle("Keep quick settings expanded", isOn: $homeQuickExpanded)
+                    .disabled(!homeQuick)
+                Toggle("Keep troubleshooting expanded", isOn: $homeDetailsExpanded)
+            } header: { Text("Default layout") }
+            Section("App interactions") {
+                Toggle("Haptic feedback for taps", isOn: $uiHaptics)
             }
-            ResetSection(keys: ["accent", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent",
-                                "uiHaptics", "keepAwake", "saveHistory", "historyRetentionDays"])
+            ResetSection(keys: [
+                "accent", "homePresets", "homeTools", "homeQuick", "homeStatus",
+                "homeRecent", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "uiHaptics"
+            ])
         }
-        .settingsPage("Interface")
-        .onChange(of: saveHistory) { _, on in
-            if !on {
-                UserDefaults.standard.removeObject(forKey: "historyData")
-                UserDefaults.standard.removeObject(forKey: "screenlingo.history.v1")
-            }
-        }
-        .onChange(of: historyRetentionDays) { _, _ in engine.applyHistoryRetention() }
-        .confirmationDialog("Delete every translation in History?", isPresented: $confirmClear, titleVisibility: .visible) {
-            Button("Clear all history", role: .destructive) { engine.eraseHistory(); engine.toast("History cleared") }
-        }
+        .settingsPage("App appearance")
     }
 }
 
@@ -593,36 +558,28 @@ struct InterfaceSettings: View {
 struct PerformanceSettings: View {
     @EnvironmentObject var engine: TranslatorEngine
     @AppStorage("coolMode") private var coolMode = false
+    @AppStorage("smartCool") private var smartCool = true
     @AppStorage("adaptive") private var adaptive = true
     @AppStorage("idleMinutes") private var idleMinutes = 0
-    @AppStorage("translateAhead") private var translateAhead = true
-    @AppStorage("keepWarm") private var keepWarm = true
-    @AppStorage("remember") private var remember = true
     @AppStorage("idleBackoff") private var idleBackoff = true
+    @AppStorage("keepAwake") private var keepAwake = true
 
     var body: some View {
         List {
             Section {
-                Toggle("Translate ahead", isOn: $translateAhead)
-                Toggle("Keep the translator warm", isOn: $keepWarm)
-                LabeledContent("Model status", value: engine.warmupStatus)
-                if let duration = engine.warmupLastDurationMs {
-                    LabeledContent("Last warm-up", value: "\(Int(duration)) ms")
-                }
-                Toggle("Remember translations", isOn: $remember)
-                LabeledContent("Persisted translation units", value: "\(engine.memoryCount)")
-                NavigationLink("Manage translation memory") { MemoryManagementView() }
-            } header: {
-                Text("Translation speed")
-            } footer: {
-                Text("Translate ahead starts translating the moment text appears and shows it once it's confirmed, so the two waits overlap. Keeping the translator warm avoids a slow first sentence. Compatible remembered translations can be reused after restarting. Memory management shows committed entries separately from pending writes.")
-            }
-            Section {
+                Toggle("Adapt to device conditions", isOn: $adaptive)
+                Text("Reduces work when thermal pressure rises, memory is scarce or Low Power Mode is enabled.")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Toggle("Cool mode", isOn: $coolMode)
-                Text("Smart Cool Mode adapts OCR frequency to workload and permits only very clear pre-translation when processing is quick and the phone is cool. Disable its controller in Experimental Features to use fixed intervals instead. Idle warm-ups are off. Updates can arrive later and brief captions may be missed.").font(.footnote).foregroundStyle(.secondary)
-                Toggle("Adaptive performance", isOn: $adaptive)
-                Toggle("Reduce OCR work when no text is visible", isOn: $idleBackoff)
-                Picker("Pause after no text for", selection: $idleMinutes) {
+                Toggle("Smart Cool controller", isOn: $smartCool)
+                    .disabled(!coolMode)
+                Text("Smart Cool adapts OCR intervals to measured workload. Fixed Cool uses conservative timing instead. Both can delay very brief subtitles.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            } header: { Text("Heat & battery") }
+
+            Section {
+                Toggle("Reduce OCR when no text is visible", isOn: $idleBackoff)
+                Picker("Pause after no text", selection: $idleMinutes) {
                     Text("Never").tag(0)
                     Text("1 minute").tag(1)
                     Text("2 minutes").tag(2)
@@ -630,19 +587,17 @@ struct PerformanceSettings: View {
                     Text("10 minutes").tag(10)
                     Text("30 minutes").tag(30)
                 }
-            } footer: {
-                Text("Adaptive performance reads less often when the phone gets hot, Low Power Mode is on, or the capture extension is running low on memory. Auto-pause saves battery during long gaps.")
+                Toggle("Keep screen awake during capture", isOn: $keepAwake)
+            } header: { Text("Idle & screen") } footer: {
+                Text("Pausing and reducing OCR during idle periods save power, but can delay the next text detection.")
             }
-            Section {
-                DiagnosticsCollectionControls()
-                Button("Reset diagnostics counters") { engine.diag.reset(); engine.toast("Counters reset") }
-            }
-            ResetSection(keys: ["coolMode", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember", "idleBackoff"])
+            ResetSection(keys: ["coolMode", "smartCool", "adaptive", "idleMinutes", "idleBackoff", "keepAwake"])
         }
-        .settingsPage("Performance & power")
+        .settingsPage("Performance & battery")
         .onChange(of: adaptive) { _, _ in engine.syncConfig() }
-        .onChange(of: translateAhead) { _, _ in engine.syncConfig() }
         .onChange(of: idleBackoff) { _, _ in engine.syncConfig() }
+        .onChange(of: smartCool) { _, _ in engine.pipelineSettingsChanged() }
+        .onChange(of: coolMode) { _, _ in engine.powerPolicyChanged() }
     }
 }
 
