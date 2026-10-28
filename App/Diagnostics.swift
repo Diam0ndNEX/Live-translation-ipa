@@ -1011,6 +1011,16 @@ final class Diagnostics: ObservableObject {
         return Array(all.suffix(960))
     }
 
+    /// Read-only completed buckets for the live diagnostic UI. Does not
+    /// recalculate statistics or store unbounded samples during rendering.
+    func completedIntervals(seconds: Int) -> [DiagnosticIntervalBucket] {
+        switch seconds {
+        case 1: return oneSecondHistory
+        case 5: return fiveSecondHistory
+        default: return intervalHistory
+        }
+    }
+
     private func recentIntervals(at now: Date, period: Int) -> [DiagnosticIntervalBucket] {
         let isOneSecond = period == 1
         let start = isOneSecond ? oneSecondStart : fiveSecondStart
@@ -1555,6 +1565,7 @@ private struct DiagnosticsBody: View {
     @State private var confirmReset = false
     @State private var showSimulator = false
     @State private var confirmDeleteSessions = false
+    @State private var bucketSeconds = 1
     @AppStorage("persistDiagnosticSessions") private var persistSessions = false
 
     private var page: DiagPage { DiagPage(rawValue: pageRaw) ?? .overview }
@@ -2135,7 +2146,51 @@ private struct DiagnosticsBody: View {
             HistogramCard(title: "How long reading takes", values: slice(diag.ocr).map { $0.v }, color: Color.green)
             HistogramCard(title: "How long the total delay is", values: slice(diag.latency).map { $0.v }, color: Color.orange)
             PairedTimingCard(samples: diag.pipeline.filter { $0.date >= rangeStart })
+            granularityCard
         }
+    }
+
+    /// Raw bucketed counts are useful for short bursts even when timing
+    /// percentile sample sizes are too small to interpret meaningfully.
+    private var granularityCard: some View {
+        let buckets = diag.completedIntervals(seconds: bucketSeconds)
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Short-interval evidence")
+                .font(.subheadline.weight(.semibold))
+            Picker("Time resolution", selection: $bucketSeconds) {
+                Text("1 second").tag(1)
+                Text("5 seconds").tag(5)
+                Text("15 seconds").tag(15)
+            }
+            .pickerStyle(.segmented)
+            if buckets.isEmpty {
+                Text(bucketSeconds == 1
+                     ? "No one-second buckets yet. Enable Detailed diagnostics and run capture."
+                     : "No completed buckets yet at this resolution.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            } else {
+                ForEach(Array(buckets.suffix(12)), id: \.startedAt) { bucket in
+                    HStack(alignment: .top) {
+                        Text(bucket.startedAt.formatted(date: .omitted, time: .standard))
+                            .font(.caption.monospacedDigit())
+                            .frame(width: 76, alignment: .leading)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Confirmed \(bucket.counters["candidateConfirmed", default: 0]) · enqueued \(bucket.counters["candidateEnqueued", default: 0])")
+                                .font(.caption)
+                            Text("Superseded \(bucket.counters["unpresentedConfirmed", default: 0]) · enqueue failures \(bucket.counters["enqueueFailed", default: 0])")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: 2)
+                        Text(String(format: "%.1f s", bucket.elapsedSeconds))
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            Text("Buckets use actual elapsed time. For precise event order and durations, export events.csv; for longer sessions, use 15-second intervals. Individual buckets may have too few timings for useful P95.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        .card()
     }
 
     // MARK: Timeline
