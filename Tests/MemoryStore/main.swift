@@ -77,6 +77,14 @@ import SQLite3
             precondition(stillImported.totalEntries == previouslyImported)
         }
 
+        // An accidental recovery purge before a verified clear must be rejected.
+        do {
+            try await store.deletePreservedCopies(legacyURLs: [legacy])
+            preconditionFailure("Recovery originals must not be erased while memory exists")
+        } catch MemoryStoreError.memoryNotEmpty {
+            precondition(FileManager.default.fileExists(atPath: legacy.path))
+        }
+
         let snapshotName = try await store.createRecoverySnapshot()
         let snapshotURL = root.appendingPathComponent("db/recovery").appendingPathComponent(snapshotName)
         precondition(FileManager.default.fileExists(atPath: snapshotURL.path),
