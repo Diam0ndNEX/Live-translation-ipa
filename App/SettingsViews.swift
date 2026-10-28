@@ -495,6 +495,7 @@ struct PerformanceSettings: View {
     @AppStorage("translateAhead") private var translateAhead = true
     @AppStorage("lowLatencyTranslation") private var lowLatencyTranslation = false
     @AppStorage("incrementalBatchRecovery") private var incrementalBatchRecovery = false
+    @AppStorage("directPiPBuffer") private var directPiPBuffer = false
     @AppStorage("keepWarm") private var keepWarm = true
     @AppStorage("predictiveWarmup") private var predictiveWarmup = true
     @AppStorage("remember") private var remember = true
@@ -548,6 +549,9 @@ struct PerformanceSettings: View {
                 Text("Adaptive performance reads less often when the phone gets hot, Low Power Mode is on, or the capture extension is running low on memory. Auto-pause saves battery during long gaps.")
             }
             Section("Controlled comparison") {
+                Toggle("Experimental direct PiP rendering", isOn: $directPiPBuffer)
+                Text("Draw directly into the PiP pixel buffer instead of rendering a UIImage first. Compare appearance, frame delivery, latency and battery; turn off if rendering differs.")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Toggle("Fresh translation test (no memory reuse)", isOn: $freshTranslationTest)
                 Text("For same-video comparisons only. Temporarily bypasses RAM/SQLite reuse and translation-ahead, without deleting remembered translations. It can be slower, warmer and use more power. Turn it off after testing.")
                     .font(.footnote).foregroundStyle(.secondary)
@@ -556,7 +560,7 @@ struct PerformanceSettings: View {
                 DiagnosticsCollectionControls()
                 Button("Reset diagnostics counters") { engine.diag.reset(); engine.toast("Counters reset") }
             }
-            ResetSection(keys: ["coolMode", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "predictiveWarmup", "remember", "lowLatencyTranslation", "incrementalBatchRecovery", "idleBackoff", "freshTranslationTest"])
+            ResetSection(keys: ["coolMode", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "predictiveWarmup", "remember", "lowLatencyTranslation", "incrementalBatchRecovery", "idleBackoff", "directPiPBuffer", "freshTranslationTest"])
         }
         .settingsPage("Performance & power")
         .onChange(of: adaptive) { _, _ in engine.syncConfig() }
