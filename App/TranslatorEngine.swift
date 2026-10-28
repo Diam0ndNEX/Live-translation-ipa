@@ -200,6 +200,8 @@ final class TranslatorEngine: ObservableObject {
     private var drainTask: Task<Void, Never>?
     private var activeCandidateText = ""
     private var activeCandidateID: String?
+    private var activeCandidateConfirmed = false
+    private var activeCandidatePresented = false
     private var specPacket: Packet?
     private var savedKeys = Set<String>()
     private var confirmedKeys = Set<String>()
@@ -499,6 +501,7 @@ final class TranslatorEngine: ObservableObject {
         generation += 1
         drainTask?.cancel()
         activeCandidateID = nil; activeCandidateText = ""
+        activeCandidateConfirmed = false; activeCandidatePresented = false
         cancelPresentation()
         queued = nil
         queuedPacket = nil
@@ -732,16 +735,33 @@ final class TranslatorEngine: ObservableObject {
         }
         let candidateText = candidateTexts.map(TextSim.norm).joined(separator: "\n")
         if flag("steadyCaptions", true), let candidate = p.candidateID, activeCandidateText != candidateText {
+            let confirmed = p.stable != false
+            // Tentative OCR jitter must never cancel a previously confirmed subtitle.
+            // Its confirmed replacement can still supersede outdated work.
+            guard SubtitleAcquisitionPolicy.shouldSupersedeActive(
+                activeConfirmed: activeCandidateConfirmed, incomingConfirmed: confirmed) else {
+                if diag.enabled { diag.s.deferredEarlyCandidates += 1 }
+                diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
+                    stage: "stability", reason: "deferred_early_candidate")
+                return
+            }
             if let previous = activeCandidateID {
-                diag.trace(previous, stage: "superseded", detail: "New subtitle candidate")
+                diag.trace(previous, stage: "superseded", detail: "Confirmed replacement or early candidate")
+                if activeCandidateConfirmed && !activeCandidatePresented && diag.enabled {
+                    diag.s.supersededUnpresentedConfirmed += 1
+                }
             }
             activeCandidateID = candidate; activeCandidateText = candidateText
+            activeCandidateConfirmed = confirmed; activeCandidatePresented = false
             clearTask?.cancel(); clearTask = nil
             generation += 1
             cancelPresentation()
             queued = nil; specQueued = nil
             drainTask?.cancel()
+        } else if p.stable != false {
+            activeCandidateConfirmed = true
         }
+        if p.stable != false && diag.enabled { diag.s.confirmedCandidatePackets += 1 }
         // Overlay-only OCR changes must not supersede the same filtered subtitle.
         if flag("steadyCaptions", true), p.candidateID != nil { p.candidateID = activeCandidateID }
         if p.stable == false, let firstSeen = p.firstSeenAt {
@@ -836,6 +856,12 @@ final class TranslatorEngine: ObservableObject {
     /// Queues a quiet, low-priority translation that only fills the cache.
     private func speculate(_ blocks: [String]) {
         guard speculationAllowed else { return }
+        // Confirmed translations own the model. A changing subtitle should not
+        // multiply low-priority speculative work while a confirmed job is busy.
+        guard !busy, queued == nil else {
+            if diag.enabled { diag.s.specSkipped += 1 }
+            return
+        }
         let thermal = ProcessInfo.processInfo.thermalState
         if ProcessInfo.processInfo.isLowPowerModeEnabled || thermal == .serious || thermal == .critical { return }
         let joined = blocks.joined(separator: "\n")
@@ -1561,6 +1587,10 @@ final class TranslatorEngine: ObservableObject {
             rendering: presented.timeIntervalSince(renderStart) * 1000,
             total: total, requestsSaved: timing.savedRequests)
         diag.trace(packet?.candidateID, stage: "enqueued", detail: "PiP frame prepared in \(Int(latency.last.rendering)) ms; physical presentation unmeasured")
+        if packet?.candidateID == activeCandidateID {
+            activeCandidatePresented = true
+        }
+        if diag.enabled { diag.s.enqueuedCandidateFrames += 1 }
         diag.recordPipeline(latency.last)
         if total > 0 { diag.recordLatency(ms: total) }
         if history.first?.original != text {
