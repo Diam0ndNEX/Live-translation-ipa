@@ -749,7 +749,13 @@ final class TranslatorEngine: ObservableObject {
             return
         }
         let candidateText = candidateTexts.map(TextSim.norm).joined(separator: "\n")
-        if flag("steadyCaptions", true), let candidate = p.candidateID, activeCandidateText != candidateText {
+        let equivalentActiveCaption = SubtitleAcquisitionPolicy.isSameUnpresentedCaption(
+            activeConfirmed: activeCandidateConfirmed,
+            activePresented: activeCandidatePresented,
+            previousBlocks: latestBlocks,
+            incomingBlocks: candidateTexts)
+        if flag("steadyCaptions", true), let candidate = p.candidateID,
+           activeCandidateText != candidateText && !equivalentActiveCaption {
             let confirmed = p.stable != false
             // Tentative OCR jitter must never cancel a previously confirmed subtitle.
             // Its confirmed replacement can still supersede outdated work.
@@ -776,6 +782,11 @@ final class TranslatorEngine: ObservableObject {
             drainTask?.cancel()
         } else if p.stable != false {
             activeCandidateConfirmed = true
+            if equivalentActiveCaption && activeCandidateText != candidateText {
+                diag.notePipelineDecision(candidate: activeCandidateID,
+                    frameIndex: p.frames, stage: "duplicate_detection",
+                    reason: "preserved_confirmed_work")
+            }
         }
         if p.stable != false && diag.enabled { diag.s.confirmedCandidatePackets += 1 }
         // Overlay-only OCR changes must not supersede the same filtered subtitle.
@@ -2009,6 +2020,9 @@ final class TranslatorEngine: ObservableObject {
         let target = Locale.Language(identifier: destination)
         guard src.languageCode != target.languageCode,
               let word = Self.warmWords[src.languageCode?.identifier ?? code] else { return }
+        // Avoid reloading the same model while a usable warm session exists.
+        let warmKey = "\(src.minimalIdentifier)>\(destination)"
+        guard directSession == nil || directKey != warmKey else { return }
         guard await pairStatus(src, target) == .installed, workContext == contextRevision, !busy,
               !ProcessInfo.processInfo.isLowPowerModeEnabled,
               ProcessInfo.processInfo.thermalState != .serious,
@@ -2022,9 +2036,10 @@ final class TranslatorEngine: ObservableObject {
         let warmed = await runBatch(session, [word])
         diag.noteModelState(warmed == nil ? "warmup_failed" : "warmup_succeeded",
             durationMs: Date().timeIntervalSince(t0) * 1000)
-        if !busy, workContext == contextRevision, directSession == nil {
+        if warmed != nil, !busy, workContext == contextRevision,
+           (directSession == nil || directKey != warmKey) {
             directSession = session
-            directKey = "\(src.minimalIdentifier)>\(destination)"
+            directKey = warmKey
         }
         let ms = Date().timeIntervalSince(t0) * 1000
         if ms > 300 { diag.event(.translation, "Warmed up the translator in \(Int(ms)) ms") }
