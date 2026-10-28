@@ -213,6 +213,8 @@ final class Diagnostics: ObservableObject {
     private var intervalStart = Date()
     private var intervalBaseline: [String: Int] = [:]
     private var intervalHistory: [DiagnosticIntervalBucket] = []
+    private var openingEvents: [StructuredDiagnosticEvent] = []
+    private var earlyEventsSeen = 0
     private var eventTotals: [String: Int] = [:]
     private var lastCaptureConnected = false
     private var lastRecordedThermalState: String?
@@ -396,12 +398,22 @@ final class Diagnostics: ObservableObject {
         default: key = nil
         }
         if let key { eventTotals[key, default: 0] += 1 }
-        structuredEvents.append(StructuredDiagnosticEvent(id: UUID(), timestamp: time,
+        let event = StructuredDiagnosticEvent(id: UUID(), timestamp: time,
             sessionID: diagnosticSessionID, candidateID: candidate,
             frameID: stableFrameID(frameIndex), unitID: stableUnitID(unitKey),
             stage: stage, outcome: outcome, reasonCode: reason,
-            durationMs: durationMs.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }, privacy: "metadataOnly"))
+            durationMs: durationMs.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }, privacy: "metadataOnly")
+        structuredEvents.append(event)
         if structuredEvents.count > 2400 { structuredEvents.removeFirst(structuredEvents.count - 2400) }
+        // Reserve 128 of the 2,400 exported events for sparse early-session
+        // evidence, so an initial 90-second stall is not erased by late activity.
+        if Date().timeIntervalSince(started) <= 120, openingEvents.count < 128 {
+            earlyEventsSeen += 1
+            if earlyEventsSeen % 20 == 0 || stage == "runtime_state" ||
+               stage == "model_state" {
+                openingEvents.append(event)
+            }
+        }
     }
 
     /// Counts one lookup outcome per unit; persistence and eviction counters have separate denominators.
@@ -475,10 +487,17 @@ final class Diagnostics: ObservableObject {
             distributions: ["memoryLookupMs": DiagnosticDistribution(lookupSamples), "memoryWriteMs": DiagnosticDistribution(writeSamples),
                 "ocrMs": DiagnosticDistribution(ocr.map { $0.v }), "translationMs": DiagnosticDistribution(translate.map { $0.v }),
                 "enqueueLatencyMs": DiagnosticDistribution(latency.map { $0.v })],
-            events: structuredEvents,
+            events: exportEventWindow(),
             intervals: diagnosticIntervals(at: Date()),
             measurementBoundary: "First OCR sighting to PiP sample-buffer enqueue; physical display unmeasured. Distributions use the latest bounded samples within this session, not all-time aggregates. Stages can overlap.",
             textCapture: false)
+    }
+
+    private func exportEventWindow() -> [StructuredDiagnosticEvent] {
+        let recent = Array(structuredEvents.suffix(2272))
+        let existing = Set(recent.map(\.id))
+        let early = openingEvents.filter { !existing.contains($0.id) }
+        return Array((early + recent).suffix(2400)).sorted { $0.timestamp < $1.timestamp }
     }
 
     func exportJSON() async {
@@ -653,6 +672,7 @@ final class Diagnostics: ObservableObject {
         persistSession()
         diagnosticSessionID = UUID(); candidateIDs = [:]; frameIDs = [:]; unitIDs = [:]; structuredEvents = []
         eventTotals = [:]; intervalHistory = []; intervalStart = Date()
+        openingEvents = []; earlyEventsSeen = 0
         intervalBaseline = [:]; lastCaptureConnected = false
         lastRecordedThermalState = nil
         memoryOutcomes = [:]; lookupSamples = []; writeSamples = []
@@ -805,7 +825,10 @@ final class Diagnostics: ObservableObject {
             elapsedSeconds: min(1800, elapsed), counters: delta,
             thermalLevel: thermal,
             lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled,
-            captureConnected: lastCaptureConnected)
+            captureConnected: lastCaptureConnected,
+            effectiveOCRIntervalMs: s.effectiveOCRIntervalMs > 0 ? s.effectiveOCRIntervalMs : nil,
+            visualChangeProxyMs: s.firstSightVisualChangeLagMs > 0 ?
+                s.firstSightVisualChangeLagMs : nil)
     }
 
     private func diagnosticIntervals(at now: Date) -> [DiagnosticIntervalBucket] {
