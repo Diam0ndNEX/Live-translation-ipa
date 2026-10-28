@@ -117,6 +117,14 @@ struct Config: Codable, Equatable {
     var confirmationBurst: Bool? = nil
 }
 
+/// Keeps the old memory context exactly unchanged unless a genuinely
+/// different user-selected model strategy is active.
+enum TranslationModelMemoryPolicy {
+    static func rulesContext(base: String, lowLatency: Bool) -> String {
+        lowLatency ? base + "\u{1F}translationStrategy=lowLatency" : base
+    }
+}
+
 enum TextSim {
     static func norm(_ s: String) -> String { String(s.lowercased().filter { $0.isLetter || $0.isNumber }) }
 
