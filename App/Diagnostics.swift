@@ -301,7 +301,7 @@ final class Diagnostics: ObservableObject {
     func noteRuntimeState(_ reason: String) {
         guard enabled else { return }
         let allowed: Set<String> = [
-            "heartbeat_timeout", "capture_connected", "idle_auto_pause",
+            "heartbeat_timeout", "capture_connected", "idle_auto_pause", "session_time_limit",
             "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical"
         ]
         guard allowed.contains(reason) else { return }
