@@ -343,8 +343,9 @@ import Foundation
         let summary = String(decoding: try entry("summary.md"), as: UTF8.self)
         precondition(summary.contains("Confirmed but superseded before enqueue") &&
                      summary.contains("physical display") &&
-                     summary.contains("median"),
-                     "Readable summary must distinguish continuity, normal timing and boundaries")
+                     summary.contains("## Normal performance") &&
+                     summary.contains("unavailable (0 samples)"),
+                     "Readable summary must distinguish continuity, timing boundaries and missing measurements")
         let fastCSV = String(decoding: try entry("seconds_1.csv"), as: UTF8.self)
         let shortCSV = String(decoding: try entry("seconds_5.csv"), as: UTF8.self)
         precondition(fastCSV.contains("elapsed_seconds") &&
