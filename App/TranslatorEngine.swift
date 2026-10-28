@@ -255,6 +255,7 @@ final class TranslatorEngine: ObservableObject {
     private var speculationWindow = SpeculativeWorkWindow()
     private var speculativeOrigins: [String: UInt64] = [:]
     private var specPacket: Packet?
+    private var currentSpeculativeText: String?
     private var savedKeys = Set<String>()
     private var confirmedKeys = Set<String>()
     private var subtitleRegions = SubtitleRegions()
@@ -1227,6 +1228,11 @@ final class TranslatorEngine: ObservableObject {
         if queued != nil { diag.noteQueueReplacement() }
         queued = blocks
         queuedAt = Date()
+        if SubtitlePerformancePolicy.preemptSpeculation(activeText: currentSpeculativeText, confirmedText: joined) {
+            // Different input cannot supply an exact whole-caption reuse result.
+            // Cancellation unwinds the single drain before confirmed work starts.
+            drainTask?.cancel()
+        }
         startDrain()
     }
 
@@ -1285,7 +1291,11 @@ final class TranslatorEngine: ObservableObject {
             } else if let sp = specQueued {
                 specQueued = nil
                 currentPacket = specPacket
-                if speculationAllowed { await process(sp, display: false) }
+                if speculationAllowed {
+                    currentSpeculativeText = sp.joined(separator: "\n")
+                    await process(sp, display: false)
+                    currentSpeculativeText = nil
+                }
             }
         }
     }

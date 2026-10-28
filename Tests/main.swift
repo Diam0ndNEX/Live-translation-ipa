@@ -576,3 +576,10 @@ check(SubtitlePerformancePolicy.predictiveSource(
     "User can disable predictive warm-up")
 print("v1.4.4 speculative, confirmed-handoff and predictive-warmup checks passed")
 
+
+check(!SubtitlePerformancePolicy.preemptSpeculation(activeText: "Olá.", confirmedText: "Olá."),
+    "Matching speculative input must finish for exact confirmed reuse")
+check(SubtitlePerformancePolicy.preemptSpeculation(activeText: "Eu posso ir.", confirmedText: "Eu não posso ir."),
+    "A different confirmed sentence must not wait for speculative input")
+check(!SubtitlePerformancePolicy.preemptSpeculation(activeText: nil, confirmedText: "Olá."),
+    "Confirmed processing must not be mistaken for speculative work")
