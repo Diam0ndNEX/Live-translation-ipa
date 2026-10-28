@@ -331,7 +331,11 @@ final class TranslatorEngine: ObservableObject {
         pip.setSize(windowSize.size)
         pip.onStatus = { [weak self] s in Task { @MainActor in self?.status = s } }
         pip.onActiveChange = { [weak self] a in
-            Task { @MainActor in self?.pipActive = a; self?.diag.log(a ? "Floating window opened" : "Floating window closed") }
+            Task { @MainActor in
+                self?.pipActive = a
+                if a { self?.idleValidationTask?.cancel() }
+                self?.diag.log(a ? "Floating window opened" : "Floating window closed")
+            }
         }
         if ud.object(forKey: "displayPolicy") == nil {
             ud.set(PresentationSchedule.inferredPolicy(saved: nil, minimum: num("minDisplay", 0)), forKey: "displayPolicy")
