@@ -250,7 +250,7 @@ import SQLite3
             _ = try await reopened.mergeRecoverySnapshot(named: "../memory.sqlite")
             preconditionFailure("Recovery filenames must reject path traversal")
         } catch MemoryStoreError.sourceUnreadable { }
-        try await reopened.clear(revision: 5)
+        try await reopened.clear(revision: 9)
 
         try await reopened.deletePreservedCopies(legacyURLs: [legacy, oldJSON])
         precondition(!FileManager.default.fileExists(atPath: legacy.path))

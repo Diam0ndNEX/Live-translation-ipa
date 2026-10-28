@@ -1413,6 +1413,25 @@ private struct DiagnosticsBody: View {
                     Text("\(session.appVersion) · \(session.events.count) retained events")
                     Text("Measured through \(session.endedAt.formatted())")
                     Text(session.measurementBoundary).font(.caption)
+                    let findings = DiagnosticIssueDetector.assess(session)
+                    if findings.isEmpty {
+                        Text("No evidence-based issues detected in this retained session.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text("Evidence-based issues").font(.subheadline.weight(.semibold))
+                        ForEach(findings) { finding in
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(finding.code.replacingOccurrences(of: "_", with: " ").capitalized)
+                                    .font(.caption.weight(.semibold))
+                                Text(finding.classification.capitalized + " · " + String(finding.occurrences) + " recorded")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                                Text(finding.explanation)
+                                    .font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Text("Suspected issues are heuristics, not verified translation errors.")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
                 }
             }
             if diag.archivedSessions.count >= 2 {
