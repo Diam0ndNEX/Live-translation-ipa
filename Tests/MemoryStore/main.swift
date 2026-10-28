@@ -120,7 +120,9 @@ import SQLite3
             preconditionFailure("Corrupt database must not silently initialize")
         } catch {
             precondition(FileManager.default.fileExists(atPath: corruptFile.path))
-            precondition((try FileManager.default.attributesOfItem(atPath: corruptFile.path)[.size] as? NSNumber)?.intValue ?? 0 > 0)
+            let attributes = try FileManager.default.attributesOfItem(atPath: corruptFile.path)
+            let size = (attributes[.size] as? NSNumber)?.intValue ?? 0
+            precondition(size > 0)
         }
 
         let reopened = TranslationMemoryStore(directory: root.appendingPathComponent("db"))
