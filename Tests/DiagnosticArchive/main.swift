@@ -44,8 +44,11 @@ import Foundation
             sessionID: session, candidateID: UUID(), frameID: safeFrame, unitID: nil,
             stage: "ocr_execution", outcome: "completed", reasonCode: "completed",
             durationMs: 141, privacy: "metadataOnly")
-        var ocrSnapshot = snapshot
-        ocrSnapshot.events = [ocrEvent]
+        let ocrSnapshot = DiagnosticSessionExport(id: session, startedAt: Date(),
+            endedAt: Date(), appVersion: "1.4.1", systemVersion: "test",
+            settings: ["speed": "balanced"], health: MemoryDiagnosticHealth(),
+            counters: [:], distributions: [:], events: [ocrEvent],
+            measurementBoundary: "OCR through PiP enqueue", textCapture: false)
         let ocrBytes = try await writer.encode(ocrSnapshot)
         let ocrDecoded = try await writer.decode(ocrBytes)
         precondition(ocrDecoded.events[0].stage == "ocr_execution" &&
@@ -53,16 +56,21 @@ import Foundation
                      ocrDecoded.events[0].durationMs == 141,
                      "Safe OCR labels and their timing must survive metadata-only export")
         let traceLimit = 2400
-        ocrSnapshot.events = (0..<(traceLimit + 5)).map { index in
+        let longEvents = (0..<(traceLimit + 5)).map { index in
             StructuredDiagnosticEvent(id: UUID(), timestamp: Date().addingTimeInterval(Double(index)),
                 sessionID: session, candidateID: UUID(), frameID: nil, unitID: nil,
                 stage: "ocr_execution", outcome: "completed", reasonCode: "completed",
                 durationMs: 10, privacy: "metadataOnly")
         }
-        let boundedSnapshot = try await writer.decode(try await writer.encode(ocrSnapshot))
+        let longSnapshot = DiagnosticSessionExport(id: session, startedAt: Date(),
+            endedAt: Date(), appVersion: "1.4.1", systemVersion: "test",
+            settings: ["speed": "balanced"], health: MemoryDiagnosticHealth(),
+            counters: [:], distributions: [:], events: longEvents,
+            measurementBoundary: "OCR through PiP enqueue", textCapture: false)
+        let boundedSnapshot = try await writer.decode(try await writer.encode(longSnapshot))
         precondition(boundedSnapshot.events.count == traceLimit &&
                      abs((boundedSnapshot.events.first?.timestamp.timeIntervalSince1970 ?? 0) -
-                         ocrSnapshot.events[5].timestamp.timeIntervalSince1970) < 1.0,
+                         longEvents[5].timestamp.timeIntervalSince1970) < 1.0,
                      "Long diagnostics retain the most recent 2400 structured events")
         let bytes = try await writer.encode(snapshot)
         let recovered = try await writer.decode(bytes)
