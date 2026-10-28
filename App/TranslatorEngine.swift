@@ -1628,30 +1628,39 @@ final class TranslatorEngine: ObservableObject {
         await refreshMemoryHealth()
     }
 
+    /// The management UI must not report deletion until the SQLite transaction commits.
+    /// Existing callers can still invoke the fire-and-forget compatibility entry point.
     func clearMemory() {
-        // A clear is a barrier: writes queued after it begins can only commit
-        // after SQLite confirms the deletion. Never silently drop queued results.
+        Task { _ = await clearMemoryConfirmed() }
+    }
+
+    @discardableResult
+    func clearMemoryConfirmed() async -> Bool {
+        // Enforce a barrier across the suspension: new confirmed translations
+        // remain pending and cannot be written until the clear completes.
         guard memoryReady, !memoryMutationInProgress, !memorySaving, pendingMemory.isEmpty else {
             memoryFailure = "Wait for pending memory writes before deleting"
-            return
+            return false
         }
         memoryMutationInProgress = true
         clearRAMCache()
         memoryRevision += 1
         let revision = memoryRevision
-        Task {
-            do {
-                try await memoryStore.clear(revision: revision)
-                clearRAMCache()
-                await refreshMemoryHealth()
-                memoryFailure = nil
-                toast("Translation memory cleared")
-            } catch {
-                memoryFailure = "Memory could not be cleared"
-            }
+        defer {
             memoryMutationInProgress = false
-            // New confirmations received during the clear remain pending.
+            // Any new confirmations queued while SQLite was busy are still owed a write.
             saveMemory(force: true)
+        }
+        do {
+            try await memoryStore.clear(revision: revision)
+            clearRAMCache()
+            await refreshMemoryHealth()
+            memoryFailure = nil
+            toast("Translation memory cleared")
+            return true
+        } catch {
+            memoryFailure = "Memory could not be cleared; saved data was preserved"
+            return false
         }
     }
 
