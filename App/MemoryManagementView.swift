@@ -40,6 +40,10 @@ struct MemoryManagementView: View {
                     Text("25,000").tag(25000); Text("100,000").tag(100000)
                     Text("500,000").tag(500000); Text("Storage aware").tag(0)
                 }
+                if let health = engine.memoryHealth, softLimit > 0, health.totalEntries >= softLimit {
+                    Label("Storage management threshold reached. No entries were deleted.", systemImage: "externaldrive.badge.exclamationmark")
+                        .font(.footnote)
+                }
                 Text("Thresholds do not delete translations. RAM eviction preserves committed entries.").font(.footnote)
             }
             Section("Transfer") {
@@ -101,7 +105,13 @@ struct MemoryManagementView: View {
                         defer { if access { url.stopAccessingSecurityScopedResource() } }
                         let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
                         guard size <= 256 * 1024 * 1024 else { throw MemoryStoreError.tooLarge }
-                        return try Data(contentsOf: url)
+                        let handle = try FileHandle(forReadingFrom: url)
+                        defer { try? handle.close() }
+                        // A security-scoped provider may omit fileSize; cap the actual
+                        // bytes read so large documents cannot bypass the size check.
+                        let data = try handle.read(upToCount: 256 * 1024 * 1024 + 1) ?? Data()
+                        guard data.count <= 256 * 1024 * 1024 else { throw MemoryStoreError.tooLarge }
+                        return data
                     }.value
                     _ = try await engine.memoryStore.importData(data)
                     engine.clearRAMCache()
