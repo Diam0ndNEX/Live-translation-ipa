@@ -164,6 +164,35 @@ import SQLite3
                      "An older clear must never destroy a newer confirmed write")
         print("Concurrent revision-fence checks passed")
 
+        // Optional diagnostic sessions remain bounded and independent of memory,
+        // even when active translation memory is explicitly cleared.
+        let sessionStore = TranslationMemoryStore(directory: root.appendingPathComponent("session-db"))
+        _ = try await sessionStore.prepare(legacyURLs: [])
+        _ = try await sessionStore.save([key: "Keep diagnostic history separate"], revision: 1)
+        let now = Date()
+        for index in 0..<25 {
+            let bytes = Data("metadata-only-session-\(index)".utf8)
+            try await sessionStore.saveDiagnosticSession(id: "test-\(index)",
+                startedAt: now.addingTimeInterval(Double(index)),
+                endedAt: now.addingTimeInterval(Double(index)),
+                payload: bytes)
+        }
+        let boundedSessions = try await sessionStore.loadDiagnosticSessions()
+        precondition(boundedSessions.count == 20, "Diagnostic archive must retain at most 20 sessions")
+        do {
+            try await sessionStore.saveDiagnosticSession(id: "oversized",
+                startedAt: now, endedAt: now,
+                payload: Data(repeating: 0x78, count: 1_048_577))
+            preconditionFailure("Diagnostic sessions larger than 1 MiB must be rejected")
+        } catch MemoryStoreError.tooLarge { }
+        try await sessionStore.clear(revision: 2)
+        precondition((try await sessionStore.loadDiagnosticSessions()).count == 20,
+                     "Memory deletion must not erase independent diagnostic sessions")
+        try await sessionStore.clearDiagnosticSessions()
+        precondition((try await sessionStore.loadDiagnosticSessions()).isEmpty,
+                     "Diagnostic deletion must not depend on translation-memory deletion")
+        print("Diagnostic session retention, size cap and independent deletion checks passed")
+
         let reopened = TranslationMemoryStore(directory: root.appendingPathComponent("db"))
         let cleared = try await reopened.prepare(legacyURLs: [legacy])
         precondition(cleared.totalEntries == 0, "Clear must not reimport legacy memory")
