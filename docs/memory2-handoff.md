@@ -75,3 +75,15 @@ GitHub macOS run after the composite commit, plus a real installed-IPA upgrade.
 Remaining mandatory manual release gates: installed-IPA upgrade preserving app
 container/history/settings, device p50/p95/p99, long-session PiP, thermal and
 battery evidence, and verified offline behavior. Do not merge into main.
+
+
+## v1.4.0 combined release-candidate audit — 2026-10-28
+- PR #5 is deliberately retargeted to `codex/screenlingo-v1.3.0` so one review/merge includes **all** staged PR #1–#4 implementation and the v1.4.0 work. Do not modify `main`.
+- The last fully verified head before the base retarget was `99c09798889c7c7b657f10b6f861e5d3fa63c40b`: macOS IPA workflow [40621552361](https://github.com/Diam0ndNEX/Live-translation-ipa/actions/runs/40621552361) passed migration, concurrency, diagnostics, 3k/25k macOS benchmarks, Xcode build, version metadata, and unsigned IPA artifact.
+- The 3k/25k CI microbenchmark measured exact-key p95 of approximately 0.093/0.117 ms on GitHub macOS hardware; **not** an iPhone measurement or guaranteed performance.
+- Standalone [PR #10](https://github.com/Diam0ndNEX/Live-translation-ipa/pull/10) runs the 100k/500k macOS scaling gate without slowing the ordinary IPA workflow. Record its actual result; do not presume it passed.
+- Storage includes explicit, opt-in recovery from an unreadable database using a verified, inactive snapshot. The original memory.sqlite, WAL and SHM are quarantined, not deleted. A snapshot may predate recent writes; the UI warns before replacing the unreadable working store.
+- Indexed metadata-only diagnostic events, ZIP/JSON redaction, correlated decision reasons, hardware-family-aware p95 comparison, and independent diagnostic/memory deletion are part of the v1.4.0 candidate.
+- Device acceptance protocol: `docs/v1.4.0-device-acceptance.md`; **NOT executed**. In-place IPA updates, user memory retention, history/settings survival, PiP latency, long-session thermal/battery behavior and genuine physical-display timings remain unverified.
+- P2 semantic/fuzzy matching and automatic cloud backups are intentionally **not** release blockers; unsafe semantic equivalence must never be enabled without explicit tests.
+- Exact next action: check the post-retarget PR #5 CI and independent scaling PR #10; fix failures; only then present the signed-install candidate for an in-place real-device upgrade. Keep the PR draft until device acceptance evidence is available.
