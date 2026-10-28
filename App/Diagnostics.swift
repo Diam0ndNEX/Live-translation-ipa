@@ -362,6 +362,20 @@ final class Diagnostics: ObservableObject {
         } catch { archiveStatus = "Export failed; no file was shared" }
     }
 
+    func exportZIP() async {
+        guard !exportInProgress else { return }
+        exportInProgress = true
+        defer { exportInProgress = false }
+        let snapshot = sessionSnapshot()
+        do {
+            let url = try await exportWriter.exportZIP(snapshot)
+            Sharer.present([url])
+            archiveStatus = "ZIP diagnostic bundle ready"
+        } catch {
+            archiveStatus = "ZIP export failed; no file was shared"
+        }
+    }
+
     func persistSession() {
         guard enabled, UserDefaults.standard.bool(forKey: "persistDiagnosticSessions"),
               !UserDefaults.standard.bool(forKey: "privateSession"), !archiveInProgress,
@@ -1166,6 +1180,9 @@ private struct DiagnosticsBody: View {
                     Menu {
                         Button { Task { await diag.exportJSON() } } label: {
                             Label(diag.exportInProgress ? "Preparing JSON…" : "Export structured JSON", systemImage: "curlybraces")
+                        }.disabled(diag.exportInProgress)
+                        Button { Task { await diag.exportZIP() } } label: {
+                            Label(diag.exportInProgress ? "Preparing bundle…" : "Export diagnostic ZIP", systemImage: "archivebox")
                         }.disabled(diag.exportInProgress)
                         Button { Sharer.shareFile(text: diag.csv(), name: "translator-data-\(Sharer.stamp()).csv") } label: {
                             Label("Export data (CSV)", systemImage: "tablecells")
