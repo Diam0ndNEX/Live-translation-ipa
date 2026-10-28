@@ -503,7 +503,12 @@ final class Diagnostics: ObservableObject {
                     "clearHold", "autoClear", "keepWarm", "langLock",
                     "selectiveSpeculation", "speculationConfidence", "confirmationDeadline",
                     "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest",
-                    "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup"]
+                    "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
+                    "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer",
+                    "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
+                    "deduplicateCopies", "contextualLanguage", "languageRecovery",
+                    "continuousRotation", "smartCool", "persistDiagnosticSessions",
+                    "diagSamples", "heartbeatInterval", "keepAwake"]
         var settings: [String: String] = [:]
         for key in keys {
             if let value = UserDefaults.standard.object(forKey: key) ?? TranslatorEngine.defaults[key] {
@@ -1144,6 +1149,9 @@ final class Diagnostics: ObservableObject {
         l.append("Source choice modes: " + SourceLanguageOrigin.allCases.map { "\($0.title)=\(sourceUsage.origins[$0, default: 0])" }.joined(separator: ", "))
         l.append("Execution phase \(executionPhase), PiP \(engine.pipActive ? "active" : "inactive"); last packet \(lastPacketAt?.ISO8601Format() ?? "none"), last device sample \(lastDeviceSampleAt?.ISO8601Format() ?? "none").")
         l.append("Settings: mode=\(UserDefaults.standard.string(forKey: "mode") ?? "movie"), area=\(UserDefaults.standard.string(forKey: "area") ?? "smart"), speed=\(UserDefaults.standard.string(forKey: "speed") ?? "balanced"), configured rotation=\(UserDefaults.standard.string(forKey: "frameRot") ?? "auto"), confirmation reads=\((UserDefaults.standard.object(forKey: "stability") as? Int) ?? 2)")
+        l.append("v1.5.0 experiments: low-latency model \(UserDefaults.standard.bool(forKey: "lowLatencyTranslation")), incremental recovery \(UserDefaults.standard.bool(forKey: "incrementalBatchRecovery")), subtitle-area sampling \(UserDefaults.standard.bool(forKey: "subtitleAwareChangeDetection")), additional lyric groups \(UserDefaults.standard.bool(forKey: "preserveRelatedMovieGroups")), direct PiP drawing \(UserDefaults.standard.bool(forKey: "directPiPBuffer")).")
+        l.append("Continuity: confirmed candidates \(s.confirmedCandidatePackets), successful PiP enqueues \(s.enqueuedCandidateFrames), superseded before enqueue \(s.supersededUnpresentedConfirmed), deferred handoffs \(s.confirmedHandoffDeferred); these are not unique-subtitle or physical-presentation counts.")
+        l.append("Speculation: discarded pipelines \(s.specDiscarded), completed superseded units retained \(s.specRetainedUnits), adaptive skips \(s.adaptiveSpeculationSkipped).")
         if UserDefaults.standard.bool(forKey: "diagIncludeText"), !UserDefaults.standard.bool(forKey: "privateSession") {
             l.append("Speakers: \(names.joined(separator: ", "))")
         }
