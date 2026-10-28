@@ -243,7 +243,12 @@ final class Diagnostics: ObservableObject {
         guard detailedCollection, let candidate else { return }
         // Never export a caller's identifier: historical candidates can encode input text.
         guard let safeID = stableCandidateID(candidate) else { return }
-        let stages: Set<String> = ["first OCR", "seen", "confirmed", "processing", "speculating", "cache", "ready", "enqueued", "superseded", "memory", "cancelled"]
+        let stages: Set<String> = [
+            "first OCR", "seen", "confirmed", "processing", "speculating", "cache",
+            "ready", "enqueued", "superseded", "memory", "cancelled",
+            "ocrCorrection", "language", "segmentation", "freshTranslation",
+            "translationResult"
+        ]
         let safeStage = stages.contains(stage) ? stage : "other"
         appendStructured(candidate: safeID, frameIndex: frameIndex, stage: safeStage,
                          outcome: "observed", reason: safeStage, durationMs: nil, at: time)
@@ -360,6 +365,20 @@ final class Diagnostics: ObservableObject {
             Sharer.present([url])
             archiveStatus = "JSON export ready"
         } catch { archiveStatus = "Export failed; no file was shared" }
+    }
+
+    func exportZIP() async {
+        guard !exportInProgress else { return }
+        exportInProgress = true
+        defer { exportInProgress = false }
+        let snapshot = sessionSnapshot()
+        do {
+            let url = try await exportWriter.exportZIP(snapshot)
+            Sharer.present([url])
+            archiveStatus = "ZIP diagnostic bundle ready"
+        } catch {
+            archiveStatus = "ZIP export failed; no file was shared"
+        }
     }
 
     func persistSession() {
@@ -1167,6 +1186,9 @@ private struct DiagnosticsBody: View {
                     Menu {
                         Button { Task { await diag.exportJSON() } } label: {
                             Label(diag.exportInProgress ? "Preparing JSON…" : "Export structured JSON", systemImage: "curlybraces")
+                        }.disabled(diag.exportInProgress)
+                        Button { Task { await diag.exportZIP() } } label: {
+                            Label(diag.exportInProgress ? "Preparing bundle…" : "Export diagnostic ZIP", systemImage: "archivebox")
                         }.disabled(diag.exportInProgress)
                         Button { Sharer.shareFile(text: diag.csv(), name: "translator-data-\(Sharer.stamp()).csv") } label: {
                             Label("Export data (CSV)", systemImage: "tablecells")

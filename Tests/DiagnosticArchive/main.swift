@@ -92,6 +92,20 @@ import Foundation
             measurementBoundary: "test", textCapture: false)
         precondition(DiagnosticIssueDetector.assess(insufficient).isEmpty,
                      "Low sample counts cannot justify a latency regression finding")
+        let zipBytes = try DiagnosticStoredZIP.make(entries: [
+            (name: "session.json", contents: bytes),
+            (name: "README.txt", contents: Data("Offline diagnostics only".utf8))
+        ])
+        precondition(Array(zipBytes.prefix(4)) == [0x50, 0x4b, 0x03, 0x04],
+                     "ZIP must begin with a standard local-file header")
+        precondition(zipBytes.range(of: Data("session.json".utf8)) != nil,
+                     "ZIP must include the metadata-only session export")
+        let zipFooter = Array(zipBytes.suffix(22).prefix(4))
+        precondition(zipFooter == [0x50, 0x4b, 0x05, 0x06],
+                     "ZIP must have a valid end-of-central-directory signature")
+        let exportedZIP = try await writer.exportZIP(snapshot)
+        defer { try? FileManager.default.removeItem(at: exportedZIP) }
+        precondition(FileManager.default.fileExists(atPath: exportedZIP.path))
         print("Diagnostic percentile, privacy, correlation, compatibility and comparison passed")
     }
 }
