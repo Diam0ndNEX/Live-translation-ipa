@@ -1,0 +1,37 @@
+name: Memory 2.0 scaling benchmarks (manual)
+on:
+  workflow_dispatch:
+    inputs:
+      full_scale:
+        description: "Include 100,000 and 500,000 entries (can take substantially longer)"
+        required: true
+        type: boolean
+        default: true
+permissions:
+  contents: read
+jobs:
+  benchmark:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Validate SQLite migration first
+        run: bash scripts/test_memory.sh
+      - name: Benchmark exact SQLite lookups and writes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.full_scale }}" = "true" ]; then
+            bash scripts/benchmark_memory.sh 3000 25000 100000 500000 | tee memory-benchmark.csv
+          else
+            bash scripts/benchmark_memory.sh 3000 25000 | tee memory-benchmark.csv
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: memory2-macos-benchmark
+          path: memory-benchmark.csv
+          if-no-files-found: error
+          retention-days: 90

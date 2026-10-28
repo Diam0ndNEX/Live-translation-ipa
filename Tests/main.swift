@@ -21,6 +21,18 @@ check(PipelineSafety.isDuplicate(["Olá, amigo!"], previous: ["Olá amigo"]), "P
 let a = PipelineSafety.cacheKey(source: "pt", target: "en", text: "Zqa chegou", protectedWords: ["Maria"])
 let b = PipelineSafety.cacheKey(source: "pt", target: "en", text: "Zqa chegou", protectedWords: ["Joana"])
 check(a != b, "Protected names must have independent cache entries")
+var segmentation = SegmentationCache(capacity: 2)
+segmentation.insert("pt/en:Olá mundo!", units: ["Olá mundo!"])
+segmentation.insert("pt/en:Como vai?", units: ["Como vai?"])
+check(segmentation.lookup("pt/en:Olá mundo!") == ["Olá mundo!"], "Repeated segmentation should reuse bounded in-memory result")
+segmentation.insert("pt/en:Nova frase", units: ["Nova frase"])
+check(segmentation.count == 2 && segmentation.lookup("pt/en:Como vai?") == nil,
+      "Segmentation LRU must evict the least recently used entry")
+check(segmentation.lookup("pt/en:Olá mundo!") == ["Olá mundo!"],
+      "Cache eviction must preserve most recent segmentation")
+segmentation.clear()
+check(segmentation.count == 0, "Explicit RAM clear must drop temporary segmentation results")
+print("Bounded segmentation cache regression checks passed")
 print("Pipeline regression checks passed")
 
 let firstHalf = OCRLine(t: "Olá meu amigo", x: 0.30, y: 0.20, h: 0.03, w: 0.30)
@@ -32,6 +44,20 @@ let nextRow = OCRLine(t: "Uma segunda linha", x: 0.32, y: 0.16, h: 0.03, w: 0.32
 check(OCRGrouping.makeBlocks([nextRow, firstHalf], movie: true).count == 1, "Stacked subtitle lines preserve sentence context")
 let distantRow = OCRLine(t: "Outro diálogo", x: 0.3, y: 0.05, h: 0.03, w: 0.3)
 check(OCRGrouping.makeBlocks([distantRow, firstHalf], movie: true).count == 2, "Distant text must not bridge dialogue regions")
+// Shadow OCR sometimes reports the same subtitle twice at effectively the
+// same screen coordinates. This must not multiply translation units.
+let shadowA = OCRLine(t: "Olá, amigo!", x: 0.45, y: 0.21, h: 0.035, w: 0.25, confidence: 0.65)
+let shadowB = OCRLine(t: "Olá, amigo!", x: 0.451, y: 0.211, h: 0.035, w: 0.25, confidence: 0.94)
+let distantRepeat = OCRLine(t: "Olá, amigo!", x: 0.45, y: 0.08, h: 0.035, w: 0.25, confidence: 0.91)
+let deduplicated = OCRGrouping.removeNearbyDuplicates([shadowA, shadowB, distantRepeat])
+check(deduplicated.count == 2, "Only spatially coincident OCR copies may be suppressed")
+check(deduplicated.first?.confidence == 0.94, "Keep the higher-confidence OCR observation")
+check(OCRGrouping.makeBlocks([shadowA, shadowB], movie: true).flatMap { $0 }.count == 1,
+      "Movie mode removes near-duplicate subtitle shadows")
+check(OCRGrouping.makeBlocks([shadowA, shadowB], movie: false).flatMap { $0 }.count == 2,
+      "Comic mode must preserve independently observed text")
+check(OCRGrouping.makeBlocks([shadowA, distantRepeat], movie: true).flatMap { $0 }.count == 2,
+      "Distant repeated dialogue is not a near-duplicate")
 print("OCR grouping checks passed")
 
 check(ExportFormat.csv([["hello, world", "a\"b", "line\nbreak"]]) == "\"hello, world\",\"a\"\"b\",\"line\nbreak\"", "CSV must preserve commas, quotes and line breaks")
@@ -277,3 +303,40 @@ var lowPowerSimulation=SimulationInput();lowPowerSimulation.lowPower=true
 let lowPowerResult=PipelineSimulation.run(options:simulationOptions,input:lowPowerSimulation)
 check(lowPowerResult.steps.contains { $0.title == "Speculative-work gate" && $0.state == "wait for confirmation" }, "Low Power Mode disables speculative model work in the simulator")
 print("Thermal ceiling and Low Power Mode checks passed")
+
+var sqliteScenario = SimulationInput()
+sqliteScenario.cacheOrigin = "sqlite"
+sqliteScenario.memoryLookupMs = 3
+let sqliteSimulation = PipelineSimulation.run(options: simulationOptions, input: sqliteScenario)
+check(sqliteSimulation.steps.contains { $0.title == "Persistent memory decision" && $0.state == "sqlite" }, "Simulator exposes SQLite hit scenario")
+sqliteScenario.memoryLookupMs = 20
+let deadlineSimulation = PipelineSimulation.run(options: simulationOptions, input: sqliteScenario)
+check(deadlineSimulation.steps.contains { $0.title == "Persistent memory decision" && $0.state.contains("deadline exceeded") }, "Simulator models deadline fallback explicitly")
+print("Memory lookup simulator checks passed")
+
+let multiSentence = TranslationUnitPlanning.units(source: "Olá. Tudo bem?",
+    candidates: ["Olá.", "Tudo bem?"])
+check(multiSentence == ["Olá.", "Tudo bem?"], "Confirmed sentence punctuation may create distinct units")
+let incompleteLyrics = "Primeira linha\nsegunda linha\nterceira linha"
+check(TranslationUnitPlanning.units(source: incompleteLyrics,
+    candidates: ["Primeira linha", "segunda linha", "terceira linha"]) == [incompleteLyrics],
+    "Incomplete scrolling lyrics must retain their complete line structure")
+check(TranslationUnitPlanning.units(source: "Dr. Smith arrived.",
+    candidates: ["Dr.", "Smith arrived."]) == ["Dr. Smith arrived."],
+    "Abbreviations may not manufacture authoritative independent units")
+check(TranslationUnitPlanning.units(source: "He paused... then spoke.",
+    candidates: ["He paused...", "then spoke."]) == ["He paused... then spoke."],
+    "Unfinished ellipses must preserve subtitle context")
+check(TranslationUnitPlanning.units(source: "Eine Sache. Noch etwas.",
+    candidates: ["Eine Sache.", "Noch etwas."]) == ["Eine Sache.", "Noch etwas."],
+    "Sentence boundaries must preserve original source content")
+check(TranslationUnitPlanning.units(source: "Hello world!",
+    candidates: ["Hello", "world!"]) == ["Hello world!"],
+    "Tokenizer candidates without sentence boundaries must not fragment a sentence")
+check(!TranslationUnitPlanning.mayRemember("12 13", confirmed: true),
+    "Nonlinguistic OCR must not become an authoritative permanent memory entry")
+check(!TranslationUnitPlanning.mayRemember("Hello.", confirmed: false),
+    "Unconfirmed speculative text must remain RAM-only")
+check(TranslationUnitPlanning.mayRemember("Olá.", confirmed: true),
+    "Confirmed language-bearing entries remain eligible for persistence")
+print("Translation-unit segmentation, context and persistence safety checks passed")

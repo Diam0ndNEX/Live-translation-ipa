@@ -2,6 +2,8 @@ name: Build ScreenLingo IPA
 on:
   push:
     branches: [codex/screenlingo-v0.7.0, codex/screenlingo-v0.8.0, codex/screenlingo-v0.9.0, codex/screenlingo-v1.0.0, codex/screenlingo-v1.1.0, codex/screenlingo-v1.2.0, codex/screenlingo-v1.2.1, codex/screenlingo-v1.3.0]
+  pull_request:
+    branches: [codex/screenlingo-v1.3.0, codex/screenlingo-v1.4.0, "codex/memory2-**"]
   workflow_dispatch:
     inputs:
       interface_preview:
@@ -27,6 +29,12 @@ jobs:
         run: |
           swiftc Shared/*.swift App/TextIntelligence.swift App/MemoryWriter.swift App/PipelineSimulation.swift Tests/main.swift -o /tmp/pipeline-tests
           /tmp/pipeline-tests
+      - name: Check SQLite memory migration
+        run: bash scripts/test_memory.sh
+      - name: Check diagnostic archive privacy and correlation
+        run: bash scripts/test_diagnostics.sh
+      - name: Storage scaling smoke benchmark
+        run: bash scripts/benchmark_memory.sh 3000 25000
       - name: Generate app icon
         run: |
           python3 -m venv .venv

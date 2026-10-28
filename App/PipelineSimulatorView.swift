@@ -154,7 +154,8 @@ struct PipelineSimulatorView: View {
                 Toggle("New unconfirmed candidate overtakes work",isOn:$input.superseded)
             }
             Section("Translation and device state") {
-                Picker("Cache result",selection:$input.cacheOrigin) { ForEach(["fresh","session","saved","speculative"],id:\.self) { Text($0.capitalized).tag($0) } }
+                Picker("Cache result",selection:$input.cacheOrigin) { ForEach(["fresh","session","saved","speculative","sqlite","legacy","miss","incompatible","migration failed","database unavailable"],id:\.self) { Text($0.capitalized).tag($0) } }
+                HStack { Text("Simulated memory lookup ms"); TextField("Milliseconds", value: $input.memoryLookupMs, format: .number).keyboardType(.decimalPad) }
                 Picker("Thermal state",selection:$input.thermal) { ForEach(["nominal","fair","serious","critical"],id:\.self) { Text($0.capitalized).tag($0) } }
                 Toggle("Low Power Mode",isOn:$input.lowPower)
                 Toggle("Language packs ready",isOn:$input.packReady)
