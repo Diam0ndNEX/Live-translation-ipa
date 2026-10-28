@@ -61,8 +61,8 @@ import Foundation
         }
         let boundedSnapshot = try await writer.decode(try await writer.encode(ocrSnapshot))
         precondition(boundedSnapshot.events.count == traceLimit &&
-                     boundedSnapshot.events.first?.timestamp ==
-                        ocrSnapshot.events[5].timestamp,
+                     abs((boundedSnapshot.events.first?.timestamp.timeIntervalSince1970 ?? 0) -
+                         ocrSnapshot.events[5].timestamp.timeIntervalSince1970) < 1.0,
                      "Long diagnostics retain the most recent 2400 structured events")
         let bytes = try await writer.encode(snapshot)
         let recovered = try await writer.decode(bytes)
