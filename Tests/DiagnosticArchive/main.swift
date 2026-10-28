@@ -138,17 +138,35 @@ import Foundation
                            "private OCR text": 100, "captureFrames": -1],
                 thermalLevel: 2, lowPower: false, captureConnected: true)
         ]
+        withIntervals.oneSecondIntervals = [
+            DiagnosticIntervalBucket(startedAt: Date(), elapsedSeconds: 1,
+                counters: ["candidateConfirmed": 1, "enqueueFailed": 1],
+                thermalLevel: 0, lowPower: false, captureConnected: true)
+        ]
+        withIntervals.fiveSecondIntervals = [
+            DiagnosticIntervalBucket(startedAt: Date(), elapsedSeconds: 5,
+                counters: ["candidateConfirmed": 4, "enqueueFailed": 1],
+                thermalLevel: 0, lowPower: false, captureConnected: true)
+        ]
         let intervalBytes = try await writer.encode(withIntervals)
         let checkedInterval = try await writer.decode(intervalBytes)
         precondition(checkedInterval.intervals?.count == 1)
+        precondition(checkedInterval.oneSecondIntervals?.first?.elapsedSeconds == 1 &&
+                     checkedInterval.fiveSecondIntervals?.first?.elapsedSeconds == 5,
+                     "Both high-resolution interval types must survive diagnostic encoding")
         precondition(checkedInterval.intervals?.first?.counters == [
             "ocrPackets": 3, "candidateEnqueued": 1
         ], "Unknown or negative metrics must never cross the ZIP privacy boundary")
         precondition(!String(decoding: intervalBytes, as: UTF8.self).contains("private OCR text"))
         var oldWithoutIntervals = try JSONSerialization.jsonObject(with: intervalBytes) as! [String: Any]
         oldWithoutIntervals.removeValue(forKey: "intervals")
+        oldWithoutIntervals.removeValue(forKey: "oneSecondIntervals")
+        oldWithoutIntervals.removeValue(forKey: "fiveSecondIntervals")
         let previousBundle = try JSONSerialization.data(withJSONObject: oldWithoutIntervals)
         let decodedPreviousBundle = try await writer.decode(previousBundle)
+        precondition(decodedPreviousBundle.oneSecondIntervals == nil &&
+                     decodedPreviousBundle.fiveSecondIntervals == nil,
+                     "Pre-1.5.0 archives without high-resolution buckets must decode")
         precondition(decodedPreviousBundle.intervals == nil,
                      "Existing 1.4.0 diagnostic archives must remain decodable")
 
@@ -273,7 +291,8 @@ import Foundation
         precondition(exportedZipData.range(of: Data("intervals.csv".utf8)) != nil,
                      "New ZIP bundles must contain the full-session interval CSV")
         for filename in ["manifest.json", "summary.md", "session.json",
-                         "intervals.csv", "metrics.csv", "events.csv",
+                         "intervals.csv", "seconds_1.csv", "seconds_5.csv",
+                         "metrics.csv", "events.csv",
                          "findings.json", "README.txt"] {
             precondition(exportedZipData.range(of: Data(filename.utf8)) != nil,
                          "Version 3 evidence ZIP must include \(filename)")
@@ -318,6 +337,12 @@ import Foundation
                      summary.contains("physical display") &&
                      summary.contains("median"),
                      "Readable summary must distinguish continuity, normal timing and boundaries")
+        let fastCSV = String(decoding: try entry("seconds_1.csv"), as: UTF8.self)
+        let shortCSV = String(decoding: try entry("seconds_5.csv"), as: UTF8.self)
+        precondition(fastCSV.contains("elapsed_seconds") &&
+                     fastCSV.contains("candidateConfirmed") &&
+                     shortCSV.contains("enqueueFailed"),
+                     "High-resolution buckets must preserve the time and events needed to inspect stalls")
         let metrics = String(decoding: try entry("metrics.csv"), as: UTF8.self)
         precondition(metrics.hasPrefix("metric,samples,mean_ms,p50_ms,p90_ms,p95_ms,p99_ms,max_ms"),
                      "Timing CSV must carry sample counts, typical and tail percentiles")
