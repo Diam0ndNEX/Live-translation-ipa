@@ -130,6 +130,7 @@ struct DiagnosticIntervalBucket: Codable {
         "modelFailures", "warmupAttempts", "warmupSucceeded",
         "warmupPredicted", "coldModelBatches", "adaptiveSpeculationSkipped",
         "specPreemptionRequested", "specMatchingConfirmation",
+        "specRetainedUnits",
         "handoffDeferred", "slowTailEnqueues", "handoffReplayed", "handoffExpired", "enqueueFailed",
         "actualModelBatches", "confirmedModelBatches", "speculativeModelBatches",
         "warmupModelBatches", "first30sModelBatches", "cancelledModelBatches",
@@ -335,7 +336,7 @@ actor DiagnosticExportWriter {
     func exportZIP(_ snapshot: DiagnosticSessionExport) throws -> URL {
         let json = try encode(snapshot)
         let readme = Data("""
-        ScreenLingo offline diagnostics — 1.4.7
+        ScreenLingo offline diagnostics — 1.5.0
         session.json: bounded recent metadata-only candidate events, timing distributions,
         configuration, memory diagnostics and whole-session interval summaries.
         intervals.csv: chronological 15-second counters, thermal and capture state.
@@ -355,6 +356,9 @@ actor DiagnosticExportWriter {
         legacySkip* counts describe the last scanned batch only. Inventory pair is
         legacyInventorySource/Target; absent means no inventory captured this session.
         specPreemptionRequested counts app cancellation requests, not engine stops.
+        specRetainedUnits counts completed superseded speculative units newly
+        cached in RAM, not presentations or guaranteed future hits. Such pipelines
+        still count as speculativeDiscarded; later exact reuse counts as a hit.
         confirmedModelMs/speculativeModelMs are bounded completed-call samples.
         Settings, OS version, cache history and source content affect A/B comparisons.
         Nothing is automatically uploaded. This ZIP is generated at user request.
@@ -409,6 +413,9 @@ struct DiagnosticPerformanceComparison {
     let comparable: Bool
     let reason: String
     let p95Changes: [String: Double]
+    let medianChanges: [String: Double]
+    let meanChanges: [String: Double]
+    let p90Changes: [String: Double]
 
     init(baseline: DiagnosticSessionExport, current: DiagnosticSessionExport) {
         guard let baselineModel = baseline.hardwareModel, !baselineModel.isEmpty,
@@ -420,9 +427,15 @@ struct DiagnosticPerformanceComparison {
             comparable = false
             reason = "Hardware model, OS, settings or measurement boundaries differ or are unavailable; comparison withheld"
             p95Changes = [:]
+            medianChanges = [:]; meanChanges = [:]; p90Changes = [:]
             return
         }
         var differences: [String: Double] = [:]
+        var medians: [String: Double] = [:], means: [String: Double] = [:], p90s: [String: Double] = [:]
+        func change(_ before: Double?, _ after: Double?) -> Double? {
+            guard let before, let after, before.isFinite, before > 0, after.isFinite else { return nil }
+            return 100 * (after - before) / before
+        }
         for name in baseline.distributions.keys.sorted() {
             guard let before = baseline.distributions[name],
                   let after = current.distributions[name],
@@ -430,8 +443,12 @@ struct DiagnosticPerformanceComparison {
                   let baselineP95 = before.p95, baselineP95 > 0,
                   let currentP95 = after.p95, currentP95.isFinite else { continue }
             differences[name] = 100 * (currentP95 - baselineP95) / baselineP95
+            medians[name] = change(before.p50, after.p50)
+            means[name] = change(before.mean, after.mean)
+            p90s[name] = change(before.p90, after.p90)
         }
         p95Changes = differences
+        medianChanges = medians; meanChanges = means; p90Changes = p90s
         comparable = !differences.isEmpty
         reason = comparable ? "Comparable settings; different subtitles may affect results"
             : "At least 20 samples per session are required to compare p95"
@@ -602,7 +619,7 @@ enum DiagnosticTraceReview {
         "pip_enqueue", "cancellation", "runtime_state", "first OCR", "seen", "confirmed",
         "processing", "speculating", "cache", "ready", "enqueued",
         "superseded", "memory", "cancelled", "ocrCorrection", "language",
-        "freshTranslation", "translationResult"
+        "freshTranslation", "translationResult", "model_state"
     ]
     private static let allowedReasons: Set<String> = [
         "accepted", "rejected_duplicate", "rejected_recent_fragment",
@@ -614,7 +631,10 @@ enum DiagnosticTraceReview {
         "observed", "cache_hit", "computed", "ramHit", "persistentHit",
         "legacyHit", "normalizedHit", "speculativeHit", "miss", "timeout",
         "compatibilityRejected", "databaseUnavailable", "persisted",
-        "writeFailed", "ramEviction", "other", "incompatible", "conflict"
+        "writeFailed", "ramEviction", "other", "incompatible", "conflict",
+        "enqueue_failed", "slow_tail", "confirmed_model_submitted", "confirmed_model_completed",
+        "speculative_model_submitted", "speculative_model_completed", "model_batch_completed",
+        "model_batch_failed", "model_batch_cancelled"
     ]
     static func review(_ input: [StructuredDiagnosticEvent], limit: Int = 12)
         -> [DiagnosticReviewedCandidate] {
@@ -641,8 +661,14 @@ enum DiagnosticTraceReview {
             }
             let stageNames = Set(stages.map(\.stage))
             let state: String
-            if stageNames.contains("enqueued") || stageNames.contains("pip_enqueue") {
+            let successfulEnqueue = stages.contains {
+                $0.stage == "enqueued" || ($0.stage == "pip_enqueue" &&
+                    ["enqueued", "completed", "slow_tail"].contains($0.reason))
+            }
+            if successfulEnqueue {
                 state = "PiP buffer enqueued (physical display unverified)"
+            } else if stages.contains(where: { $0.stage == "pip_enqueue" && $0.reason == "enqueue_failed" }) {
+                state = "PiP frame preparation or enqueue failed"
             } else if stageNames.contains("cancelled") || stageNames.contains("cancellation") ||
                       stageNames.contains("superseded") {
                 state = "Superseded or cancelled"

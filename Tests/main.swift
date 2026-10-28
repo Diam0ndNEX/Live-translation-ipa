@@ -341,6 +341,16 @@ check(writtenEnvelope.validated == [contextA: "Hello"], "Versioned memory surviv
 await memoryWriter.clear(memoryFile, revision: 3)
 _ = await memoryWriter.save([contextA: "stale"], to: memoryFile, revision: 2)
 check(!FileManager.default.fileExists(atPath: memoryFile.path), "A stale asynchronous save cannot resurrect cleared memory")
+let blockedDirectory = memoryDirectory.appendingPathComponent("blocked")
+try! Data("not a directory".utf8).write(to: blockedDirectory)
+let retryFile = blockedDirectory.appendingPathComponent("retry.json")
+let retryWriter = MemoryWriter()
+let failedSave = await retryWriter.save([contextA: "Hello"], to: retryFile, revision: 1)
+check(!failedSave, "A failed atomic save must report failure")
+try! FileManager.default.removeItem(at: blockedDirectory)
+let retriedSave = await retryWriter.save([contextA: "Hello"], to: retryFile, revision: 1)
+check(retriedSave && FileManager.default.fileExists(atPath: retryFile.path),
+    "A failed save must remain retryable at the same revision")
 try? FileManager.default.removeItem(at: memoryDirectory)
 print("Persistence, privacy and candidate-lifetime regression checks passed")
 
@@ -387,6 +397,13 @@ sqliteScenario.memoryLookupMs = 20
 let deadlineSimulation = PipelineSimulation.run(options: simulationOptions, input: sqliteScenario)
 check(deadlineSimulation.steps.contains { $0.title == "Persistent memory decision" && $0.state.contains("deadline exceeded") }, "Simulator models deadline fallback explicitly")
 print("Memory lookup simulator checks passed")
+var freshSimulationOptions = simulationOptions
+freshSimulationOptions["freshTranslationTest"] = "true"
+sqliteScenario.memoryLookupMs = 3
+let freshSimulation = PipelineSimulation.run(options: freshSimulationOptions, input: sqliteScenario)
+check(freshSimulation.steps.contains { $0.title == "Speculative-work gate" && $0.state == "wait for confirmation" } &&
+      !freshSimulation.steps.contains { $0.title == "Persistent memory decision" && $0.state == "sqlite" },
+    "Fresh-test simulation must bypass both remembered output and speculative work")
 
 let multiSentence = TranslationUnitPlanning.units(source: "Olá. Tudo bem?",
     candidates: ["Olá.", "Tudo bem?"])
@@ -584,9 +601,72 @@ check(SubtitlePerformancePolicy.preemptSpeculation(activeText: "Eu posso ir.", c
 check(!SubtitlePerformancePolicy.preemptSpeculation(activeText: nil, confirmedText: "Olá."),
     "Confirmed processing must not be mistaken for speculative work")
 
-check(!SubtitlePerformancePolicy.allowSpeculation(attempts: 32, discarded: 30, hits: 0, opportunity: 2, enabled: true),
-    "Sustained near-zero benefit reduces tentative model opportunities further")
+check(SubtitlePerformancePolicy.allowSpeculation(attempts: 32, discarded: 30, hits: 0, opportunity: 2, enabled: true),
+    "Poor historical yield must retain the 1.4.6 alternate-opportunity head starts")
 check(SubtitlePerformancePolicy.allowSpeculation(attempts: 32, discarded: 30, hits: 0, opportunity: 4, enabled: true),
-    "Severe speculation backoff retains recovery probes")
+    "Low-yield speculation retains regular recovery opportunities")
 check(SubtitlePerformancePolicy.allowSpeculation(attempts: 32, discarded: 30, hits: 0, opportunity: 2, enabled: false),
     "User disabling backoff retains tentative opportunities")
+
+// A completed obsolete caption can supply exact sentence reuse, never a stale
+// presentation. Exercise the same retention seam used after the model await.
+let retainedKey = PipelineSafety.cacheKey(source: "pt", target: "en", text: "Olá amigo.",
+    protectedWords: [], rules: "rules-A")
+let changedKey = PipelineSafety.cacheKey(source: "pt", target: "en", text: "Olá inimigo.",
+    protectedWords: [], rules: "rules-A")
+let retainedBatch = TranslationBatchPlan(["Olá amigo.", "Outra frase.", "Olá amigo."])
+let retainedKeys = [retainedKey, "other-exact-context-key", retainedKey]
+let retainedValues = retainedBatch.expand([Optional("Hello friend."), Optional("Another sentence.")])
+let retainedCache = SubtitlePerformancePolicy.retainedSpeculativeResults(keys: retainedKeys,
+    values: retainedValues, workContext: 7, currentContext: 7, reuseAllowed: true)
+check(retainedCache[retainedKey] == "Hello friend." && retainedCache.count == 2,
+    "Completed superseded units must be reusable without another translation call")
+check(retainedCache[changedKey] == nil,
+    "A different sentence must never reuse an obsolete translation")
+for isolatedKey in [
+    PipelineSafety.cacheKey(source: "pt", target: "de", text: "Olá amigo.", protectedWords: [], rules: "rules-A"),
+    PipelineSafety.cacheKey(source: "es", target: "en", text: "Olá amigo.", protectedWords: [], rules: "rules-A"),
+    PipelineSafety.cacheKey(source: "pt", target: "en", text: "Olá amigo.", protectedWords: [], rules: "rules-B"),
+    PipelineSafety.cacheKey(source: "pt", target: "en", text: "Olá amigo.", protectedWords: ["Zqa=Maria"], rules: "rules-A")
+] {
+    check(retainedCache[isolatedKey] == nil,
+        "Languages, rules and protected-name context must remain isolated")
+}
+check(SubtitlePerformancePolicy.retainedSpeculativeResults(keys: retainedKeys, values: retainedValues,
+    workContext: 7, currentContext: 8, reuseAllowed: true).isEmpty,
+    "Settings, capture and cache invalidation must reject suspended speculative output")
+check(SubtitlePerformancePolicy.retainedSpeculativeResults(keys: retainedKeys, values: retainedValues,
+    workContext: 7, currentContext: 7, reuseAllowed: false).isEmpty,
+    "Fresh-test and explicit memory bypass must prevent obsolete-result retention")
+let invalidRetainedBatches: [[String?]?] = [nil, [], ["partial"], ["Hello", nil, "Hello"],
+                                         ["Hello", " ", "Hello"], ["Hello", "Other", "Conflicting"]]
+for invalidValues in invalidRetainedBatches {
+    check(SubtitlePerformancePolicy.retainedSpeculativeResults(keys: retainedKeys, values: invalidValues,
+        workContext: 7, currentContext: 7, reuseAllowed: true).isEmpty,
+        "Failed, incomplete, empty or conflicting results must never seed the cache")
+}
+print("v1.5.0 restored head-start cadence and exact speculative recovery checks passed")
+
+var emptyReadSequence = OCREmptyReadStreak()
+for _ in 0..<3 { emptyReadSequence.primaryEmpty(); emptyReadSequence.finish(foundText: false) }
+check(emptyReadSequence.needsContrastRetry && !emptyReadSequence.mayClear,
+    "The third primary miss may request contrast recovery without clearing")
+emptyReadSequence.finish(foundText: true)
+emptyReadSequence.primaryEmpty(); emptyReadSequence.finish(foundText: false)
+check(emptyReadSequence.count == 1 && !emptyReadSequence.mayClear,
+    "A successful contrast retry must prevent clearing after the next single miss")
+for _ in 0..<3 { emptyReadSequence.primaryEmpty(); emptyReadSequence.finish(foundText: false) }
+check(emptyReadSequence.mayClear, "Four genuinely empty completed reads must still allow clearing")
+emptyReadSequence.reset()
+check(emptyReadSequence.count == 0 && !emptyReadSequence.needsContrastRetry,
+    "Recognition configuration reset must discard the old empty streak")
+let literalPlaceholder = TextIntel.protect("Zqa met Maria.", words: ["Maria"])
+check(TextIntel.restore(literalPlaceholder.text, tokens: literalPlaceholder.tokens) == "Zqa met Maria.",
+    "Literal placeholder-like text must survive protected-name restoration")
+let overlappingNames = TextIntel.protect("Maria Clara met Maria.", words: ["Maria", "Maria Clara"])
+check(overlappingNames.tokens.count == 2 &&
+      TextIntel.restore(overlappingNames.text, tokens: overlappingNames.tokens) == "Maria Clara met Maria.",
+    "Longer protected names must remain intact beside shorter overlapping names")
+let tokenPrefixName = TextIntel.protect("Maria met Zq.", words: ["Maria", "Zq"])
+check(TextIntel.restore(tokenPrefixName.text, tokens: tokenPrefixName.tokens) == "Maria met Zq.",
+    "A later protected word must never replace characters inside an inserted placeholder")

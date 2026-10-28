@@ -79,6 +79,7 @@ import Foundation
             health: MemoryDiagnosticHealth(),
             counters: ["slowTailEnqueues": 1, "handoffDeferred": 1,
                        "legacyInventoryPending": 103, "legacySkipSegmentation": 12, "specPreemptionRequested": 9,
+                       "specRetainedUnits": 3,
                        "legacyBatchVerified": 24, "actualModelBatches": 7, "confirmedModelBatches": 2,
                        "speculativeModelBatches": 4, "warmupModelBatches": 1, "first30sModelBatches": 5,
                        "handoffReplayed": 1, "enqueueFailed": 1, "source text": 100],
@@ -92,6 +93,7 @@ import Foundation
                      performanceRestored.counters["legacyInventoryPending"] == 103 &&
                      performanceRestored.counters["legacySkipSegmentation"] == 12 &&
                      performanceRestored.counters["specPreemptionRequested"] == 9 &&
+                     performanceRestored.counters["specRetainedUnits"] == 3 &&
                      performanceRestored.counters["first30sModelBatches"] == 5 &&
                      performanceRestored.counters["handoffReplayed"] == 1 &&
                      performanceRestored.counters["enqueueFailed"] == 1 &&
@@ -153,6 +155,17 @@ import Foundation
         let matching = DiagnosticPerformanceComparison(baseline: snapshot, current: snapshot)
         precondition(matching.comparable &&
                      abs(matching.p95Changes["memoryLookupMs", default: 100]) < 0.00001)
+        let mixedTiming = DiagnosticSessionExport(id: UUID(), startedAt: Date(), endedAt: Date(),
+            appVersion: "1.5.0", systemVersion: snapshot.systemVersion, hardwareModel: snapshot.hardwareModel,
+            settings: snapshot.settings, health: snapshot.health, counters: [:],
+            distributions: ["memoryLookupMs": DiagnosticDistribution(
+                Array(repeating: 60.0, count: 90) + Array(repeating: 90.0, count: 10))],
+            events: [], measurementBoundary: snapshot.measurementBoundary, textCapture: false)
+        let mixedComparison = DiagnosticPerformanceComparison(baseline: snapshot, current: mixedTiming)
+        precondition(mixedComparison.comparable &&
+                     mixedComparison.medianChanges["memoryLookupMs", default: 0] > 0 &&
+                     mixedComparison.p95Changes["memoryLookupMs", default: 0] < 0,
+                     "A better tail must never conceal a slower typical result")
         // A matching OS and settings do not establish a comparable baseline if
         // the device hardware changed or the older archive lacked a model code.
         var differentHardware = snapshot
@@ -280,6 +293,19 @@ import Foundation
                      secondCandidate.status == "Superseded or cancelled",
                      "Privacy-incompatible events must be ignored")
         precondition(DiagnosticTraceReview.review([], limit: 5).isEmpty)
+        let failedEnqueue = DiagnosticTraceReview.review([
+            traceEvent(candidateA, 0, "model_state", "confirmed_model_completed"),
+            traceEvent(candidateA, 0.1, "pip_enqueue", "enqueue_failed")
+        ])
+        precondition(failedEnqueue.first?.status == "PiP frame preparation or enqueue failed" &&
+                     failedEnqueue.first?.stages.first?.stage == "model_state",
+                     "A failed enqueue must never be labelled as successful presentation")
+        let recoveredEnqueue = DiagnosticTraceReview.review([
+            traceEvent(candidateA, 0, "pip_enqueue", "enqueue_failed"),
+            traceEvent(candidateA, 0.1, "enqueued", "enqueued")
+        ])
+        precondition(recoveredEnqueue.first?.status.contains("PiP buffer enqueued") == true,
+                     "An actual later successful enqueue must remain visible")
         print("Diagnostic percentile, privacy, correlation, compatibility and comparison passed")
     }
 }

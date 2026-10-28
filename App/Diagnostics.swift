@@ -160,6 +160,7 @@ struct Stats {
     var adaptiveSpeculationSkipped = 0, confirmedHandoffDeferred = 0
     var slowTailEnqueues = 0
     var specPreemptionRequested = 0, specMatchingConfirmation = 0
+    var specRetainedUnits = 0
     var legacyBatchEntries = 0, legacyBatchVerified = 0, legacyBatchSkipped = 0
     var legacyBatchPeakWorkers = 0, legacyBatchElapsedMs = 0.0
     var specProcessingMs = 0.0, specDiscardedMs = 0.0
@@ -866,6 +867,7 @@ final class Diagnostics: ObservableObject {
             "speculativeRequests": s.specModelRequests,
             "specPreemptionRequested": s.specPreemptionRequested,
             "specMatchingConfirmation": s.specMatchingConfirmation,
+            "specRetainedUnits": s.specRetainedUnits,
             "speculativeDiscarded": s.specDiscarded,
             "legacyVerified": memoryHealth.legacyValidated,
             "legacySuperseded": memoryHealth.legacySuperseded,
@@ -1640,6 +1642,18 @@ private struct DiagnosticsBody: View {
                 StatTile(title: "Total delay", value: delay > 0 ? "\(Int(delay)) ms" : "–",
                          tint: level(d.avg, d.n, 1200, 2000), icon: "timer")
             }
+            if collectDetails {
+                let timing = DiagnosticDistribution(diag.latency.map(\.v))
+                HStack {
+                    LabeledContent("Median", value: timing.p50.map { "\(Int($0)) ms" } ?? "–")
+                    Spacer()
+                    LabeledContent("P90", value: timing.p90.map { "\(Int($0)) ms" } ?? "–")
+                }.font(.caption)
+            }
+            LabeledContent("Confirmed replaced before enqueue", value: "\(diag.s.supersededUnpresentedConfirmed)")
+                .font(.footnote)
+            Text("Latency covers successful frame enqueues. Replaced work is excluded, so lower latency alone does not establish better subtitle continuity. Counts are candidates, not unique subtitle lines.")
+                .font(.caption).foregroundStyle(.secondary)
         }
         .card()
     }
@@ -1830,11 +1844,14 @@ private struct DiagnosticsBody: View {
                 let current = diag.archivedSessions[0]
                 let comparison = DiagnosticPerformanceComparison(baseline: baseline, current: current)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("Recent session p95 comparison").font(.subheadline.weight(.semibold))
+                    Text("Recent session timing comparison").font(.subheadline.weight(.semibold))
                     if comparison.comparable {
                         ForEach(comparison.p95Changes.keys.sorted(), id: \.self) { metric in
-                            let difference = comparison.p95Changes[metric, default: 0]
-                            LabeledContent(metric, value: String(format: "%+.1f%%", difference))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(metric).font(.caption.weight(.semibold))
+                                Text(comparisonTiming(comparison, metric: metric))
+                                    .font(.caption).monospacedDigit()
+                            }
                         }
                         Text("Indicative only: different subtitle workloads can change latency.")
                             .font(.caption).foregroundStyle(.secondary)
@@ -1848,6 +1865,13 @@ private struct DiagnosticsBody: View {
     }
 
     // MARK: Overview
+    private func comparisonTiming(_ comparison: DiagnosticPerformanceComparison, metric: String) -> String {
+        [("Median", comparison.medianChanges), ("Mean", comparison.meanChanges),
+         ("P90", comparison.p90Changes), ("P95", comparison.p95Changes)]
+            .compactMap { label, values in values[metric].map { label + String(format: " %+.1f%%", $0) } }
+            .joined(separator: " · ")
+    }
+
     private var liveFraction: Double {
         let now = Date()
         let total = now.timeIntervalSince(diag.started)

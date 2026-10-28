@@ -21,7 +21,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var candidateCount = 0
     private var specKey = ""
     private var lastOCRConfig: Config?
-    private var emptyPasses = 0
+    private var emptyReads = OCREmptyReadStreak()
     private var lastOcrMs: Double = 0
     // Recognition callbacks are serialized by recognitionLock. Reuse only the
     // request configuration; Vision replaces results on every perform call.
@@ -87,7 +87,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         let cfg = config
         if cfg.resetsRecognition(comparedTo: lastOCRConfig) {
             candidateKey = ""; sentKey = ""; specKey = ""; candidateCount = 0
-            ocrSig = []; emptyPasses = 0
+            ocrSig = []; emptyReads.reset()
             tracker.reset(); candidateID = nil
         }
         lastOCRConfig = cfg
@@ -260,15 +260,18 @@ class SampleHandler: RPBroadcastSampleHandler {
         let boost = cfg.boost ?? 1
         var lines = ocr(boost == 2 ? enhanced(img) : img, cfg, y0, y1)
         if lines.isEmpty {
-            emptyPasses += 1
+            emptyReads.primaryEmpty()
             totalEmptyOCRPasses += 1
             // Fallback for hard text (thin, outlined, low contrast): boost contrast and retry
-            if boost == 1 && emptyPasses % 3 == 0 && freeMB() > 20 {
+            if boost == 1 && emptyReads.needsContrastRetry && freeMB() > 20 {
                 retryCount += 1
                 lines = ocr(enhanced(img), cfg, y0, y1)
             }
-        } else {
-            emptyPasses = 0
+        }
+        // A successful contrast retry is a successful read too. Otherwise the
+        // old empty streak could clear the caption after just one later miss.
+        emptyReads.finish(foundText: !lines.isEmpty)
+        if !lines.isEmpty {
             lastUsefulText = Date()
         }
         lastOcrMs = (CFAbsoluteTimeGetCurrent() - t0) * 1000
@@ -281,7 +284,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         if recognizedKey != lastRecognizedKey { lastChanged = Date(); lastRecognizedKey = recognizedKey }
 
         if lines.isEmpty {
-            if emptyPasses >= 4 {
+            if emptyReads.mayClear {
                 if !sentKey.isEmpty { send(kind: "clear", lines: [], revision: cfg.rev) }
                 sentKey = ""; candidateKey = ""; candidateCount = 0; tracker.reset(); candidateID = nil
             }

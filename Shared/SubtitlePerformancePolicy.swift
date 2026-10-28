@@ -46,10 +46,28 @@ enum SubtitlePerformancePolicy {
         let lost = Double(max(0, discarded)) / Double(max(attempts, 1))
         let useful = Double(max(0, hits)) / Double(max(attempts, 1))
         guard lost >= 0.50, useful < 0.18 else { return true }
-        // Sustained near-zero benefit backs off further, with periodic probes
-        // so a new scene can recover. Confirmed work never uses this gate.
-        if attempts >= 32 && lost >= 0.80 && useful < 0.05 { return opportunity.isMultiple(of: 4) }
+        // Keep the 1.4.6 alternate-opportunity floor. More aggressive throttling
+        // can remove useful head starts and needs separate device evidence.
         return opportunity.isMultiple(of: 2)
+    }
+
+    /// Completed tentative output may seed RAM even after its caption was
+    /// superseded. Only exact, fully contextualized keys can later reuse it;
+    /// this never authorizes presentation or persistence. A settings/capture/
+    /// cache mutation invalidates the context and rejects the entire batch.
+    static func retainedSpeculativeResults(keys: [String], values: [String?]?,
+                                          workContext: Int, currentContext: Int,
+                                          reuseAllowed: Bool) -> [String: String] {
+        guard reuseAllowed, workContext == currentContext, let values,
+              !keys.isEmpty, keys.count == values.count else { return [:] }
+        var result: [String: String] = [:]
+        for (key, value) in zip(keys, values) {
+            guard !key.isEmpty, let value,
+                  !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  result[key] == nil || result[key] == value else { return [:] }
+            result[key] = value
+        }
+        return result
     }
 
     /// A previous confidently resolved source can be warmed ahead of capture

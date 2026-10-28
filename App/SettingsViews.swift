@@ -469,7 +469,7 @@ struct InterfaceSettings: View {
         }
         .onChange(of: historyRetentionDays) { _, _ in engine.applyHistoryRetention() }
         .confirmationDialog("Delete every translation in History?", isPresented: $confirmClear, titleVisibility: .visible) {
-            Button("Clear all history", role: .destructive) { engine.history.removeAll(); engine.toast("History cleared") }
+            Button("Clear all history", role: .destructive) { engine.eraseHistory(); engine.toast("History cleared") }
         }
     }
 }

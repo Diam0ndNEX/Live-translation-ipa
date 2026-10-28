@@ -13,6 +13,7 @@ struct TranslationWorkspace: View {
     @State private var recognizing = false
     @State private var errorText: String?
     @State private var ocrTask: Task<Void, Never>?
+    @State private var ocrRequestID = UUID()
     @AppStorage("photoOCREdge") private var photoEdge = 2400
     @AppStorage("photoAutoTranslate") private var photoAutoTranslate = false
 
@@ -85,20 +86,28 @@ struct TranslationWorkspace: View {
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }
         .onAppear { engine.beginWorkspace() }
-        .onDisappear { ocrTask?.cancel(); engine.endWorkspace() }
+        .onDisappear { ocrRequestID = UUID(); ocrTask?.cancel(); recognizing = false; engine.endWorkspace() }
         .onChange(of: input) { _, value in if value.count > 12000 { input = String(value.prefix(12000)) } }
         .onChange(of: photo) { _, value in
             ocrTask?.cancel()
+            let requestID = UUID()
+            ocrRequestID = requestID
+            recognizing = true
+            errorText = nil
             ocrTask = Task {
+                defer { if ocrRequestID == requestID { recognizing = false } }
                 do {
                     guard let data = try await value?.loadTransferable(type: Data.self), !Task.isCancelled else { return }
-                    await readImage(data)
-                } catch { errorText = error.localizedDescription }
+                    await readImage(data, requestID: requestID)
+                } catch { if ocrRequestID == requestID && !Task.isCancelled { errorText = error.localizedDescription } }
             }
         }
         .fileImporter(isPresented: $importing, allowedContentTypes: [.image, .plainText]) { result in
             do {
                 let url = try result.get()
+                ocrTask?.cancel()
+                ocrRequestID = UUID()
+                recognizing = false
                 let access = url.startAccessingSecurityScopedResource()
                 defer { if access { url.stopAccessingSecurityScopedResource() } }
                 let data = try Data(contentsOf: url)
@@ -106,18 +115,22 @@ struct TranslationWorkspace: View {
                     input = String(text.prefix(12000))
                 } else {
                     ocrTask?.cancel()
-                    ocrTask = Task { await readImage(data) }
+                    let requestID = UUID()
+                    ocrRequestID = requestID
+                    ocrTask = Task { await readImage(data, requestID: requestID) }
                 }
             } catch { errorText = error.localizedDescription }
         }
     }
 
-    @MainActor private func readImage(_ data: Data) async {
+    @MainActor private func readImage(_ data: Data, requestID: UUID) async {
+        guard ocrRequestID == requestID, !Task.isCancelled else { return }
         recognizing = true; errorText = nil
-        defer { recognizing = false }
+        defer { if ocrRequestID == requestID { recognizing = false } }
         let language = engine.sourceCode
         let edge = max(1600, min(3200, photoEdge))
         let task = Task.detached(priority: .userInitiated) { () throws -> String in
+            try Task.checkCancellation()
             guard let source = CGImageSourceCreateWithData(data as CFData, nil),
                   let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
                     kCGImageSourceCreateThumbnailFromImageAlways: true,
@@ -137,7 +150,9 @@ struct TranslationWorkspace: View {
                     request.recognitionLanguages = [match]
                 }
             }
+            try Task.checkCancellation()
             try VNImageRequestHandler(cgImage: image, options: [:]).perform([request])
+            try Task.checkCancellation()
             let lines = (request.results ?? []).compactMap { observation -> OCRLine? in
                 guard let text = observation.topCandidates(1).first?.string else { return nil }
                 let b = observation.boundingBox
@@ -146,12 +161,14 @@ struct TranslationWorkspace: View {
             return OCRGrouping.readingOrder(lines).map(\.t).joined(separator: "\n")
         }
         do {
-            let text = try await task.value
-            guard !Task.isCancelled else { return }
+            let text = try await withTaskCancellationHandler {
+                try await task.value
+            } onCancel: { task.cancel() }
+            guard !Task.isCancelled, ocrRequestID == requestID else { return }
             input = String(text.prefix(12000))
             if text.isEmpty { errorText = "No readable text found. Try a sharper image." }
             else if photoAutoTranslate { engine.translateText(input) }
-        } catch { if !Task.isCancelled { errorText = error.localizedDescription } }
+        } catch { if !Task.isCancelled && ocrRequestID == requestID { errorText = error.localizedDescription } }
     }
 }
 
