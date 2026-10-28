@@ -1842,6 +1842,8 @@ final class TranslatorEngine: ObservableObject {
             diag.memoryHealth.legacyValidated = health.legacyValidated
             diag.memoryHealth.legacySuperseded = health.legacySuperseded
             diag.memoryHealth.legacyUnverified = health.legacyUnverified
+            diag.memoryHealth.suggestedOCRMatches = health.suggestedOCRMatches
+            diag.memoryHealth.suggestedFragmentMatches = health.suggestedFragmentMatches
             diag.memoryHealth.conflicts = health.conflicts
             diag.memoryHealth.databaseBytes = health.databaseBytes
             diag.memoryHealth.migrationStatus = health.migrationStatus
