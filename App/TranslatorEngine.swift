@@ -1255,7 +1255,7 @@ final class TranslatorEngine: ObservableObject {
             guard !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
             cache[key] = out
             savedKeys.remove(key)
-            if display && eligibleMemoryKeys.contains(key) {
+            if display && eligibleMemoryKeys.contains(key) && !flag("freshTranslationTest", false) {
                 confirmedKeys.insert(key)
                 queueMemory(key, out)
             }
