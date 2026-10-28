@@ -1,0 +1,28 @@
+name: ScreenLingo Memory 2.0 full-scale verification
+on:
+  pull_request:
+    branches: [codex/screenlingo-v1.4.0]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scale:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Check migration and integrity before scale test
+        run: bash scripts/test_memory.sh
+      - name: Benchmark 100k and 500k persistent translations
+        run: |
+          set -euo pipefail
+          bash scripts/benchmark_memory.sh 100000 500000 | tee memory-scale-results.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screenlingo-memory-100k-500k-results
+          path: memory-scale-results.csv
+          if-no-files-found: error
+          retention-days: 90
