@@ -676,30 +676,37 @@ struct PrivacySettings: View {
     @AppStorage("privateSession") private var privateSession = false
     @AppStorage("diagIncludeText") private var includeText = false
     @AppStorage("showSessionSpeakers") private var showSpeakers = true
-    @State private var confirm = false
+
     var body: some View {
         List {
             Section {
                 Toggle("Private session", isOn: $privateSession)
-                Text("New translations stay out of History and are not written to translation memory. Existing saved history is kept.").font(.footnote).foregroundStyle(.secondary)
-                Toggle("Show recognized speaker labels this session", isOn: $showSpeakers)
-                Text("Shows names from visible Name: dialogue labels, kept only for this session. Private sessions hide the list. This does not identify voices or unnamed people.").font(.footnote).foregroundStyle(.secondary)
+                Text("New translations are not added to History or persistent translation memory. Previously saved entries remain.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            } header: { Text("Translation privacy") }
+            Section {
+                Toggle("Show recognized speaker labels", isOn: $showSpeakers)
+                Text("Only detects visible Name: labels; this does not identify voices or unnamed people.")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Toggle("Include recognized names and text in diagnostics", isOn: $includeText)
-                Text("Allows names in shared reports and text in detailed events. Turn this on only when you want to include text while troubleshooting. Translation and OCR run on your device.").font(.footnote).foregroundStyle(.secondary)
-            }
-            Section("Local storage") {
-                LabeledContent("History entries", value: "\(engine.history.count)")
-                LabeledContent("Persisted translation units", value: "\(engine.memoryCount)")
-                NavigationLink("Manage translation memory") { MemoryManagementView() }
-                Button("Erase history", role: .destructive) { confirm = true }
-            }
+                Text("Leave off unless you specifically need text in a troubleshooting export. OCR and translation run on-device.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            } header: { Text("Personal content") }
+            Section {
+                NavigationLink {
+                    HistoryStorageSettings()
+                } label: {
+                    Label("Manage stored history", systemImage: "clock.arrow.circlepath")
+                }
+                NavigationLink {
+                    MemoryManagementView()
+                } label: {
+                    Label("Manage translation memory", systemImage: "externaldrive")
+                }
+            } header: { Text("Review local data") }
+            ResetSection(keys: ["privateSession", "diagIncludeText", "showSessionSpeakers"])
         }
-        .settingsPage("Privacy & storage")
-        .confirmationDialog("Erase saved history? Translation memory stays unchanged.", isPresented: $confirm, titleVisibility: .visible) {
-            Button("Erase", role: .destructive) {
-                engine.eraseHistory()
-            }
-        }
+        .settingsPage("Privacy")
     }
 }
 
