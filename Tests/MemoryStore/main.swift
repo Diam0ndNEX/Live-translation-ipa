@@ -283,6 +283,76 @@ import SQLite3
             .appendingPathComponent("memory.sqlite")
         precondition(FileManager.default.fileExists(atPath: preservedBadDatabase.path))
 
+        // SQLite triggers inject deterministic failures without requiring
+        // unavailable disk/OS fault injection on production hardware.
+        let failureDirectory = root.appendingPathComponent("revision-rollback-db")
+        let failureStore = TranslationMemoryStore(directory: failureDirectory)
+        _ = try await failureStore.prepare(legacyURLs: [])
+        let failureKey = "v4|\(rules)|pt>en|0:|Important."
+        var injection: OpaquePointer?
+        let failureDB = failureDirectory.appendingPathComponent("memory.sqlite")
+        precondition(sqlite3_open_v2(failureDB.path, &injection,
+            SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX, nil) == SQLITE_OK)
+        defer { sqlite3_close_v2(injection) }
+        func runInjection(_ sql: String) {
+            precondition(sqlite3_exec(injection, sql, nil, nil, nil) == SQLITE_OK,
+                "Test trigger could not be created")
+        }
+        runInjection("""
+            CREATE TRIGGER reject_confirmed_insert BEFORE INSERT ON memory_entries
+            BEGIN SELECT RAISE(ABORT,'simulated_write_failure'); END
+            """)
+        do {
+            _ = try await failureStore.save([failureKey: "Verified"], revision: 20)
+            preconditionFailure("Injected SQLite write failure must propagate")
+        } catch { }
+        let rolledBackWrite = try await failureStore.health()
+        precondition(rolledBackWrite.totalEntries == 0,
+            "Failed transaction must not retain partial memory entries")
+        runInjection("DROP TRIGGER reject_confirmed_insert")
+        _ = try await failureStore.save([failureKey: "Verified"], revision: 20)
+        let acknowledgedWrite = try await failureStore.health()
+        precondition(acknowledgedWrite.totalEntries == 1,
+            "Same revision must retry after a failed commit")
+        runInjection("""
+            CREATE TRIGGER reject_memory_clear BEFORE DELETE ON memory_entries
+            BEGIN SELECT RAISE(ABORT,'simulated_clear_failure'); END
+            """)
+        do {
+            try await failureStore.clear(revision: 21)
+            preconditionFailure("Injected clear failure must propagate")
+        } catch { }
+        let preservedAfterFailedClear = try await failureStore.health()
+        precondition(preservedAfterFailedClear.totalEntries == 1,
+            "Failed clear must preserve committed translations")
+        runInjection("DROP TRIGGER reject_memory_clear")
+        try await failureStore.clear(revision: 21)
+        let retriedClear = try await failureStore.health()
+        precondition(retriedClear.totalEntries == 0,
+            "Failed clear revision must remain retryable")
+        print("Transactional write/clear rollback and revision retry checks passed")
+
+        // Importing a formerly ready backup must never silently promote an
+        // entry that the user subsequently quarantined for review.
+        let reviewStore = TranslationMemoryStore(
+            directory: root.appendingPathComponent("review-preservation-db"))
+        _ = try await reviewStore.prepare(legacyURLs: [])
+        let reviewKey = "v4|\(rules)|pt>en|0:|Needs review."
+        _ = try await reviewStore.save([reviewKey: "Review me"], revision: 1)
+        let reviewBackup = try await reviewStore.exportData()
+        let reviewSnapshot = try await reviewStore.createRecoverySnapshot()
+        let reviewEntries = try await reviewStore.search(query: "Needs review.", limit: 5)
+        precondition(reviewEntries.count == 1)
+        _ = try await reviewStore.quarantineEntries(ids: [reviewEntries[0].id])
+        _ = try await reviewStore.importData(reviewBackup)
+        let afterImport = await reviewStore.lookup(key: reviewKey, timeoutMilliseconds: 50)
+        precondition(afterImport.value == nil, "Backup import may not undo explicit quarantine")
+        _ = try await reviewStore.mergeRecoverySnapshot(named: reviewSnapshot)
+        let afterRecovery = await reviewStore.lookup(key: reviewKey, timeoutMilliseconds: 50)
+        precondition(afterRecovery.value == nil,
+            "Recovery snapshot may not silently revalidate quarantined translations")
+        print("Imported-backup quarantine and recovery compatibility checks passed")
+
         let reopened = TranslationMemoryStore(directory: root.appendingPathComponent("db"))
         let cleared = try await reopened.prepare(legacyURLs: [legacy])
         precondition(cleared.totalEntries == 0, "Clear must not reimport legacy memory")
