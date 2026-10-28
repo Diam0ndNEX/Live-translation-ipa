@@ -163,6 +163,8 @@ struct ReadingSettings: View {
     @AppStorage("dropNoise") private var dropNoise = true
     @AppStorage("boost") private var boost = 1
     @AppStorage("skipUnchanged") private var skipUnchanged = true
+    @AppStorage("subtitleAwareChangeDetection") private var subtitleAwareChangeDetection = false
+    @AppStorage("preserveRelatedMovieGroups") private var preserveRelatedMovieGroups = false
     @AppStorage("ocrConfidence") private var confidence = 0.3
     @AppStorage("ocrCorrection") private var correction = true
     @State private var showAreaEditor = false
@@ -225,6 +227,14 @@ struct ReadingSettings: View {
                     Text("Always").tag(2)
                 }
                 Toggle("Skip unchanged frames", isOn: $skipUnchanged)
+                Toggle("Experimental subtitle-area change detection", isOn: $subtitleAwareChangeDetection)
+                    .disabled(!skipUnchanged)
+                Text("Upright video: samples more of the selected subtitle area. Rotated video: full-frame fallback. Periodic OCR remains active.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Toggle("Experimental multi-line lyric groups", isOn: $preserveRelatedMovieGroups)
+                    .disabled(mode != TranslateMode.movie.rawValue)
+                Text("Retains nearby, aligned secondary lyric/dialogue groups; may include unrelated text. Off by default.")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Toggle("OCR language correction", isOn: $correction)
                 VStack(alignment: .leading) {
                     Text("Minimum OCR confidence · \(Int(confidence * 100))%")
@@ -237,12 +247,14 @@ struct ReadingSettings: View {
             }
 
             ResetSection(keys: ["mode", "area", "customY0", "customY1", "frameRot", "speed", "stability",
-                                "minTextH", "ignoreList", "dropNoise", "boost", "skipUnchanged", "ocrConfidence", "ocrCorrection"])
+                                "minTextH", "ignoreList", "dropNoise", "boost", "skipUnchanged", "subtitleAwareChangeDetection", "preserveRelatedMovieGroups", "ocrConfidence", "ocrCorrection"])
         }
         .settingsPage("Reading & OCR")
         .sheet(isPresented: $showAreaEditor) { CaptureAreaEditor().environmentObject(engine) }
         .onChange(of: key) { _, _ in engine.syncConfig() }
         .onChange(of: frameRot) { _, _ in engine.rotationSettingChanged() }
+        .onChange(of: subtitleAwareChangeDetection) { _, _ in engine.pipelineSettingsChanged() }
+        .onChange(of: preserveRelatedMovieGroups) { _, _ in engine.pipelineSettingsChanged() }
     }
 }
 
