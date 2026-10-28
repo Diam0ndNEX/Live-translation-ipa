@@ -301,9 +301,6 @@ enum DiagnosticStoredZIP {
             central.append(name)
         }
         let centralOffset = UInt32(body.count)
-        write32(0x06054B50, to: &body) // End marker added after central below
-        // Move end marker to the end of the full central directory.
-        body.removeLast(4)
         body.append(central)
         write32(0x06054B50, to: &body)
         write16(0, to: &body)
