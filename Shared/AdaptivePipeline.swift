@@ -124,7 +124,7 @@ struct RecorderCosts {
 extension Config {
     func resetsRecognition(comparedTo old: Config?) -> Bool {
         guard let old else { return true }
-        return lang != old.lang || y0 != old.y0 || y1 != old.y1 || rev != old.rev || rot != old.rot
+        return appInterfaceVisible != old.appInterfaceVisible || lang != old.lang || y0 != old.y0 || y1 != old.y1 || rev != old.rev || rot != old.rot
             || paused != old.paused || stability != old.stability || confidence != old.confidence
             || correction != old.correction || boost != old.boost || adaptiveConfirmation != old.adaptiveConfirmation
             || subtitleTracking != old.subtitleTracking

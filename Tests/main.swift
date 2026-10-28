@@ -681,3 +681,24 @@ check(PipelineSafety.cacheKey(source: "pt", target: "en", text: "Olá amigo", pr
       PipelineSafety.cacheKey(source: "pt", target: "en", text: "Olá amigo", protectedWords: [],
         rules: TranslationModelMemoryPolicy.rulesContext(base: existingMemoryRules, lowLatency: false)),
       "Different model strategies must not cross-reuse persistent translations")
+
+// v1.7.0: screen transitions are recognition boundaries, not content evidence.
+var visibleConfig = configA
+visibleConfig.appInterfaceVisible = true
+var externalConfig = visibleConfig
+externalConfig.appInterfaceVisible = false
+check(externalConfig.resetsRecognition(comparedTo: visibleConfig),
+      "Leaving ScreenLingo must start new confirmation timing, not retain interface text")
+check(visibleConfig.resetsRecognition(comparedTo: externalConfig),
+      "Returning to ScreenLingo invalidates in-flight video OCR")
+check(!externalConfig.resetsRecognition(comparedTo: externalConfig),
+      "Repeated background heartbeat must not reset subtitle confirmation")
+let encodedConfig = try! JSONEncoder().encode(externalConfig)
+check((try! JSONDecoder().decode(Config.self, from: encodedConfig)).appInterfaceVisible == false,
+      "Visibility crosses the real app/extension Codable boundary")
+let oldConfigBytes = String(data: encodedConfig, encoding: .utf8)!
+    .replacingOccurrences(of: "\"appInterfaceVisible\":false,", with: "")
+    .replacingOccurrences(of: ",\"appInterfaceVisible\":false", with: "")
+check((try! JSONDecoder().decode(Config.self, from: Data(oldConfigBytes.utf8))).appInterfaceVisible == nil,
+      "Old app/extension configs remain decodable without visibility metadata")
+print("v1.7.0 capture visibility boundary checks passed")

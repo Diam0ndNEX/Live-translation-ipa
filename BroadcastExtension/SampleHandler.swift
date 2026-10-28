@@ -108,7 +108,7 @@ class SampleHandler: RPBroadcastSampleHandler {
                 ProcessInfo.processInfo.thermalState != .nominal,
             processingMs: lastOcrMs)
         effectiveOCRIntervalMs = interval * 1000
-        guard !cfg.paused else { pausedSkipped += 1; return }
+        guard !cfg.paused && cfg.appInterfaceVisible != true else { pausedSkipped += 1; return }
         guard CaptureCadence.remaining(startedAt: lastRun.timeIntervalSince1970, now: now.timeIntervalSince1970,
                                        interval: interval) <= 0 else { cadenceSkipped += 1; return }
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }

@@ -49,6 +49,7 @@ struct RootView: View {
         .translationTask(engine.downloadConfig) { session in await engine.runDownload(session) }
         .task {
             engine.diag.noteExecutionPhase(phase == .active ? "active" : (phase == .background ? "background" : "inactive"), pipActive: engine.pipActive)
+            engine.setAppInterfaceVisible(phase != .background)
             await engine.loadLanguages()
         }
         .onChange(of: diagnosticsEnabled) { _, _ in engine.diagnosticsSettingsChanged() }
@@ -60,6 +61,7 @@ struct RootView: View {
             engine.handleMemoryPressure()
         }
         .onChange(of: phase) { _, p in
+            engine.setAppInterfaceVisible(p != .background)
             engine.diag.noteExecutionPhase(p == .active ? "active" : (p == .background ? "background" : "inactive"), pipActive: engine.pipActive)
             if p == .active { engine.server.start() }
             if p == .background {

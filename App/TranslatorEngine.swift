@@ -100,10 +100,10 @@ final class TranslatorEngine: ObservableObject {
         "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode", "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "smartCool", "steadyCaptions", "languageRecovery", "deduplicateCopies", "continuousRotation", "contextualLanguage"
     ]
     /// App look & behaviour that presets do not touch.
-    static let interfaceKeys = ["memoryRAMCapacity", "memorySoftLimit", "persistDiagnosticSessions", "directPiPBuffer", "legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
+    static let interfaceKeys = ["memoryRAMCapacity", "memorySoftLimit", "persistDiagnosticSessions", "suppressOwnInterface", "directPiPBuffer", "legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
     static var settingKeys: [String] { presetKeys + interfaceKeys }
     static let defaults: [String: Any] = [
-        "memoryRAMCapacity": 3000, "memorySoftLimit": 100000, "persistDiagnosticSessions": false, "directPiPBuffer": false,
+        "suppressOwnInterface": true, "memoryRAMCapacity": 3000, "memorySoftLimit": 100000, "persistDiagnosticSessions": false, "directPiPBuffer": false,
         "source": "auto", "target": "en", "mode": "movie", "area": "smart", "customY0": 0.0, "customY1": 0.5,
         "speed": "balanced", "stability": 2, "minTextH": 0.0, "ignoreList": "", "frameRot": "auto",
         "dropNoise": true, "boost": 1, "skipUnchanged": true, "subtitleAwareChangeDetection": false, "preserveRelatedMovieGroups": false, "cleanOCR": true, "slang": true,
@@ -295,6 +295,8 @@ final class TranslatorEngine: ObservableObject {
     // confirmed subtitle; speculative/ RAM/ SQLite reuse never counts as proof.
     private var pendingLegacyProof: [String: String] = [:]
     private var memorySaving = false
+    private var memoryCoalescingTask: Task<Void, Never>?
+    private var appInterfaceVisible = true
     private var memoryMutationInProgress = false
     private var memoryRetryAttempts = 0
     private var storageFullRetryNotBefore = Date.distantPast
@@ -500,6 +502,17 @@ final class TranslatorEngine: ObservableObject {
         }
     }
 
+    /// Own-app visibility is observable; video playback in another app is not.
+    /// Do not translate ScreenLingo's diagnostic/settings interface back into PiP.
+    func setAppInterfaceVisible(_ visible: Bool) {
+        guard visible != appInterfaceVisible else { return }
+        appInterfaceVisible = visible
+        rotRev += 1 // Reject packets produced before the visibility boundary.
+        invalidatePending()
+        diag.noteRuntimeState(visible ? "app_interface_visible" : "external_capture_period")
+        syncConfig()
+    }
+
     func translationStrategyChanged() {
         pipelineSettingsChanged()
         if #available(iOS 26.0, *) { directSession?.cancel() }
@@ -554,7 +567,8 @@ final class TranslatorEngine: ObservableObject {
                            pressure: flag("adaptive", true) && (intelligentCool || speed == .automatic || (speed == .balanced && flag("adaptiveOCR", true))) && (ProcessInfo.processInfo.thermalState != .nominal || (busy && queued != nil)),
                            selectiveSpeculation: flag("selectiveSpeculation", true), speculationConfidence: num("speculationConfidence", 0.85),
                            detailCeiling: (ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical || (extFreeMB > 0 && extFreeMB < 12)) ? maxEdge : 2400,
-                           confirmationBurst: !flag("coolMode", false)))
+                           confirmationBurst: !flag("coolMode", false),
+                           appInterfaceVisible: appInterfaceVisible && flag("suppressOwnInterface", true)))
     }
 
     // MARK: PiP
@@ -850,7 +864,7 @@ final class TranslatorEngine: ObservableObject {
             diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
                 stage: "stability", reason: "handoff_replayed")
         }
-        if paused || manualMode { return }
+        if paused || manualMode || (appInterfaceVisible && flag("suppressOwnInterface", true)) { return }
         if let rev = p.rev, rev != rotRev { return }
         if p.kind == "clear" {
             deferredConfirmedPacket = nil
@@ -1307,7 +1321,7 @@ final class TranslatorEngine: ObservableObject {
     private func startDrain() {
         guard !busy, drainTask == nil, queued != nil || specQueued != nil else { return }
         interruptWarmupForLiveWork()
-        drainTask = Task { await drain() }
+        drainTask = Task(priority: .userInitiated) { await drain() }
     }
 
     /// Warm-up owns a disposable session, so cancelling it cannot invalidate
@@ -1520,6 +1534,7 @@ final class TranslatorEngine: ObservableObject {
         var pending: [String: [(b: Int, u: Int, s: Int, text: String, key: String)]] = [:]
         var srcLangs: [String: Locale.Language] = [:]
         var eligibleMemoryKeys = Set<String>()
+        var resolvedLookups: [String: MemoryLookupResult] = [:]
         var translatedAny = false
         var unresolvedSource = false
         var failureReason: String? = nil
@@ -1615,7 +1630,12 @@ final class TranslatorEngine: ObservableObject {
                     var resolvedHit = bypassReuse ? nil : cache[key]
                     var diskHit = false
                     if resolvedHit == nil, !bypassReuse, memoryReady, flag("remember", true), !flag("privateSession", false) {
-                        let lookup = await memoryStore.lookup(key: key)
+                        let lookup: MemoryLookupResult
+                        if let previous = resolvedLookups[key] { lookup = previous }
+                        else {
+                            lookup = await memoryStore.lookup(key: key)
+                            resolvedLookups[key] = lookup
+                        }
                         guard isCurrent() else {
                             if display {
                                 // Never attribute an obsolete result to the newer
@@ -1640,7 +1660,9 @@ final class TranslatorEngine: ObservableObject {
                                               candidate: currentPacket?.candidateID,
                                               frameIndex: currentPacket?.frames, unitKey: key)
                         }
-                        if let value = resolvedHit { cache[key] = value; touchCache(key) }
+                        if let value = resolvedHit {
+                            cache[key] = value; savedKeys.insert(key); touchCache(key)
+                        }
                     }
                     if let hit = resolvedHit {
                         touchCache(key)
@@ -1650,7 +1672,8 @@ final class TranslatorEngine: ObservableObject {
                             if speculativeHit, let origin = speculativeOrigins.removeValue(forKey: key) {
                                 speculationWindow.reuse(origin)
                             }
-                            let savedHit = diskHit || savedKeys.remove(key) != nil
+                            let savedFromRAM = savedKeys.remove(key) != nil
+                            let savedHit = diskHit || savedFromRAM
                             if !diskHit { diag.recordMemory(speculativeHit ? .speculativeHit : .ramHit,
                                                                   durationMs: (ProcessInfo.processInfo.systemUptime - lookupStart) * 1000,
                                                                   candidate: currentPacket?.candidateID,
@@ -1660,7 +1683,7 @@ final class TranslatorEngine: ObservableObject {
                             // independently confirmed by stable OCR, it is safe to use
                             // as evidence for lazy legacy reconciliation without another
                             // model call. Ordinary RAM/SQLite hits remain untrusted proof.
-                            if memoryEligible && confirmedKeys.insert(key).inserted {
+                            if memoryEligible && confirmedKeys.insert(key).inserted && !savedHit {
                                 queueMemory(key, hit, independentlyConfirmed: speculativeHit)
                             }
                             if diag.enabled {
@@ -1724,9 +1747,9 @@ final class TranslatorEngine: ObservableObject {
             }
             let batch = await translateBatch(plan.unique, source: src, target: target, installed: installed,
                                              speculative: !display, partial: partialHandler)
-            if !display, !isCurrent() {
-                // Cancellation is cooperative: the model can finish after a
-                // different caption arrives. Recover only completed exact-key
+            if !isCurrent() {
+                // Cancellation is cooperative: confirmed or speculative model work
+                // can finish after a different caption arrives. Recover only completed exact-key
                 // units in the SAME context, never publish this old caption,
                 // never retry it and never write unconfirmed output to disk.
                 let recovered = SubtitlePerformancePolicy.retainedSpeculativeResults(
@@ -1739,13 +1762,16 @@ final class TranslatorEngine: ObservableObject {
                 for (key, value) in recovered where cache[key] == nil {
                     cache[key] = value
                     savedKeys.remove(key)
-                    specKeys.insert(key)
+                    if !display { specKeys.insert(key) }
                     if let speculativeID { speculativeOrigins[key] = speculativeID }
                     touchCache(key)
                     retained += 1
                 }
                 trimCache()
-                if diag.enabled && diag.started == diagnosticEpoch { diag.s.specRetainedUnits += retained }
+                if diag.enabled && diag.started == diagnosticEpoch {
+                    if !display { diag.s.specRetainedUnits += retained }
+                    else { diag.noteCompletedWorkRecovery(retained) }
+                }
                 return
             }
             guard isCurrent() else { return }
@@ -2096,10 +2122,18 @@ final class TranslatorEngine: ObservableObject {
         else if pendingLegacyProof[key] != value { pendingLegacyProof[key] = nil }
         memoryPendingWrites = pendingMemory.count
         memoryDirty = true
-        saveMemory()
+        if memoryCoalescingTask == nil {
+            memoryCoalescingTask = Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 75_000_000)
+                guard !Task.isCancelled, let self else { return }
+                self.memoryCoalescingTask = nil
+                self.saveMemory()
+            }
+        }
     }
 
     func saveMemory(force: Bool = false) {
+        if force { memoryCoalescingTask?.cancel(); memoryCoalescingTask = nil }
         guard memoryReady, !memorySaving, !memoryMutationInProgress, !pendingMemory.isEmpty,
               force || Date() >= storageFullRetryNotBefore else { return }
         memorySaving = true

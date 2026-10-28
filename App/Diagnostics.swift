@@ -236,6 +236,8 @@ final class Diagnostics: ObservableObject {
     private var frameIDs: [Int: UUID] = [:]
     private var unitIDs: [String: UUID] = [:]
     private var memoryOutcomes: [MemoryDiagnosticOutcome: Int] = [:]
+    private var modelTimingSamples: [String: [Double]] = [:]
+    private var completedWorkRecoveredUnits = 0
     private var lookupSamples: [Double] = []
     private var writeSamples: [Double] = []
     private var archiveInProgress = false
@@ -332,7 +334,7 @@ final class Diagnostics: ObservableObject {
         guard enabled else { return }
         let allowed: Set<String> = [
             "heartbeat_timeout", "capture_connected", "idle_auto_pause", "session_time_limit",
-            "app_started", "capture_config_changed", "capture_idle", "capture_live",
+            "app_started", "app_interface_visible", "external_capture_period", "capture_config_changed", "capture_idle", "capture_live",
             "capture_paused", "capture_frozen",
             "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical"
         ]
@@ -392,6 +394,11 @@ final class Diagnostics: ObservableObject {
         legacyValidationPair = ["legacyInventorySource": source, "legacyInventoryTarget": target]
     }
 
+    func noteCompletedWorkRecovery(_ count: Int) {
+        guard enabled else { return }
+        completedWorkRecoveredUnits += max(0, count)
+    }
+
     func noteModelState(_ reason: String, durationMs: Double? = nil, candidate: String? = nil) {
         guard enabled else { return }
         let allowed: Set<String> = [
@@ -404,6 +411,13 @@ final class Diagnostics: ObservableObject {
             "legacy_idle_completed", "legacy_idle_deferred"
         ]
         guard allowed.contains(reason) else { return }
+        if ["model_batch_completed", "confirmed_model_completed", "speculative_model_completed"].contains(reason),
+           let durationMs, durationMs.isFinite, durationMs >= 0 {
+            modelTimingSamples[reason, default: []].append(durationMs)
+            if modelTimingSamples[reason, default: []].count > 1200 {
+                modelTimingSamples[reason]?.removeFirst()
+            }
+        }
         appendStructured(candidate: stableCandidateID(candidate), stage: "model_state", outcome: reason, reason: reason,
             durationMs: durationMs)
     }
@@ -516,7 +530,7 @@ final class Diagnostics: ObservableObject {
                     "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
                     "deduplicateCopies", "contextualLanguage", "languageRecovery",
                     "continuousRotation", "smartCool", "persistDiagnosticSessions",
-                    "diagSamples", "heartbeatInterval", "keepAwake"]
+                    "diagSamples", "heartbeatInterval", "keepAwake", "suppressOwnInterface"]
         var settings: [String: String] = [:]
         for key in keys {
             if let value = UserDefaults.standard.object(forKey: key) ?? TranslatorEngine.defaults[key] {
@@ -564,15 +578,9 @@ final class Diagnostics: ObservableObject {
                 "processingMs": DiagnosticDistribution(pipeline.map { $0.stages.translation }),
                 "displayHoldMs": DiagnosticDistribution(pipeline.map { $0.stages.displayHold }),
                 "renderingMs": DiagnosticDistribution(pipeline.map { $0.stages.rendering }),
-                "speculativeModelMs": DiagnosticDistribution(structuredEvents.filter {
-                    $0.reasonCode == "speculative_model_completed"
-                }.compactMap(\.durationMs)),
-                "confirmedModelMs": DiagnosticDistribution(structuredEvents.filter {
-                    $0.reasonCode == "confirmed_model_completed"
-                }.compactMap(\.durationMs)),
-                "modelBatchMs": DiagnosticDistribution(structuredEvents.filter {
-                    $0.reasonCode == "model_batch_completed"
-                }.compactMap(\.durationMs))],
+                "speculativeModelMs": DiagnosticDistribution(modelTimingSamples["speculative_model_completed", default: []]),
+                "confirmedModelMs": DiagnosticDistribution(modelTimingSamples["confirmed_model_completed", default: []]),
+                "modelBatchMs": DiagnosticDistribution(modelTimingSamples["model_batch_completed", default: []])],
             events: exportEventWindow(),
             intervals: diagnosticIntervals(at: Date()),
             oneSecondIntervals: detailedCollection ? recentIntervals(at: Date(), period: 1) : nil,
@@ -768,6 +776,7 @@ final class Diagnostics: ObservableObject {
         lastCaptureConnected = false
         lastRecordedThermalState = nil
         memoryOutcomes = [:]; lookupSamples = []; writeSamples = []
+        modelTimingSamples = [:]; completedWorkRecoveredUnits = 0
         started = Date()
         subtitleTraces = []; recorderCosts = RecorderCosts()
         lastFrames = 0; lastFrameTime = Date(); tickN = 0
@@ -912,6 +921,7 @@ final class Diagnostics: ObservableObject {
             "specPreemptionRequested": s.specPreemptionRequested,
             "specMatchingConfirmation": s.specMatchingConfirmation,
             "specRetainedUnits": s.specRetainedUnits,
+            "completedConfirmedUnitsRetained": completedWorkRecoveredUnits,
             "speculativeDiscarded": s.specDiscarded,
             "legacyVerified": memoryHealth.legacyValidated,
             "legacySuperseded": memoryHealth.legacySuperseded,

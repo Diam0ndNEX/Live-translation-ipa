@@ -70,6 +70,7 @@ actor TranslationMemoryStore {
     static let schemaVersion = 2
     let directory: URL
     private var db: OpaquePointer?
+    private var lookupStatements: [String: OpaquePointer] = [:]
     private var active = false
     private var latestRevision = -1
     private var status = MemoryStoreHealth()
@@ -83,7 +84,42 @@ actor TranslationMemoryStore {
     private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     init(directory: URL) { self.directory = directory }
-    deinit { if let db { sqlite3_close_v2(db) } }
+    deinit {
+        for query in lookupStatements.values { sqlite3_finalize(query) }
+        if let db { sqlite3_close_v2(db) }
+    }
+
+    private func clearLookupStatements() {
+        for query in lookupStatements.values { sqlite3_finalize(query) }
+        lookupStatements.removeAll()
+    }
+
+    /// Only the two read-only lookup shapes are retained, on this actor.
+    /// Reset AND clear bindings after every use, including conflicts/timeouts.
+    private func lookupStatement(_ sql: String, _ values: [SQLValue]) throws -> OpaquePointer {
+        guard let query = lookupStatements[sql] else {
+            let query = try statement(sql, values)
+            lookupStatements[sql] = query
+            return query
+        }
+        for (offset, value) in values.enumerated() {
+            guard case .text(let value) = value else { throw MemoryStoreError.databaseOperation }
+            let result = value.withCString { sqlite3_bind_text(query, Int32(offset + 1), $0, -1, transient) }
+            guard result == SQLITE_OK else { finishLookup(query); throw MemoryStoreError.databaseOperation }
+        }
+        return query
+    }
+
+    private func finishLookup(_ query: OpaquePointer) {
+        let reset = sqlite3_reset(query)
+        let cleared = sqlite3_clear_bindings(query)
+        if reset != SQLITE_OK || cleared != SQLITE_OK {
+            if let sql = lookupStatements.first(where: { $0.value == query })?.key {
+                lookupStatements.removeValue(forKey: sql)
+            }
+            sqlite3_finalize(query)
+        }
+    }
 
     private enum SQLValue {
         case text(String), integer(Int64), real(Double), blob(Data), null
@@ -408,8 +444,8 @@ actor TranslationMemoryStore {
         do {
             // At most two indexed rows are read. Any conflicting ready outputs make
             // automatic reuse ambiguous; keep both and request fresh translation.
-            let query = try statement("SELECT id,translated_text,EXISTS(SELECT 1 FROM memory_provenance p WHERE p.entry_id=memory_entries.id AND p.source_format IN ('envelope_v4','legacy_dictionary','envelope_v3','envelope_v2')) FROM memory_entries WHERE canonical_key=? AND validation_state='ready' AND confirmation_state='persisted' LIMIT 2", [.text(key)])
-            defer { sqlite3_finalize(query) }
+            let query = try lookupStatement("SELECT id,translated_text,EXISTS(SELECT 1 FROM memory_provenance p WHERE p.entry_id=memory_entries.id AND p.source_format IN ('envelope_v4','legacy_dictionary','envelope_v3','envelope_v2')) FROM memory_entries WHERE canonical_key=? AND validation_state='ready' AND confirmation_state='persisted' LIMIT 2", [.text(key)])
+            defer { finishLookup(query) }
             let first = sqlite3_step(query)
             if first == SQLITE_DONE {
                 return try lookupNormalized(key: key, started: started, deadline: deadline)
@@ -436,14 +472,14 @@ actor TranslationMemoryStore {
         guard let requested = keyParts(key), let rules = requested.rules
         else { return result(nil, "none", "incompatible") }
         let composed = requested.sourceText.precomposedStringWithCanonicalMapping
-        let query = try statement("""
+        let query = try lookupStatement("""
             SELECT canonical_key,translated_text,validation_state,confirmation_state
             FROM memory_entries
             WHERE source_language=? AND target_language=? AND normalized_source=?
             LIMIT 16
             """, [.text(requested.source), .text(requested.target),
                    .text(normalized(requested.sourceText))])
-        defer { sqlite3_finalize(query) }
+        defer { finishLookup(query) }
         var matched: String?
         var scanned = 0
         while true {
@@ -1015,6 +1051,7 @@ actor TranslationMemoryStore {
         }
         // A failed open can leave an inactive SQLite connection. No file move
         // is allowed until it has closed successfully.
+        clearLookupStatements()
         if let db {
             guard sqlite3_close(db) == SQLITE_OK else {
                 try? FileManager.default.removeItem(at: temp)
@@ -1045,6 +1082,7 @@ actor TranslationMemoryStore {
             return try self.health()
         } catch {
             active = false
+            clearLookupStatements()
             if let db {
                 sqlite3_close_v2(db)
                 self.db = nil

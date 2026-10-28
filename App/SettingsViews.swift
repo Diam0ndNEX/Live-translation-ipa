@@ -557,6 +557,7 @@ struct InterfaceSettings: View {
 // MARK: - Performance
 struct PerformanceSettings: View {
     @EnvironmentObject var engine: TranslatorEngine
+    @AppStorage("suppressOwnInterface") private var suppressOwnInterface = true
     @AppStorage("coolMode") private var coolMode = false
     @AppStorage("smartCool") private var smartCool = true
     @AppStorage("adaptive") private var adaptive = true
@@ -588,12 +589,16 @@ struct PerformanceSettings: View {
                     Text("30 minutes").tag(30)
                 }
                 Toggle("Keep screen awake during capture", isOn: $keepAwake)
+                Toggle("Pause screen reading inside ScreenLingo", isOn: $suppressOwnInterface)
+                Text("Avoids translating this app's interface. Turn off to read a video floating over ScreenLingo. Text and photo translation still work.")
+                    .font(.footnote).foregroundStyle(.secondary)
             } header: { Text("Idle & screen") } footer: {
                 Text("Pausing and reducing OCR during idle periods save power, but can delay the next text detection.")
             }
-            ResetSection(keys: ["coolMode", "smartCool", "adaptive", "idleMinutes", "idleBackoff", "keepAwake"])
+            ResetSection(keys: ["suppressOwnInterface", "coolMode", "smartCool", "adaptive", "idleMinutes", "idleBackoff", "keepAwake"])
         }
         .settingsPage("Performance & battery")
+        .onChange(of: suppressOwnInterface) { _, _ in engine.pipelineSettingsChanged() }
         .onChange(of: adaptive) { _, _ in engine.syncConfig() }
         .onChange(of: idleBackoff) { _, _ in engine.syncConfig() }
         .onChange(of: smartCool) { _, _ in engine.pipelineSettingsChanged() }

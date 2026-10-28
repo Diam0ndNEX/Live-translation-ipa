@@ -1,15 +1,12 @@
-# ScreenLingo v1.5.0 · build 53
+# ScreenLingo v1.7.0 · build 54
 
-Version 1.5.0 prioritizes consistent subtitle delivery and normal latency. It
-restores the 1.4.6 speculative cadence, recovers completed exact-context work
-into bounded RAM, reduces duplicate database health work and makes capture
-activation idempotent. It also fixes OCR fallback streaks, protected-name token
-collisions, stale photo task ownership, private-history edits and misleading
-enqueue/comparison diagnostics. Selective unvalidated legacy cleanup is retained.
+Normal-model performance candidate, based on v1.5.0 build 53. Low-latency
+translation remains optional and OFF by default. Targets redundant memory work,
+completed obsolete result recovery, own-interface OCR and representative diagnostics.
+No measured device speedup is claimed.
 
-[Release changes, research and acceptance checks](docs/v1.5.0-acceptance.md)
-cover the source review, automated evidence and physical-device checks still
-required. CI does not prove an on-device speedup or translation-quality parity.
+[Changes and release acceptance](docs/v1.7.0-performance.md) define the 90% target,
+quality/reliability gates and pending tests.
 
 Run the existing pipeline compilation in `.github/workflows/build.yml`, plus
 `bash scripts/test_memory.sh`, `bash scripts/test_transport.sh`,

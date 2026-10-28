@@ -50,6 +50,27 @@ import CryptoKit
                      "Confirmed writes can retry after storage capacity is restored")
         #endif
 
+        // Reused SQL statements must bind each key afresh and observe mutations.
+        let statementStore = TranslationMemoryStore(directory: root.appendingPathComponent("statement-reuse"))
+        _ = try await statementStore.prepare(legacyURLs: [])
+        let firstKey = "v4|\(rules)|pt>en|0:|Primeira frase."
+        let secondKey = "v4|\(rules)|pt>en|0:|Segunda frase."
+        _ = try await statementStore.save([firstKey: "First sentence.", secondKey: "Second sentence."], revision: 1)
+        for _ in 0..<20 {
+            let first = await statementStore.lookup(key: firstKey, timeoutMilliseconds: 50)
+            let missing = await statementStore.lookup(key: "v4|\(rules)|pt>en|0:|Never saved.", timeoutMilliseconds: 50)
+            let second = await statementStore.lookup(key: secondKey, timeoutMilliseconds: 50)
+            precondition(first.value == "First sentence." && missing.value == nil && second.value == "Second sentence.",
+                         "Prepared bindings must not leak a previous sentence's result")
+        }
+        let beforeQuarantine = try await statementStore.search(limit: 100)
+        _ = try await statementStore.quarantineEntries(ids: beforeQuarantine.filter { $0.key == firstKey }.map(\.id))
+        let afterQuarantine = await statementStore.lookup(key: firstKey, timeoutMilliseconds: 50)
+        precondition(afterQuarantine.value == nil, "Reused statement must observe quarantine immediately")
+        try await statementStore.clear(revision: 2)
+        let afterStatementClear = await statementStore.lookup(key: secondKey, timeoutMilliseconds: 50)
+        precondition(afterStatementClear.value == nil, "Prepared statements must not cache row results after clear")
+
         // Reopening a populated SQLite store without any legacy JSON file is not
         // "no previous memory"; that status must survive multi-year app upgrades.
         let durableDirectory = root.appendingPathComponent("already-migrated")
