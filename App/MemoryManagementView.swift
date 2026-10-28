@@ -70,7 +70,7 @@ struct MemoryManagementView: View {
                 Text("Off by default. When enabled, validates one eligible older entry at a time while ScreenLingo is in the foreground and capture/PiP are stopped. Never runs in Low Power Mode or serious thermal pressure.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Button("Validate up to 5 entries now") {
-                    Task { await engine.validateIdleLegacy(maxEntries: 5) }
+                    engine.startLegacyValidation(maxEntries: 5)
                 }.disabled(captureInProgress || transferBusy ||
                     engine.memoryHealth == nil)
                 LabeledContent("Validation activity", value: engine.legacyIdleValidationStatus)
