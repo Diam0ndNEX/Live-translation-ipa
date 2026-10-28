@@ -372,11 +372,12 @@ final class Diagnostics: ObservableObject {
             defer { archiveInProgress = false }
             do {
                 let data = try await exportWriter.encode(snapshot)
+                let indexedEvents = try await exportWriter.encodeIndexedEvents(snapshot.events)
                 // Check privacy again after encoding, before submitting a durable write.
                 guard UserDefaults.standard.bool(forKey: "persistDiagnosticSessions"),
                       !UserDefaults.standard.bool(forKey: "privateSession") else { return }
                 try await store.saveDiagnosticSession(id: snapshot.id.uuidString, startedAt: snapshot.startedAt,
-                    endedAt: snapshot.endedAt, payload: data)
+                    endedAt: snapshot.endedAt, payload: data, events: indexedEvents)
                 archiveStatus = "Session saved"
             } catch { archiveStatus = "Session could not be saved" }
         }
