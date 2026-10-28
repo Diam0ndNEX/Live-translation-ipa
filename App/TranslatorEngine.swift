@@ -215,6 +215,30 @@ final class TranslatorEngine: ObservableObject {
     private var idleValidationTask: Task<Void, Never>?
     private var legacyValidationCursor: Int64 = 0
     private var legacyValidationExhausted = false
+    private var legacyScanFingerprint = ""
+    @Published private(set) var legacyValidationInventory: [String: Int] = [:]
+    @Published private(set) var legacyScanReasons: [String: Int] = [:]
+
+    private func refreshLegacyScanContext() {
+        guard !legacyValidationBusy else { return }
+        let installed = langStatus.filter { $0.value == .installed }.keys.sorted().joined(separator: ",")
+        let fingerprint = "\(sourceCode)|\(targetCode)|\(memoryRuleToken)|\(memoryHealth?.totalEntries ?? 0)|\(memoryHealth?.legacyUnverified ?? 0)|\(installed)"
+        if fingerprint != legacyScanFingerprint {
+            legacyScanFingerprint = fingerprint
+            legacyValidationCursor = 0
+            legacyValidationExhausted = false
+            legacyValidationInventory = [:]
+            legacyScanReasons = [:]
+        }
+    }
+
+    func rescanLegacyValidation() {
+        guard idleValidationTask == nil else { return }
+        legacyValidationCursor = 0
+        legacyValidationExhausted = false
+        startLegacyValidation()
+    }
+
     private var lastIdleValidationAttempt = Date.distantPast
     private var legacyBatchStartedAt = Date.distantPast
     private var legacyAverageRate = 0.0
@@ -392,6 +416,7 @@ final class TranslatorEngine: ObservableObject {
         diag.tick(alive: alive, paused: paused, frozen: frozen)
         if tickCount % 5 == 0 { saveMemory() }
         if tickCount % 60 == 0 { applyHistoryRetention() }
+        if tickCount % 5 == 0 { refreshLegacyScanContext() }
         if tickCount % 5 == 0, flag("legacyIdleValidationEnabled", false),
            !legacyValidationExhausted, mayRunIdleValidation {
             let fair = ProcessInfo.processInfo.thermalState == .fair
@@ -1606,6 +1631,9 @@ final class TranslatorEngine: ObservableObject {
             if let batch, batch.count == plan.unique.count {
                 uniqueResults = batch.map(Optional.some)
             } else {
+                // Tentative work gets one attempt. Let confirmed processing own
+                // retries instead of holding its queue behind speculative retries.
+                if !display { return }
                 diag.log("Batch failed – retrying unique sentences")
                 uniqueResults = []
                 for sentence in plan.unique {
@@ -2213,6 +2241,7 @@ final class TranslatorEngine: ObservableObject {
 
     func startLegacyValidation(maxEntries: Int = IdleLegacyBatchPolicy.manualEntries) {
         guard idleValidationTask == nil else { return }
+        refreshLegacyScanContext()
         if legacyValidationExhausted {
             // Manual validation is a new scan after settings/model availability
             // may have changed; automatic idle checks avoid repeated futile scans.
@@ -2267,6 +2296,7 @@ final class TranslatorEngine: ObservableObject {
         legacyBatchCompleted = 0
         legacyBatchProcessed = 0
         legacyBatchSkipped = 0
+        legacyScanReasons = [:]
         legacyEstimatedRemainingMinutes = nil
         legacyBatchStartedAt = Date()
         legacyBatchTotal = 0
@@ -2291,6 +2321,8 @@ final class TranslatorEngine: ObservableObject {
         var scanned = 0
         var exhausted = false
         do {
+            legacyValidationInventory = try await memoryStore.legacyValidationInventory(
+                target: target, selectedSource: sourceFilter)
             while selected.count < maxCount && scanned < 384 {
                 guard idleValidationStillSafe(revision: originalRevision, target: target, rules: rules)
                 else { return }
@@ -2303,15 +2335,21 @@ final class TranslatorEngine: ObservableObject {
                 for entry in rows {
                     legacyValidationCursor = entry.id
                     scanned += 1
-                    guard !entry.source.isEmpty && !entry.text.isEmpty,
-                          (!flag("cleanOCR", true) ||
-                           TextIntel.cleanOCR(entry.text) == entry.text),
-                          (!flag("slang", true) ||
-                           TextIntel.expandSlang(entry.text, lang: entry.source) == entry.text)
-                    else { legacyBatchSkipped += 1; continue }
-                    let sentences = splitSentences(entry.text)
-                    guard sentences.count == 1 && sentences[0] == entry.text
-                    else { legacyBatchSkipped += 1; continue }
+                    let reason: String?
+                    if entry.source.isEmpty || entry.text.isEmpty {
+                        reason = "Unreadable key or protected context"
+                    } else if (flag("cleanOCR", true) && TextIntel.cleanOCR(entry.text) != entry.text) ||
+                                (flag("slang", true) && TextIntel.expandSlang(entry.text, lang: entry.source) != entry.text) {
+                        reason = "Needs cleanup or slang review"
+                    } else {
+                        let sentences = splitSentences(entry.text)
+                        reason = sentences.count == 1 && sentences[0] == entry.text ? nil : "Needs sentence-unit review"
+                    }
+                    if let reason {
+                        legacyBatchSkipped += 1
+                        legacyScanReasons[reason, default: 0] += 1
+                        continue
+                    }
                     selected.append(entry)
                     if selected.count >= maxCount { break }
                 }
@@ -2326,7 +2364,7 @@ final class TranslatorEngine: ObservableObject {
         if exhausted { legacyValidationExhausted = true }
         if selected.isEmpty {
             legacyIdleValidationStatus = exhausted ?
-                "No more eligible entries; pending records may need review" :
+                "No safe candidates for this language pair; see inventory and scan reasons below" :
                 "Skipped \(legacyBatchSkipped) incompatible older entries"
             return
         }
@@ -2345,6 +2383,7 @@ final class TranslatorEngine: ObservableObject {
         else { return }
         let eligible = selected.filter { installed.contains($0.source) }
         legacyBatchSkipped += selected.count - eligible.count
+        legacyScanReasons["Language model unavailable", default: 0] += selected.count - eligible.count
         let items = eligible.map { IdleLegacyWorkItem(id: $0.id, source: $0.source, text: $0.text) }
         let chunks = IdleLegacyBatchPolicy.chunks(items, limit: maxCount)
         legacyBatchTotal = items.count

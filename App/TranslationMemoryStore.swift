@@ -612,6 +612,23 @@ actor TranslationMemoryStore {
             previousOutput: text(query, 3))
     }
 
+    /// Read-only inventory. Categories partition pending legacy records; scan
+    /// candidates still require key, cleanup, segmentation and model checks.
+    func legacyValidationInventory(target: String, selectedSource: String?) throws -> [String: Int] {
+        guard active else { throw MemoryStoreError.unavailable }
+        let pending = "validation_state='needs_validation' AND rules_version IS NULL"
+        let all = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE \(pending)"))
+        let targetCount = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE \(pending) AND target_language=?", [.text(target)]))
+        let pair = pending + " AND target_language=? AND (? IS NULL OR source_language=?)"
+        let values: [SQLValue] = [.text(target), selectedSource.map(SQLValue.text) ?? .null, selectedSource.map(SQLValue.text) ?? .null]
+        let matching = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE \(pair)", values))
+        let candidates = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE \(pair) AND LENGTH(source_text) BETWEEN 4 AND 240", values))
+        return ["Pending legacy records": all, "Different target language": all - targetCount,
+                "Different source language": targetCount - matching,
+                "Outside 4–240 character range": matching - candidates,
+                "Scan candidates before safety checks": candidates]
+    }
+
     /// One bounded read instead of a separate SQLite call for each old entry.
     /// The caller can skip malformed rows, missing models and context-incompatible
     /// sources without loading all historical data into RAM.
@@ -1251,3 +1268,4 @@ actor TranslationMemoryStore {
     }
     func clearDiagnosticSessions() throws { try execute("DELETE FROM diagnostic_sessions") }
 }
+
