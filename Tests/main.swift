@@ -422,3 +422,23 @@ check(!SubtitleAcquisitionPolicy.isSameUnpresentedCaption(
     previousBlocks: ["Olá mundo"], incomingBlocks: ["Olá mundo!"]),
     "Tentative captions must not gain confirmed-work protection")
 print("Confirmed-caption OCR jitter continuity checks passed")
+
+
+// v1.4.2: association only discovers relationships. It must never
+// authorize a translation cache hit without independent model proof.
+check(LegacyAssociation.classify(old: "Olá, meu amigo!", new: "Olá meu amigo") == .orthographic,
+      "Punctuation-only variants must be discoverable")
+check(LegacyAssociation.classify(old: "I don't know how to respond to this problem",
+                                 new: "I don't know how to respond to that problem") == .none,
+      "Different words are not equivalent memory translations")
+check(LegacyAssociation.classify(old: "We should never make a mistake here.",
+                                 new: "We shouId never make a mistake here.") == .ocrCandidate,
+      "A single plausible long OCR-character error can be suggested for review")
+check(LegacyAssociation.classify(old: "Where in the world are we going tonight?",
+                                 new: "world are we going") == .fragment,
+      "A word-aligned long subtitle fragment can be associated")
+check(LegacyAssociation.classify(old: "I love you", new: "I hate you") == .none,
+      "Short meaning-changing variants must not be associated")
+check(LegacyAssociation.classify(old: "They'll never know", new: "They will never know") == .none,
+      "Expansions that change words are not automatically equivalent")
+print("Conservative legacy discovery regressions passed")
