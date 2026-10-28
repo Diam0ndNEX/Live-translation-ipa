@@ -732,7 +732,8 @@ final class TranslatorEngine: ObservableObject {
         // Overlay-only OCR changes must not supersede the same filtered subtitle.
         if flag("steadyCaptions", true), p.candidateID != nil { p.candidateID = activeCandidateID }
         if p.stable == false, let firstSeen = p.firstSeenAt {
-            diag.trace(p.candidateID, stage: "first OCR", detail: "Capture first sighting", at: Date(timeIntervalSince1970: firstSeen))
+            diag.trace(p.candidateID, stage: "first OCR", detail: "Capture first sighting",
+                       at: Date(timeIntervalSince1970: firstSeen), frameIndex: p.frames)
         }
         diag.trace(p.candidateID, stage: p.stable == false ? "seen" : "confirmed", detail: p.confirmationReason ?? "legacy confirmation")
         // First, unconfirmed sighting: translate quietly now so the result is ready the moment the text is confirmed.
@@ -1143,7 +1144,8 @@ final class TranslatorEngine: ObservableObject {
                 } else { diag.s.specCompleted += 1 }
             }
         }
-        diag.trace(currentPacket?.candidateID, stage: display ? "processing" : "speculating", detail: "Translation started")
+        diag.trace(currentPacket?.candidateID, stage: display ? "processing" : "speculating",
+                   detail: "Translation started", frameIndex: currentPacket?.frames)
         let target = Locale.Language(identifier: destination)
         let cleanOn = flag("cleanOCR", true), slangOn = flag("slang", true), speakerOn = flag("speakerDetect", true)
         let fixes = pairs("sourceFixes")
@@ -1231,7 +1233,9 @@ final class TranslatorEngine: ObservableObject {
                             case "database_error", "unavailable": outcome = .databaseUnavailable
                             default: outcome = diskHit ? (lookup.origin == "legacy" ? .legacyHit : .persistentHit) : .miss
                             }
-                            diag.recordMemory(outcome, durationMs: lookup.durationMs, candidate: currentPacket?.candidateID)
+                            diag.recordMemory(outcome, durationMs: lookup.durationMs,
+                                              candidate: currentPacket?.candidateID,
+                                              frameIndex: currentPacket?.frames, unitKey: key)
                         }
                         if let value = resolvedHit { cache[key] = value; touchCache(key) }
                     }
@@ -1241,7 +1245,10 @@ final class TranslatorEngine: ObservableObject {
                         if display {
                             let speculativeHit = specKeys.remove(key) != nil
                             let savedHit = diskHit || savedKeys.remove(key) != nil
-                            if !diskHit { diag.recordMemory(speculativeHit ? .speculativeHit : .ramHit, durationMs: (ProcessInfo.processInfo.systemUptime - lookupStart) * 1000, candidate: currentPacket?.candidateID) }
+                            if !diskHit { diag.recordMemory(speculativeHit ? .speculativeHit : .ramHit,
+                                                                  durationMs: (ProcessInfo.processInfo.systemUptime - lookupStart) * 1000,
+                                                                  candidate: currentPacket?.candidateID,
+                                                                  frameIndex: currentPacket?.frames, unitKey: key) }
                             if memoryEligible && confirmedKeys.insert(key).inserted { queueMemory(key, hit) }
                             if diag.enabled {
                                 if speculativeHit { diag.s.specHits += 1 }
