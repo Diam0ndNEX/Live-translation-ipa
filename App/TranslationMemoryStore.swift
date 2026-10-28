@@ -397,7 +397,7 @@ actor TranslationMemoryStore {
             counts[text(categories, 0)] = Int(sqlite3_column_int64(categories, 1))
         }
         status.categoryCounts = counts
-        status.lastVerifiedBackup = try metadata("last_verified_backup")
+        status.lastVerifiedBackup = try metadata("last_verified_backup").flatMap { $0.isEmpty ? nil : $0 }
         status.databaseBytes = ["memory.sqlite","memory.sqlite-wal","memory.sqlite-shm"].reduce(0) {
             $0 + ((try? FileManager.default.attributesOfItem(atPath: directory.appendingPathComponent($1).path)[.size] as? NSNumber)?.int64Value ?? 0)
         }
@@ -454,6 +454,29 @@ actor TranslationMemoryStore {
             try? FileManager.default.removeItem(at: staging)
             throw error
         }
+    }
+
+    /// Destructive opt-in only, after a confirmed active-memory clear. This
+    /// deliberately leaves history, settings, diagnostic sessions, and the
+    /// active SQLite database untouched. A failed removal is not reported as
+    /// success and can be retried without restoring deleted translations.
+    func deletePreservedCopies(legacyURLs: [URL]) throws {
+        guard active else { throw MemoryStoreError.unavailable }
+        let permitted = Set(["translation-memory-v4.json", "translation-memory.json"])
+        for url in legacyURLs {
+            guard permitted.contains(url.lastPathComponent) else { throw MemoryStoreError.sourceUnreadable }
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+        }
+        for name in ["legacy", "recovery"] {
+            let folder = directory.appendingPathComponent(name, isDirectory: true)
+            if FileManager.default.fileExists(atPath: folder.path) {
+                try FileManager.default.removeItem(at: folder)
+            }
+        }
+        try setMetadata("last_verified_backup", "")
+        status.lastVerifiedBackup = nil
     }
 
     func clear(revision: Int) throws {
