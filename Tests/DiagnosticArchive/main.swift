@@ -65,7 +65,7 @@ import Foundation
             counters: ["timeout": 4, "persistentHit": 16, "writeFailed": 1],
             distributions: [:], events: [], measurementBoundary: "test", textCapture: false)
         let findings = DiagnosticIssueDetector.assess(evidence)
-        precondition(Set(findings.map(\\.code)) == Set([
+        precondition(Set(findings.map(\.code)) == Set([
             "memory_write_failure", "memory_conflict", "migration_recovery", "memory_lookup_timeouts"
         ]), "Only evidence-backed diagnostic signals should be emitted")
         precondition(findings.first(where: { $0.code == "memory_lookup_timeouts" })?.classification == "suspected")
