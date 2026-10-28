@@ -150,7 +150,7 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
     func configureHeartbeat() {
         heartbeat?.invalidate()
         let interval = max(0.5, min(2, (UserDefaults.standard.object(forKey: "heartbeatInterval") as? Double) ?? 1))
-        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in self?.enqueueCurrentFrame() }
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in self?.enqueueCurrentFrame(heartbeat: true) }
         RunLoop.main.add(timer, forMode: .common)
         heartbeat = timer
     }
@@ -324,10 +324,13 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
     }
 
     @discardableResult
-    private func enqueueCurrentFrame() -> Bool {
-        guard let sb = makeSampleBuffer() else { return false }
+    private func enqueueCurrentFrame(heartbeat: Bool = false) -> Bool {
         let r = displayLayer.sampleBufferRenderer
         if r.status == .failed { r.flush() }
+        // Only avoid redundant heartbeat frames when the display queue is full.
+        // Newly translated subtitles must still be enqueued immediately.
+        if heartbeat && !r.readyForMoreMediaData { return true }
+        guard let sb = makeSampleBuffer() else { return false }
         r.enqueue(sb)
         return r.status != .failed
     }
