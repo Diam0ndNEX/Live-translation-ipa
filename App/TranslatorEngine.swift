@@ -100,7 +100,7 @@ final class TranslatorEngine: ObservableObject {
         "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode", "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "smartCool", "steadyCaptions", "languageRecovery", "deduplicateCopies", "continuousRotation", "contextualLanguage"
     ]
     /// App look & behaviour that presets do not touch.
-    static let interfaceKeys = ["accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
+    static let interfaceKeys = ["legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
     static var settingKeys: [String] { presetKeys + interfaceKeys }
     static let defaults: [String: Any] = [
         "source": "auto", "target": "en", "mode": "movie", "area": "smart", "customY0": 0.0, "customY1": 0.5,
@@ -121,7 +121,7 @@ final class TranslatorEngine: ObservableObject {
         "speculationConfidence": 0.85, "confirmationDeadline": 0.6, "smartCool": true, "steadyCaptions": true,
         "languageRecovery": true, "deduplicateCopies": true, "continuousRotation": false, "contextualLanguage": true,
         "coolMode": false, "diagnosticsEnabled": true, "detailedCollection": false, "freshTranslationTest": false, "showSessionSpeakers": true,
-        "privateSession": false, "diagIncludeText": false, "sessionLimit": 0, "readerSize": 28.0,
+        "legacyIdleValidationEnabled": false, "privateSession": false, "diagIncludeText": false, "sessionLimit": 0, "readerSize": 28.0,
         "readerOriginal": true, "readerAlignment": false, "ocrConfidence": 0.3, "ocrCorrection": true, "idleBackoff": true
     ]
 
@@ -161,6 +161,9 @@ final class TranslatorEngine: ObservableObject {
     @Published var original = ""
     @Published var translated = ""
     @Published var status = "Idle"
+    @Published private(set) var warmupStatus = "Waiting for source language"
+    @Published private(set) var legacyIdleValidationStatus = "Disabled"
+    @Published private(set) var legacyValidatedThisSession = 0
     @Published var captureAlive = false
     @Published var frames = 0
     @Published var ocrCount = 0
@@ -196,6 +199,10 @@ final class TranslatorEngine: ObservableObject {
     private var processingStarted = Date()
     private var savedRequests = 0
     private var warming = false
+    private var legacyValidationBusy = false
+    private var idleValidationTask: Task<Void, Never>?
+    private var legacyValidationCursor: Int64 = 0
+    private var lastIdleValidationAttempt = Date.distantPast
     private var languageCache: [String: (NLLanguage?, [NLLanguage: Double])] = [:]
     private var drainTask: Task<Void, Never>?
     private var activeCandidateText = ""
@@ -206,6 +213,7 @@ final class TranslatorEngine: ObservableObject {
     private var savedKeys = Set<String>()
     private var confirmedKeys = Set<String>()
     private var subtitleRegions = SubtitleRegions()
+    private var movieTextFocus = MovieTextFocus()
     private var languageFailures = 0
     private var rulesSnapshot = "", rulesDigest = ""
     private var busy = false
@@ -226,11 +234,15 @@ final class TranslatorEngine: ObservableObject {
     private var specKeys = Set<String>()
     private var lastSpecText = ""
     private var lastWarm = Date.distantPast
+    private var lastUnresolvedWarmupNotice = Date.distantPast
     let memoryStore = TranslationMemoryStore(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ScreenLingo/TranslationMemory", isDirectory: true))
     @Published var memoryHealth: MemoryStoreHealth?
     @Published var memoryPendingWrites = 0
     @Published var memoryFailure: String?
     private var pendingMemory: [String: String] = [:]
+    // A proof is recorded only when the current model generated the result for a
+    // confirmed subtitle; speculative/ RAM/ SQLite reuse never counts as proof.
+    private var pendingLegacyProof: [String: String] = [:]
     private var memorySaving = false
     private var memoryMutationInProgress = false
     private var memoryRetryAttempts = 0
@@ -328,6 +340,7 @@ final class TranslatorEngine: ObservableObject {
         }
         presets.applyStartup()
         diag.log("App started \(AppVersion.full)")
+        diag.noteRuntimeState("app_started")
     }
 
     private func tick() {
@@ -349,6 +362,11 @@ final class TranslatorEngine: ObservableObject {
         diag.tick(alive: alive, paused: paused, frozen: frozen)
         if tickCount % 5 == 0 { saveMemory() }
         if tickCount % 60 == 0 { applyHistoryRetention() }
+        if tickCount % 60 == 0, flag("legacyIdleValidationEnabled", false),
+           Date().timeIntervalSince(lastIdleValidationAttempt) > 90,
+           mayRunIdleValidation {
+            startLegacyValidation(maxEntries: 1)
+        }
         if alive, !paused, tickCount % 10 == 0, Date().timeIntervalSince(lastTextDate) > 8,
            Date().timeIntervalSince(lastWarm) > 25 {
             Task { await prewarm() }
@@ -420,6 +438,7 @@ final class TranslatorEngine: ObservableObject {
     }
 
     func pipelineSettingsChanged() {
+        diag.noteRuntimeState("capture_config_changed")
         invalidatePending()
         rotRev += 1
         syncConfig()
@@ -453,6 +472,7 @@ final class TranslatorEngine: ObservableObject {
                            speculate: speculationAllowed && flag("translateAhead", true), confidence: num("ocrConfidence", 0.3),
                            correction: flag("ocrCorrection", true), idleBackoff: flag("idleBackoff", true),
                            movieMode: mode == .movie,
+                           captureDiagnostics: diag.enabled,
                            adaptiveOCR: speed == .automatic || (speed == .balanced && flag("adaptiveOCR", true)),
                            adaptiveConfirmation: flag("adaptiveConfirmation", false), subtitleTracking: flag("subtitleTracking", true),
                            confirmationDeadline: num("confirmationDeadline", 0.6), smartCool: intelligentCool,
@@ -506,6 +526,7 @@ final class TranslatorEngine: ObservableObject {
         generation += 1
         drainTask?.cancel()
         activeCandidateID = nil; activeCandidateText = ""
+        movieTextFocus.reset()
         activeCandidateConfirmed = false; activeCandidatePresented = false
         cancelPresentation()
         queued = nil
@@ -705,6 +726,8 @@ final class TranslatorEngine: ObservableObject {
         diag.onPacket(p, transport: p.ts.map { max(0, now.timeIntervalSince1970 - $0) * 1000 })
 
         if !wasAlive {
+            idleValidationTask?.cancel()
+            idleValidationTask = nil
             sessionStarted = now
             sessionTranslations = 0; sessionCharacters = 0
             diag.log("Capture connected (extension v\(p.version))")
@@ -740,7 +763,13 @@ final class TranslatorEngine: ObservableObject {
             return
         }
         let candidateText = candidateTexts.map(TextSim.norm).joined(separator: "\n")
-        if flag("steadyCaptions", true), let candidate = p.candidateID, activeCandidateText != candidateText {
+        let equivalentActiveCaption = SubtitleAcquisitionPolicy.isSameUnpresentedCaption(
+            activeConfirmed: activeCandidateConfirmed,
+            activePresented: activeCandidatePresented,
+            previousBlocks: latestBlocks,
+            incomingBlocks: candidateTexts)
+        if flag("steadyCaptions", true), let candidate = p.candidateID,
+           activeCandidateText != candidateText && !equivalentActiveCaption {
             let confirmed = p.stable != false
             // Tentative OCR jitter must never cancel a previously confirmed subtitle.
             // Its confirmed replacement can still supersede outdated work.
@@ -767,6 +796,11 @@ final class TranslatorEngine: ObservableObject {
             drainTask?.cancel()
         } else if p.stable != false {
             activeCandidateConfirmed = true
+            if equivalentActiveCaption && activeCandidateText != candidateText {
+                diag.notePipelineDecision(candidate: activeCandidateID,
+                    frameIndex: p.frames, stage: "duplicate_detection",
+                    reason: "preserved_confirmed_work")
+            }
         }
         if p.stable != false && diag.enabled { diag.s.confirmedCandidatePackets += 1 }
         // Overlay-only OCR changes must not supersede the same filtered subtitle.
@@ -847,7 +881,7 @@ final class TranslatorEngine: ObservableObject {
             if count { subtitleRegions = regions }
         }
         if count && diag.enabled { diag.s.blocksIn += allBlocks.count }
-        let blocks = selectBlocks(allBlocks)
+        let blocks = selectBlocks(allBlocks, diagnosticCount: count)
         if count && diag.enabled { diag.s.blocksKept += blocks.count }
         var texts: [String] = []
         for b in blocks {
@@ -936,12 +970,15 @@ final class TranslatorEngine: ObservableObject {
     }
 
     /// Movie mode keeps the dominant block(s); other modes keep everything that isn't tiny.
-    private func selectBlocks(_ blocks: [[OCRLine]]) -> [[OCRLine]] {
+    private func selectBlocks(_ blocks: [[OCRLine]], diagnosticCount: Bool) -> [[OCRLine]] {
         guard !blocks.isEmpty else { return [] }
         let maxH = blocks.map { blockHeight($0) }.max() ?? 0
         var kept = blocks
         if mode == .movie {
-            kept = blocks.filter { blockHeight($0) >= maxH * 0.7 }
+            let beforeHeightFilter = kept.count
+            // Tiny dialogue must not be excluded because a persistent label uses a larger font.
+            kept = blocks.filter { blockHeight($0) >= max(0.006, maxH * 0.20) }
+            if kept.isEmpty { kept = blocks }
             // Aligned visible lyrics are one reading group, even with separate OCR boxes.
             let sorted = kept.sorted { ($0.first?.y ?? 0) > ($1.first?.y ?? 0) }
             var groups: [[[OCRLine]]] = []
@@ -955,7 +992,22 @@ final class TranslatorEngine: ObservableObject {
                     return abs(px - x) <= 0.12 && abs(py - y) <= max(0.12, blockHeight(block) * 4.2)
                 }) { groups[i].append(block) } else { groups.append([block]) }
             }
-            kept = groups.max(by: { a, b in a.reduce(0) { $0 + blockWeight($1) } < b.reduce(0) { $0 + blockWeight($1) } }) ?? []
+            let summaries = groups.map { group -> MovieTextGroup in
+                let lines = group.flatMap { $0 }
+                let x = lines.reduce(0.0) { $0 + $1.x } / Double(max(1, lines.count))
+                let y = lines.reduce(0.0) { $0 + $1.y } / Double(max(1, lines.count))
+                return MovieTextGroup(text: lines.map(\.t).joined(separator: " "), x: x, y: y,
+                    weight: group.reduce(0.0) { $0 + blockWeight($1) })
+            }
+            // A label becomes background only after repeated, spatially stable OCR.
+            // A lone held subtitle/lyrics group remains eligible for translation.
+            let strongest = summaries.indices.max(by: { summaries[$0].weight < summaries[$1].weight })
+            let chosen = movieTextFocus.preferredIndex(in: summaries, at: Date().timeIntervalSince1970)
+            diag.noteMovieSelection(groups: groups.count,
+                filteredSmall: beforeHeightFilter - kept.count,
+                temporalOverride: chosen != nil && chosen != strongest,
+                confirmed: diagnosticCount)
+            if let chosen { kept = groups[chosen] } else { kept = [] }
         } else if area == .smart {
             kept = blocks.filter { blockHeight($0) >= maxH * 0.4 }
         }
@@ -1042,6 +1094,7 @@ final class TranslatorEngine: ObservableObject {
         generation += 1
         cancelPresentation()
         lastHandled = joined
+        if queued != nil { diag.noteQueueReplacement() }
         queued = blocks
         queuedAt = Date()
         startDrain()
@@ -1257,7 +1310,7 @@ final class TranslatorEngine: ObservableObject {
             savedKeys.remove(key)
             if display && eligibleMemoryKeys.contains(key) && !flag("freshTranslationTest", false) {
                 confirmedKeys.insert(key)
-                queueMemory(key, out)
+                queueMemory(key, out, independentlyConfirmed: true)
             }
             memoryDirty = true
             touchCache(key)
@@ -1363,7 +1416,14 @@ final class TranslatorEngine: ObservableObject {
                                                                   durationMs: (ProcessInfo.processInfo.systemUptime - lookupStart) * 1000,
                                                                   candidate: currentPacket?.candidateID,
                                                                   frameIndex: currentPacket?.frames, unitKey: key) }
-                            if memoryEligible && confirmedKeys.insert(key).inserted { queueMemory(key, hit) }
+                            // A speculative result was produced by the current on-device
+                            // model, not by historical memory. Once this exact key is
+                            // independently confirmed by stable OCR, it is safe to use
+                            // as evidence for lazy legacy reconciliation without another
+                            // model call. Ordinary RAM/SQLite hits remain untrusted proof.
+                            if memoryEligible && confirmedKeys.insert(key).inserted {
+                                queueMemory(key, hit, independentlyConfirmed: speculativeHit)
+                            }
                             if diag.enabled {
                                 if speculativeHit { diag.s.specHits += 1 }
                                 else if savedHit { diag.s.savedHits += 1 }
@@ -1502,6 +1562,7 @@ final class TranslatorEngine: ObservableObject {
         if #available(iOS 26.0, *), installed {
             let k = "\(source.minimalIdentifier)>\(targetCode)"
             if directSession == nil || directKey != k {
+                diag.noteModelState("model_session_created")
                 directSession = TranslationSession(installedSource: source, target: target)
                 directKey = k
             }
@@ -1509,6 +1570,7 @@ final class TranslatorEngine: ObservableObject {
             guard let session = directSession else { return nil }
             let r = await runBatch(session, texts)
             if r == nil { directSession = nil }
+            else { warmupStatus = "Ready" }
             return r
         }
         if diag.enabled { diag.s.sessionKind = "Hosted view (iOS 18)" }
@@ -1516,12 +1578,18 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func runBatch(_ session: TranslationSession, _ texts: [String]) async -> [String]? {
+        let began = ProcessInfo.processInfo.systemUptime
         let reqs = texts.enumerated().map { TranslationSession.Request(sourceText: $0.element, clientIdentifier: String($0.offset)) }
         do {
             let res = try await session.translations(from: reqs)
-            return PipelineSafety.orderedTranslations(res.map { ($0.clientIdentifier, $0.targetText) }, count: texts.count)
+            let result = PipelineSafety.orderedTranslations(res.map { ($0.clientIdentifier, $0.targetText) }, count: texts.count)
+            diag.noteModelState(result == nil ? "model_batch_failed" : "model_batch_completed",
+                durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
+            return result
         } catch {
             if Task.isCancelled { return nil }
+            diag.noteModelState("model_batch_failed",
+                durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
             diag.event(.error, "Translation engine failed: \(error.localizedDescription)")
             return nil
         }
@@ -1664,7 +1732,7 @@ final class TranslatorEngine: ObservableObject {
         cacheUse[key] = cacheClock
     }
 
-    private func queueMemory(_ key: String, _ value: String) {
+    private func queueMemory(_ key: String, _ value: String, independentlyConfirmed: Bool = false) {
         guard flag("remember", true), !flag("privateSession", false),
               !flag("freshTranslationTest", false) else { return }
         // Bound pending writes without claiming unsaved entries are durable.
@@ -1673,6 +1741,8 @@ final class TranslatorEngine: ObservableObject {
             return
         }
         pendingMemory[key] = value
+        if independentlyConfirmed { pendingLegacyProof[key] = value }
+        else if pendingLegacyProof[key] != value { pendingLegacyProof[key] = nil }
         memoryPendingWrites = pendingMemory.count
         memoryDirty = true
         saveMemory()
@@ -1683,6 +1753,9 @@ final class TranslatorEngine: ObservableObject {
               force || Date() >= storageFullRetryNotBefore else { return }
         memorySaving = true
         let snapshot = pendingMemory
+        let freshKeys = Set(snapshot.compactMap { key, value in
+            pendingLegacyProof[key] == value ? key : nil
+        })
         memoryRevision += 1
         let revision = memoryRevision
         Task { [weak self] in
@@ -1691,10 +1764,16 @@ final class TranslatorEngine: ObservableObject {
             var committed = false
             var storageFull = false
             do {
-                self.memoryHealth = try await self.memoryStore.save(snapshot, revision: revision)
+                self.memoryHealth = try await self.memoryStore.save(snapshot,
+                    revision: revision, independentlyConfirmedKeys: freshKeys)
                 committed = true
                 if self.memoryRevision == revision {
-                    for (key, value) in snapshot where self.pendingMemory[key] == value { self.pendingMemory[key] = nil }
+                    for (key, value) in snapshot where self.pendingMemory[key] == value {
+                        self.pendingMemory[key] = nil
+                        if self.pendingLegacyProof[key] == value {
+                            self.pendingLegacyProof[key] = nil
+                        }
+                    }
                 }
                 self.memoryFailure = nil
                 self.diag.recordMemory(.persisted, durationMs: (ProcessInfo.processInfo.systemUptime - writeStart) * 1000)
@@ -1764,6 +1843,11 @@ final class TranslatorEngine: ObservableObject {
             diag.memoryHealth.totalEntries = health.totalEntries
             diag.memoryHealth.readyEntries = health.readyEntries
             diag.memoryHealth.needsValidation = health.needsValidation
+            diag.memoryHealth.legacyValidated = health.legacyValidated
+            diag.memoryHealth.legacySuperseded = health.legacySuperseded
+            diag.memoryHealth.legacyUnverified = health.legacyUnverified
+            diag.memoryHealth.suggestedOCRMatches = health.suggestedOCRMatches
+            diag.memoryHealth.suggestedFragmentMatches = health.suggestedFragmentMatches
             diag.memoryHealth.conflicts = health.conflicts
             diag.memoryHealth.databaseBytes = health.databaseBytes
             diag.memoryHealth.migrationStatus = health.migrationStatus
@@ -1933,13 +2017,124 @@ final class TranslatorEngine: ObservableObject {
         diag.recordMemory(.ramEviction, count: victims.count)
     }
 
+    // MARK: Explicitly opt-in, foreground-only old memory reconciliation
+    private var mayRunIdleValidation: Bool {
+        memoryReady && !memorySaving && !memoryMutationInProgress &&
+        pendingMemory.isEmpty && !legacyValidationBusy && !warming &&
+        !captureAlive && !pipActive && !busy &&
+        UIApplication.shared.applicationState == .active &&
+        !flag("privateSession", false) && !flag("freshTranslationTest", false) &&
+        !ProcessInfo.processInfo.isLowPowerModeEnabled &&
+        ProcessInfo.processInfo.thermalState != .serious &&
+        ProcessInfo.processInfo.thermalState != .critical
+    }
+
+    func startLegacyValidation(maxEntries: Int = 5) {
+        guard idleValidationTask == nil else { return }
+        idleValidationTask = Task { [weak self] in
+            await self?.validateIdleLegacy(maxEntries: maxEntries)
+            self?.idleValidationTask = nil
+        }
+    }
+
+    /// At most five translations on demand, or one per idle interval. The old
+    /// output never becomes authoritative; all model requests remain on-device.
+    func validateIdleLegacy(maxEntries: Int = 1) async {
+        guard mayRunIdleValidation else {
+            legacyIdleValidationStatus = "Unavailable while capturing or under power pressure"
+            return
+        }
+        guard #available(iOS 26.0, *) else {
+            legacyIdleValidationStatus = "Requires iOS 26 or newer"
+            return
+        }
+        guard pairs("sourceFixes").isEmpty &&
+              list("neverTranslate", lower: false).isEmpty else {
+            legacyIdleValidationStatus = "Source substitutions/protected words prevent safe idle validation"
+            return
+        }
+        lastIdleValidationAttempt = Date()
+        legacyValidationBusy = true
+        legacyIdleValidationStatus = "Checking old translations…"
+        diag.noteModelState("legacy_idle_started")
+        defer { legacyValidationBusy = false }
+        let originalRevision = contextRevision
+        let target = targetCode
+        let source: String? = sourceCode == "auto" ? nil : sourceCode
+        var completed = 0
+        for _ in 0..<max(1, min(5, maxEntries)) {
+            guard !Task.isCancelled && !captureAlive && !pipActive && !busy &&
+                  UIApplication.shared.applicationState == .active &&
+                  !ProcessInfo.processInfo.isLowPowerModeEnabled &&
+                  ProcessInfo.processInfo.thermalState != .serious &&
+                  ProcessInfo.processInfo.thermalState != .critical &&
+                  contextRevision == originalRevision && targetCode == target &&
+                  !memorySaving && pendingMemory.isEmpty else { break }
+            do {
+                guard let candidate = try await memoryStore.nextLegacyIdleCandidate(
+                    target: target, selectedSource: source,
+                    after: legacyValidationCursor) else {
+                    if completed == 0 { legacyIdleValidationStatus = "No eligible older entries for this language pair" }
+                    break
+                }
+                legacyValidationCursor = candidate.id
+                let text = candidate.text
+                guard !text.isEmpty && !candidate.source.isEmpty else { continue }
+                // Existing OCR cleanup, slang, and sentence splitting rules may
+                // change a historical string. Never store an incorrect v4 key.
+                guard (!flag("cleanOCR", true) || TextIntel.cleanOCR(text) == text),
+                      (!flag("slang", true) ||
+                       TextIntel.expandSlang(text, lang: candidate.source) == text)
+                else { continue }
+                let segments = splitSentences(text)
+                guard segments.count == 1 && segments[0] == text else { continue }
+                let src = Locale.Language(identifier: candidate.source)
+                let dst = Locale.Language(identifier: target)
+                guard src.languageCode != dst.languageCode else { continue }
+                guard await pairStatus(src, dst) == .installed else { continue }
+                guard !Task.isCancelled && !captureAlive && !pipActive && !busy &&
+                      contextRevision == originalRevision else { break }
+                let outputs = await translateBatch([text], source: src,
+                    target: dst, installed: true)
+                guard !Task.isCancelled && !captureAlive && !pipActive && !busy &&
+                      contextRevision == originalRevision &&
+                      UIApplication.shared.applicationState == .active &&
+                      !ProcessInfo.processInfo.isLowPowerModeEnabled &&
+                      ProcessInfo.processInfo.thermalState != .serious &&
+                      ProcessInfo.processInfo.thermalState != .critical &&
+                      !memorySaving && !memoryMutationInProgress &&
+                      pendingMemory.isEmpty else { break }
+                guard let translation = outputs?.first, !translation.isEmpty else { continue }
+                let key = PipelineSafety.cacheKey(source: candidate.source,
+                    target: target, text: text, protectedWords: [],
+                    rules: memoryRuleToken)
+                memoryRevision += 1
+                memoryHealth = try await memoryStore.confirmIdleLegacy(
+                    id: candidate.id, currentKey: key,
+                    freshOutput: translation, revision: memoryRevision)
+                legacyValidatedThisSession += 1
+                completed += 1
+                await refreshMemoryHealth()
+            } catch {
+                legacyIdleValidationStatus = "Deferred; saved memory preserved"
+                diag.noteModelState("legacy_idle_deferred")
+                break
+            }
+        }
+        if completed > 0 {
+            legacyIdleValidationStatus = "Verified \(completed) older entries in this batch"
+            diag.noteModelState("legacy_idle_completed")
+        }
+    }
+
     // MARK: Keep the translator warm
     private static let warmWords = ["en": "Hello.", "pt": "Olá.", "es": "Hola.", "fr": "Bonjour.", "de": "Hallo.",
                                     "it": "Ciao.", "ja": "こんにちは。", "ko": "안녕하세요.", "zh": "你好。", "ru": "Привет."]
 
     /// Loads the translation models before they're needed so the first real sentence isn't slow.
     func prewarm() async {
-        guard runtimePolicy.allowsPrewarming, flag("keepWarm", true), !paused, !busy, !warming,
+        guard runtimePolicy.allowsPrewarming, flag("keepWarm", true), !paused,
+              !legacyValidationBusy, !busy, !warming,
               Date().timeIntervalSince(lastWarm) > 25 else { return }
         warming = true
         defer { warming = false }
@@ -1947,13 +2142,26 @@ final class TranslatorEngine: ObservableObject {
         if sourceCode != "auto" { code = sourceCode }
         else if let l = lockedLang { code = l }
         else if detectedLang != "–" { code = detectedLang }
-        else { return }
+        else {
+            warmupStatus = "Waiting for source language"
+            if Date().timeIntervalSince(lastUnresolvedWarmupNotice) > 25 {
+                lastUnresolvedWarmupNotice = Date()
+                diag.noteModelState("warmup_source_unresolved")
+            }
+            return
+        }
         let workContext = contextRevision
         let destination = targetCode
         let src = Locale.Language(identifier: code)
         let target = Locale.Language(identifier: destination)
         guard src.languageCode != target.languageCode,
               let word = Self.warmWords[src.languageCode?.identifier ?? code] else { return }
+        // Avoid reloading the same model while a usable warm session exists.
+        let warmKey = "\(src.minimalIdentifier)>\(destination)"
+        guard directSession == nil || directKey != warmKey else {
+            warmupStatus = "Ready"
+            return
+        }
         guard await pairStatus(src, target) == .installed, workContext == contextRevision, !busy,
               !ProcessInfo.processInfo.isLowPowerModeEnabled,
               ProcessInfo.processInfo.thermalState != .serious,
@@ -1962,11 +2170,17 @@ final class TranslatorEngine: ObservableObject {
         guard #available(iOS 26.0, *) else { return }
         lastWarm = Date()
         let t0 = Date()
+        warmupStatus = "Warming up…"
+        diag.noteModelState("warmup_started")
         let session = TranslationSession(installedSource: src, target: target)
-        _ = await runBatch(session, [word])
-        if !busy, workContext == contextRevision, directSession == nil {
+        let warmed = await runBatch(session, [word])
+        warmupStatus = warmed == nil ? "Warm-up failed" : "Ready"
+        diag.noteModelState(warmed == nil ? "warmup_failed" : "warmup_succeeded",
+            durationMs: Date().timeIntervalSince(t0) * 1000)
+        if warmed != nil, !busy, workContext == contextRevision,
+           (directSession == nil || directKey != warmKey) {
             directSession = session
-            directKey = "\(src.minimalIdentifier)>\(destination)"
+            directKey = warmKey
         }
         let ms = Date().timeIntervalSince(t0) * 1000
         if ms > 300 { diag.event(.translation, "Warmed up the translator in \(Int(ms)) ms") }

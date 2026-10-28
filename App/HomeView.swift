@@ -44,6 +44,7 @@ struct HomeView: View {
                     header
                     languageCard
                     liveCard
+                    warmupCard
                     if homeTools { outputTools }
                     if homeStatus && homeMetrics { LatencyReadout(monitor: engine.latency) }
                     if !engine.captureAlive { readiness }
@@ -230,6 +231,19 @@ struct HomeView: View {
                 Text(SpeedPreset(rawValue: speed)?.title ?? "Balanced").font(.caption).foregroundStyle(.secondary)
             }
         }.card()
+    }
+
+    private var warmupCard: some View {
+        HStack(spacing: 10) {
+            Image(systemName: engine.warmupStatus == "Ready" ?
+                "checkmark.circle.fill" : "arrow.triangle.2.circlepath.circle")
+                .foregroundStyle(engine.warmupStatus == "Ready" ? .green : .secondary)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Translation model").font(.caption2).foregroundStyle(.secondary)
+                Text(engine.warmupStatus).font(.subheadline.weight(.medium))
+            }
+            Spacer()
+        }.accessibilityElement(children: .combine).card()
     }
 
     private var recentPairs: some View {

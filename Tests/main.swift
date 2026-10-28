@@ -369,3 +369,76 @@ check(!TranslationUnitPlanning.mayRemember("Hello.", confirmed: false),
 check(TranslationUnitPlanning.mayRemember("Olá.", confirmed: true),
     "Confirmed language-bearing entries remain eligible for persistence")
 print("Translation-unit segmentation, context and persistence safety checks passed")
+
+
+// v1.4.1: the subtitle can be shorter/smaller than a stationary movie overlay.
+// Only prefer changing dialogue once a separate label is confirmed persistent.
+var movieFocus = MovieTextFocus()
+let stationaryOverlay = MovieTextGroup(text: "Streaming channel", x: 0.5, y: 0.40, weight: 4)
+let dialogue = MovieTextGroup(text: "Where are you going?", x: 0.5, y: 0.13, weight: 1.1)
+check(movieFocus.preferredIndex(in: [stationaryOverlay], at: 0) == 0,
+      "Static text must remain translatable when it is the only visible group")
+check(movieFocus.preferredIndex(in: [stationaryOverlay], at: 0.5) == 0,
+      "Do not prematurely classify the only text as noise")
+check(movieFocus.preferredIndex(in: [stationaryOverlay], at: 1.4) == 0,
+      "Long-held text must remain readable when no competing subtitle exists")
+check(movieFocus.preferredIndex(in: [stationaryOverlay, dialogue], at: 1.5) == 1,
+      "New dialogue must beat a repeatedly recognized stationary label")
+check(movieFocus.preferredIndex(in: [stationaryOverlay, dialogue], at: 1.7) == 1,
+      "Continuing subtitle must remain selected while it is still new")
+let nextDialogue = MovieTextGroup(text: "I am leaving!", x: 0.5, y: 0.13, weight: 1.1)
+check(movieFocus.preferredIndex(in: [stationaryOverlay, nextDialogue], at: 2) == 1,
+      "Different dialogue in the same region must restart temporal freshness")
+check(movieFocus.preferredIndex(in: [stationaryOverlay], at: 4) == 0,
+      "Returning to a single group should never suppress its content")
+movieFocus.reset()
+check(movieFocus.preferredIndex(in: [dialogue], at: 5) == 0,
+      "Context changes clear the stale overlay preference")
+print("Movie static-overlay and subtitle freshness checks passed")
+
+
+// v1.4.2 - OCR jitter cannot cancel a confirmed, unpresented caption merely
+// to have the duplicate filter reject the replacement. Real new dialogue
+// and a changed lyric row must remain eligible.
+check(SubtitleAcquisitionPolicy.isSameUnpresentedCaption(
+    activeConfirmed: true, activePresented: false,
+    previousBlocks: ["Olá, mundo!"], incomingBlocks: ["Olá mundo"]),
+    "Punctuation-only OCR differences retain already confirmed model work")
+check(!SubtitleAcquisitionPolicy.isSameUnpresentedCaption(
+    activeConfirmed: true, activePresented: false,
+    previousBlocks: ["I love you"], incomingBlocks: ["I hate you"]),
+    "Changed dialogue must not be mistaken for harmless OCR jitter")
+check(!SubtitleAcquisitionPolicy.isSameUnpresentedCaption(
+    activeConfirmed: true, activePresented: false,
+    previousBlocks: ["First verse", "I love you"],
+    incomingBlocks: ["First verse", "I hate you"]),
+    "Changing any lyric row must still replace the old caption")
+check(!SubtitleAcquisitionPolicy.isSameUnpresentedCaption(
+    activeConfirmed: true, activePresented: true,
+    previousBlocks: ["Olá mundo"], incomingBlocks: ["Olá mundo!"]),
+    "Presented captions do not block fresh work")
+check(!SubtitleAcquisitionPolicy.isSameUnpresentedCaption(
+    activeConfirmed: false, activePresented: false,
+    previousBlocks: ["Olá mundo"], incomingBlocks: ["Olá mundo!"]),
+    "Tentative captions must not gain confirmed-work protection")
+print("Confirmed-caption OCR jitter continuity checks passed")
+
+
+// v1.4.2: association only discovers relationships. It must never
+// authorize a translation cache hit without independent model proof.
+check(LegacyAssociation.classify(old: "Olá, meu amigo!", new: "Olá meu amigo") == .orthographic,
+      "Punctuation-only variants must be discoverable")
+check(LegacyAssociation.classify(old: "I don't know how to respond to this problem",
+                                 new: "I don't know how to respond to that problem") == .none,
+      "Different words are not equivalent memory translations")
+check(LegacyAssociation.classify(old: "We should never make a mistake here.",
+                                 new: "We shouId never make a mistake here.") == .ocrCandidate,
+      "A single plausible long OCR-character error can be suggested for review")
+check(LegacyAssociation.classify(old: "Where in the world are we going tonight?",
+                                 new: "world are we going") == .fragment,
+      "A word-aligned long subtitle fragment can be associated")
+check(LegacyAssociation.classify(old: "I love you", new: "I hate you") == .none,
+      "Short meaning-changing variants must not be associated")
+check(LegacyAssociation.classify(old: "They'll never know", new: "They will never know") == .none,
+      "Expansions that change words are not automatically equivalent")
+print("Conservative legacy discovery regressions passed")

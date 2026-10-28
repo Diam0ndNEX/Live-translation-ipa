@@ -2,10 +2,15 @@ import Foundation
 
 /// Metadata only: no source text, translations, cache keys, filenames or model errors.
 struct MemoryDiagnosticHealth: Codable {
-    var schemaVersion = 1
+    var schemaVersion = 2
     var totalEntries = 0
     var readyEntries = 0
     var needsValidation = 0
+    var legacyValidated = 0
+    var legacySuperseded = 0
+    var legacyUnverified = 0
+    var suggestedOCRMatches = 0
+    var suggestedFragmentMatches = 0
     var conflicts = 0
     var databaseBytes: Int64 = 0
     var migrationStatus = "not started"
@@ -18,6 +23,8 @@ struct MemoryDiagnosticHealth: Codable {
     // Old saved sessions lack categoryCounts. Keep them readable after upgrades.
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, totalEntries, readyEntries, needsValidation, conflicts
+        case legacyValidated, legacySuperseded, legacyUnverified
+        case suggestedOCRMatches, suggestedFragmentMatches
         case databaseBytes, migrationStatus, integrity, pendingWrites, failedWrites
         case ramEntries, categoryCounts
     }
@@ -28,6 +35,11 @@ struct MemoryDiagnosticHealth: Codable {
         totalEntries = try c.decodeIfPresent(Int.self, forKey: .totalEntries) ?? 0
         readyEntries = try c.decodeIfPresent(Int.self, forKey: .readyEntries) ?? 0
         needsValidation = try c.decodeIfPresent(Int.self, forKey: .needsValidation) ?? 0
+        legacyValidated = try c.decodeIfPresent(Int.self, forKey: .legacyValidated) ?? 0
+        legacySuperseded = try c.decodeIfPresent(Int.self, forKey: .legacySuperseded) ?? 0
+        legacyUnverified = try c.decodeIfPresent(Int.self, forKey: .legacyUnverified) ?? 0
+        suggestedOCRMatches = try c.decodeIfPresent(Int.self, forKey: .suggestedOCRMatches) ?? 0
+        suggestedFragmentMatches = try c.decodeIfPresent(Int.self, forKey: .suggestedFragmentMatches) ?? 0
         conflicts = try c.decodeIfPresent(Int.self, forKey: .conflicts) ?? 0
         databaseBytes = try c.decodeIfPresent(Int64.self, forKey: .databaseBytes) ?? 0
         migrationStatus = try c.decodeIfPresent(String.self, forKey: .migrationStatus) ?? "not started"
@@ -83,9 +95,65 @@ struct DiagnosticDistribution: Codable {
     }
 }
 
+/// Fifteen-second, metadata-only summaries cover the full captured session instead
+/// of only the last few thousand events. Keys are strict counters, never OCR text.
+struct DiagnosticIntervalBucket: Codable {
+    let startedAt: Date
+    let elapsedSeconds: Double
+    let counters: [String: Int]
+    let thermalLevel: Int
+    let lowPower: Bool
+    let captureConnected: Bool
+    /// The current effective cadence in the extension. Not actual capture FPS.
+    var effectiveOCRIntervalMs: Double? = nil
+    /// Last coarse image-motion-to-first-OCR proxy; NOT subtitle acquisition latency.
+    var visualChangeProxyMs: Double? = nil
+    var ocrMedianMs: Double? = nil
+    var ocrP95Ms: Double? = nil
+    var translationMedianMs: Double? = nil
+    var translationP95Ms: Double? = nil
+    var enqueueMedianMs: Double? = nil
+    var enqueueP95Ms: Double? = nil
+    var modelBatchMedianMs: Double? = nil
+
+    static let allowedCounters: Set<String> = [
+        "captureFrames", "capturePasses", "ocrPackets", "candidateConfirmed",
+        "candidateEnqueued", "candidateSuperseded", "candidateCancelled",
+        "candidateFirstSeen", "speculativeRequests", "speculativeDiscarded",
+        "ramHits", "persistentHits", "speculativeHits", "lookupMisses",
+        "legacyVerified", "legacySuperseded", "legacyOCRSuggestions",
+        "legacyFragmentSuggestions", "legacyIdleStarted", "legacyIdleCompleted",
+        "unchangedSkips", "cadenceSkips", "pausedSkips", "emptyOCRPasses",
+        "contrastRetries", "movieSelections", "movieTemporalOverrides",
+        "movieRejectedSmall", "queueReplacements", "earlyDeferred",
+        "unpresentedConfirmed", "capturePackets", "modelBatches",
+        "modelFailures", "warmupAttempts", "warmupSucceeded",
+        "runtimeTransitions", "visualChanges",
+        "ocrMeasurementCount", "translationMeasurementCount", "enqueueMeasurementCount"
+    ]
+
+    func sanitized() -> DiagnosticIntervalBucket {
+        func safe(_ value: Double?) -> Double? {
+            value.flatMap { $0.isFinite && $0 >= 0 ? min($0, 60000) : nil }
+        }
+        return DiagnosticIntervalBucket(startedAt: startedAt,
+            elapsedSeconds: elapsedSeconds.isFinite ? max(0, min(elapsedSeconds, 1800)) : 0,
+            counters: counters.filter { Self.allowedCounters.contains($0.key) && $0.value >= 0 },
+            thermalLevel: max(0, min(thermalLevel, 3)),
+            lowPower: lowPower, captureConnected: captureConnected,
+            effectiveOCRIntervalMs: safe(effectiveOCRIntervalMs),
+            visualChangeProxyMs: safe(visualChangeProxyMs).map { min($0, 6000) },
+            ocrMedianMs: safe(ocrMedianMs), ocrP95Ms: safe(ocrP95Ms),
+            translationMedianMs: safe(translationMedianMs),
+            translationP95Ms: safe(translationP95Ms),
+            enqueueMedianMs: safe(enqueueMedianMs), enqueueP95Ms: safe(enqueueP95Ms),
+            modelBatchMedianMs: safe(modelBatchMedianMs))
+    }
+}
+
 struct DiagnosticSessionExport: Codable, Identifiable {
     var eventSchemaVersion = 1
-    var exportFormatVersion = 1
+    var exportFormatVersion = 2
     let id: UUID
     let startedAt: Date
     let endedAt: Date
@@ -99,6 +167,8 @@ struct DiagnosticSessionExport: Codable, Identifiable {
     let counters: [String: Int]
     let distributions: [String: DiagnosticDistribution]
     let events: [StructuredDiagnosticEvent]
+    /// Optional for backwards-compatible import of 1.4.0/early 1.4.1 bundles.
+    var intervals: [DiagnosticIntervalBucket]? = nil
     let measurementBoundary: String
     let textCapture: Bool
 }
@@ -115,7 +185,7 @@ actor DiagnosticExportWriter {
             "frame_arrival", "rotation", "ocr_execution", "duplicate_detection", "ocr_filtering",
             "stability", "text_grouping", "ocr_correction", "language_detection",
             "memory_lookup", "translation", "pip_preparation", "pip_enqueue", "runtime_state",
-            "cancellation"
+            "model_state", "cancellation"
         ]
         let eventCodes: Set<String> = Set(MemoryDiagnosticOutcome.allCases.map { $0.rawValue })
             .union([
@@ -125,7 +195,14 @@ actor DiagnosticExportWriter {
                 "filtered", "confirmed", "speculative", "ready", "enqueued",
                 "cancelled", "redacted", "completed", "deferred_early_candidate",
                 "heartbeat_timeout", "capture_connected", "idle_auto_pause", "session_time_limit",
-                "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical"
+                "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical",
+                "changing_group_preferred", "dominant_group", "queue_replaced",
+                "preserved_confirmed_work",
+                "warmup_started", "warmup_succeeded", "warmup_failed",
+                "model_session_created", "model_batch_completed", "model_batch_failed",
+                "warmup_source_unresolved", "legacy_idle_started", "legacy_idle_completed",
+                "legacy_idle_deferred", "app_started", "capture_config_changed",
+                "capture_idle", "capture_live", "capture_paused", "capture_frozen"
             ]).union(stageCodes)
         let safeEvents = snapshot.events.suffix(2400).map { event in
             StructuredDiagnosticEvent(id: event.id, timestamp: event.timestamp,
@@ -139,6 +216,10 @@ actor DiagnosticExportWriter {
         }
         let settingsKeys: Set<String> = [
             "mode", "speed", "stability", "frameRot", "area", "adaptiveOCR",
+            "source", "target", "customY0", "customY1", "minTextH", "dropNoise",
+            "boost", "ocrCorrection", "adaptive", "displayPolicy", "minDisplay",
+            "clearHold", "autoClear", "keepWarm", "langLock",
+            "selectiveSpeculation", "speculationConfidence", "confirmationDeadline",
             "remember", "privateSession", "diagnosticsEnabled", "detailedCollection",
             "skipUnchanged", "idleBackoff", "adaptiveConfirmation", "subtitleTracking",
             "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest"
@@ -167,6 +248,7 @@ actor DiagnosticExportWriter {
             settings: safeSettings,
             health: snapshot.health, counters: snapshot.counters,
             distributions: snapshot.distributions, events: safeEvents,
+            intervals: snapshot.intervals.map { Array($0.suffix(960)).map { $0.sanitized() } },
             measurementBoundary: safeBoundary, textCapture: false)
     }
 
@@ -221,13 +303,49 @@ actor DiagnosticExportWriter {
     func exportZIP(_ snapshot: DiagnosticSessionExport) throws -> URL {
         let json = try encode(snapshot)
         let readme = Data("""
-        ScreenLingo offline diagnostics
-        Contains metadata-only session.json. No screen frames are included.
-        Timings end at PiP enqueue, not measured physical display.
-        Session comparisons do not establish causation.
+        ScreenLingo offline diagnostics — 1.4.1
+        session.json: bounded recent metadata-only candidate events, timing distributions,
+        configuration, memory diagnostics and whole-session interval summaries.
+        intervals.csv: chronological 15-second counters, thermal and capture state.
+        Empty/missing intervals indicate this older version did not record interval data.
+        Counts are OCR/processing events, NOT a count of spoken sentences or missed captions.
+        Visual-change timestamps are only coarse image-motion proxies, not a video subtitle
+        ground truth. A caption invisible to OCR cannot be recovered from these statistics.
+        No screen frames, recognized words, translated words, audio or identifying file paths.
+        Physical PiP presentation time is NOT measured; 'enqueued' is a buffer enqueue.
+        Settings, OS version, cache history and source content affect A/B comparisons.
+        Nothing is automatically uploaded. This ZIP is generated at user request.
         """.utf8)
-        let zip = try DiagnosticStoredZIP.make(entries: [
+        let safe = redact(snapshot)
+        let names = DiagnosticIntervalBucket.allowedCounters.sorted()
+        let header = "start_time,elapsed_seconds,thermal_level,low_power,capture_connected,effective_ocr_interval_ms,visual_motion_proxy_ms,ocr_median_ms,ocr_p95_ms,translation_median_ms,translation_p95_ms,enqueue_median_ms,enqueue_p95_ms,model_batch_median_ms," +
+                     names.joined(separator: ",")
+        let lines: [String] = (safe.intervals ?? []).map { interval in
+            var fields: [String] = [
+                String(Int(interval.startedAt.timeIntervalSince1970)),
+                String(interval.elapsedSeconds),
+                String(interval.thermalLevel),
+                interval.lowPower ? "1" : "0",
+                interval.captureConnected ? "1" : "0"
+            ]
+            let durations: [Double?] = [
+                interval.effectiveOCRIntervalMs, interval.visualChangeProxyMs,
+                interval.ocrMedianMs, interval.ocrP95Ms,
+                interval.translationMedianMs, interval.translationP95Ms,
+                interval.enqueueMedianMs, interval.enqueueP95Ms,
+                interval.modelBatchMedianMs
+            ]
+            fields.append(contentsOf: durations.map { value in
+                guard let value else { return "" }
+                return String(value)
+            })
+            fields.append(contentsOf: names.map { String(interval.counters[$0, default: 0]) })
+            return fields.joined(separator: ",")
+        }
+        let csv = Data(([header] + lines).joined(separator: "\n").utf8)
+        let zip: Data = try DiagnosticStoredZIP.make(entries: [
             (name: "session.json", contents: json),
+            (name: "intervals.csv", contents: csv),
             (name: "README.txt", contents: readme)
         ])
         let url = FileManager.default.temporaryDirectory

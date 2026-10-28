@@ -123,6 +123,173 @@ import CryptoKit
         precondition(unknownHealth.totalEntries == 1 && unknownHealth.needsValidation == 1)
         let unsafeHit = await secondStore.lookup(key: unknownKey)
         precondition(unsafeHit.value == nil, "Unknown rules must never be authoritative")
+
+        // v1.4.2: an imported legacy entry is NEVER a usable lookup. Only an
+        // independently generated, confirmed current-rule translation may cause
+        // its historical status to change, in the *same* SQLite transaction.
+        let freshLegacyKey = "v4|\(rules)|pt>en|0:|Antigo"
+        let unverifiedWrite = try await secondStore.save(
+            [freshLegacyKey: "Old"], revision: 1)
+        precondition(unverifiedWrite.needsValidation == 1 &&
+                     unverifiedWrite.legacyUnverified == 1 &&
+                     unverifiedWrite.legacyValidated == 0,
+                     "Cached or merely inserted results must not validate older translations")
+        let independentlyConfirmed = try await secondStore.save(
+            [freshLegacyKey: "Old"], revision: 2,
+            independentlyConfirmedKeys: [freshLegacyKey])
+        precondition(independentlyConfirmed.totalEntries == 2 &&
+                     independentlyConfirmed.readyEntries == 1 &&
+                     independentlyConfirmed.needsValidation == 0 &&
+                     independentlyConfirmed.legacyValidated == 1 &&
+                     independentlyConfirmed.legacyUnverified == 0,
+                     "Independent fresh verification retires the exact older validation backlog")
+        let historical = try await secondStore.search(query: "Antigo", limit: 10)
+        precondition(historical.contains { $0.key == unknownKey &&
+            $0.translatedText == "Old" && $0.validationState == "validated_legacy" },
+            "Historical entry bytes and provenance must remain intact")
+        let stillNotReusable = await secondStore.lookup(key: unknownKey,
+            timeoutMilliseconds: 50)
+        precondition(stillNotReusable.value == nil,
+                     "Even validated historical keys must NEVER be directly reused")
+        let currentRuleHit = await secondStore.lookup(key: freshLegacyKey,
+            timeoutMilliseconds: 50)
+        precondition(currentRuleHit.value == "Old",
+                     "Only the current confirmed key is eligible for live reuse")
+        let differentText = "v4|\(rules)|pt>en|0:|Outros"
+        _ = try await secondStore.save([differentText: "Others"], revision: 3,
+            independentlyConfirmedKeys: [differentText])
+        let afterUnrelated = try await secondStore.health()
+        precondition(afterUnrelated.legacyValidated == 1,
+                     "No mass validation for unrelated source text")
+
+        let conflictLegacy = root.appendingPathComponent("conflict-legacy.json")
+        let conflictOld = "v2|pt>en|0:|Obrigado"
+        let conflictNew = "v4|\(rules)|pt>en|0:|Obrigado"
+        try JSONEncoder().encode([conflictOld: "Incorrect older answer"])
+            .write(to: conflictLegacy)
+        let conflictStore = TranslationMemoryStore(directory:
+            root.appendingPathComponent("legacy-supersession"))
+        _ = try await conflictStore.prepare(legacyURLs: [conflictLegacy])
+        let replaced = try await conflictStore.save(
+            [conflictNew: "Thank you"], revision: 1,
+            independentlyConfirmedKeys: [conflictNew])
+        precondition(replaced.legacySuperseded == 1 &&
+                     replaced.legacyValidated == 0 && replaced.needsValidation == 0,
+                     "A different independently confirmed answer only supersedes historical evidence")
+        let preservedAlternative = try await conflictStore.search(query: "Obrigado", limit: 10)
+        precondition(preservedAlternative.contains {
+            $0.key == conflictOld && $0.translatedText == "Incorrect older answer" &&
+            $0.validationState == "superseded_legacy"
+        }, "Never silently overwrite old translations")
+        let untrustedOldLookup = await conflictStore.lookup(key: conflictOld,
+            timeoutMilliseconds: 50)
+        precondition(untrustedOldLookup.value == nil, "Superseded old keys remain excluded")
+        let unrelatedContext = "v4|\(rules)|pt>en|1:x|Obrigado"
+        _ = try await conflictStore.save(
+            [unrelatedContext: "Thanks"], revision: 2,
+            independentlyConfirmedKeys: [unrelatedContext])
+        let afterOtherContext = try await conflictStore.health()
+        precondition(afterOtherContext.legacySuperseded == 1,
+                     "Context mismatch must not touch previously classified legacy rows")
+
+        // User-quarantined compatible v4 entries must never be auto-revalidated
+        // by the legacy migration path. They remain under explicit review controls.
+        let quarantinedV4 = root.appendingPathComponent("quarantined-v4")
+        let qStore = TranslationMemoryStore(directory: quarantinedV4)
+        _ = try await qStore.prepare(legacyURLs: [])
+        _ = try await qStore.save([freshLegacyKey: "First"], revision: 1)
+        let qRows = try await qStore.search(query: "Antigo", limit: 5)
+        _ = try await qStore.quarantineEntries(ids: qRows.map(\.id))
+        _ = try await qStore.save([differentText: "Others"], revision: 2,
+            independentlyConfirmedKeys: [differentText])
+        let quarantinedHealth = try await qStore.health()
+        precondition(quarantinedHealth.needsValidation == 1,
+                     "Legacy proof must never bypass a user's quarantine of a v4 key")
+
+        // A punctuation/segment association must not silently validate a
+        // historical translation or turn it into an authoritative cache hit.
+        let fuzzyPath = root.appendingPathComponent("ocr-variant-legacy.json")
+        let oldVariantKey = "v2|pt>en|0:|Olá, meu amigo!"
+        let newVariantKey = "v4|\(rules)|pt>en|0:|Olá meu amigo"
+        let fragmentOldKey = "v2|pt>en|0:|Onde é que vamos esta noite?"
+        let fragmentNewKey = "v4|\(rules)|pt>en|0:|é que vamos esta"
+        try JSONEncoder().encode([
+            oldVariantKey: "Hello my friend",
+            fragmentOldKey: "Where are we going tonight?"
+        ]).write(to: fuzzyPath)
+        let associationStore = TranslationMemoryStore(
+            directory: root.appendingPathComponent("legacy-association-db"))
+        _ = try await associationStore.prepare(legacyURLs: [fuzzyPath])
+        let assocHealth = try await associationStore.save([
+            newVariantKey: "Hello, my friend",
+            fragmentNewKey: "Where are we going"
+        ], revision: 1, independentlyConfirmedKeys: [newVariantKey, fragmentNewKey])
+        precondition(assocHealth.legacyUnverified == 2 &&
+                     assocHealth.suggestedOCRMatches == 1 &&
+                     assocHealth.suggestedFragmentMatches == 1,
+                     "Fuzzy and fragment associations must remain unverified suggestions")
+        let oldVariantHit = await associationStore.lookup(key: oldVariantKey,
+            timeoutMilliseconds: 50)
+        precondition(oldVariantHit.value == nil,
+                     "A suggestion alone must never become a legacy cache hit")
+
+        // Explicit idle validation independently retranslates the ORIGINAL
+        // source text. It creates a fresh current-key translation and marks
+        // the old row historical, without importing the old output as truth.
+        guard let idleCandidate = try await associationStore.nextLegacyIdleCandidate(
+            target: "en", selectedSource: "pt", after: 0),
+              idleCandidate.source == "pt" else {
+            preconditionFailure("Eligible idled legacy candidate missing")
+        }
+        let idleKey = "v4|\(rules)|pt>en|0:|\(idleCandidate.text)"
+        let idleHealth = try await associationStore.confirmIdleLegacy(
+            id: idleCandidate.id, currentKey: idleKey,
+            freshOutput: "Independent freshly translated text", revision: 2)
+        precondition(idleHealth.legacyUnverified == 1 &&
+                     idleHealth.readyEntries == 3,
+                     "Idle validation saves a current-rule result and retains old records")
+        let postIdleRows = try await associationStore.search(
+            query: idleCandidate.text, limit: 20)
+        precondition(postIdleRows.contains {
+            $0.id == idleCandidate.id &&
+            $0.validationState == "superseded_legacy"
+        }, "A valid differing translation preserves old wording for review")
+        let oldIdleKey = idleCandidate.text == "Olá, meu amigo!" ?
+            oldVariantKey : fragmentOldKey
+        let notReadyLegacy = await associationStore.lookup(key: oldIdleKey,
+            timeoutMilliseconds: 50)
+        precondition(notReadyLegacy.value == nil,
+                     "Idle-verified v2 key must remain excluded from automatic lookup")
+
+        // Regression: v1 SQLite databases from the previous installed release
+        // must upgrade in place to schema v2 without losing committed memory.
+        let upgradeDir = root.appendingPathComponent("memory-v1-upgrade")
+        let migratedEntry = "v4|\(rules)|pt>en|0:|Preserved through upgrade"
+        do {
+            let prior = TranslationMemoryStore(directory: upgradeDir)
+            _ = try await prior.prepare(legacyURLs: [])
+            _ = try await prior.save([migratedEntry: "Still saved"], revision: 1)
+        }
+        var downgradeConnection: OpaquePointer?
+        let databasePath = upgradeDir.appendingPathComponent("memory.sqlite")
+        precondition(sqlite3_open(databasePath.path, &downgradeConnection) == SQLITE_OK)
+        precondition(sqlite3_exec(downgradeConnection,
+            "DROP TABLE memory_legacy_associations", nil, nil, nil) == SQLITE_OK)
+        precondition(sqlite3_exec(downgradeConnection,
+            "DROP INDEX memory_legacy_pending", nil, nil, nil) == SQLITE_OK)
+        precondition(sqlite3_exec(downgradeConnection,
+            "PRAGMA user_version=1", nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(downgradeConnection)
+        let upgraded = TranslationMemoryStore(directory: upgradeDir)
+        let updatedHealth = try await upgraded.prepare(legacyURLs: [])
+        precondition(updatedHealth.schemaVersion == 2 && updatedHealth.totalEntries == 1 &&
+                     updatedHealth.readyEntries == 1,
+                     "Schema migration must preserve historical v1 SQLite data")
+        let migratedHit = await upgraded.lookup(key: migratedEntry,
+            timeoutMilliseconds: 50)
+        precondition(migratedHit.value == "Still saved",
+                     "Existing confirmed translation must survive schema migration")
+
         // A partially unreadable legacy file must not be silently described as migrated.
         let damagedLegacy = root.appendingPathComponent("corrupt-legacy.json")
         try Data("{broken json".utf8).write(to: damagedLegacy)
@@ -154,6 +321,19 @@ import CryptoKit
         _ = try await imported.prepare(legacyURLs: [])
         let importedHealth = try await imported.importData(exported)
         precondition(importedHealth.totalEntries == 3)
+        // Backward compatibility with exported JSON made by SQLite schema v1.
+        let oldFormatJSON = String(decoding: exported, as: UTF8.self)
+            .replacingOccurrences(of: "\"schemaVersion\":2",
+                                  with: "\"schemaVersion\":1")
+        precondition(oldFormatJSON != String(decoding: exported, as: UTF8.self),
+                     "Test must actually construct a v1 transfer envelope")
+        let oldImport = TranslationMemoryStore(
+            directory: root.appendingPathComponent("legacy-v1-json-import"))
+        _ = try await oldImport.prepare(legacyURLs: [])
+        let oldImportHealth = try await oldImport.importData(
+            Data(oldFormatJSON.utf8))
+        precondition(oldImportHealth.totalEntries == 3,
+                     "Old memory exports remain importable after schema migration")
         // A changed export must fail checksum verification without touching the store.
         var tampered = exported
         let original = Data("Alternative".utf8), replacement = Data("Mischievous".utf8)
@@ -210,6 +390,18 @@ import CryptoKit
         let snapshotURL = root.appendingPathComponent("db/recovery").appendingPathComponent(snapshotName)
         precondition(FileManager.default.fileExists(atPath: snapshotURL.path),
                      "Snapshot must be created through SQLite, not a WAL-blind file copy")
+        // A schema-v1 snapshot is still a valid source for explicit recovery
+        // after a v1→v2 app update. Keep the current snapshot unchanged.
+        let olderSnapshotName = "memory-legacy-v1-fixture.sqlite"
+        let olderSnapshotURL = snapshotURL.deletingLastPathComponent()
+            .appendingPathComponent(olderSnapshotName)
+        try FileManager.default.copyItem(at: snapshotURL, to: olderSnapshotURL)
+        var oldSnapshotConnection: OpaquePointer?
+        precondition(sqlite3_open(olderSnapshotURL.path, &oldSnapshotConnection) == SQLITE_OK)
+        precondition(sqlite3_exec(oldSnapshotConnection,
+            "PRAGMA user_version=1", nil, nil, nil) == SQLITE_OK)
+        sqlite3_close(oldSnapshotConnection)
+        _ = try await store.mergeRecoverySnapshot(named: olderSnapshotName)
         let backupHealth = try await store.health()
         precondition(backupHealth.lastVerifiedBackup != nil,
                      "Health must expose a verified recovery snapshot timestamp")
