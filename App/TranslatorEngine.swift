@@ -95,7 +95,7 @@ final class TranslatorEngine: ObservableObject {
         "frameRot", "dropNoise", "boost", "skipUnchanged", "cleanOCR", "slang", "speakerDetect", "highlightNames",
         "langLock", "neverTranslate", "sourceFixes", "glossary", "winSize", "theme", "textSize", "pipFont",
         "showOriginal", "autoClear", "clearHold", "minDisplay", "autoOpenPiP", "haptics", "speak", "speechRate",
-        "autoCopy", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember", "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
+        "autoCopy", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember", "lowLatencyTranslation", "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
         "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode", "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "smartCool", "steadyCaptions", "languageRecovery", "deduplicateCopies", "continuousRotation", "contextualLanguage"
     ]
     /// App look & behaviour that presets do not touch.
@@ -110,7 +110,7 @@ final class TranslatorEngine: ObservableObject {
         "glossary": "", "winSize": "normal", "theme": "dark", "textSize": "auto", "pipFont": "standard",
         "showOriginal": false, "autoClear": true, "clearHold": 1.0, "minDisplay": 0.0, "autoOpenPiP": true,
         "haptics": false, "speak": false, "speechRate": 0.5, "autoCopy": false, "adaptive": true, "idleMinutes": 0,
-        "translateAhead": true, "keepWarm": true, "remember": true,
+        "translateAhead": true, "keepWarm": true, "remember": true, "lowLatencyTranslation": false,
         "adaptiveSpeculation": true, "protectConfirmedPresentation": true, "predictiveWarmup": true,
         "displayPolicy": "immediate", "pipWeight": "bold", "pipAlignment": "left", "pipLineSpacing": 0.0,
         "pipPadding": 24.0, "originalFraction": 0.27, "pipScale": 1.0, "speakerAccent": "blue", "heartbeatInterval": 1.0,
@@ -496,6 +496,17 @@ final class TranslatorEngine: ObservableObject {
             diag.s.orderVote = orderVote
             diag.s.calibrated = calibrated && !rotationBudget.exhausted
         }
+    }
+
+    func translationStrategyChanged() {
+        pipelineSettingsChanged()
+        directSession?.cancel()
+        directSession = nil
+        directKey = ""
+        availCache.removeAll()
+        langStatus.removeAll()
+        warmupStatus = "Strategy changed; preparing model"
+        Task { await refreshStatus() }
     }
 
     func pipelineSettingsChanged() {
@@ -1332,7 +1343,7 @@ final class TranslatorEngine: ObservableObject {
 
     // MARK: Translation
     private var memoryRuleToken: String {
-        let keys = ["cleanOCR", "slang", "speakerDetect", "neverTranslate", "sourceFixes", "glossary"]
+        let keys = ["cleanOCR", "slang", "speakerDetect", "neverTranslate", "sourceFixes", "glossary", "lowLatencyTranslation"]
         let snapshot = keys.map { key in "\(key)=\(ud.object(forKey: key) ?? Self.defaults[key] ?? "")" }.joined(separator: "\u{1F}")
         if snapshot != rulesSnapshot {
             rulesSnapshot = snapshot
@@ -1379,9 +1390,15 @@ final class TranslatorEngine: ObservableObject {
         if target.minimalIdentifier == Locale.Language(identifier: targetCode).minimalIdentifier,
            src.minimalIdentifier == Locale.Language(identifier: sourceCode).minimalIdentifier,
            let s = langStatus[sourceCode] { return s }
-        let k = "\(src.minimalIdentifier)>\(target.minimalIdentifier)"
+        let k = "\(src.minimalIdentifier)>\(target.minimalIdentifier)|\(flag("lowLatencyTranslation", false) ? "low" : "default")"
         if let c = availCache[k], Date().timeIntervalSince(c.0) < 60 { return c.1 }
-        let s = await LanguageAvailability().status(from: src, to: target)
+        let availability: LanguageAvailability
+        if #available(iOS 26.4, *), flag("lowLatencyTranslation", false) {
+            availability = LanguageAvailability(preferredStrategy: .lowLatency)
+        } else {
+            availability = LanguageAvailability()
+        }
+        let s = await availability.status(from: src, to: target)
         availCache[k] = (Date(), s)
         return s
     }
@@ -1767,10 +1784,14 @@ final class TranslatorEngine: ObservableObject {
     private func translateBatch(_ texts: [String], source: Locale.Language, target: Locale.Language,
                                 installed: Bool, speculative: Bool = false) async -> [String]? {
         if #available(iOS 26.0, *), installed {
-            let k = "\(source.minimalIdentifier)>\(targetCode)"
+            let k = "\(source.minimalIdentifier)>\(targetCode)|\(flag("lowLatencyTranslation", false) ? "low" : "default")"
             if directSession == nil || directKey != k {
                 diag.noteModelState("model_session_created")
-                directSession = TranslationSession(installedSource: source, target: target)
+                if #available(iOS 26.4, *), flag("lowLatencyTranslation", false) {
+                    directSession = TranslationSession(installedSource: source, target: target, preferredStrategy: .lowLatency)
+                } else {
+                    directSession = TranslationSession(installedSource: source, target: target)
+                }
                 directKey = k
             }
             if diag.enabled { diag.s.sessionKind = "Direct session (iOS 26)" }
@@ -2628,7 +2649,7 @@ final class TranslatorEngine: ObservableObject {
         guard src.languageCode != target.languageCode,
               let word = Self.warmWords[src.languageCode?.identifier ?? code] else { return }
         // Avoid reloading the same model while a usable warm session exists.
-        let warmKey = "\(src.minimalIdentifier)>\(destination)"
+        let warmKey = "\(src.minimalIdentifier)>\(destination)|\(flag("lowLatencyTranslation", false) ? "low" : "default")"
         guard directSession == nil || directKey != warmKey else {
             warmupStatus = "Ready"
             return
@@ -2645,7 +2666,12 @@ final class TranslatorEngine: ObservableObject {
         warmupStatus = predicted ? "Predictive warm-up…" : "Warming up…"
         diag.noteModelState("warmup_started")
         if predicted { diag.noteModelState("warmup_predicted_source") }
-        let session = TranslationSession(installedSource: src, target: target)
+        let session: TranslationSession
+        if #available(iOS 26.4, *), flag("lowLatencyTranslation", false) {
+            session = TranslationSession(installedSource: src, target: target, preferredStrategy: .lowLatency)
+        } else {
+            session = TranslationSession(installedSource: src, target: target)
+        }
         warmupSuperseded = false
         warmupSession = session
         defer { warmupSession = nil }
@@ -2705,7 +2731,11 @@ final class TranslatorEngine: ObservableObject {
                 if var c = legacyConfig, c.source == source, c.target == target {
                     c.invalidate(); legacyConfig = c
                 } else {
-                    legacyConfig = .init(source: source, target: target)
+                    if #available(iOS 26.4, *), flag("lowLatencyTranslation", false) {
+                        legacyConfig = .init(source: source, target: target, preferredStrategy: .lowLatency)
+                    } else {
+                        legacyConfig = .init(source: source, target: target)
+                    }
                 }
                 Task { [weak self] in
                     try? await Task.sleep(for: .seconds(10))
@@ -2755,7 +2785,12 @@ final class TranslatorEngine: ObservableObject {
         availCache.removeAll()
         let destination = targetCode
         let target = Locale.Language(identifier: destination)
-        let av = LanguageAvailability()
+        let av: LanguageAvailability
+        if #available(iOS 26.4, *), flag("lowLatencyTranslation", false) {
+            av = LanguageAvailability(preferredStrategy: .lowLatency)
+        } else {
+            av = LanguageAvailability()
+        }
         var out: [String: LanguageAvailability.Status] = [:]
         // Read the active pair first so readiness does not wait behind every other language.
         var seen = Set<String>()
