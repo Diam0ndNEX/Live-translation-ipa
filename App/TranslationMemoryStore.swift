@@ -44,7 +44,7 @@ struct MemoryStoredEntry: Codable, Identifiable, Sendable {
 /// SQL, or filenames and must never be copied into standard diagnostic reports.
 enum MemoryStoreError: String, Error, LocalizedError {
     case unavailable, databaseOpen, databaseOperation, unsupportedSchema, integrityFailure
-    case invalidImport, unsupportedImport, sourceUnreadable, backupFailed, tooLarge, staleRevision, memoryNotEmpty
+    case invalidImport, unsupportedImport, sourceUnreadable, backupFailed, tooLarge, staleRevision, memoryNotEmpty, storageFull
     var errorDescription: String? { "Translation memory: \(rawValue)" }
 }
 
@@ -67,6 +67,13 @@ actor TranslationMemoryStore {
     private var active = false
     private var latestRevision = -1
     private var status = MemoryStoreHealth()
+    #if MEMORY_FAULT_TESTING
+    private var injectedInsertCountdown: Int?
+    /// A deterministic simulated SQLITE_FULL fault; never compiled into the app.
+    func injectStorageFull(afterSuccessfulInserts count: Int) {
+        injectedInsertCountdown = max(0, count)
+    }
+    #endif
     private let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
 
     init(directory: URL) { self.directory = directory }
@@ -96,8 +103,21 @@ actor TranslationMemoryStore {
         } catch { sqlite3_finalize(result); throw error }
     }
     private func execute(_ sql: String, _ values: [SQLValue] = []) throws {
+        #if MEMORY_FAULT_TESTING
+        if sql.contains("INSERT INTO memory_entries"), let remaining = injectedInsertCountdown {
+            if remaining == 0 {
+                injectedInsertCountdown = nil
+                throw MemoryStoreError.storageFull
+            }
+            injectedInsertCountdown = remaining - 1
+        }
+        #endif
         let query = try statement(sql, values); defer { sqlite3_finalize(query) }
-        guard sqlite3_step(query) == SQLITE_DONE else { throw MemoryStoreError.databaseOperation }
+        let result = sqlite3_step(query)
+        guard result == SQLITE_DONE else {
+            if result == SQLITE_FULL { throw MemoryStoreError.storageFull }
+            throw MemoryStoreError.databaseOperation
+        }
     }
     private func scalar(_ sql: String, _ values: [SQLValue] = []) throws -> Int64 {
         let query = try statement(sql, values); defer { sqlite3_finalize(query) }
