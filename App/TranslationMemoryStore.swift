@@ -693,7 +693,7 @@ actor TranslationMemoryStore {
             }
             try FileManager.default.moveItem(
                 at: temp, to: directory.appendingPathComponent("memory.sqlite"))
-            let health = try prepare(legacyURLs: [])
+            _ = try prepare(legacyURLs: [])
             status.migrationStatus = "restored_from_snapshot"
             try setMetadata("migration_status", status.migrationStatus)
             return try self.health()
