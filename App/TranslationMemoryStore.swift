@@ -707,6 +707,17 @@ actor TranslationMemoryStore {
                     at: newDatabase,
                     to: quarantine.appendingPathComponent("uncommitted-restoration.sqlite"))
             }
+            // If the staged database opened before a later error, it may have
+            // created new WAL/SHM companions. Quarantine those separately so
+            // they can never be paired with the original damaged database.
+            for suffix in ["-wal", "-shm"] {
+                let sidecar = directory.appendingPathComponent("memory.sqlite" + suffix)
+                if FileManager.default.fileExists(atPath: sidecar.path) {
+                    try? FileManager.default.moveItem(
+                        at: sidecar,
+                        to: quarantine.appendingPathComponent("uncommitted-restoration" + suffix))
+                }
+            }
             for entry in moved.reversed() where
                 FileManager.default.fileExists(atPath: entry.preserved.path) &&
                 !FileManager.default.fileExists(atPath: entry.original.path) {
