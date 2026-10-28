@@ -24,7 +24,9 @@ import Foundation
         let writer = DiagnosticExportWriter()
         let indexed = try await writer.encodeIndexedEvents([event])
         precondition(indexed.count == 1 && indexed[0].payload.count <= 4096)
-        let decodedEvent = try JSONDecoder().decode(
+        let eventDecoder = JSONDecoder()
+        eventDecoder.dateDecodingStrategy = .iso8601
+        let decodedEvent = try eventDecoder.decode(
             StructuredDiagnosticEvent.self,
             from: indexed[0].payload)
         precondition(decodedEvent.sessionID == session &&
