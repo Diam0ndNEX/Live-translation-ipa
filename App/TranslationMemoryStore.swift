@@ -172,6 +172,7 @@ actor TranslationMemoryStore {
             guard version == 0 || version == Int64(Self.schemaVersion) else { throw MemoryStoreError.unsupportedSchema }
             if version == 0 { try createSchema() }
             status.integrity = try verifyIntegrity()
+            let previousMigrationState = try metadata("migration_status")
             status.migrationStatus = "discovering"
             var found = false, failed = false
             // Never remove originals. A failed import does not block a healthy new store.
@@ -180,8 +181,23 @@ actor TranslationMemoryStore {
                 found = true
                 do { try migrate(source) } catch { failed = true }
             }
-            status.migrationStatus = failed ? "partial_recovery" : (found ? "ready" : "no_previous_memory")
-            try setMetadata("migration_status", status.migrationStatus)
+            let durableEntries = try scalar("SELECT COUNT(*) FROM memory_entries")
+            if failed {
+                status.migrationStatus = "partial_recovery"
+            } else if previousMigrationState == "restored_from_snapshot", durableEntries > 0 {
+                status.migrationStatus = "restored_from_snapshot"
+            } else if previousMigrationState == "partial_recovery", !found {
+                status.migrationStatus = "partial_recovery"
+            } else if found || durableEntries > 0 {
+                status.migrationStatus = "ready"
+            } else if try metadata("last_explicit_clear") != nil {
+                status.migrationStatus = "cleared"
+            } else {
+                status.migrationStatus = "no_previous_memory"
+            }
+            if previousMigrationState != status.migrationStatus {
+                try setMetadata("migration_status", status.migrationStatus)
+            }
             status.integrity = try verifyIntegrity()
             active = true
             return try health()
