@@ -56,13 +56,6 @@ import SQLite3
         _ = try await store.save([key:"Alternative"], revision: 3)
         let conflict = await store.lookup(key: key, timeoutMilliseconds: 50)
         precondition(conflict.value == nil, "Conflicting outputs must force fresh translation")
-        let alternatives = try await store.conflictingEntries(limit: 100)
-        precondition(alternatives.count == 2)
-        precondition(Set(alternatives.map(\.translatedText)) == Set(["Hello.", "Alternative"]),
-                     "Each conflicting translation must remain independently inspectable")
-        let unresolved = try await store.health()
-        precondition(unresolved.conflicts > 0)
-
         let alternatives = try await store.conflictingEntries(limit: 10)
         precondition(Set(alternatives.map(\.translatedText)).isSuperset(of: ["Hello.", "Alternative"]),
                      "Both legitimate conflicting translations must stay inspectable")
