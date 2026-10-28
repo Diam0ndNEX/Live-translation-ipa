@@ -346,7 +346,7 @@ final class Diagnostics: ObservableObject {
         // Explicit allowlist excludes glossary, protected names, source fixes, user text and paths.
         let keys = ["mode", "speed", "stability", "frameRot", "area", "adaptiveOCR", "remember", "privateSession", "diagnosticsEnabled", "detailedCollection",
                     "skipUnchanged", "idleBackoff", "adaptiveConfirmation", "subtitleTracking",
-                    "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence"]
+                    "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest"]
         var settings: [String: String] = [:]
         for key in keys {
             if let value = UserDefaults.standard.object(forKey: key) { settings[key] = String(describing: value) }
