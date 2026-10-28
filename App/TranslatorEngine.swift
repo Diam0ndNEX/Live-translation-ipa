@@ -2352,6 +2352,9 @@ final class TranslatorEngine: ObservableObject {
                 commits, revision: memoryRevision)
             legacyValidatedThisSession += commits.count
             legacyBatchCompleted = commits.count
+            diag.noteLegacyBatch(selected: items.count, committed: commits.count,
+                skipped: legacyBatchSkipped, workers: workers,
+                durationMs: max(0, Date().timeIntervalSince(legacyBatchStartedAt) * 1000))
             await refreshMemoryHealth()
             let elapsed = max(0.1, Date().timeIntervalSince(legacyBatchStartedAt))
             let rate = Double(commits.count) * 60.0 / elapsed
