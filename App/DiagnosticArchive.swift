@@ -352,68 +352,199 @@ actor DiagnosticExportWriter {
         return output
     }
 
-    /// Portable user-initiated ZIP bundle; no background uploads. The contained
-    /// session.json uses exactly the privacy policy applied to structured JSON.
+    /// Portable, versioned diagnostic evidence bundle. All derived files use
+    /// ONLY the same redacted snapshot as session.json.
     func exportZIP(_ snapshot: DiagnosticSessionExport) throws -> URL {
-        let json = try encode(snapshot)
-        let readme = Data("""
-        ScreenLingo offline diagnostics — 1.5.0
-        session.json: bounded recent metadata-only candidate events, timing distributions,
-        configuration, memory diagnostics and whole-session interval summaries.
-        intervals.csv: chronological 15-second counters, thermal and capture state.
-        Empty/missing intervals indicate this older version did not record interval data.
-        Counts are OCR/processing events, NOT a count of spoken sentences or missed captions.
-        Visual-change timestamps are only coarse image-motion proxies, not a video subtitle
-        ground truth. A caption invisible to OCR cannot be recovered from these statistics.
-        No screen frames, recognized words, translated words, audio or identifying file paths.
-        Physical PiP presentation time is NOT measured; 'enqueued' is a buffer enqueue.
-        modelBatches is the legacy confirmed logical-batch counter. actualModelBatches
-        counts API submissions, partitioned into confirmed/speculative/warmupModelBatches.
-        first30sModelBatches (and legacy coldModelBatches) counts completions of work
-        submitted in the first 30 capture seconds; it does NOT prove a cold model load.
-        Stage timing distributions are bounded matched enqueue samples, not additive.
-        Legacy validation health/legacyVerified may include entries from earlier sessions.
-        legacyInventory* counters are a LAST-SCAN snapshot, not cumulative events.
-        legacySkip* counts describe the last scanned batch only. Inventory pair is
-        legacyInventorySource/Target; absent means no inventory captured this session.
-        specPreemptionRequested counts app cancellation requests, not engine stops.
-        specRetainedUnits counts completed superseded speculative units newly
-        cached in RAM, not presentations or guaranteed future hits. Such pipelines
-        still count as speculativeDiscarded; later exact reuse counts as a hit.
-        confirmedModelMs/speculativeModelMs are bounded completed-call samples.
-        Settings, OS version, cache history and source content affect A/B comparisons.
-        Nothing is automatically uploaded. This ZIP is generated at user request.
-        """.utf8)
-        let safe = redact(snapshot)
-        let names = DiagnosticIntervalBucket.allowedCounters.sorted()
+        let sessionData = try encode(snapshot)
+        let safe = try decode(sessionData)
+        let counterNames = DiagnosticIntervalBucket.allowedCounters.sorted()
         let header = "start_time,elapsed_seconds,thermal_level,low_power,capture_connected,effective_ocr_interval_ms,visual_motion_proxy_ms,ocr_median_ms,ocr_p95_ms,translation_median_ms,translation_p95_ms,enqueue_median_ms,enqueue_p95_ms,model_batch_median_ms," +
-                     names.joined(separator: ",")
-        let lines: [String] = (safe.intervals ?? []).map { interval in
-            var fields: [String] = [
+            counterNames.joined(separator: ",")
+        let intervalRows = (safe.intervals ?? []).map { interval -> String in
+            var columns: [String] = [
                 String(Int(interval.startedAt.timeIntervalSince1970)),
                 String(interval.elapsedSeconds),
                 String(interval.thermalLevel),
                 interval.lowPower ? "1" : "0",
                 interval.captureConnected ? "1" : "0"
             ]
-            let durations: [Double?] = [
+            let timings: [Double?] = [
                 interval.effectiveOCRIntervalMs, interval.visualChangeProxyMs,
                 interval.ocrMedianMs, interval.ocrP95Ms,
                 interval.translationMedianMs, interval.translationP95Ms,
                 interval.enqueueMedianMs, interval.enqueueP95Ms,
                 interval.modelBatchMedianMs
             ]
-            fields.append(contentsOf: durations.map { value in
-                guard let value else { return "" }
-                return String(value)
-            })
-            fields.append(contentsOf: names.map { String(interval.counters[$0, default: 0]) })
-            return fields.joined(separator: ",")
+            columns.append(contentsOf: timings.map { $0.map(String.init) ?? "" })
+            columns.append(contentsOf: counterNames.map { String(interval.counters[$0, default: 0]) })
+            return columns.joined(separator: ",")
         }
-        let csv = Data(([header] + lines).joined(separator: "\n").utf8)
-        let zip: Data = try DiagnosticStoredZIP.make(entries: [
-            (name: "session.json", contents: json),
-            (name: "intervals.csv", contents: csv),
+        let intervalsCSV = Data(([header] + intervalRows).joined(separator: "\n").utf8)
+
+        // Flat, machine-readable timing distributions for spreadsheet-based A/B
+        // checks. No source text or full raw screen content is included.
+        let metricsHeader = "metric,samples,mean_ms,p50_ms,p90_ms,p95_ms,p99_ms,max_ms"
+        let metricsRows = safe.distributions.keys.sorted().compactMap { name -> String? in
+            guard let value = safe.distributions[name] else { return nil }
+            let cells: [String] = [
+                name, String(value.count), String(value.mean),
+                value.p50.map(String.init) ?? "",
+                value.p90.map(String.init) ?? "",
+                value.p95.map(String.init) ?? "",
+                value.p99.map(String.init) ?? "",
+                value.maximum.map(String.init) ?? ""
+            ]
+            return cells.joined(separator: ",")
+        }
+        let metricsCSV = Data(([metricsHeader] + metricsRows).joined(separator: "\n").utf8)
+
+        // An event timeline with opaque IDs allows joining a candidate across
+        // OCR, translation and enqueue stages; the keys never expose OCR text.
+        let eventsHeader = "timestamp_utc,session_id,candidate_id,frame_id,unit_id,stage,outcome,reason_code,duration_ms"
+        let eventsRows = safe.events.map { event -> String in
+            [
+                event.timestamp.ISO8601Format(),
+                event.sessionID.uuidString,
+                event.candidateID?.uuidString ?? "",
+                event.frameID?.uuidString ?? "",
+                event.unitID?.uuidString ?? "",
+                event.stage, event.outcome, event.reasonCode,
+                event.durationMs.map(String.init) ?? ""
+            ].joined(separator: ",")
+        }
+        let eventsCSV = Data(([eventsHeader] + eventsRows).joined(separator: "\n").utf8)
+
+        let findings = DiagnosticIssueDetector.assess(safe)
+        let findingsEncoder = JSONEncoder()
+        findingsEncoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let findingsData = try findingsEncoder.encode(findings)
+
+        let count: (String) -> Int = { safe.counters[$0, default: 0] }
+        let metric: (String) -> String = { name in
+            guard let d = safe.distributions[name], d.count > 0 else { return "unavailable (0 samples)" }
+            let median = d.p50.map { String(format: "%.0f", $0) } ?? "–"
+            let p90 = d.p90.map { String(format: "%.0f", $0) } ?? "–"
+            let p95 = d.p95.map { String(format: "%.0f", $0) } ?? "–"
+            return "median \(median) ms, mean \(String(format: "%.0f", d.mean)) ms, P90 \(p90) ms, P95 \(p95) ms (\(d.count) samples)"
+        }
+        let settingsLines = safe.settings.keys.sorted().map {
+            "- \($0): \(safe.settings[$0] ?? "")"
+        }
+        let issueLines = findings.map {
+            "- [\($0.classification)] \($0.code): \($0.explanation)"
+        }
+        let summary = Data("""
+            # ScreenLingo diagnostic summary
+
+            ## Measurement boundary
+            First OCR sighting to **PiP sample-buffer enqueue**, not physical display or
+            a ground-truth measure of when a subtitle first appeared in a video.
+            Many processing stages overlap; their averages must not be added together.
+            No subtitle text, video frames, audio or user file paths are exported.
+
+            ## Normal performance
+            - OCR: \(metric("ocrMs"))
+            - Model translation: \(metric("translationMs"))
+            - OCR-to-PiP enqueue: \(metric("enqueueLatencyMs"))
+            - Confirmed model requests: \(metric("confirmedModelMs"))
+            - Speculative model requests: \(metric("speculativeModelMs"))
+            - PiP frame preparation: \(metric("renderingMs"))
+
+            ## Subtitle lifecycle (candidates, not sentences)
+            - Confirmed packets: \(count("confirmedCandidatePackets"))
+            - Successfully enqueued candidate frames: \(count("enqueuedCandidateFrames"))
+            - Confirmed but superseded before enqueue: \(count("supersededUnpresentedConfirmed"))
+            - Failed enqueue attempts: \(count("enqueueFailed"))
+            - Confirmed handoffs deferred: \(count("handoffDeferred"))
+            - Handoffs replayed / expired: \(count("handoffReplayed")) / \(count("handoffExpired"))
+            - Queue replacements: \(count("queueReplacements"))
+            Enqueue and confirmation counters represent different events and are not
+            a denominator for unique-subtitle coverage. The app cannot verify
+            subtitles it never recognized or whether iOS visibly displayed a frame.
+
+            ## Work avoided and reuse (different event units)
+            - Session RAM cache hits: \(count("sessionCacheHits"))
+            - Persistent memory hits: \(count("savedMemoryHits"))
+            - Pre-translated results reused: \(count("speculativeHits"))
+            - New translation requests: \(count("lookupMisses"))
+            - Speculative requests: \(count("speculativeModelRequests"))
+            - Speculative pipelines discarded: \(count("supersededSpeculativePipelines"))
+            - Completed superseded units retained: \(count("specRetainedUnits"))
+            - Model batches sent: \(count("actualModelBatches"))
+            - Cancelled model batches: \(count("cancelledModelBatches"))
+            - Skipped unchanged frames: \(count("unchangedSkippedFrames"))
+
+            ## Translation memory
+            - Database entries: \(safe.health.totalEntries)
+            - Ready for reuse: \(safe.health.readyEntries)
+            - Pending writes: \(safe.health.pendingWrites)
+            - Failed writes: \(safe.health.failedWrites)
+            - Conflicts: \(safe.health.conflicts)
+
+            ## Enabled settings (redacted allowlist)
+            \(settingsLines.isEmpty ? "Not recorded" : settingsLines.joined(separator: "\n"))
+
+            ## Evidence-based findings
+            \(issueLines.isEmpty ? "No issues identified by current numeric heuristics." : issueLines.joined(separator: "\n"))
+
+            ## Caveats
+            - Counts from different processing stages are not interchangeable.
+            - Timing distributions are bounded recent samples; 15-second intervals
+              provide a broader chronological view, not ground truth of omitted text.
+            - Device, OS, source language, workload, cache state and experimental
+              toggles must match for a meaningful A/B comparison.
+            - Suspected findings are heuristics, never proof of incorrect translation.
+            """.utf8)
+
+        let names = [
+            "manifest.json", "summary.md", "session.json", "intervals.csv",
+            "metrics.csv", "events.csv", "findings.json", "README.txt"
+        ]
+        let manifest: [String: Any] = [
+            "bundleFormat": "ScreenLingo diagnostics",
+            "bundleSchemaVersion": 3,
+            "sessionSchemaVersion": safe.eventSchemaVersion,
+            "sessionID": safe.id.uuidString,
+            "startedAt": safe.startedAt.ISO8601Format(),
+            "endedAt": safe.endedAt.ISO8601Format(),
+            "fileNames": names,
+            "privacy": "metadataOnly",
+            "textIncluded": false,
+            "boundedEvents": safe.events.count,
+            "intervals": safe.intervals?.count ?? 0,
+            "distributionCount": safe.distributions.count,
+            "measuredUntil": "PiP sample-buffer enqueue (not physical display)"
+        ]
+        let manifestData = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
+        let readme = Data("""
+            ScreenLingo diagnostic ZIP v3 — private, portable, offline
+            Start with summary.md: human-readable findings, measured latency and
+            candidate continuity. All numbers come from redacted session.json.
+            manifest.json: ZIP format and session metadata.
+            session.json: versioned canonical metadata (compatible with older readers).
+            intervals.csv: chronological 15-second counters and thermal state.
+            metrics.csv: sample count, mean, median, P90, P95, P99 by timing stage.
+            events.csv: recent candidate/frame/unit event timeline with opaque UUIDs.
+            findings.json: observed and suspected issues; heuristics, not verified errors.
+            README.txt: this file.
+
+            Diagnostics are bounded. Structured events cover at most 2400 retained
+            entries; old events can be evicted. Summary counters span the whole session.
+            Model batches, translation units, OCR packets and subtitle candidates
+            count different kinds of work; never add or equate those quantities.
+            First OCR sighting to PiP enqueue does NOT measure physical display.
+            Visual-motion proxies are NOT subtitle ground truth.
+            No recognized text, translated text, frames, audio or paths are included.
+            This ZIP is only created when you explicitly request export.
+            """.utf8)
+        let zip = try DiagnosticStoredZIP.make(entries: [
+            (name: "manifest.json", contents: manifestData),
+            (name: "summary.md", contents: summary),
+            (name: "session.json", contents: sessionData),
+            (name: "intervals.csv", contents: intervalsCSV),
+            (name: "metrics.csv", contents: metricsCSV),
+            (name: "events.csv", contents: eventsCSV),
+            (name: "findings.json", contents: findingsData),
             (name: "README.txt", contents: readme)
         ])
         let url = FileManager.default.temporaryDirectory
@@ -421,6 +552,7 @@ actor DiagnosticExportWriter {
         try zip.write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
         return url
     }
+
     func decode(_ data: Data) throws -> DiagnosticSessionExport {
         let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
         return try decoder.decode(DiagnosticSessionExport.self, from: data)
