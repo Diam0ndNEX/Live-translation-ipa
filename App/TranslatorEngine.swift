@@ -1359,8 +1359,14 @@ final class TranslatorEngine: ObservableObject {
 
     // MARK: Translation
     private var memoryRuleToken: String {
-        let keys = ["cleanOCR", "slang", "speakerDetect", "neverTranslate", "sourceFixes", "glossary", "lowLatencyTranslation"]
-        let snapshot = keys.map { key in "\(key)=\(ud.object(forKey: key) ?? Self.defaults[key] ?? "")" }.joined(separator: "\u{1F}")
+        let keys = ["cleanOCR", "slang", "speakerDetect", "neverTranslate", "sourceFixes", "glossary"]
+        var snapshot = keys.map { key in "\(key)=\(ud.object(forKey: key) ?? Self.defaults[key] ?? "")" }.joined(separator: "\u{1F}")
+        // Preserve the original v4 memory rule digest when the optional model
+        // strategy is OFF. Only isolate outputs when a genuinely distinct
+        // low-latency model was selected on a supported OS.
+        if #available(iOS 26.4, *), flag("lowLatencyTranslation", false) {
+            snapshot += "\u{1F}translationStrategy=lowLatency"
+        }
         if snapshot != rulesSnapshot {
             rulesSnapshot = snapshot
             rulesDigest = SHA256.hash(data: Data(snapshot.utf8)).map { String(format: "%02x", $0) }.joined()
