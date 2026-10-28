@@ -481,6 +481,7 @@ struct PerformanceSettings: View {
     @AppStorage("adaptive") private var adaptive = true
     @AppStorage("idleMinutes") private var idleMinutes = 0
     @AppStorage("translateAhead") private var translateAhead = true
+    @AppStorage("lowLatencyTranslation") private var lowLatencyTranslation = false
     @AppStorage("keepWarm") private var keepWarm = true
     @AppStorage("predictiveWarmup") private var predictiveWarmup = true
     @AppStorage("remember") private var remember = true
@@ -491,6 +492,14 @@ struct PerformanceSettings: View {
         List {
             Section {
                 Toggle("Translate ahead", isOn: $translateAhead)
+                if #available(iOS 26.4, *) {
+                    Toggle("Low-latency translation models", isOn: $lowLatencyTranslation)
+                    Text("Optional traditional on-device models for faster, lower-power translations. Wording can be less fluent. Turn off to restore the existing automatic model choice. Changing this setting reinitializes the translator.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                } else {
+                    Text("Low-latency model selection requires iOS 26.4 or newer; the existing translator remains unchanged.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
                 Toggle("Keep the translator warm", isOn: $keepWarm)
                 Toggle("Warm the last confirmed language before Auto detection", isOn: $predictiveWarmup)
                 LabeledContent("Model status", value: engine.warmupStatus)
@@ -531,11 +540,12 @@ struct PerformanceSettings: View {
                 DiagnosticsCollectionControls()
                 Button("Reset diagnostics counters") { engine.diag.reset(); engine.toast("Counters reset") }
             }
-            ResetSection(keys: ["coolMode", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "predictiveWarmup", "remember", "idleBackoff", "freshTranslationTest"])
+            ResetSection(keys: ["coolMode", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "predictiveWarmup", "remember", "lowLatencyTranslation", "idleBackoff", "freshTranslationTest"])
         }
         .settingsPage("Performance & power")
         .onChange(of: adaptive) { _, _ in engine.syncConfig() }
         .onChange(of: translateAhead) { _, _ in engine.syncConfig() }
+        .onChange(of: lowLatencyTranslation) { _, _ in engine.translationStrategyChanged() }
         .onChange(of: idleBackoff) { _, _ in engine.syncConfig() }
         .onChange(of: freshTranslationTest) { _, _ in engine.pipelineSettingsChanged() }
     }
