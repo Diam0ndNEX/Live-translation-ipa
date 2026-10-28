@@ -6,6 +6,9 @@ struct MemoryDiagnosticHealth: Codable {
     var totalEntries = 0
     var readyEntries = 0
     var needsValidation = 0
+    var legacyValidated = 0
+    var legacySuperseded = 0
+    var legacyUnverified = 0
     var conflicts = 0
     var databaseBytes: Int64 = 0
     var migrationStatus = "not started"
@@ -18,6 +21,7 @@ struct MemoryDiagnosticHealth: Codable {
     // Old saved sessions lack categoryCounts. Keep them readable after upgrades.
     private enum CodingKeys: String, CodingKey {
         case schemaVersion, totalEntries, readyEntries, needsValidation, conflicts
+        case legacyValidated, legacySuperseded, legacyUnverified
         case databaseBytes, migrationStatus, integrity, pendingWrites, failedWrites
         case ramEntries, categoryCounts
     }
@@ -28,6 +32,9 @@ struct MemoryDiagnosticHealth: Codable {
         totalEntries = try c.decodeIfPresent(Int.self, forKey: .totalEntries) ?? 0
         readyEntries = try c.decodeIfPresent(Int.self, forKey: .readyEntries) ?? 0
         needsValidation = try c.decodeIfPresent(Int.self, forKey: .needsValidation) ?? 0
+        legacyValidated = try c.decodeIfPresent(Int.self, forKey: .legacyValidated) ?? 0
+        legacySuperseded = try c.decodeIfPresent(Int.self, forKey: .legacySuperseded) ?? 0
+        legacyUnverified = try c.decodeIfPresent(Int.self, forKey: .legacyUnverified) ?? 0
         conflicts = try c.decodeIfPresent(Int.self, forKey: .conflicts) ?? 0
         databaseBytes = try c.decodeIfPresent(Int64.self, forKey: .databaseBytes) ?? 0
         migrationStatus = try c.decodeIfPresent(String.self, forKey: .migrationStatus) ?? "not started"
