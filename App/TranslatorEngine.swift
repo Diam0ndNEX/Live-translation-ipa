@@ -1609,6 +1609,28 @@ final class TranslatorEngine: ObservableObject {
         }
     }
 
+    /// Best-effort bounded persistence for iOS suspension. Returning false means
+    /// confirmed entries remain visibly pending; it is never a durability claim.
+    func flushPendingMemory(maxWaitSeconds: Double = 2.5) async -> Bool {
+        guard memoryReady else { return pendingMemory.isEmpty && !memorySaving }
+        let seconds = min(5.0, max(0.1, maxWaitSeconds))
+        let deadline = ProcessInfo.processInfo.systemUptime + seconds
+        var retries = 0
+        while ProcessInfo.processInfo.systemUptime < deadline {
+            if pendingMemory.isEmpty && !memorySaving { return true }
+            if !memorySaving && !memoryMutationInProgress && retries < 2 {
+                retries += 1
+                saveMemory(force: true)
+            }
+            try? await Task.sleep(nanoseconds: 50_000_000)
+        }
+        memoryPendingWrites = pendingMemory.count
+        if !pendingMemory.isEmpty {
+            memoryFailure = "Confirmed translations remain pending after background flush"
+        }
+        return pendingMemory.isEmpty && !memorySaving
+    }
+
     func refreshMemoryHealth() async {
         do {
             let health = try await memoryStore.health()
