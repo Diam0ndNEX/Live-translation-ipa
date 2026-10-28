@@ -157,6 +157,8 @@ struct Stats {
     var savedHits = 0
     var specModelRequests = 0
     var specStarted = 0, specCompleted = 0, specDiscarded = 0, specSkipped = 0
+    var adaptiveSpeculationSkipped = 0, confirmedHandoffDeferred = 0
+    var slowTailEnqueues = 0
     var specProcessingMs = 0.0, specDiscardedMs = 0.0
     var languageContextUsed = false
     var languageConfidence = 0.0, ocrConfidence = 0.0
@@ -299,7 +301,8 @@ final class Diagnostics: ObservableObject {
             "accepted", "completed", "rejected_duplicate", "rejected_recent_fragment",
             "rejected_empty", "rejected_revision", "rejected_unstable",
             "rejected_low_confidence", "rejected_stale", "filtered", "deferred_early_candidate",
-            "preserved_confirmed_work",
+            "preserved_confirmed_work", "confirmed_handoff_deferred",
+            "adaptive_speculation_backoff", "slow_tail",
             "changing_group_preferred", "dominant_group", "queue_replaced",
             "confirmed", "speculative", "ready", "enqueued", "cancelled"
         ]
@@ -350,7 +353,8 @@ final class Diagnostics: ObservableObject {
         let allowed: Set<String> = [
             "warmup_started", "warmup_succeeded", "warmup_failed",
             "model_session_created", "model_batch_failed", "model_batch_completed",
-            "warmup_source_unresolved", "legacy_idle_started",
+            "warmup_source_unresolved", "warmup_predicted_source",
+            "model_batch_first_30s", "legacy_idle_started",
             "legacy_idle_completed", "legacy_idle_deferred"
         ]
         guard allowed.contains(reason) else { return }
@@ -458,7 +462,8 @@ final class Diagnostics: ObservableObject {
                     "boost", "ocrCorrection", "adaptive", "displayPolicy", "minDisplay",
                     "clearHold", "autoClear", "keepWarm", "langLock",
                     "selectiveSpeculation", "speculationConfidence", "confirmationDeadline",
-                    "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest"]
+                    "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest",
+                    "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup"]
         var settings: [String: String] = [:]
         for key in keys {
             if let value = UserDefaults.standard.object(forKey: key) ?? TranslatorEngine.defaults[key] {
@@ -817,10 +822,15 @@ final class Diagnostics: ObservableObject {
             "movieRejectedSmall": s.movieRejectedSmall,
             "queueReplacements": s.queueReplacements,
             "earlyDeferred": s.deferredEarlyCandidates,
+            "handoffDeferred": s.confirmedHandoffDeferred,
+            "adaptiveSpeculationSkipped": s.adaptiveSpeculationSkipped,
+            "slowTailEnqueues": s.slowTailEnqueues,
             "unpresentedConfirmed": s.supersededUnpresentedConfirmed,
             "modelBatches": s.batches, "modelFailures": s.failures,
             "warmupAttempts": eventTotals["warmup_started", default: 0],
             "warmupSucceeded": eventTotals["warmup_succeeded", default: 0],
+            "warmupPredicted": eventTotals["warmup_predicted_source", default: 0],
+            "coldModelBatches": eventTotals["model_batch_first_30s", default: 0],
             "runtimeTransitions": eventTotals["runtimeTransition", default: 0],
             "visualChanges": s.visualChanges
         ]
