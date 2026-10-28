@@ -591,26 +591,25 @@ actor TranslationMemoryStore {
             WHERE validation_state='needs_validation' AND rules_version IS NULL
               AND target_language=? AND id>? AND LENGTH(source_text) BETWEEN 4 AND 240
               AND (? IS NULL OR source_language=?)
-            ORDER BY id LIMIT 64
+            ORDER BY id LIMIT 1
             """, [.text(target), .integer(id), selectedSource.map(SQLValue.text) ?? .null,
                    selectedSource.map(SQLValue.text) ?? .null])
         defer { sqlite3_finalize(query) }
-        var scanned = 0
-        while scanned < 64 {
-            let result = sqlite3_step(query)
-            if result == SQLITE_DONE { return nil }
-            guard result == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
-            scanned += 1
-            let key = text(query, 1)
-            guard let parsed = keyParts(key), parsed.rules == nil,
-                  parsed.context.isEmpty,
-                  parsed.source == text(query, 4),
-                  parsed.target == text(query, 5) else { continue }
-            return LegacyIdleCandidate(id: sqlite3_column_int64(query, 0),
-                source: parsed.source, target: parsed.target,
-                text: parsed.sourceText, previousOutput: text(query, 3))
-        }
-        return nil
+        let result = sqlite3_step(query)
+        if result == SQLITE_DONE { return nil }
+        guard result == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
+        let recordID = sqlite3_column_int64(query, 0)
+        let key = text(query, 1)
+        let parsed = keyParts(key)
+        let eligible = parsed?.rules == nil && parsed?.context.isEmpty == true &&
+            parsed?.source == text(query, 4) && parsed?.target == text(query, 5)
+        // Return an empty source for malformed rows so the caller can advance
+        // its cursor without accidentally sending unknown text to the model.
+        return LegacyIdleCandidate(id: recordID,
+            source: eligible ? (parsed?.source ?? "") : "",
+            target: eligible ? (parsed?.target ?? "") : "",
+            text: eligible ? (parsed?.sourceText ?? "") : "",
+            previousOutput: text(query, 3))
     }
 
     /// A successful fresh on-device model translation, independently requested
