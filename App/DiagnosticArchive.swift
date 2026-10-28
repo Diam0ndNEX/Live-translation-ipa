@@ -304,27 +304,30 @@ actor DiagnosticExportWriter {
         let names = DiagnosticIntervalBucket.allowedCounters.sorted()
         let header = "start_time,elapsed_seconds,thermal_level,low_power,capture_connected,effective_ocr_interval_ms,visual_motion_proxy_ms,ocr_median_ms,ocr_p95_ms,translation_median_ms,translation_p95_ms,enqueue_median_ms,enqueue_p95_ms,model_batch_median_ms," +
                      names.joined(separator: ",")
-        let lines = (safe.intervals ?? []).map { interval -> String in
-            let fields = [
+        let lines: [String] = (safe.intervals ?? []).map { interval in
+            var fields: [String] = [
                 String(Int(interval.startedAt.timeIntervalSince1970)),
                 String(interval.elapsedSeconds),
                 String(interval.thermalLevel),
                 interval.lowPower ? "1" : "0",
-                interval.captureConnected ? "1" : "0",
-                interval.effectiveOCRIntervalMs.map { String($0) } ?? "",
-                interval.visualChangeProxyMs.map { String($0) } ?? "",
-                interval.ocrMedianMs.map { String($0) } ?? "",
-                interval.ocrP95Ms.map { String($0) } ?? "",
-                interval.translationMedianMs.map { String($0) } ?? "",
-                interval.translationP95Ms.map { String($0) } ?? "",
-                interval.enqueueMedianMs.map { String($0) } ?? "",
-                interval.enqueueP95Ms.map { String($0) } ?? "",
-                interval.modelBatchMedianMs.map { String($0) } ?? ""
-            ] + names.map { String(interval.counters[$0, default: 0]) }
+                interval.captureConnected ? "1" : "0"
+            ]
+            let durations: [Double?] = [
+                interval.effectiveOCRIntervalMs, interval.visualChangeProxyMs,
+                interval.ocrMedianMs, interval.ocrP95Ms,
+                interval.translationMedianMs, interval.translationP95Ms,
+                interval.enqueueMedianMs, interval.enqueueP95Ms,
+                interval.modelBatchMedianMs
+            ]
+            fields.append(contentsOf: durations.map { value in
+                guard let value else { return "" }
+                return String(value)
+            })
+            fields.append(contentsOf: names.map { String(interval.counters[$0, default: 0]) })
             return fields.joined(separator: ",")
         }
         let csv = Data(([header] + lines).joined(separator: "\n").utf8)
-        let zip = try DiagnosticStoredZIP.make(entries: [
+        let zip: Data = try DiagnosticStoredZIP.make(entries: [
             (name: "session.json", contents: json),
             (name: "intervals.csv", contents: csv),
             (name: "README.txt", contents: readme)
