@@ -670,3 +670,14 @@ check(overlappingNames.tokens.count == 2 &&
 let tokenPrefixName = TextIntel.protect("Maria met Zq.", words: ["Maria", "Zq"])
 check(TextIntel.restore(tokenPrefixName.text, tokens: tokenPrefixName.tokens) == "Maria met Zq.",
     "A later protected word must never replace characters inside an inserted placeholder")
+
+let existingMemoryRules = "cleanOCR=true\u{1F}slang=true"
+check(TranslationModelMemoryPolicy.rulesContext(base: existingMemoryRules, lowLatency: false) == existingMemoryRules,
+    "Default model must preserve the exact legacy translation-memory digest input")
+check(TranslationModelMemoryPolicy.rulesContext(base: existingMemoryRules, lowLatency: true) != existingMemoryRules,
+    "Opted-in low-latency strategy must isolate memory from the default model")
+check(PipelineSafety.cacheKey(source: "pt", target: "en", text: "Olá amigo", protectedWords: [],
+        rules: TranslationModelMemoryPolicy.rulesContext(base: existingMemoryRules, lowLatency: true)) !=
+      PipelineSafety.cacheKey(source: "pt", target: "en", text: "Olá amigo", protectedWords: [],
+        rules: TranslationModelMemoryPolicy.rulesContext(base: existingMemoryRules, lowLatency: false)),
+      "Different model strategies must not cross-reuse persistent translations")
