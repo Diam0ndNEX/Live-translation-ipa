@@ -96,6 +96,13 @@ struct DiagnosticIntervalBucket: Codable {
     var effectiveOCRIntervalMs: Double? = nil
     /// Last coarse image-motion-to-first-OCR proxy; NOT subtitle acquisition latency.
     var visualChangeProxyMs: Double? = nil
+    var ocrMedianMs: Double? = nil
+    var ocrP95Ms: Double? = nil
+    var translationMedianMs: Double? = nil
+    var translationP95Ms: Double? = nil
+    var enqueueMedianMs: Double? = nil
+    var enqueueP95Ms: Double? = nil
+    var modelBatchMedianMs: Double? = nil
 
     static let allowedCounters: Set<String> = [
         "captureFrames", "capturePasses", "ocrPackets", "candidateConfirmed",
@@ -107,21 +114,26 @@ struct DiagnosticIntervalBucket: Codable {
         "movieRejectedSmall", "queueReplacements", "earlyDeferred",
         "unpresentedConfirmed", "capturePackets", "modelBatches",
         "modelFailures", "warmupAttempts", "warmupSucceeded",
-        "runtimeTransitions", "visualChanges"
+        "runtimeTransitions", "visualChanges",
+        "ocrMeasurementCount", "translationMeasurementCount", "enqueueMeasurementCount"
     ]
 
     func sanitized() -> DiagnosticIntervalBucket {
-        DiagnosticIntervalBucket(startedAt: startedAt,
+        func safe(_ value: Double?) -> Double? {
+            value.flatMap { $0.isFinite && $0 >= 0 ? min($0, 60000) : nil }
+        }
+        return DiagnosticIntervalBucket(startedAt: startedAt,
             elapsedSeconds: elapsedSeconds.isFinite ? max(0, min(elapsedSeconds, 1800)) : 0,
             counters: counters.filter { Self.allowedCounters.contains($0.key) && $0.value >= 0 },
             thermalLevel: max(0, min(thermalLevel, 3)),
             lowPower: lowPower, captureConnected: captureConnected,
-            effectiveOCRIntervalMs: effectiveOCRIntervalMs.flatMap {
-                $0.isFinite && $0 >= 0 ? min($0, 60000) : nil
-            },
-            visualChangeProxyMs: visualChangeProxyMs.flatMap {
-                $0.isFinite && $0 >= 0 ? min($0, 6000) : nil
-            })
+            effectiveOCRIntervalMs: safe(effectiveOCRIntervalMs),
+            visualChangeProxyMs: safe(visualChangeProxyMs).map { min($0, 6000) },
+            ocrMedianMs: safe(ocrMedianMs), ocrP95Ms: safe(ocrP95Ms),
+            translationMedianMs: safe(translationMedianMs),
+            translationP95Ms: safe(translationP95Ms),
+            enqueueMedianMs: safe(enqueueMedianMs), enqueueP95Ms: safe(enqueueP95Ms),
+            modelBatchMedianMs: safe(modelBatchMedianMs))
     }
 }
 
@@ -288,7 +300,7 @@ actor DiagnosticExportWriter {
         """.utf8)
         let safe = redact(snapshot)
         let names = DiagnosticIntervalBucket.allowedCounters.sorted()
-        let header = "start_time,elapsed_seconds,thermal_level,low_power,capture_connected,effective_ocr_interval_ms,visual_motion_proxy_ms," +
+        let header = "start_time,elapsed_seconds,thermal_level,low_power,capture_connected,effective_ocr_interval_ms,visual_motion_proxy_ms,ocr_median_ms,ocr_p95_ms,translation_median_ms,translation_p95_ms,enqueue_median_ms,enqueue_p95_ms,model_batch_median_ms," +
                      names.joined(separator: ",")
         let lines = (safe.intervals ?? []).map { interval -> String in
             let fields = [
@@ -298,7 +310,14 @@ actor DiagnosticExportWriter {
                 interval.lowPower ? "1" : "0",
                 interval.captureConnected ? "1" : "0",
                 interval.effectiveOCRIntervalMs.map { String($0) } ?? "",
-                interval.visualChangeProxyMs.map { String($0) } ?? ""
+                interval.visualChangeProxyMs.map { String($0) } ?? "",
+                interval.ocrMedianMs.map { String($0) } ?? "",
+                interval.ocrP95Ms.map { String($0) } ?? "",
+                interval.translationMedianMs.map { String($0) } ?? "",
+                interval.translationP95Ms.map { String($0) } ?? "",
+                interval.enqueueMedianMs.map { String($0) } ?? "",
+                interval.enqueueP95Ms.map { String($0) } ?? "",
+                interval.modelBatchMedianMs.map { String($0) } ?? ""
             ] + names.map { String(interval.counters[$0, default: 0]) }
             return fields.joined(separator: ",")
         }
