@@ -136,6 +136,15 @@ struct MemoryManagementView: View {
                         Text("\(entry.sourceLanguage) → \(entry.targetLanguage) · \(entry.validationState)").font(.caption)
                     }
                     .swipeActions {
+                        Button("Review") {
+                            Task {
+                                do {
+                                    try await engine.quarantineMemoryEntries(ids: [entry.id])
+                                    entries = try await engine.memoryStore.search(query: query, limit: 100)
+                                    message = "Entry preserved, but excluded from automatic reuse"
+                                } catch { message = "Cannot review while memory is being saved" }
+                            }
+                        }.tint(.orange)
                         Button("Delete", role: .destructive) {
                             Task {
                                 do { try await engine.removeMemoryEntries(ids: [entry.id]); entries.removeAll { $0.id == entry.id } }
@@ -172,9 +181,7 @@ struct MemoryManagementView: View {
                         guard data.count <= 256 * 1024 * 1024 else { throw MemoryStoreError.tooLarge }
                         return data
                     }.value
-                    _ = try await engine.memoryStore.importData(data)
-                    engine.clearRAMCache()
-                    await engine.refreshMemoryHealth()
+                    try await engine.importMemoryData(data)
                     message = "Memory imported; compatibility checks remain active"
                 } catch { message = "Import failed; existing memory preserved" }
             }
@@ -200,9 +207,7 @@ struct MemoryManagementView: View {
                 Task {
                     defer { transferBusy = false }
                     do {
-                        _ = try await engine.memoryStore.mergeRecoverySnapshot(named: name)
-                        engine.clearRAMCache()
-                        await engine.refreshMemoryHealth()
+                        try await engine.mergeMemoryRecoverySnapshot(named: name)
                         message = "Recovery snapshot merged; conflicting alternatives retained"
                     } catch {
                         message = "Recovery merge failed; current memory preserved"

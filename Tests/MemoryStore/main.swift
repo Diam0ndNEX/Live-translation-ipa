@@ -8,8 +8,10 @@ import SQLite3
         precondition(MemoryUnitClassifier.classify("Olá meu amigo") == .phrase)
         precondition(MemoryUnitClassifier.classify("How are you?") == .sentence)
         precondition(MemoryUnitClassifier.classify("Scrolling lyric\ncontinued") == .subtitleFragment)
-        precondition(MemoryUnitClassifier.classify("I don't know what else to say now") == .subtitleFragment)
+        precondition(MemoryUnitClassifier.classify("I don't know what else to say now") == .phrase)
         precondition(MemoryUnitClassifier.classify("123") == .unknown)
+        precondition(MemoryUnitClassifier.classify("— New speaker starts") == .subtitleFragment)
+        precondition(MemoryUnitClassifier.classify("To be continued…") == .subtitleFragment)
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
@@ -85,6 +87,37 @@ import SQLite3
             precondition(FileManager.default.fileExists(atPath: legacy.path))
         }
 
+
+        // Only NFC-equivalent source bytes may use the indexed normalized path.
+        // Language, context, rule digest and actual whitespace must remain exact.
+        let accentOriginal = "Cafe\u{301}?"
+        let accentEquivalent = "Café?"
+        let canonicalKey = "v4|\(rules)|pt>en|0:|\(accentOriginal)"
+        let equivalentKey = "v4|\(rules)|pt>en|0:|\(accentEquivalent)"
+        _ = try await store.save([canonicalKey:"Coffee?"], revision: 4)
+        let normalizedHit = await store.lookup(key: equivalentKey, timeoutMilliseconds: 50)
+        precondition(normalizedHit.value == "Coffee?" && normalizedHit.outcome == "normalized_hit",
+                     "Only canonically equivalent Unicode may reuse a translation")
+        let wrongRules = "v4|\(String(repeating: "b", count: 64))|pt>en|0:|\(accentEquivalent)"
+        let wrongContext = "v4|\(rules)|pt>en|1:x|\(accentEquivalent)"
+        let wrongLanguage = "v4|\(rules)|pt>fr|0:|\(accentEquivalent)"
+        let wrongRulesHit = await store.lookup(key: wrongRules, timeoutMilliseconds: 50)
+        let wrongContextHit = await store.lookup(key: wrongContext, timeoutMilliseconds: 50)
+        let wrongLanguageHit = await store.lookup(key: wrongLanguage, timeoutMilliseconds: 50)
+        precondition(wrongRulesHit.value == nil && wrongContextHit.value == nil &&
+                     wrongLanguageHit.value == nil, "Rules, context and language isolate memory")
+        let accentRows = try await store.search(query: "Cafe", limit: 20)
+        guard let accentEntry = accentRows.first(where: { $0.translatedText == "Coffee?" })
+        else { preconditionFailure("Memory entry missing") }
+        let quarantined = try await store.quarantineEntries(ids: [accentEntry.id])
+        precondition(quarantined.needsValidation >= 1)
+        let excluded = await store.lookup(key: equivalentKey, timeoutMilliseconds: 50)
+        precondition(excluded.value == nil, "Quarantined entries must not be reused")
+        _ = try await store.save([canonicalKey:"Coffee?"], revision: 5)
+        let revalidated = await store.lookup(key: equivalentKey, timeoutMilliseconds: 50)
+        precondition(revalidated.value == "Coffee?",
+                     "A later confirmed translation may revalidate its same canonical key")
+
         let snapshotName = try await store.createRecoverySnapshot()
         let snapshotURL = root.appendingPathComponent("db/recovery").appendingPathComponent(snapshotName)
         precondition(FileManager.default.fileExists(atPath: snapshotURL.path),
@@ -92,11 +125,11 @@ import SQLite3
         let backupHealth = try await store.health()
         precondition(backupHealth.lastVerifiedBackup != nil,
                      "Health must expose a verified recovery snapshot timestamp")
-        try await store.clear(revision: 4)
+        try await store.clear(revision: 6)
         precondition(FileManager.default.fileExists(atPath: snapshotURL.path),
                      "Clearing active memory must never delete the recovery snapshot")
         do {
-            _ = try await store.save([key:"Stale work"], revision: 3)
+            _ = try await store.save([key:"Stale work"], revision: 5)
             preconditionFailure("Old in-flight write must be fenced by clear revision")
         } catch MemoryStoreError.staleRevision { }
 
@@ -199,6 +232,17 @@ import SQLite3
         let cleared = try await reopened.prepare(legacyURLs: [legacy])
         precondition(cleared.totalEntries == 0, "Clear must not reimport legacy memory")
         precondition(FileManager.default.fileExists(atPath: legacy.path))
+        let recoveryNames = try await reopened.recoverySnapshots()
+        precondition(recoveryNames.contains(snapshotName))
+        let merged = try await reopened.mergeRecoverySnapshot(named: snapshotName)
+        precondition(merged.totalEntries >= 4,
+                     "Recovery must non-destructively return old confirmed entries")
+        _ = try await reopened.save(["v4|\(rules)|pt>en|0:|New after recovery":"New"], revision: 7)
+        let stillPresent = await reopened.lookup(
+            key: "v4|\(rules)|pt>en|0:|New after recovery", timeoutMilliseconds: 50)
+        precondition(stillPresent.value == "New",
+                     "A recovery merge must not replace newer translations")
+        try await reopened.clear(revision: 8)
         // Restore is additive and explicit. A previous Clear cannot be undone by
         // legacy migration, but a user-selected verified snapshot can be merged.
         let availableSnapshots = try await reopened.recoverySnapshots()

@@ -282,7 +282,7 @@ final class Diagnostics: ObservableObject {
         memoryOutcomes[outcome, default: 0] += count
         let finite = durationMs.isFinite && durationMs >= 0
         switch outcome {
-        case .ramHit, .persistentHit, .legacyHit, .speculativeHit, .miss, .timeout, .compatibilityRejected, .databaseUnavailable:
+        case .ramHit, .persistentHit, .legacyHit, .normalizedHit, .speculativeHit, .miss, .timeout, .compatibilityRejected, .databaseUnavailable:
             if finite { lookupSamples.append(durationMs) }
             if lookupSamples.count > 600 { lookupSamples.removeFirst(lookupSamples.count - 600) }
         case .persisted, .writeFailed:
@@ -1363,6 +1363,10 @@ private struct DiagnosticsBody: View {
             LabeledContent("Migration", value: diag.memoryHealth.migrationStatus)
             LabeledContent("Integrity", value: diag.memoryHealth.integrity)
             LabeledContent("Pending / failed writes", value: "\(diag.memoryHealth.pendingWrites) / \(diag.memoryHealth.failedWrites)")
+            ForEach(diag.memoryHealth.categoryCounts.keys.sorted(), id: \.self) { category in
+                LabeledContent(category.replacingOccurrences(of: "_", with: " ").capitalized,
+                               value: String(diag.memoryHealth.categoryCounts[category, default: 0]))
+            }
             Text("Pending writes are not yet durable. RAM eviction never means permanent deletion. Lookup outcomes count translation units; persistence counters count write operations.").font(.caption).foregroundStyle(.secondary)
             ForEach(MemoryDiagnosticOutcome.allCases, id: \.self) { outcome in
                 LabeledContent(outcome.rawValue, value: String(diag.memoryOutcomesForUI(outcome)))
@@ -1385,6 +1389,24 @@ private struct DiagnosticsBody: View {
                     Text("\(session.appVersion) · \(session.events.count) retained events")
                     Text("Measured through \(session.endedAt.formatted())")
                     Text(session.measurementBoundary).font(.caption)
+                }
+            }
+            if diag.archivedSessions.count >= 2 {
+                let baseline = diag.archivedSessions[1]
+                let current = diag.archivedSessions[0]
+                let comparison = DiagnosticPerformanceComparison(baseline: baseline, current: current)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Recent session p95 comparison").font(.subheadline.weight(.semibold))
+                    if comparison.comparable {
+                        ForEach(comparison.p95Changes.keys.sorted(), id: \.self) { metric in
+                            let difference = comparison.p95Changes[metric, default: 0]
+                            LabeledContent(metric, value: String(format: "%+.1f%%", difference))
+                        }
+                        Text("Indicative only: different subtitle workloads can change latency.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text(comparison.reason).font(.caption).foregroundStyle(.secondary)
+                    }
                 }
             }
             Button("Delete saved diagnostic sessions", role: .destructive) { confirmDeleteSessions = true }

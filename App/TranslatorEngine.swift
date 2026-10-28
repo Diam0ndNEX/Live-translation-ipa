@@ -1177,8 +1177,15 @@ final class TranslatorEngine: ObservableObject {
         var unresolvedSource = false
         var failureReason: String? = nil
         func isCurrent() -> Bool {
-            !Task.isCancelled && workContext == contextRevision && (!display || workGeneration == generation)
-                && CandidateValidity.isCurrent(workCandidate, active: activeCandidateID, enabled: flag("steadyCaptions", true))
+            let current = !Task.isCancelled && workContext == contextRevision &&
+                (!display || workGeneration == generation) &&
+                CandidateValidity.isCurrent(workCandidate, active: activeCandidateID,
+                    enabled: flag("steadyCaptions", true))
+            if display && !current && diag.detailedCollection {
+                diag.trace(workCandidate, stage: "cancelled",
+                           detail: "Obsolete translation generation or candidate")
+            }
+            return current
         }
 
         /// Remembers a finished sentence. Early (translate-ahead) results are marked so we can show how often they pay off.
@@ -1199,7 +1206,15 @@ final class TranslatorEngine: ObservableObject {
         for (bi, raw) in blocks.enumerated() {
             var text = cleanOn ? TextIntel.cleanOCR(raw) : raw
             for (from, to) in fixes { text = text.replacingOccurrences(of: from, with: to, options: [.caseInsensitive]) }
+            if display && diag.detailedCollection && text != raw {
+                diag.trace(workCandidate, stage: "ocrCorrection",
+                           detail: "Recognized text was cleaned or corrected")
+            }
             guard let choice = detectSource(text, record: display) else {
+                if display && diag.detailedCollection {
+                    diag.trace(workCandidate, stage: "language",
+                               detail: "No compatible source language selected")
+                }
                 unresolvedSource = true
                 units.append([TUnit(label: nil, sentences: [text], out: [text], tokens: [])])
                 continue
@@ -1210,6 +1225,10 @@ final class TranslatorEngine: ObservableObject {
             }
             let src = choice.language
             let id = src.minimalIdentifier
+            if display && diag.detailedCollection {
+                diag.trace(workCandidate, stage: "language",
+                           detail: "Source language resolved for current candidate")
+            }
             if display {
                 if diag.s.sourceUsed != id || diag.s.sourceOrigin != choice.origin.title {
                     diag.event(.language, "Source resolved: \(id) (\(choice.origin.title))")
@@ -1230,6 +1249,10 @@ final class TranslatorEngine: ObservableObject {
                 if display, let name = d.label { diag.learn(name) }
                 let prot = TextIntel.protect(d.text, words: never)
                 let sentences = splitSentences(prot.text)
+                if display && diag.detailedCollection {
+                    diag.trace(workCandidate, stage: "segmentation",
+                               detail: "Translation units assigned to stable block")
+                }
                 if display && diag.enabled { diag.s.sentences += sentences.count }
                 var outs: [String?] = []
                 for (si, s) in sentences.enumerated() {
@@ -1255,6 +1278,7 @@ final class TranslatorEngine: ObservableObject {
                             let outcome: MemoryDiagnosticOutcome
                             switch lookup.outcome {
                             case "timeout": outcome = .timeout
+                            case "normalized_hit": outcome = .normalizedHit
                             case "incompatible", "conflict": outcome = .compatibilityRejected
                             case "database_error", "unavailable": outcome = .databaseUnavailable
                             default: outcome = diskHit ? (lookup.origin == "legacy" ? .legacyHit : .persistentHit) : .miss
@@ -1316,8 +1340,18 @@ final class TranslatorEngine: ObservableObject {
             let plan = TranslationBatchPlan(items.map { $0.text }, contexts: items.map { $0.key })
             if display { savedRequests += items.count - plan.unique.count }
             if !display && diag.enabled { diag.s.specModelRequests += plan.unique.count }
+            if display && diag.detailedCollection {
+                diag.trace(workCandidate, stage: "freshTranslation",
+                           detail: "Uncached units submitted to on-device translation")
+            }
             let batch = await translateBatch(plan.unique, source: src, target: target, installed: installed)
             guard isCurrent() else { return }
+            if display && diag.detailedCollection {
+                diag.trace(workCandidate, stage: "translationResult",
+                           detail: (batch?.count == plan.unique.count) ?
+                                   "On-device model batch returned expected count" :
+                                   "Translation batch was incomplete; retry policy applies")
+            }
             var uniqueResults: [String?]
             if let batch, batch.count == plan.unique.count {
                 uniqueResults = batch.map(Optional.some)
@@ -1654,6 +1688,7 @@ final class TranslatorEngine: ObservableObject {
             diag.memoryHealth.failedWrites = health.failedWrites
             diag.memoryHealth.pendingWrites = memoryPendingWrites
             diag.memoryHealth.ramEntries = cache.count
+            diag.memoryHealth.categoryCounts = health.categoryCounts
         } catch { memoryFailure = "Memory health unavailable" }
     }
 
@@ -1674,6 +1709,49 @@ final class TranslatorEngine: ObservableObject {
         }
         clearRAMCache()
         try await memoryStore.delete(ids: ids)
+        await refreshMemoryHealth()
+    }
+
+
+    /// Storage imports and review operations are serialized against engine writes.
+    /// New confirmations arriving while a maintenance operation awaits the store
+    /// remain in pendingMemory and are flushed after its commit.
+    func importMemoryData(_ data: Data) async throws {
+        guard memoryReady, !memorySaving, !memoryMutationInProgress, pendingMemory.isEmpty
+        else { throw MemoryStoreError.unavailable }
+        memoryMutationInProgress = true
+        defer {
+            memoryMutationInProgress = false
+            saveMemory(force: true)
+        }
+        _ = try await memoryStore.importData(data)
+        clearRAMCache()
+        await refreshMemoryHealth()
+    }
+
+    func quarantineMemoryEntries(ids: [Int64]) async throws {
+        guard memoryReady, !memorySaving, !memoryMutationInProgress, pendingMemory.isEmpty
+        else { throw MemoryStoreError.unavailable }
+        memoryMutationInProgress = true
+        defer {
+            memoryMutationInProgress = false
+            saveMemory(force: true)
+        }
+        _ = try await memoryStore.quarantineEntries(ids: ids)
+        clearRAMCache()
+        await refreshMemoryHealth()
+    }
+
+    func mergeMemoryRecoverySnapshot(named name: String) async throws {
+        guard memoryReady, !memorySaving, !memoryMutationInProgress, pendingMemory.isEmpty
+        else { throw MemoryStoreError.unavailable }
+        memoryMutationInProgress = true
+        defer {
+            memoryMutationInProgress = false
+            saveMemory(force: true)
+        }
+        _ = try await memoryStore.mergeRecoverySnapshot(named: name)
+        clearRAMCache()
         await refreshMemoryHealth()
     }
 
