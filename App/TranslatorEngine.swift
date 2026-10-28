@@ -1827,6 +1827,25 @@ final class TranslatorEngine: ObservableObject {
         await refreshMemoryHealth()
     }
 
+    /// Explicit maintenance route when SQLite initialization failed. A failed
+    /// recovery leaves pending confirmations intact and fresh translation active.
+    func restoreUnavailableMemoryFromSnapshot(named name: String) async throws {
+        guard !memoryReady, !memorySaving, !memoryMutationInProgress else {
+            throw MemoryStoreError.unavailable
+        }
+        memoryMutationInProgress = true
+        defer {
+            memoryMutationInProgress = false
+            if memoryReady { saveMemory(force: true) }
+        }
+        memoryHealth = try await memoryStore.recoverUnavailableStore(named: name)
+        memoryReady = true
+        clearRAMCache()
+        await refreshMemoryHealth()
+        memoryFailure = nil
+        diag.log("Unavailable memory database restored from verified snapshot; damaged originals retained")
+    }
+
     /// Called from the live app on an iOS memory warning. Persistent SQLite entries
     /// remain untouched; only evictable RAM entries are reduced.
     func handleMemoryPressure() {
