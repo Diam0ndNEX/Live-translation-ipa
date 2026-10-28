@@ -248,7 +248,8 @@ import SQLite3
         let availableSnapshots = try await reopened.recoverySnapshots()
         precondition(availableSnapshots.contains(snapshotName))
         let recoveredHealth = try await reopened.mergeRecoverySnapshot(named: snapshotName)
-        precondition(recoveredHealth.totalEntries == 3)
+        precondition(recoveredHealth.totalEntries == 4,
+                     "Snapshot contains both conflict alternatives, sentence and accent entry")
         let recoveredConflict = await reopened.lookup(key: key, timeoutMilliseconds: 50)
         precondition(recoveredConflict.value == nil, "Recovered conflicting translations must stay blocked")
         let recoveredSentence = await reopened.lookup(key: sentenceKey, timeoutMilliseconds: 50)
@@ -256,12 +257,12 @@ import SQLite3
         precondition(recoveredSentence.origin == "persistent",
                      "Recovered provenance must not inflate legacy lookup hits")
         let repeatRecovery = try await reopened.mergeRecoverySnapshot(named: snapshotName)
-        precondition(repeatRecovery.totalEntries == 3, "Snapshot re-merge must be idempotent")
+        precondition(repeatRecovery.totalEntries == 4, "Snapshot re-merge must be idempotent")
         do {
             _ = try await reopened.mergeRecoverySnapshot(named: "../memory.sqlite")
             preconditionFailure("Recovery filenames must reject path traversal")
         } catch MemoryStoreError.sourceUnreadable { }
-        try await reopened.clear(revision: 5)
+        try await reopened.clear(revision: 9)
 
         try await reopened.deletePreservedCopies(legacyURLs: [legacy, oldJSON])
         precondition(!FileManager.default.fileExists(atPath: legacy.path))
