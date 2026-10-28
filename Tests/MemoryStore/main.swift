@@ -236,6 +236,18 @@ import CryptoKit
         // Explicit idle validation independently retranslates the ORIGINAL
         // source text. It creates a fresh current-key translation and marks
         // the old row historical, without importing the old output as truth.
+        let inventory = try await associationStore.legacyValidationInventory(target: "en", selectedSource: "pt")
+        let pendingInventory = inventory["Pending legacy records", default: 0]
+        precondition(pendingInventory > 0)
+        precondition(pendingInventory == inventory["Different target language", default: 0] +
+            inventory["Different source language", default: 0] +
+            inventory["Outside 4–240 character range", default: 0] +
+            inventory["Scan candidates before safety checks", default: 0],
+            "Inventory categories must partition pending originals without mutating them")
+        let otherPairInventory = try await associationStore.legacyValidationInventory(target: "zz", selectedSource: nil)
+        precondition(otherPairInventory["Different target language"] == pendingInventory &&
+            otherPairInventory["Scan candidates before safety checks"] == 0,
+            "Changing the target must explain exclusions rather than imply no pending data")
         guard let idleCandidate = try await associationStore.nextLegacyIdleCandidate(
             target: "en", selectedSource: "pt", after: 0),
               idleCandidate.source == "pt" else {
@@ -745,3 +757,4 @@ import CryptoKit
         print("SQLite migration, recovery, integrity checks, classification, revision barrier and clear/reopen passed")
     }
 }
+

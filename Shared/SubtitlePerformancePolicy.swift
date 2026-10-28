@@ -3,6 +3,11 @@ import Foundation
 /// Pure, bounded decisions for performance-sensitive subtitle acquisition.
 /// The counters are session-local metadata; no recognized text is persisted.
 enum SubtitlePerformancePolicy {
+    static func preemptSpeculation(activeText: String?, confirmedText: String) -> Bool {
+        guard let activeText, !activeText.isEmpty, !confirmedText.isEmpty else { return false }
+        return activeText != confirmedText
+    }
+
     /// A second independent frame can be read sooner without reducing the
     /// configured number of reads, detail, confidence or correction. Only a
     /// pending Movie confirmation may borrow this short burst; pressure wins.

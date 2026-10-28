@@ -74,6 +74,16 @@ struct MemoryManagementView: View {
                 }.disabled(captureInProgress || transferBusy ||
                     engine.memoryHealth == nil)
                 LabeledContent("Validation activity", value: engine.legacyIdleValidationStatus)
+                Button("Rescan pending legacy records") { engine.rescanLegacyValidation() }
+                    .disabled(captureInProgress || transferBusy || engine.legacyBatchActive || engine.memoryHealth == nil)
+                ForEach(engine.legacyValidationInventory.keys.sorted(), id: \.self) { key in
+                    LabeledContent(key, value: String(engine.legacyValidationInventory[key] ?? 0))
+                }
+                ForEach(engine.legacyScanReasons.keys.sorted(), id: \.self) { key in
+                    LabeledContent(key, value: String(engine.legacyScanReasons[key] ?? 0))
+                }
+                Text("Inventory is a snapshot from the last scan. Scan candidates still need compatible keys, unchanged cleanup, one sentence unit and an installed model. Skip reasons describe the latest scanned batch, not every pending record. Scanning resumes automatically after language, rule or database changes. Originals are preserved.")
+                    .font(.footnote).foregroundStyle(.secondary)
                 LabeledContent("Translation model", value: engine.warmupStatus)
                 if let duration = engine.warmupLastDurationMs {
                     LabeledContent("Last model warm-up", value: "\(Int(duration)) ms")
@@ -365,3 +375,4 @@ struct MemoryTransferDocument: FileDocument {
     init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
 }
+
