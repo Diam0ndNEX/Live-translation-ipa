@@ -193,6 +193,8 @@ final class Diagnostics: ObservableObject {
     private let exportWriter = DiagnosticExportWriter()
     private var diagnosticSessionID = UUID()
     private var candidateIDs: [String: UUID] = [:]
+    private var frameIDs: [Int: UUID] = [:]
+    private var unitIDs: [String: UUID] = [:]
     private var memoryOutcomes: [MemoryDiagnosticOutcome: Int] = [:]
     private var lookupSamples: [Double] = []
     private var writeSamples: [Double] = []
@@ -219,30 +221,51 @@ final class Diagnostics: ObservableObject {
         return id
     }
 
-    func trace(_ candidate: String?, stage: String, detail: String, at time: Date = Date()) {
+    private func stableFrameID(_ index: Int?) -> UUID? {
+        guard let index else { return nil }
+        if let id = frameIDs[index] { return id }
+        if frameIDs.count >= 600 { frameIDs.removeAll(keepingCapacity: true) }
+        let id = UUID(); frameIDs[index] = id
+        return id
+    }
+
+    private func stableUnitID(_ canonicalKey: String?) -> UUID? {
+        guard let canonicalKey else { return nil }
+        if let id = unitIDs[canonicalKey] { return id }
+        if unitIDs.count >= 600 { unitIDs.removeAll(keepingCapacity: true) }
+        let id = UUID(); unitIDs[canonicalKey] = id
+        return id
+    }
+
+    func trace(_ candidate: String?, stage: String, detail: String, at time: Date = Date(),
+               frameIndex: Int? = nil) {
         let recorderToken = beginRecorder(); defer { endRecorder(recorderToken) }
         guard detailedCollection, let candidate else { return }
         // Never export a caller's identifier: historical candidates can encode input text.
         guard let safeID = stableCandidateID(candidate) else { return }
         let stages: Set<String> = ["first OCR", "seen", "confirmed", "processing", "speculating", "cache", "ready", "enqueued", "superseded", "memory", "cancelled"]
         let safeStage = stages.contains(stage) ? stage : "other"
-        appendStructured(candidate: safeID, stage: safeStage, outcome: "observed", reason: safeStage, durationMs: nil, at: time)
+        appendStructured(candidate: safeID, frameIndex: frameIndex, stage: safeStage,
+                         outcome: "observed", reason: safeStage, durationMs: nil, at: time)
         subtitleTraces.append(SubtitleTrace(candidate: safeID.uuidString, stage: safeStage, time: time, detail: detail))
         if subtitleTraces.count > 300 { subtitleTraces.removeFirst(subtitleTraces.count - 300) }
     }
 
 
-    private func appendStructured(candidate: UUID? = nil, stage: String, outcome: String,
+    private func appendStructured(candidate: UUID? = nil, frameIndex: Int? = nil,
+                                  unitKey: String? = nil, stage: String, outcome: String,
                                   reason: String, durationMs: Double?, at time: Date = Date()) {
         structuredEvents.append(StructuredDiagnosticEvent(id: UUID(), timestamp: time,
-            sessionID: diagnosticSessionID, candidateID: candidate, stage: stage,
-            outcome: outcome, reasonCode: reason,
+            sessionID: diagnosticSessionID, candidateID: candidate,
+            frameID: stableFrameID(frameIndex), unitID: stableUnitID(unitKey),
+            stage: stage, outcome: outcome, reasonCode: reason,
             durationMs: durationMs.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }, privacy: "metadataOnly"))
         if structuredEvents.count > 600 { structuredEvents.removeFirst(structuredEvents.count - 600) }
     }
 
     /// Counts one lookup outcome per unit; persistence and eviction counters have separate denominators.
-    func recordMemory(_ outcome: MemoryDiagnosticOutcome, durationMs: Double = 0, candidate: String? = nil) {
+    func recordMemory(_ outcome: MemoryDiagnosticOutcome, durationMs: Double = 0,
+                      candidate: String? = nil, frameIndex: Int? = nil, unitKey: String? = nil) {
         let token = beginRecorder(); defer { endRecorder(token) }
         guard enabled else { return }
         memoryOutcomes[outcome, default: 0] += 1
@@ -259,7 +282,8 @@ final class Diagnostics: ObservableObject {
         // Preserve errors in basic mode; detailed events are pressure-aware.
         if detailedCollection || outcome == .writeFailed || outcome == .timeout || outcome == .databaseUnavailable {
             let safeID = detailedCollection ? stableCandidateID(candidate) : nil
-            appendStructured(candidate: safeID, stage: "memory", outcome: outcome.rawValue,
+            appendStructured(candidate: safeID, frameIndex: frameIndex, unitKey: unitKey,
+                             stage: "memory", outcome: outcome.rawValue,
                              reason: outcome.rawValue, durationMs: durationMs)
         }
     }
@@ -446,7 +470,7 @@ final class Diagnostics: ObservableObject {
 
     func reset() {
         persistSession()
-        diagnosticSessionID = UUID(); candidateIDs = [:]; structuredEvents = []
+        diagnosticSessionID = UUID(); candidateIDs = [:]; frameIDs = [:]; unitIDs = [:]; structuredEvents = []
         memoryOutcomes = [:]; lookupSamples = []; writeSamples = []
         started = Date()
         subtitleTraces = []; recorderCosts = RecorderCosts()
