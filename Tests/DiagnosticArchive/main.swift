@@ -146,23 +146,6 @@ import Foundation
         precondition(protectedEvents.count == 1)
         precondition(!String(decoding: protectedEvents[0].payload, as: UTF8.self).contains("private source text"),
                      "Indexed events must share the same privacy boundary")
-        let unsafeEvent = StructuredDiagnosticEvent(id: UUID(), timestamp: Date(),
-            sessionID: session, candidateID: UUID(), frameID: nil, unitID: nil,
-            stage: "private source text", outcome: "private source text",
-            reasonCode: "private source text", durationMs: 0.2, privacy: "metadataOnly")
-        let unsafeSnapshot = DiagnosticSessionExport(id: session, startedAt: Date(),
-            endedAt: Date(), appVersion: "1.4.0", systemVersion: "test",
-            settings: ["speed": "balanced", "glossary": "private source text"],
-            health: MemoryDiagnosticHealth(), counters: [:], distributions: [:],
-            events: [unsafeEvent], measurementBoundary: "private source text",
-            textCapture: false)
-        let redacted = try await writer.encode(unsafeSnapshot)
-        precondition(!String(decoding: redacted, as: UTF8.self).contains("private source text"),
-                     "Standard reports must not leak text via event reason or settings")
-        let protectedEvents = try await writer.encodeIndexedEvents([unsafeEvent])
-        precondition(protectedEvents.count == 1)
-        precondition(!String(decoding: protectedEvents[0].payload, as: UTF8.self).contains("private source text"),
-                     "Indexed events must share the same privacy boundary")
         print("Diagnostic percentile, privacy, correlation, compatibility and comparison passed")
     }
 }
