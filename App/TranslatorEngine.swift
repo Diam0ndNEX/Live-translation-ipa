@@ -502,7 +502,7 @@ final class TranslatorEngine: ObservableObject {
 
     func translationStrategyChanged() {
         pipelineSettingsChanged()
-        directSession?.cancel()
+        if #available(iOS 26.0, *) { directSession?.cancel() }
         directSession = nil
         directKey = ""
         availCache.removeAll()
@@ -1465,6 +1465,25 @@ final class TranslatorEngine: ObservableObject {
         return out
     }
 
+    /// A partial model response can be kept only in the exact live context.
+    /// Never present or persist a speculative unit before confirmation.
+    private func retainIncrementalSpeculation(key: String?, value: String,
+                                               context: Int, rules: String, destination: String,
+                                               speculativeID: UInt64?) {
+        guard let key, context == contextRevision,
+              rules == memoryRuleToken, destination == targetCode,
+              !bypassMemory, !flag("freshTranslationTest", false),
+              !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              cache[key] == nil else { return }
+        cache[key] = value
+        specKeys.insert(key)
+        if let speculativeID { speculativeOrigins[key] = speculativeID }
+        savedKeys.remove(key)
+        touchCache(key)
+        trimCache()
+        if diag.enabled { diag.s.specRetainedUnits += 1 }
+    }
+
     private func process(_ blocks: [String], display: Bool = true) async {
         if display { isTranslating = true }
         defer { if display { isTranslating = false } }
@@ -1689,27 +1708,20 @@ final class TranslatorEngine: ObservableObject {
                            detail: "Uncached units submitted to on-device translation")
             }
             let streamPartials = !display && installed && flag("incrementalBatchRecovery", false)
-            let partialHandler: (@MainActor (Int, String) -> Void)? = streamPartials ? { [self] index, value in
-                // The incremental API can complete units out of order. Only
-                // retain a valid, uniquely mapped exact-context sentence.
-                guard index >= 0, index < plan.unique.count,
-                      workContext == contextRevision, rules == memoryRuleToken,
-                      destination == targetCode, !bypassMemory,
-                      !flag("freshTranslationTest", false) else { return }
-                let text = plan.unique[index]
-                let matches = items.filter { $0.text == text }
-                let keys = Set(matches.map(\.key))
-                guard keys.count == 1, let key = keys.first,
-                      !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                      cache[key] == nil else { return }
-                cache[key] = value
-                specKeys.insert(key)
-                if let speculativeID { speculativeOrigins[key] = speculativeID }
-                savedKeys.remove(key)
-                touchCache(key)
-                trimCache()
-                if diag.enabled { diag.s.specRetainedUnits += 1 }
-            } : nil
+            var partialHandler: (@MainActor (Int, String) -> Void)?
+            if streamPartials {
+                let exactKeys: [String?] = plan.unique.map { text in
+                    let matchingKeys = Set(items.filter { $0.text == text }.map { $0.key })
+                    return matchingKeys.count == 1 ? matchingKeys.first : nil
+                }
+                partialHandler = { [weak self] index, value in
+                    guard index >= 0, index < exactKeys.count else { return }
+                    self?.retainIncrementalSpeculation(
+                        key: exactKeys[index], value: value,
+                        context: workContext, rules: rules, destination: destination,
+                        speculativeID: speculativeID)
+                }
+            }
             let batch = await translateBatch(plan.unique, source: src, target: target, installed: installed,
                                              speculative: !display, partial: partialHandler)
             if !display, !isCurrent() {
