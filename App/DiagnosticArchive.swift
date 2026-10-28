@@ -17,7 +17,7 @@ struct MemoryDiagnosticHealth: Codable {
 
 enum MemoryDiagnosticOutcome: String, Codable, CaseIterable {
     case ramHit, persistentHit, legacyHit, speculativeHit, miss, timeout
-    case compatibilityRejected, persisted, writeFailed, ramEviction, cancelled
+    case compatibilityRejected, databaseUnavailable, persisted, writeFailed, ramEviction, cancelled
 }
 
 struct StructuredDiagnosticEvent: Codable, Identifiable {
