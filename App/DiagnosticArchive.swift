@@ -658,6 +658,31 @@ enum DiagnosticIssueDetector {
             add("high_cancellation_rate", "suspected", cancelled,
                 "Many units were cancelled. Screen motion and changing subtitles may explain the pattern.")
         }
+        // Evidence is limited to recognized candidates. We cannot measure
+        // subtitles that OCR never saw or whether iOS actually painted a frame.
+        let confirmed = max(0, session.counters["confirmedCandidatePackets", default: 0])
+        let unpresented = max(0, session.counters["supersededUnpresentedConfirmed", default: 0])
+        if confirmed >= 20 && unpresented >= 3 &&
+           Double(unpresented) / Double(confirmed) >= 0.05 {
+            add("confirmed_continuity_loss", "suspected", unpresented,
+                "Confirmed candidate work was superseded before PiP enqueue. This is not a ground-truth missed-subtitle rate.")
+        }
+        let failedEnqueues = max(0, session.counters["enqueueFailed", default: 0])
+        if failedEnqueues > 0 {
+            add("pip_enqueue_failure", "observed", failedEnqueues,
+                "The PiP renderer rejected one or more buffer enqueue attempts. A successful retry may have followed.")
+        }
+        if let enqueue = session.distributions["enqueueLatencyMs"], enqueue.count >= 20,
+           let median = enqueue.p50, median > 0,
+           let p95 = enqueue.p95, p95 > max(1800, median * 2.5) {
+            add("enqueue_slow_tail", "suspected", enqueue.count,
+                "OCR-to-PiP enqueue P95 is high relative to the median. Examine slow intervals and candidate handoffs.")
+        }
+        if let enqueue = session.distributions["enqueueLatencyMs"], enqueue.count >= 20,
+           let median = enqueue.p50, median >= 1200 {
+            add("enqueue_typical_latency", "suspected", enqueue.count,
+                "Typical OCR-to-PiP enqueue time is high, even if the slowest tail has improved.")
+        }
         return findings
     }
 }
