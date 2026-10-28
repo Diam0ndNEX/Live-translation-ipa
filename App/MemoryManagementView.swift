@@ -33,6 +33,9 @@ struct MemoryManagementView: View {
                     LabeledContent("Integrity", value: h.integrity)
                     LabeledContent("Ready for compatible reuse", value: String(h.readyEntries))
                     LabeledContent("Needs validation", value: String(h.needsValidation))
+                    LabeledContent("Older entries pending verification", value: String(h.legacyUnverified))
+                    LabeledContent("Older translations independently verified", value: String(h.legacyValidated))
+                    LabeledContent("Older translations superseded", value: String(h.legacySuperseded))
                     LabeledContent("Conflicts", value: String(h.conflicts))
                     LabeledContent("Legacy imports", value: String(h.importedEntries))
                     LabeledContent("Legacy duplicates", value: String(h.duplicateEntries))
@@ -58,6 +61,7 @@ struct MemoryManagementView: View {
                     Label("Storage management threshold reached. No entries were deleted.", systemImage: "externaldrive.badge.exclamationmark")
                         .font(.footnote)
                 }
+                Text("Older entries are checked only when an independently generated, confirmed translation matches their language, text and context. They remain preserved for review; only the fresh current-rule translation is reused. This adds no background model work.").font(.footnote)
                 Text("Thresholds do not delete translations. RAM eviction preserves committed entries.").font(.footnote)
             }
             Section("Transfer") {
