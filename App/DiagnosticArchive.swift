@@ -121,7 +121,8 @@ struct DiagnosticIntervalBucket: Codable {
         "candidateEnqueued", "candidateSuperseded", "candidateCancelled",
         "candidateFirstSeen", "speculativeRequests", "speculativeDiscarded",
         "ramHits", "persistentHits", "speculativeHits", "lookupMisses",
-        "legacyVerified", "legacySuperseded",
+        "legacyVerified", "legacySuperseded", "legacyOCRSuggestions",
+        "legacyFragmentSuggestions", "legacyIdleStarted", "legacyIdleCompleted",
         "unchangedSkips", "cadenceSkips", "pausedSkips", "emptyOCRPasses",
         "contrastRetries", "movieSelections", "movieTemporalOverrides",
         "movieRejectedSmall", "queueReplacements", "earlyDeferred",
@@ -199,7 +200,8 @@ actor DiagnosticExportWriter {
                 "preserved_confirmed_work",
                 "warmup_started", "warmup_succeeded", "warmup_failed",
                 "model_session_created", "model_batch_completed", "model_batch_failed",
-                "warmup_source_unresolved", "app_started", "capture_config_changed",
+                "warmup_source_unresolved", "legacy_idle_started", "legacy_idle_completed",
+                "legacy_idle_deferred", "app_started", "capture_config_changed",
                 "capture_idle", "capture_live", "capture_paused", "capture_frozen"
             ]).union(stageCodes)
         let safeEvents = snapshot.events.suffix(2400).map { event in
