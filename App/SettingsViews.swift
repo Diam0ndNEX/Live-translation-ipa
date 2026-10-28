@@ -43,31 +43,72 @@ private struct PresetsLinkRow: View {
 }
 
 // MARK: - Settings home
+private struct SettingsNavRow<Destination: View>: View {
+    let title: String
+    let detail: String
+    let symbol: String
+    let destination: Destination
+
+    var body: some View {
+        NavigationLink {
+            destination
+        } label: {
+            HStack(spacing: 13) {
+                Image(systemName: symbol)
+                    .font(.system(size: 18, weight: .medium))
+                    .foregroundStyle(Color.accentColor)
+                    .frame(width: 40, height: 40)
+                    .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title).font(.body.weight(.medium))
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.vertical, 3)
+            }
+            .contentShape(Rectangle())
+        }
+    }
+}
+
+/// Settings are organized around tasks, not the order features were developed.
+/// Search includes previous page names so navigation remains discoverable.
 struct SettingsView: View {
     @EnvironmentObject var engine: TranslatorEngine
     @State private var query = ""
 
-    private func show(_ title: String, _ keywords: String) -> Bool {
+    private func matches(_ title: String, _ keywords: String) -> Bool {
         query.isEmpty || (title + " " + keywords).localizedCaseInsensitiveContains(query)
     }
 
+    private var translateMatches: Bool {
+        matches("Reading & OCR", "capture movie subtitles frames recognition tracking confirmation")
+        || matches("Languages & text rules", "understanding glossary slang protect names source fixes automatic recovery")
+        || matches("Translation & memory", "translate ahead pretranslation warm up cache remember SQLite speculative model")
+        || matches("Presets", "profiles saved configurations")
+    }
+    private var subtitleMatches: Bool {
+        matches("Floating subtitles", "picture in picture PiP font size theme appearance window")
+        || matches("Subtitle timing", "min display clear heartbeat steady captions handoff responsive")
+        || matches("Feedback & sharing", "haptics speak copy clipboard voice vibration")
+    }
+    private var personalizeMatches: Bool {
+        matches("App appearance", "interface accent home layout customize cards")
+        || matches("Reader & photos", "workspace photo OCR reading")
+        || matches("History & storage", "saved translations retention limit delete memory library")
+    }
+    private var advancedMatches: Bool {
+        matches("Performance & battery", "speed cool power thermal idle awake energy")
+        || matches("Experimental Features", "smart pipeline beta low latency lyrics incremental PiP advanced model rotation")
+        || matches("Diagnostics & tests", "metrics benchmark export sessions simulator validation fresh translation")
+    }
+    private var supportMatches: Bool {
+        matches("Privacy", "private session text diagnostic speaker")
+        || matches("Backup & restore", "export import reset settings")
+        || matches("About & help", "version changelog guide")
+    }
     private var anyMatch: Bool {
-        show("Presets", "save profile custom switch")
-            || show("Pipeline simulator", "simulation stages diagram timeline settings lab")
-            || show("Experimental Features", "experiments smart pipeline advanced adaptive OCR model low latency lyrics PiP prediction memory speculative")
-            || show("Reading & OCR", "mode area custom rotation order speed stability ignore noise contrast frames words small")
-            || show("Understanding & rules", "clean slang speaker language lock never translate glossary fixes names")
-            || show("Floating window", "size theme colour font text original auto open clear hold display vibrate speak voice copy preview")
-            || show("Interface", "accent colour home sections haptics keep awake history save")
-            || show("Performance & power", "adaptive battery idle pause thermal hot")
-            || show("Privacy & storage", "private session history memory diagnostic text delete")
-            || show("Translation memory", "remembered words phrases sentences migration database cache")
-            || show("Backup & reset", "export import backup restore reset")
-            || show("Timing & responsiveness", "waiting display delay latency heartbeat immediate readable")
-            || show("Caption layout", "alignment weight spacing padding scale original speaker colour")
-            || show("Reader & workspace", "font width photo resolution automatic home timing expanded")
-            || show("Feedback & storage", "haptic clipboard speech limits memory history samples")
-            || show("About & help", "version changelog help how")
+        translateMatches || subtitleMatches || personalizeMatches || advancedMatches || supportMatches
     }
 
     var body: some View {
@@ -76,73 +117,119 @@ struct SettingsView: View {
                 if query.isEmpty {
                     Section {
                         HStack(spacing: 14) {
-                            BrandMark().frame(width: 52, height: 52)
+                            BrandMark().frame(width: 54, height: 54)
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Make it yours").font(.system(.title3, design: .rounded, weight: .bold))
-                                Text("ScreenLingo \(AppVersion.full)").font(.caption).foregroundStyle(.secondary)
+                                Text("Your ScreenLingo").font(.title3.weight(.semibold))
+                                Text("Find the settings you need, all in one place.")
+                                    .font(.subheadline).foregroundStyle(.secondary)
                             }
-                        }.padding(.vertical, 6)
+                        }
+                        .padding(.vertical, 8)
                     }
                 }
-                if show("Presets", "save profile custom switch") {
-                    Section { PresetsLinkRow(store: engine.presets) }
+
+                if translateMatches {
+                    Section("Read & translate") {
+                        if matches("Reading & OCR", "capture movie subtitles frames recognition tracking confirmation") {
+                            SettingsNavRow(title: "Reading & OCR", detail: "Screen area, recognition speed and text tracking",
+                                           symbol: "viewfinder", destination: ReadingSettings())
+                        }
+                        if matches("Languages & text rules", "understanding glossary slang protect names source fixes automatic recovery") {
+                            SettingsNavRow(title: "Languages & text rules", detail: "Detection, corrections, glossary and protected names",
+                                           symbol: "character.book.closed", destination: IntelligenceSettings())
+                        }
+                        if matches("Translation & memory", "translate ahead pretranslation warm up cache remember SQLite speculative model") {
+                            SettingsNavRow(title: "Translation & memory", detail: "Translate ahead, model readiness and remembered text",
+                                           symbol: "translate", destination: TranslationSettings())
+                        }
+                        if matches("Presets", "profiles saved configurations") {
+                            PresetsLinkRow(store: engine.presets)
+                        }
+                    }
                 }
-                Section {
-                    if show("Timing & responsiveness", "waiting display delay latency heartbeat immediate readable") {
-                        NavigationLink { ResponsivenessSettings() } label: { Label("Timing & responsiveness", systemImage: "timer") }
+
+                if subtitleMatches {
+                    Section("Subtitles & output") {
+                        if matches("Floating subtitles", "picture in picture PiP font size theme appearance window") {
+                            SettingsNavRow(title: "Floating subtitles", detail: "PiP window, typography and subtitle appearance",
+                                           symbol: "rectangle.on.rectangle", destination: WindowSettings())
+                        }
+                        if matches("Subtitle timing", "min display clear heartbeat steady captions handoff responsive") {
+                            SettingsNavRow(title: "Subtitle timing", detail: "When captions appear and how they transition",
+                                           symbol: "timer", destination: ResponsivenessSettings())
+                        }
+                        if matches("Feedback & sharing", "haptics speak copy clipboard voice vibration") {
+                            SettingsNavRow(title: "Feedback & sharing", detail: "Speech, copying and vibration",
+                                           symbol: "speaker.wave.2", destination: FeedbackStorageSettings())
+                        }
                     }
-                    if show("Caption layout", "alignment weight spacing padding scale original speaker colour") {
-                        NavigationLink { CaptionAppearanceSettings() } label: { Label("Caption layout", systemImage: "textformat.size") }
+                }
+
+                if personalizeMatches {
+                    Section("Personalize & library") {
+                        if matches("App appearance", "interface accent home layout customize cards") {
+                            SettingsNavRow(title: "App appearance", detail: "Colors and Home screen sections",
+                                           symbol: "paintpalette", destination: InterfaceSettings())
+                        }
+                        if matches("Reader & photos", "workspace photo OCR reading") {
+                            SettingsNavRow(title: "Reader & photos", detail: "Reading layout and photo translation",
+                                           symbol: "text.book.closed", destination: ReaderWorkspaceSettings())
+                        }
+                        if matches("History & storage", "saved translations retention limit delete memory library") {
+                            SettingsNavRow(title: "History & storage", detail: "History retention, memory and storage limits",
+                                           symbol: "clock.arrow.circlepath", destination: HistoryStorageSettings())
+                        }
                     }
-                    if show("Reader & workspace", "font width photo resolution automatic home timing expanded") {
-                        NavigationLink { ReaderWorkspaceSettings() } label: { Label("Reader & workspace", systemImage: "text.book.closed") }
+                }
+
+                if advancedMatches {
+                    Section("Performance & advanced") {
+                        if matches("Performance & battery", "speed cool power thermal idle awake energy") {
+                            SettingsNavRow(title: "Performance & battery", detail: "Adaptive performance, heat and idle power",
+                                           symbol: "bolt", destination: PerformanceSettings())
+                        }
+                        if matches("Experimental Features", "smart pipeline beta low latency lyrics incremental PiP advanced model rotation") {
+                            SettingsNavRow(title: "Experimental Features", detail: "Opt-in features that still need device testing",
+                                           symbol: "flask", destination: ExperimentalFeaturesView())
+                        }
+                        if matches("Diagnostics & tests", "metrics benchmark export sessions simulator validation fresh translation") {
+                            SettingsNavRow(title: "Diagnostics & tests", detail: "Collection, controlled comparisons and simulator",
+                                           symbol: "waveform.path.ecg", destination: DiagnosticsSettings())
+                        }
                     }
-                    if show("Feedback & storage", "haptic clipboard speech limits memory history samples") {
-                        NavigationLink { FeedbackStorageSettings() } label: { Label("Feedback & storage", systemImage: "slider.horizontal.3") }
+                }
+
+                if supportMatches {
+                    Section("Privacy & support") {
+                        if matches("Privacy", "private session text diagnostic speaker") {
+                            SettingsNavRow(title: "Privacy", detail: "Private sessions and diagnostic content",
+                                           symbol: "hand.raised", destination: PrivacySettings())
+                        }
+                        if matches("Backup & restore", "export import reset settings") {
+                            SettingsNavRow(title: "Backup & restore", detail: "Export, import and reset settings",
+                                           symbol: "square.and.arrow.up", destination: BackupSettings())
+                        }
+                        if matches("About & help", "version changelog guide") {
+                            SettingsNavRow(title: "About & help", detail: "Version, changelog and how to use ScreenLingo",
+                                           symbol: "info.circle", destination: AboutSettings())
+                        }
                     }
-                } header: { Text("Personalize") }
-                Section {
-                    if show("Translation memory", "remembered words phrases sentences migration database cache") {
-                        NavigationLink { MemoryManagementView() } label: { Label("Translation memory", systemImage: "externaldrive") }
+                }
+                if query.isEmpty {
+                    Section {
+                        HStack {
+                            Spacer()
+                            Text(AppVersion.full).font(.caption).foregroundStyle(.secondary)
+                            Spacer()
+                        }
                     }
-                    if show("Pipeline simulator", "simulation stages diagram timeline settings lab") {
-                        NavigationLink { PipelineSimulatorView() } label: { Label("Pipeline simulator", systemImage: "point.3.connected.trianglepath.dotted") }
-                    }
-                    if show("Experimental Features", "experiments smart pipeline advanced adaptive OCR model low latency lyrics PiP prediction memory speculative") {
-                        NavigationLink { ExperimentalFeaturesView() } label: { Label("Experimental Features", systemImage: "testtube.2") }
-                    }
-                    if show("Reading & OCR", "mode area custom rotation order speed stability ignore noise contrast frames words small") {
-                        NavigationLink { ReadingSettings() } label: { Label("Reading & OCR", systemImage: "viewfinder") }
-                    }
-                    if show("Understanding & rules", "clean slang speaker language lock never translate glossary fixes names") {
-                        NavigationLink { IntelligenceSettings() } label: { Label("Understanding & rules", systemImage: "brain") }
-                    }
-                    if show("Floating window", "size theme colour font text original auto open clear hold display vibrate speak voice copy preview") {
-                        NavigationLink { WindowSettings() } label: { Label("Floating window", systemImage: "rectangle.on.rectangle") }
-                    }
-                    if show("Interface", "accent colour home sections haptics keep awake history save") {
-                        NavigationLink { InterfaceSettings() } label: { Label("Interface", systemImage: "paintbrush.fill") }
-                    }
-                    if show("Performance & power", "adaptive battery idle pause thermal hot") {
-                        NavigationLink { PerformanceSettings() } label: { Label("Performance & power", systemImage: "bolt.fill") }
-                    }
-                    if show("Privacy & storage", "private session history memory diagnostic text delete") {
-                        NavigationLink { PrivacySettings() } label: { Label("Privacy & storage", systemImage: "hand.raised.fill") }
-                    }
-                    if show("Backup & reset", "export import backup restore reset") {
-                        NavigationLink { BackupSettings() } label: { Label("Backup & reset", systemImage: "externaldrive.fill") }
-                    }
-                    if show("About & help", "version changelog help how") {
-                        NavigationLink { AboutSettings() } label: { Label("About & help", systemImage: "info.circle") }
-                    }
-                } footer: {
-                    Text(AppVersion.full)
                 }
             }
             .overlay { if !anyMatch { ContentUnavailableView.search(text: query) } }
+            .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(Theme.bg.ignoresSafeArea())
-            .searchable(text: $query, prompt: "Search settings")
+            .searchable(text: $query, prompt: "Search settings and features")
             .navigationTitle("Settings")
         }
     }
