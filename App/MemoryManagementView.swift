@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct MemoryManagementView: View {
     @EnvironmentObject private var engine: TranslatorEngine
@@ -6,6 +7,10 @@ struct MemoryManagementView: View {
     @State private var query = ""
     @State private var confirmClear = false
     @State private var message = ""
+    @State private var transfer = MemoryTransferDocument(data: Data())
+    @State private var exporting = false
+    @State private var importing = false
+    @State private var transferBusy = false
     @AppStorage("memoryRAMCapacity") private var ramCapacity = 3000
     @AppStorage("memorySoftLimit") private var softLimit = 100000
 
@@ -30,6 +35,18 @@ struct MemoryManagementView: View {
                     Text("500,000").tag(500000); Text("Storage aware").tag(0)
                 }
                 Text("Thresholds do not delete translations. RAM eviction preserves committed entries.").font(.footnote)
+            }
+            Section("Transfer") {
+                Button(transferBusy ? "Preparing…" : "Export translation memory") {
+                    transferBusy = true
+                    Task {
+                        defer { transferBusy = false }
+                        do { transfer = MemoryTransferDocument(data: try await engine.memoryStore.exportData()); exporting = true }
+                        catch { message = "Export failed; memory unchanged" }
+                    }
+                }.disabled(transferBusy)
+                Button("Import translation memory") { importing = true }.disabled(transferBusy)
+                Text("Memory exports contain source and translated text. Choose where to save them.").font(.footnote)
             }
             Section("Maintenance") {
                 Button("Clear RAM cache") { engine.clearRAMCache() }
@@ -61,6 +78,32 @@ struct MemoryManagementView: View {
             }
         }
         .navigationTitle("Translation memory")
+        .fileExporter(isPresented: $exporting, document: transfer, contentType: .json, defaultFilename: "screenlingo-memory") { result in
+            switch result {
+            case .success: message = "Memory exported"
+            case .failure: message = "Export cancelled or failed"
+            }
+        }
+        .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
+            guard case .success(let url) = result else { message = "Import cancelled or failed"; return }
+            transferBusy = true
+            Task {
+                defer { transferBusy = false }
+                do {
+                    let data = try await Task.detached(priority: .utility) {
+                        let access = url.startAccessingSecurityScopedResource()
+                        defer { if access { url.stopAccessingSecurityScopedResource() } }
+                        let size = try url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+                        guard size <= 256 * 1024 * 1024 else { throw MemoryStoreError.tooLarge }
+                        return try Data(contentsOf: url)
+                    }.value
+                    _ = try await engine.memoryStore.importData(data)
+                    engine.clearRAMCache()
+                    await engine.refreshMemoryHealth()
+                    message = "Memory imported; compatibility checks remain active"
+                } catch { message = "Import failed; existing memory preserved" }
+            }
+        }
         .searchable(text: $query)
         .task(id: query) {
             try? await Task.sleep(nanoseconds: 250_000_000)
@@ -76,4 +119,12 @@ struct MemoryManagementView: View {
             Button("Delete translation memory", role: .destructive) { engine.clearMemory(); entries = [] }
         }
     }
+}
+
+struct MemoryTransferDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+    var data: Data
+    init(data: Data) { self.data = data }
+    init(configuration: ReadConfiguration) throws { data = configuration.file.regularFileContents ?? Data() }
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
 }

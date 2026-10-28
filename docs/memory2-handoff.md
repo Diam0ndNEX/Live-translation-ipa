@@ -38,3 +38,10 @@ Read this document and docs/memory2-baseline.md; fetch current development and c
 
 ## Subsequent integration progress
 Live TranslatorEngine now uses asynchronous SQLite preparation/lookup, additive pending confirmed writes, committed counts and RAM LRU trimming. MemoryManagementView has bounded search, status, integrity verification, RAM clearing and explicit permanent-clear confirmation. A standalone migration harness and CI step were added. These are implementation changes, not verified release evidence. Initial WIP checkpoint run 40611113777 failed before these missing pieces were added; integrated run 40611465886 is in progress. Next inspect its first failing step, correct compilation/runtime defects and rerun. Outstanding: expanded failure-path tests, background queue/clear races, memory pressure adaptation, segmentation/classification, simulator scenarios, exports/import UI, complete diagnostics wiring and all device release gates.
+
+## Latest continuation
+- Initial integrated implementation de14d5d79a402e9f420bba3031b3c2af5dd8d61e passed full IPA workflow 40611465886 (existing regressions, initial storage migration tests, iOS build, metadata, packaging/upload).
+- PR #2 now contains ba9b06706e1ee3a42a6594a6be6084186c9b36a7: extended opaque legacy/conflict/export roundtrip tests, revision-fenced write acknowledgements, RAM timing and fresh confirmation promotion. Run 40611821319 in progress when recorded.
+- PR #3 (codex/memory2-simulator), 8d71d9077cbcceb1a2583ec8d6ff0d009d5d6b38: memory scenarios and deadline assumptions, regression tests; run 40611880568 in progress when recorded.
+- Memory management transfer controls added next: async export, security-scoped bounded import and explicit text disclosure; compilation pending.
+- Exact next step: inspect the newest CI runs for PRs #2/#3 and transfer UI, fix any failures, then add interruption/corruption/concurrency regression coverage and independent review. Do not merge the draft stack until its own prerequisites pass. Device benchmarks and installed-IPA migration remain mandatory unverified release gates.
