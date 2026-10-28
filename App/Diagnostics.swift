@@ -184,6 +184,19 @@ final class Diagnostics: ObservableObject {
     @Published var events: [TimelineEvent] = []
     @Published var spans: [StateSpan] = []
     @Published private(set) var subtitleTraces: [SubtitleTrace] = []
+    @Published var memoryHealth = MemoryDiagnosticHealth()
+    @Published private(set) var structuredEvents: [StructuredDiagnosticEvent] = []
+    @Published private(set) var archivedSessions: [DiagnosticSessionExport] = []
+    @Published private(set) var archiveStatus = "Not saved"
+    @Published private(set) var exportInProgress = false
+    var memoryStore: TranslationMemoryStore?
+    private let exportWriter = DiagnosticExportWriter()
+    private var diagnosticSessionID = UUID()
+    private var candidateIDs: [String: UUID] = [:]
+    private var memoryOutcomes: [MemoryDiagnosticOutcome: Int] = [:]
+    private var lookupSamples: [Double] = []
+    private var writeSamples: [Double] = []
+    private var archiveInProgress = false
     private(set) var recorderCosts = RecorderCosts()
     private var recorderDepth = 0
     private struct CostToken { let start: Double; let outer: Bool; let detailed: Bool }
@@ -200,8 +213,128 @@ final class Diagnostics: ObservableObject {
     func trace(_ candidate: String?, stage: String, detail: String, at time: Date = Date()) {
         let recorderToken = beginRecorder(); defer { endRecorder(recorderToken) }
         guard detailedCollection, let candidate else { return }
-        subtitleTraces.append(SubtitleTrace(candidate: candidate, stage: stage, time: time, detail: detail))
+        // Never export a caller's identifier: historical candidates can encode input text.
+        if candidateIDs[candidate] == nil {
+            if candidateIDs.count >= 600 { candidateIDs.removeAll(keepingCapacity: true) }
+            candidateIDs[candidate] = UUID()
+        }
+        let safeID = candidateIDs[candidate] ?? UUID()
+        let stages: Set<String> = ["first OCR", "seen", "confirmed", "processing", "speculating", "cache", "ready", "enqueued", "superseded", "memory", "cancelled"]
+        let safeStage = stages.contains(stage) ? stage : "other"
+        appendStructured(candidate: safeID, stage: safeStage, outcome: "observed", reason: safeStage, durationMs: nil, at: time)
+        subtitleTraces.append(SubtitleTrace(candidate: safeID.uuidString, stage: safeStage, time: time, detail: detail))
         if subtitleTraces.count > 300 { subtitleTraces.removeFirst(subtitleTraces.count - 300) }
+    }
+
+
+    private func appendStructured(candidate: UUID? = nil, stage: String, outcome: String,
+                                  reason: String, durationMs: Double?, at time: Date = Date()) {
+        structuredEvents.append(StructuredDiagnosticEvent(id: UUID(), timestamp: time,
+            sessionID: diagnosticSessionID, candidateID: candidate, stage: stage,
+            outcome: outcome, reasonCode: reason,
+            durationMs: durationMs.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }, privacy: "metadataOnly"))
+        if structuredEvents.count > 600 { structuredEvents.removeFirst(structuredEvents.count - 600) }
+    }
+
+    /// Counts one lookup outcome per unit; persistence and eviction counters have separate denominators.
+    func recordMemory(_ outcome: MemoryDiagnosticOutcome, durationMs: Double = 0) {
+        let token = beginRecorder(); defer { endRecorder(token) }
+        guard enabled else { return }
+        memoryOutcomes[outcome, default: 0] += 1
+        let finite = durationMs.isFinite && durationMs >= 0
+        switch outcome {
+        case .ramHit, .persistentHit, .legacyHit, .speculativeHit, .miss, .timeout, .compatibilityRejected:
+            if finite { lookupSamples.append(durationMs) }
+            if lookupSamples.count > 600 { lookupSamples.removeFirst(lookupSamples.count - 600) }
+        case .persisted, .writeFailed:
+            if finite { writeSamples.append(durationMs) }
+            if writeSamples.count > 600 { writeSamples.removeFirst(writeSamples.count - 600) }
+        default: break
+        }
+        // Preserve errors in basic mode; detailed events are pressure-aware.
+        if detailedCollection || outcome == .writeFailed || outcome == .timeout {
+            appendStructured(stage: "memory", outcome: outcome.rawValue, reason: outcome.rawValue, durationMs: durationMs)
+        }
+    }
+
+    func memoryOutcomesForUI(_ outcome: MemoryDiagnosticOutcome) -> Int { memoryOutcomes[outcome, default: 0] }
+
+    func sessionSnapshot() -> DiagnosticSessionExport {
+        // Explicit allowlist excludes glossary, protected names, source fixes, user text and paths.
+        let keys = ["mode", "speed", "stability", "frameRot", "area", "adaptiveOCR", "remember", "privateSession", "diagnosticsEnabled", "detailedCollection"]
+        var settings: [String: String] = [:]
+        for key in keys {
+            if let value = UserDefaults.standard.object(forKey: key) { settings[key] = String(describing: value) }
+        }
+        var counters = Dictionary(uniqueKeysWithValues: memoryOutcomes.map { ($0.key.rawValue, $0.value) })
+        counters["sessionCacheHits"] = s.cacheHits
+        counters["savedMemoryHits"] = s.savedHits
+        counters["speculativeHits"] = s.specHits
+        counters["lookupMisses"] = s.cacheMisses
+        counters["speculativeModelRequests"] = s.specModelRequests
+        counters["supersededSpeculativePipelines"] = s.specDiscarded
+        return DiagnosticSessionExport(id: diagnosticSessionID, startedAt: started, endedAt: Date(),
+            appVersion: AppVersion.full, systemVersion: UIDevice.current.systemVersion,
+            settings: settings, health: memoryHealth, counters: counters,
+            distributions: ["memoryLookupMs": DiagnosticDistribution(lookupSamples), "memoryWriteMs": DiagnosticDistribution(writeSamples),
+                "ocrMs": DiagnosticDistribution(ocr.map { $0.v }), "translationMs": DiagnosticDistribution(translate.map { $0.v }),
+                "enqueueLatencyMs": DiagnosticDistribution(latency.map { $0.v })],
+            events: structuredEvents,
+            measurementBoundary: "First OCR sighting to PiP sample-buffer enqueue; physical display unmeasured. Distributions use the latest bounded samples within this session, not all-time aggregates. Stages can overlap.",
+            textCapture: false)
+    }
+
+    func exportJSON() async {
+        guard !exportInProgress else { return }
+        exportInProgress = true
+        defer { exportInProgress = false }
+        let snapshot = sessionSnapshot()
+        do {
+            let url = try await exportWriter.export(snapshot)
+            Sharer.present([url])
+            archiveStatus = "JSON export ready"
+        } catch { archiveStatus = "Export failed; no file was shared" }
+    }
+
+    func persistSession() {
+        guard enabled, UserDefaults.standard.bool(forKey: "persistDiagnosticSessions"),
+              !UserDefaults.standard.bool(forKey: "privateSession"), !archiveInProgress,
+              let store = memoryStore else { return }
+        archiveInProgress = true
+        let snapshot = sessionSnapshot()
+        Task {
+            defer { archiveInProgress = false }
+            do {
+                let data = try await exportWriter.encode(snapshot)
+                // Check privacy again after encoding, before submitting a durable write.
+                guard UserDefaults.standard.bool(forKey: "persistDiagnosticSessions"),
+                      !UserDefaults.standard.bool(forKey: "privateSession") else { return }
+                try await store.saveDiagnosticSession(id: snapshot.id.uuidString, startedAt: snapshot.startedAt,
+                    endedAt: snapshot.endedAt, payload: data)
+                archiveStatus = "Session saved"
+            } catch { archiveStatus = "Session could not be saved" }
+        }
+    }
+
+    func loadSessions() async {
+        guard let store = memoryStore else { archiveStatus = "Memory database unavailable"; return }
+        do {
+            let records = try await store.loadDiagnosticSessions()
+            var decoded: [DiagnosticSessionExport] = []
+            for record in records { decoded.append(try await exportWriter.decode(record)) }
+            archivedSessions = decoded.sorted { $0.endedAt > $1.endedAt }
+            archiveStatus = "Loaded \(decoded.count) sessions"
+        } catch { archiveStatus = "Sessions could not be loaded" }
+    }
+
+    func deleteSessions() async {
+        guard let store = memoryStore else { archiveStatus = "Memory database unavailable"; return }
+        // Stop automatic re-creation; only diagnostics are removed.
+        UserDefaults.standard.set(false, forKey: "persistDiagnosticSessions")
+        do {
+            try await store.clearDiagnosticSessions()
+            archivedSessions = []; archiveStatus = "Saved sessions deleted"
+        } catch { archiveStatus = "Saved sessions could not be deleted" }
     }
 
     @Published var sourceUsage = SourceLanguageUsage()
@@ -216,7 +349,9 @@ final class Diagnostics: ObservableObject {
     }
     var enabled: Bool { (UserDefaults.standard.object(forKey: "diagnosticsEnabled") as? Bool) ?? true }
     var detailedCollection: Bool {
-        RuntimePolicy(coolMode: false, diagnosticsEnabled: enabled,
+        guard ProcessInfo.processInfo.thermalState != .serious,
+              ProcessInfo.processInfo.thermalState != .critical else { return false }
+        return RuntimePolicy(coolMode: false, diagnosticsEnabled: enabled,
                       detailedRequested: UserDefaults.standard.bool(forKey: "detailedCollection")).detailedDiagnostics
     }
 
@@ -303,6 +438,9 @@ final class Diagnostics: ObservableObject {
     }
 
     func reset() {
+        persistSession()
+        diagnosticSessionID = UUID(); candidateIDs = [:]; structuredEvents = []
+        memoryOutcomes = [:]; lookupSamples = []; writeSamples = []
         started = Date()
         subtitleTraces = []; recorderCosts = RecorderCosts()
         lastFrames = 0; lastFrameTime = Date(); tickN = 0
@@ -360,6 +498,7 @@ final class Diagnostics: ObservableObject {
         let recorderToken = beginRecorder(); defer { endRecorder(recorderToken) }
         guard enabled else { return }
         tickN += 1
+        if tickN % 30 == 0 { persistSession() }
         let st: EngineState = !alive ? .idle : (paused ? .paused : (frozen ? .frozen : .live))
         if st != lastState {
             if let i = spans.indices.last { spans[i].end = Date() }
@@ -558,6 +697,8 @@ final class Diagnostics: ObservableObject {
             l.append("Latest paired timing (ms): confirmation \(Int(latest.confirmation)), OCR \(Int(latest.recognition)), delivery/filtering \(Int(latest.delivery)), queue \(Int(latest.queue)), processing \(Int(latest.translation)), readability hold \(Int(latest.displayHold)), frame preparation \(Int(latest.rendering)), total \(Int(latest.total))")
             l.append("Total measures first OCR sighting to frame enqueue; it does not measure physical screen presentation. Confirmation and translation-ahead can overlap.")
         }
+        l.append("Memory schema \(memoryHealth.schemaVersion), entries \(memoryHealth.totalEntries), ready \(memoryHealth.readyEntries), needs validation \(memoryHealth.needsValidation), conflicts \(memoryHealth.conflicts).")
+        l.append("Memory migration: \(memoryHealth.migrationStatus); integrity: \(memoryHealth.integrity); pending writes \(memoryHealth.pendingWrites), failed writes \(memoryHealth.failedWrites).")
         l.append("Recent events:")
         for e in events.suffix(60).reversed() {
             l.append("\(e.time.formatted(date: .omitted, time: .standard)) [\(e.kind.title)] \(e.text)")
@@ -842,7 +983,7 @@ private struct MultiSpeedChart: View {
 
 // MARK: - Pages
 enum DiagPage: String, CaseIterable, Identifiable {
-    case overview, speed, timeline, pipeline, language, device, log
+    case overview, speed, timeline, pipeline, language, device, memory, sessions, log
     var id: String { rawValue }
     var title: String { rawValue.capitalized }
     var icon: String {
@@ -853,6 +994,8 @@ enum DiagPage: String, CaseIterable, Identifiable {
         case .pipeline: "arrow.triangle.branch"
         case .language: "globe"
         case .device: "iphone"
+        case .memory: "internaldrive"
+        case .sessions: "clock.arrow.circlepath"
         case .log: "list.bullet.rectangle"
         }
     }
@@ -891,6 +1034,8 @@ private struct DiagnosticsBody: View {
     @State private var query = ""
     @State private var confirmReset = false
     @State private var showSimulator = false
+    @State private var confirmDeleteSessions = false
+    @AppStorage("persistDiagnosticSessions") private var persistSessions = false
 
     private var page: DiagPage { DiagPage(rawValue: pageRaw) ?? .overview }
     private var range: DiagRange { DiagRange(rawValue: rangeRaw) ?? .fiveMin }
@@ -944,6 +1089,7 @@ private struct DiagnosticsBody: View {
                             }
                         }
                         Section("Collection") {
+                            Toggle("Save diagnostic sessions on this device", isOn: $persistSessions)
                             Toggle("Simple diagnostics", isOn: $collectionEnabled)
                             Toggle("Detailed diagnostics", isOn: $collectDetails).disabled(!collectionEnabled)
                         }
@@ -952,6 +1098,9 @@ private struct DiagnosticsBody: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        Button { Task { await diag.exportJSON() } } label: {
+                            Label(diag.exportInProgress ? "Preparing JSON…" : "Export structured JSON", systemImage: "curlybraces")
+                        }.disabled(diag.exportInProgress)
                         Button { Sharer.shareFile(text: diag.csv(), name: "translator-data-\(Sharer.stamp()).csv") } label: {
                             Label("Export data (CSV)", systemImage: "tablecells")
                         }
@@ -968,6 +1117,9 @@ private struct DiagnosticsBody: View {
             .sheet(isPresented: $showSimulator) { NavigationStack { PipelineSimulatorView().environmentObject(engine) } }
             .onAppear { visible = true }
             .onDisappear { visible = false }
+            .confirmationDialog("Delete saved diagnostic sessions? Translation memory and history are preserved.", isPresented: $confirmDeleteSessions, titleVisibility: .visible) {
+                Button("Delete saved sessions", role: .destructive) { Task { await diag.deleteSessions() } }
+            }
             .confirmationDialog("Clear all graphs, counters and the timeline?", isPresented: $confirmReset,
                                 titleVisibility: .visible) {
                 Button("Reset diagnostics", role: .destructive) { diag.reset(); engine.toast("Diagnostics reset") }
@@ -1150,9 +1302,51 @@ private struct DiagnosticsBody: View {
                 subtitleLifecycleCard
             case .language: languagePage
             case .device: devicePage
+            case .memory: memoryPage
+            case .sessions: sessionsPage
             case .log: logPage
             }
         }
+    }
+
+    private var memoryPage: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Translation memory").font(.headline)
+            LabeledContent("Entries", value: String(diag.memoryHealth.totalEntries))
+            LabeledContent("Ready / needs validation", value: "\(diag.memoryHealth.readyEntries) / \(diag.memoryHealth.needsValidation)")
+            LabeledContent("Conflicts", value: String(diag.memoryHealth.conflicts))
+            LabeledContent("Database", value: ByteCountFormatter.string(fromByteCount: diag.memoryHealth.databaseBytes, countStyle: .file))
+            LabeledContent("RAM entries", value: String(diag.memoryHealth.ramEntries))
+            LabeledContent("Schema", value: String(diag.memoryHealth.schemaVersion))
+            LabeledContent("Migration", value: diag.memoryHealth.migrationStatus)
+            LabeledContent("Integrity", value: diag.memoryHealth.integrity)
+            LabeledContent("Pending / failed writes", value: "\(diag.memoryHealth.pendingWrites) / \(diag.memoryHealth.failedWrites)")
+            Text("Pending writes are not yet durable. RAM eviction never means permanent deletion. Lookup outcomes count translation units; persistence counters count write operations.").font(.caption).foregroundStyle(.secondary)
+            ForEach(MemoryDiagnosticOutcome.allCases, id: \.self) { outcome in
+                LabeledContent(outcome.rawValue, value: String(diag.memoryOutcomesForUI(outcome)))
+            }
+            Text(diag.archiveStatus).font(.caption).foregroundStyle(.secondary)
+        }.card()
+    }
+
+    private var sessionsPage: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Toggle("Save sessions on this device", isOn: $persistSessions)
+            Text("Opt-in metadata only. Up to 20 sessions, 7 days and 10 MB. No screen images or recognized text. Private sessions are not saved. Only instrumented boundaries are recorded.").font(.caption).foregroundStyle(.secondary)
+            HStack {
+                Button("Save now") { diag.persistSession() }.disabled(!persistSessions)
+                Button("Refresh") { Task { await diag.loadSessions() } }
+            }
+            Text(diag.archiveStatus).font(.caption)
+            ForEach(diag.archivedSessions) { session in
+                DisclosureGroup(session.startedAt.formatted()) {
+                    Text("\(session.appVersion) · \(session.events.count) retained events")
+                    Text("Measured through \(session.endedAt.formatted())")
+                    Text(session.measurementBoundary).font(.caption)
+                }
+            }
+            Button("Delete saved diagnostic sessions", role: .destructive) { confirmDeleteSessions = true }
+        }.card()
     }
 
     // MARK: Overview

@@ -61,6 +61,7 @@ struct SettingsView: View {
             || show("Interface", "accent colour home sections haptics keep awake history save")
             || show("Performance & power", "adaptive battery idle pause thermal hot")
             || show("Privacy & storage", "private session history memory diagnostic text delete")
+            || show("Translation memory", "remembered words phrases sentences migration database cache")
             || show("Backup & reset", "export import backup restore reset")
             || show("Timing & responsiveness", "waiting display delay latency heartbeat immediate readable")
             || show("Caption layout", "alignment weight spacing padding scale original speaker colour")
@@ -101,6 +102,9 @@ struct SettingsView: View {
                     }
                 } header: { Text("Personalize") }
                 Section {
+                    if show("Translation memory", "remembered words phrases sentences migration database cache") {
+                        NavigationLink { MemoryManagementView() } label: { Label("Translation memory", systemImage: "externaldrive") }
+                    }
                     if show("Pipeline simulator", "simulation stages diagram timeline settings lab") {
                         NavigationLink { PipelineSimulatorView() } label: { Label("Pipeline simulator", systemImage: "point.3.connected.trianglepath.dotted") }
                     }
@@ -487,12 +491,12 @@ struct PerformanceSettings: View {
                 Toggle("Translate ahead", isOn: $translateAhead)
                 Toggle("Keep the translator warm", isOn: $keepWarm)
                 Toggle("Remember translations", isOn: $remember)
-                LabeledContent("Sentences remembered", value: "\(engine.memoryCount)")
-                Button("Clear translation memory", role: .destructive) { engine.clearMemory() }
+                LabeledContent("Persisted translation units", value: "\(engine.memoryCount)")
+                NavigationLink("Manage translation memory") { MemoryManagementView() }
             } header: {
                 Text("Translation speed")
             } footer: {
-                Text("Translate ahead starts translating the moment text appears and shows it once it's confirmed, so the two waits overlap. Keeping the translator warm avoids a slow first sentence. Remembered sentences are reused instantly, even after restarting. None of this changes the wording of a translation.")
+                Text("Translate ahead starts translating the moment text appears and shows it once it's confirmed, so the two waits overlap. Keeping the translator warm avoids a slow first sentence. Compatible remembered translations can be reused after restarting. Memory management shows committed entries separately from pending writes.")
             }
             Section {
                 Toggle("Cool mode", isOn: $coolMode)
@@ -611,16 +615,15 @@ struct PrivacySettings: View {
             }
             Section("Local storage") {
                 LabeledContent("History entries", value: "\(engine.history.count)")
-                LabeledContent("Remembered sentences", value: "\(engine.memoryCount)")
-                Button("Clear translation memory", role: .destructive) { engine.clearMemory() }
-                Button("Erase history and memory", role: .destructive) { confirm = true }
+                LabeledContent("Persisted translation units", value: "\(engine.memoryCount)")
+                NavigationLink("Manage translation memory") { MemoryManagementView() }
+                Button("Erase history", role: .destructive) { confirm = true }
             }
         }
         .settingsPage("Privacy & storage")
-        .confirmationDialog("Erase saved translations and memory?", isPresented: $confirm) {
+        .confirmationDialog("Erase saved history? Translation memory stays unchanged.", isPresented: $confirm, titleVisibility: .visible) {
             Button("Erase", role: .destructive) {
                 engine.eraseHistory()
-                engine.clearMemory()
             }
         }
     }
