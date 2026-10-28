@@ -26,6 +26,12 @@ struct MemoryManagementView: View {
                     LabeledContent("Conflicts", value: String(h.conflicts))
                     LabeledContent("Database", value: ByteCountFormatter.string(fromByteCount: h.databaseBytes, countStyle: .file))
                 }
+                if let h = engine.memoryHealth, !h.categoryCounts.isEmpty {
+                    ForEach(h.categoryCounts.keys.sorted(), id: \.self) { category in
+                        LabeledContent(category.replacingOccurrences(of: "_", with: " ").capitalized,
+                                       value: String(h.categoryCounts[category, default: 0]))
+                    }
+                }
                 if let failure = engine.memoryFailure { Text(failure).foregroundStyle(.orange) }
                 Picker("RAM entries", selection: $ramCapacity) {
                     Text("1,000").tag(1000); Text("3,000").tag(3000); Text("6,000").tag(6000)
