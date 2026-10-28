@@ -188,10 +188,10 @@ actor TranslationMemoryStore {
                 status.migrationStatus = "restored_from_snapshot"
             } else if previousMigrationState == "partial_recovery", !found {
                 status.migrationStatus = "partial_recovery"
+            } else if durableEntries == 0, try metadata("last_explicit_clear") != nil {
+                status.migrationStatus = "cleared"
             } else if found || durableEntries > 0 {
                 status.migrationStatus = "ready"
-            } else if try metadata("last_explicit_clear") != nil {
-                status.migrationStatus = "cleared"
             } else {
                 status.migrationStatus = "no_previous_memory"
             }
