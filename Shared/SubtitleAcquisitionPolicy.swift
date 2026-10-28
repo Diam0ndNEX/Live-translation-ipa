@@ -29,6 +29,18 @@ enum SubtitleAcquisitionPolicy {
         return movie ? 1.15 : 2.5
     }
 
+    /// OCR sometimes changes punctuation or one harmless character while the
+    /// same confirmed caption is still waiting for its model result. Do not
+    /// cancel that work only to have the duplicate enqueue guard reject the
+    /// replacement. Compare *every* row so scrolling lyrics still update.
+    static func isSameUnpresentedCaption(activeConfirmed: Bool,
+                                         activePresented: Bool,
+                                         previousBlocks: [String],
+                                         incomingBlocks: [String]) -> Bool {
+        activeConfirmed && !activePresented && !previousBlocks.isEmpty &&
+            PipelineSafety.isDuplicate(incomingBlocks, previous: previousBlocks)
+    }
+
     /// A tentative next subtitle must not erase a confirmed one that is still
     /// translating. Once the new subtitle is confirmed, ordinary freshness
     /// guards may supersede the older output.
