@@ -519,6 +519,8 @@ final class Diagnostics: ObservableObject {
             distributions: ["memoryLookupMs": DiagnosticDistribution(lookupSamples), "memoryWriteMs": DiagnosticDistribution(writeSamples),
                 "ocrMs": DiagnosticDistribution(ocr.map { $0.v }), "translationMs": DiagnosticDistribution(translate.map { $0.v }),
                 "enqueueLatencyMs": DiagnosticDistribution(latency.map { $0.v }),
+                "finalOCRMs": DiagnosticDistribution(pipeline.map { $0.stages.recognition }),
+                "transportMs": DiagnosticDistribution(transport.map { $0.v }),
                 "confirmationMs": DiagnosticDistribution(pipeline.map { $0.stages.confirmation }),
                 "deliveryFilteringMs": DiagnosticDistribution(pipeline.map { $0.stages.delivery }),
                 "queueMs": DiagnosticDistribution(pipeline.map { $0.stages.queue }),
@@ -1100,7 +1102,7 @@ final class Diagnostics: ObservableObject {
         l.append("Cache origins: session \(s.cacheHits), saved memory \(s.savedHits), speculative \(s.specHits), fresh requests \(s.cacheMisses).")
         l.append("Speculative model requests \(s.specModelRequests); pipeline attempts \(s.specStarted), completed \(s.specCompleted), superseded/cancelled \(s.specDiscarded), declined \(s.specSkipped), unconsumed results \(engine.unconsumedSpeculation); processing \(Int(s.specProcessingMs)) ms, discarded work \(Int(s.specDiscardedMs)) ms. Attempts count pipeline jobs; cache hits count sentences.")
         l.append("Idle validation: selected \(s.legacyBatchEntries), verified \(s.legacyBatchVerified), skipped \(s.legacyBatchSkipped); peak workers \(s.legacyBatchPeakWorkers); model + commit wall time \(Int(s.legacyBatchElapsedMs)) ms.")
-        l.append("v1.4.4: deferred confirmed handoffs \(s.confirmedHandoffDeferred); adaptive speculative skips \(s.adaptiveSpeculationSkipped); slow (>1200 ms) PiP enqueues \(s.slowTailEnqueues).")
+        l.append("v1.4.5: deferred confirmed handoffs \(s.confirmedHandoffDeferred); adaptive speculative skips \(s.adaptiveSpeculationSkipped); slow (>1200 ms) PiP enqueues \(s.slowTailEnqueues).")
         l.append("OCR confidence \(Int(s.ocrConfidence*100))%, source evidence \(s.sourceOrigin == "Selected" ? "manual selection" : "\(Int(s.languageConfidence*100))%"); recognition: \(s.recognitionReason); confirmation: \(s.confirmationReason).")
         l.append("Frame skips: unchanged \(s.unchangedSkipped), cadence \(s.cadenceSkipped), paused \(s.pausedSkipped); consecutive empty reads \(s.emptyReads), contrast retries \(s.retryCount).")
         l.append("Instrumented recorder elapsed self-time, app lifetime: simple \(String(format: "%.2f", recorderCosts.simpleMs)) ms / \(recorderCosts.simpleCalls) calls; detailed \(String(format: "%.2f", recorderCosts.detailedMs)) ms / \(recorderCosts.detailedCalls) calls. Excludes async chart drawing, translation and OCR; workloads may differ.")
@@ -2113,7 +2115,7 @@ private struct DiagnosticsBody: View {
             Text("\(s.recognitionReason) · \(s.confirmationReason)").font(.caption).foregroundStyle(.secondary)
             Text("Cache sentences · session \(s.cacheHits) · saved \(s.savedHits) · pre-translated \(s.specHits)").font(.footnote)
             Text("Speculative jobs · started \(s.specStarted) · completed \(s.specCompleted) · discarded \(s.specDiscarded) · declined \(s.specSkipped)").font(.footnote)
-            Text("v1.4.4 · Spec throttled \(s.adaptiveSpeculationSkipped) · confirmed handoffs \(s.confirmedHandoffDeferred) · slow tails \(s.slowTailEnqueues)").font(.footnote)
+            Text("v1.4.5 · Spec throttled \(s.adaptiveSpeculationSkipped) · confirmed handoffs \(s.confirmedHandoffDeferred) · slow tails \(s.slowTailEnqueues)").font(.footnote)
             Text("Discarded work: \(Int(s.specDiscardedMs)) ms. Unconsumed cached results: \(engine.unconsumedSpeculation). Completed results may still be reused later.").font(.caption).foregroundStyle(.secondary)
             Text("Skipped frames · unchanged \(s.unchangedSkipped) · cadence \(s.cadenceSkipped) · paused \(s.pausedSkipped)").font(.caption)
             Text("Recorder self-time · simple \(String(format: "%.1f", diag.recorderCosts.simpleMs)) ms · detailed \(String(format: "%.1f", diag.recorderCosts.detailedMs)) ms. Excludes chart drawing and model work; these are different workloads.").font(.caption).foregroundStyle(.secondary)

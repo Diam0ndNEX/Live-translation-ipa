@@ -1272,8 +1272,7 @@ final class TranslatorEngine: ObservableObject {
         deferredConfirmedPacket = nil
         confirmedHandoffDeadlineTask?.cancel()
         confirmedHandoffDeadlineTask = nil
-        guard !paused, !manualMode, captureAlive,
-              Date().timeIntervalSince(deferredConfirmedReceivedAt) < 1.2 else { return }
+        guard !paused, !manualMode, captureAlive else { return }
         handleContent(packet, receivedAt: deferredConfirmedReceivedAt, replayed: true)
     }
 
