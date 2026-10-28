@@ -39,6 +39,31 @@ import Foundation
         let sanitized = try await writer.encodeIndexedEvents([event, privateEvent])
         precondition(sanitized.count == 1,
                      "Indexed events must discard non-metadata privacy classifications")
+        // The v1.4.0 exporter incorrectly labelled safe OCR timings as 'other'.
+        let ocrEvent = StructuredDiagnosticEvent(id: UUID(), timestamp: Date(),
+            sessionID: session, candidateID: UUID(), frameID: safeFrame, unitID: nil,
+            stage: "ocr_execution", outcome: "completed", reasonCode: "completed",
+            durationMs: 141, privacy: "metadataOnly")
+        var ocrSnapshot = snapshot
+        ocrSnapshot.events = [ocrEvent]
+        let ocrBytes = try await writer.encode(ocrSnapshot)
+        let ocrDecoded = try await writer.decode(ocrBytes)
+        precondition(ocrDecoded.events[0].stage == "ocr_execution" &&
+                     ocrDecoded.events[0].outcome == "completed" &&
+                     ocrDecoded.events[0].durationMs == 141,
+                     "Safe OCR labels and their timing must survive metadata-only export")
+        let traceLimit = 2400
+        ocrSnapshot.events = (0..<(traceLimit + 5)).map { index in
+            StructuredDiagnosticEvent(id: UUID(), timestamp: Date().addingTimeInterval(Double(index)),
+                sessionID: session, candidateID: UUID(), frameID: nil, unitID: nil,
+                stage: "ocr_execution", outcome: "completed", reasonCode: "completed",
+                durationMs: 10, privacy: "metadataOnly")
+        }
+        let boundedSnapshot = try await writer.decode(try await writer.encode(ocrSnapshot))
+        precondition(boundedSnapshot.events.count == traceLimit &&
+                     boundedSnapshot.events.first?.timestamp ==
+                        ocrSnapshot.events[5].timestamp,
+                     "Long diagnostics retain the most recent 2400 structured events")
         let bytes = try await writer.encode(snapshot)
         let recovered = try await writer.decode(bytes)
         precondition(recovered.id == session && recovered.events.count == 1)
