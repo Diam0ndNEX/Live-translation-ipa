@@ -304,7 +304,7 @@ final class Diagnostics: ObservableObject {
             "rejected_empty", "rejected_revision", "rejected_unstable",
             "rejected_low_confidence", "rejected_stale", "filtered", "deferred_early_candidate",
             "preserved_confirmed_work", "confirmed_handoff_deferred",
-            "adaptive_speculation_backoff", "slow_tail",
+            "adaptive_speculation_backoff", "slow_tail", "handoff_expired", "handoff_replayed", "enqueue_failed",
             "changing_group_preferred", "dominant_group", "queue_replaced",
             "confirmed", "speculative", "ready", "enqueued", "cancelled"
         ]
@@ -367,6 +367,7 @@ final class Diagnostics: ObservableObject {
         guard enabled else { return }
         let allowed: Set<String> = [
             "warmup_started", "warmup_succeeded", "warmup_failed",
+            "warmup_model_submitted", "speculative_model_submitted", "confirmed_model_submitted", "model_batch_cancelled",
             "model_session_created", "model_batch_failed", "model_batch_completed",
             "warmup_source_unresolved", "warmup_predicted_source", "warmup_preempted",
             "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started",
@@ -420,6 +421,8 @@ final class Diagnostics: ObservableObject {
         case "cancellation": key = reason == "queue_replaced" ? nil : "cancelled"
         case "runtime_state": key = "runtimeTransition"
         case "model_state": key = reason
+        case "stability", "pip_enqueue":
+            key = ["handoff_replayed", "handoff_expired", "enqueue_failed"].contains(reason) ? reason : nil
         default: key = nil
         }
         if let key { eventTotals[key, default: 0] += 1 }
@@ -485,7 +488,8 @@ final class Diagnostics: ObservableObject {
                 settings[key] = String(describing: value)
             }
         }
-        var counters = Dictionary(uniqueKeysWithValues: memoryOutcomes.map { ($0.key.rawValue, $0.value) })
+        var counters = cumulativeCounters()
+        counters.merge(Dictionary(uniqueKeysWithValues: memoryOutcomes.map { ($0.key.rawValue, $0.value) })) { _, new in new }
         counters["sessionCacheHits"] = s.cacheHits
         counters["savedMemoryHits"] = s.savedHits
         counters["speculativeHits"] = s.specHits
@@ -514,7 +518,16 @@ final class Diagnostics: ObservableObject {
             hardwareModel: Self.hardwareModelCode, settings: settings, health: memoryHealth, counters: counters,
             distributions: ["memoryLookupMs": DiagnosticDistribution(lookupSamples), "memoryWriteMs": DiagnosticDistribution(writeSamples),
                 "ocrMs": DiagnosticDistribution(ocr.map { $0.v }), "translationMs": DiagnosticDistribution(translate.map { $0.v }),
-                "enqueueLatencyMs": DiagnosticDistribution(latency.map { $0.v })],
+                "enqueueLatencyMs": DiagnosticDistribution(latency.map { $0.v }),
+                "confirmationMs": DiagnosticDistribution(pipeline.map { $0.stages.confirmation }),
+                "deliveryFilteringMs": DiagnosticDistribution(pipeline.map { $0.stages.delivery }),
+                "queueMs": DiagnosticDistribution(pipeline.map { $0.stages.queue }),
+                "processingMs": DiagnosticDistribution(pipeline.map { $0.stages.translation }),
+                "displayHoldMs": DiagnosticDistribution(pipeline.map { $0.stages.displayHold }),
+                "renderingMs": DiagnosticDistribution(pipeline.map { $0.stages.rendering }),
+                "modelBatchMs": DiagnosticDistribution(structuredEvents.filter {
+                    $0.reasonCode == "model_batch_completed"
+                }.compactMap(\.durationMs))],
             events: exportEventWindow(),
             intervals: diagnosticIntervals(at: Date()),
             measurementBoundary: "First OCR sighting to PiP sample-buffer enqueue; physical display unmeasured. Distributions use the latest bounded samples within this session, not all-time aggregates. Stages can overlap.",
@@ -848,7 +861,18 @@ final class Diagnostics: ObservableObject {
             "warmupAttempts": eventTotals["warmup_started", default: 0],
             "warmupSucceeded": eventTotals["warmup_succeeded", default: 0],
             "warmupPredicted": eventTotals["warmup_predicted_source", default: 0],
+            // Legacy alias counts first-30s completions, not proven cold loads.
             "coldModelBatches": eventTotals["model_batch_first_30s", default: 0],
+            "first30sModelBatches": eventTotals["model_batch_first_30s", default: 0],
+            "confirmedModelBatches": eventTotals["confirmed_model_submitted", default: 0],
+            "speculativeModelBatches": eventTotals["speculative_model_submitted", default: 0],
+            "warmupModelBatches": eventTotals["warmup_model_submitted", default: 0],
+            "actualModelBatches": eventTotals["confirmed_model_submitted", default: 0] +
+                eventTotals["speculative_model_submitted", default: 0] + eventTotals["warmup_model_submitted", default: 0],
+            "cancelledModelBatches": eventTotals["model_batch_cancelled", default: 0],
+            "handoffReplayed": eventTotals["handoff_replayed", default: 0],
+            "handoffExpired": eventTotals["handoff_expired", default: 0],
+            "enqueueFailed": eventTotals["enqueue_failed", default: 0],
             "runtimeTransitions": eventTotals["runtimeTransition", default: 0],
             "visualChanges": s.visualChanges
         ]
@@ -2335,3 +2359,4 @@ private struct DiagnosticsBody: View {
         }
     }
 }
+

@@ -78,13 +78,19 @@ import Foundation
             systemVersion: "test", settings: ["predictiveWarmup": "true"],
             health: MemoryDiagnosticHealth(),
             counters: ["slowTailEnqueues": 1, "handoffDeferred": 1,
-                       "legacyBatchVerified": 24, "source text": 100],
+                       "legacyBatchVerified": 24, "actualModelBatches": 7, "confirmedModelBatches": 2,
+                       "speculativeModelBatches": 4, "warmupModelBatches": 1, "first30sModelBatches": 5,
+                       "handoffReplayed": 1, "enqueueFailed": 1, "source text": 100],
             distributions: [:], events: performanceEvents,
             measurementBoundary: "OCR through PiP enqueue", textCapture: false)
         let performanceBytes = try await writer.encode(performanceSnapshot)
         let performanceRestored = try await writer.decode(performanceBytes)
         precondition(performanceRestored.counters["legacyBatchVerified"] == 24 &&
                      performanceRestored.counters["slowTailEnqueues"] == 1 &&
+                     performanceRestored.counters["actualModelBatches"] == 7 &&
+                     performanceRestored.counters["first30sModelBatches"] == 5 &&
+                     performanceRestored.counters["handoffReplayed"] == 1 &&
+                     performanceRestored.counters["enqueueFailed"] == 1 &&
                      performanceRestored.counters["source text"] == nil &&
                      performanceRestored.events.count == 3 &&
                      performanceRestored.events.allSatisfy { $0.privacy == "metadataOnly" },
@@ -273,3 +279,4 @@ import Foundation
         print("Diagnostic percentile, privacy, correlation, compatibility and comparison passed")
     }
 }
+

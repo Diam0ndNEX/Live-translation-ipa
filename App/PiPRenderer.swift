@@ -109,6 +109,8 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
     private var size = CGSize(width: 720, height: 360)
     private var frameBuffer: CVPixelBuffer?
     private var frameFormat: CMVideoFormatDescription?
+    private var framePool: CVPixelBufferPool?
+    private var poolSize = CGSize.zero
     private var heartbeat: Timer?
     private var lastOriginal = "", lastTranslated = "Waiting for screen text…"
     private var lastShowOriginal = true
@@ -173,13 +175,15 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
     }
 
     // MARK: Rendering
-    func render(original: String, translated: String, showOriginal: Bool) {
-        lastOriginal = original; lastTranslated = translated; lastShowOriginal = showOriginal
+    @discardableResult
+    func render(original: String, translated: String, showOriginal: Bool,
+                size newSize: CGSize? = nil) -> Bool {
+        if let newSize { size = newSize }
         let img = PiPRenderer.image(original: original, translated: translated, showOriginal: showOriginal,
                                     size: size, style: style)
-        guard let cg = img.cgImage else { return }
-        guard prepareFrame(cg) else { return }
-        enqueueCurrentFrame()
+        guard let cg = img.cgImage, prepareFrame(cg), enqueueCurrentFrame() else { return false }
+        lastOriginal = original; lastTranslated = translated; lastShowOriginal = showOriginal
+        return true
     }
 
     /// Draws the floating-window picture. Also used for settings previews and "share as image".
@@ -236,19 +240,38 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
         return base
     }
 
-    private func enqueueCurrentFrame() {
-        guard let sb = makeSampleBuffer() else { return }
+    @discardableResult
+    private func enqueueCurrentFrame() -> Bool {
+        guard let sb = makeSampleBuffer() else { return false }
         let r = displayLayer.sampleBufferRenderer
         if r.status == .failed { r.flush() }
         r.enqueue(sb)
+        return r.status != .failed
     }
 
     private func prepareFrame(_ cg: CGImage) -> Bool {
         var pb: CVPixelBuffer?
-        let attrs = [kCVPixelBufferCGImageCompatibilityKey: true,
-                     kCVPixelBufferCGBitmapContextCompatibilityKey: true,
-                     kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
-        CVPixelBufferCreate(kCFAllocatorDefault, cg.width, cg.height, kCVPixelFormatType_32BGRA, attrs, &pb)
+        let dimensions = CGSize(width: cg.width, height: cg.height)
+        if framePool == nil || poolSize != dimensions {
+            let attrs: [CFString: Any] = [
+                kCVPixelBufferWidthKey: cg.width, kCVPixelBufferHeightKey: cg.height,
+                kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferCGImageCompatibilityKey: true,
+                kCVPixelBufferCGBitmapContextCompatibilityKey: true,
+                kCVPixelBufferIOSurfacePropertiesKey: [:]]
+            var pool: CVPixelBufferPool?
+            CVPixelBufferPoolCreate(kCFAllocatorDefault, nil, attrs as CFDictionary, &pool)
+            framePool = pool; poolSize = dimensions
+        }
+        if let framePool { CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, framePool, &pb) }
+        // An allocation failure must not turn a scheduling optimization into a
+        // reliability regression. Buffers already enqueued are never redrawn.
+        if pb == nil {
+            let attrs = [kCVPixelBufferCGImageCompatibilityKey: true,
+                         kCVPixelBufferCGBitmapContextCompatibilityKey: true,
+                         kCVPixelBufferIOSurfacePropertiesKey: [:]] as CFDictionary
+            CVPixelBufferCreate(kCFAllocatorDefault, cg.width, cg.height, kCVPixelFormatType_32BGRA, attrs, &pb)
+        }
         guard let pb else { return false }
         CVPixelBufferLockBaseAddress(pb, [])
         defer { CVPixelBufferUnlockBaseAddress(pb, []) }
@@ -259,8 +282,14 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
                                             | CGBitmapInfo.byteOrder32Little.rawValue) else { return false }
         ctx.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
 
-        var fmt: CMVideoFormatDescription?
-        CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: pb, formatDescriptionOut: &fmt)
+        var fmt = frameFormat
+        if let previous = frameBuffer,
+           CVPixelBufferGetWidth(previous) != cg.width || CVPixelBufferGetHeight(previous) != cg.height {
+            fmt = nil
+        }
+        if fmt == nil {
+            CMVideoFormatDescriptionCreateForImageBuffer(allocator: nil, imageBuffer: pb, formatDescriptionOut: &fmt)
+        }
         guard let fmt else { return false }
         frameBuffer = pb
         frameFormat = fmt
@@ -312,3 +341,4 @@ final class LayerHostView: UIView {
     func host(_ l: CALayer) { layer.addSublayer(l); hosted = l }
     override func layoutSubviews() { super.layoutSubviews(); hosted?.frame = bounds }
 }
+
