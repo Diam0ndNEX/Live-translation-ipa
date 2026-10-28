@@ -87,12 +87,14 @@ check(SubtitleAcquisitionPolicy.idleMultiplier(movie: false, enabled: true, seco
       "Other reading modes retain the previous power-saving policy")
 check(SubtitleAcquisitionPolicy.idleMultiplier(movie: true, enabled: false, secondsSinceText: 10) == 1,
       "Disabling idle backoff must always mean no idle slow-down")
-check(!SubtitleAcquisitionPolicy.shouldSupersedeActive(activeConfirmed: true, incomingConfirmed: false),
+check(!SubtitleAcquisitionPolicy.shouldSupersedeActive(activeConfirmed: true, activePresented: false, incomingConfirmed: false),
       "A tentative subtitle cannot cancel a confirmed translation")
-check(SubtitleAcquisitionPolicy.shouldSupersedeActive(activeConfirmed: true, incomingConfirmed: true),
+check(SubtitleAcquisitionPolicy.shouldSupersedeActive(activeConfirmed: true, activePresented: false, incomingConfirmed: true),
       "A confirmed new subtitle may replace stale confirmed output")
-check(SubtitleAcquisitionPolicy.shouldSupersedeActive(activeConfirmed: false, incomingConfirmed: false),
+check(SubtitleAcquisitionPolicy.shouldSupersedeActive(activeConfirmed: false, activePresented: false, incomingConfirmed: false),
       "Early OCR may update other unconfirmed candidates")
+check(SubtitleAcquisitionPolicy.shouldSupersedeActive(activeConfirmed: true, activePresented: true, incomingConfirmed: false),
+      "The next early subtitle may translate ahead once the previous one was presented")
 print("Subtitle acquisition and confirmed-caption continuity checks passed")
 
 // Cadence removes only redundant waiting: accuracy, pass count and resolution are unchanged.
