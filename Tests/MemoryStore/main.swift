@@ -250,6 +250,39 @@ import SQLite3
         precondition(deletedEvents.isEmpty, "Deleted diagnostic sessions must cascade to indexed events")
         print("Diagnostic session retention, size cap and independent deletion checks passed")
 
+        // If the active SQLite database is unreadable, the user can explicitly
+        // recover from a verified snapshot. The damaged database/WAL are retained.
+        let corruptRecovery = corruptDirectory.appendingPathComponent("recovery")
+        try FileManager.default.createDirectory(at: corruptRecovery,
+                                                withIntermediateDirectories: true)
+        let invalidSnapshot = corruptRecovery.appendingPathComponent("memory-invalid.sqlite")
+        try Data("invalid recovery snapshot".utf8).write(to: invalidSnapshot)
+        do {
+            _ = try await corruptStore.recoverUnavailableStore(named: "memory-invalid.sqlite")
+            preconditionFailure("An unreadable recovery image must be rejected")
+        } catch MemoryStoreError.backupFailed {
+            let damagedFile = try Data(contentsOf: corruptFile)
+            precondition(!damagedFile.isEmpty,
+                         "Failed restore must not replace the unreadable original")
+        }
+        try FileManager.default.copyItem(
+            at: snapshotURL, to: corruptRecovery.appendingPathComponent(snapshotName))
+        let recoveredFromDamage = try await corruptStore.recoverUnavailableStore(
+            named: snapshotName)
+        precondition(recoveredFromDamage.totalEntries == 4)
+        precondition(recoveredFromDamage.migrationStatus == "restored_from_snapshot")
+        let recoveredAfterDamage = await corruptStore.lookup(
+            key: sentenceKey, timeoutMilliseconds: 50)
+        precondition(recoveredAfterDamage.value == "Como você está?")
+        let quarantines = try FileManager.default.contentsOfDirectory(
+            atPath: corruptRecovery.path).filter { $0.hasPrefix("unhealthy-") }
+        precondition(quarantines.count == 1,
+                     "Damaged database copies must be preserved for later investigation")
+        let preservedBadDatabase = corruptRecovery
+            .appendingPathComponent(quarantines[0])
+            .appendingPathComponent("memory.sqlite")
+        precondition(FileManager.default.fileExists(atPath: preservedBadDatabase.path))
+
         let reopened = TranslationMemoryStore(directory: root.appendingPathComponent("db"))
         let cleared = try await reopened.prepare(legacyURLs: [legacy])
         precondition(cleared.totalEntries == 0, "Clear must not reimport legacy memory")
