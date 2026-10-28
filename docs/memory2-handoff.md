@@ -45,3 +45,13 @@ Live TranslatorEngine now uses asynchronous SQLite preparation/lookup, additive 
 - PR #3 (codex/memory2-simulator), 8d71d9077cbcceb1a2583ec8d6ff0d009d5d6b38: memory scenarios and deadline assumptions, regression tests; run 40611880568 in progress when recorded.
 - Memory management transfer controls added next: async export, security-scoped bounded import and explicit text disclosure; compilation pending.
 - Exact next step: inspect the newest CI runs for PRs #2/#3 and transfer UI, fix any failures, then add interruption/corruption/concurrency regression coverage and independent review. Do not merge the draft stack until its own prerequisites pass. Device benchmarks and installed-IPA migration remain mandatory unverified release gates.
+
+
+## Continuation audit — 2026-10-28 (Revision 3.0)
+- Compared reference codex/screenlingo-v1.3.0 against codex/memory2-management-transfer: baseline TranslatorEngine/Diagnostics/PipelineSimulation exist; memory2 branch adds SQLite store, memory management UI and simulation changes. Do not duplicate these.
+- Confirmed PR #2 run 40611821319 and PR #3 run 40611880568 succeeded at their respective SHAs. These are NOT verification of the combined PR #4 head.
+- 390e35d9f4a0f03fef5f1bdcf248495beacfc1ea: export now rejects output larger than the supported 256 MiB import ceiling.
+- cabeda81143b6a933f0496e62b8bec284fbfbd72: clearMemory now refuses deletion while confirmed writes are pending and reports success only after the SQLite clear returns.
+- Latest commit had no associated PR-triggered workflow run at inspection. Build and tests for these changes are UNVERIFIED.
+- Remaining high-priority review: verify asynchronous clear/write interleavings and failed-clear cache behavior; exercise migration interruptions, corruption, low-storage, and selected-entry deletion concurrency; verify combined IPA CI and device in-place upgrade.
+- Exact next step: trigger/check the combined branch's IPA CI, fix any failures, then add deterministic concurrent write/clear tests. Do not merge into main or claim release readiness without device validation.
