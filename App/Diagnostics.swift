@@ -459,7 +459,9 @@ final class Diagnostics: ObservableObject {
                     "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest"]
         var settings: [String: String] = [:]
         for key in keys {
-            if let value = UserDefaults.standard.object(forKey: key) { settings[key] = String(describing: value) }
+            if let value = UserDefaults.standard.object(forKey: key) ?? TranslatorEngine.defaults[key] {
+                settings[key] = String(describing: value)
+            }
         }
         var counters = Dictionary(uniqueKeysWithValues: memoryOutcomes.map { ($0.key.rawValue, $0.value) })
         counters["sessionCacheHits"] = s.cacheHits
