@@ -74,14 +74,53 @@ struct MemoryManagementView: View {
                 }.disabled(captureInProgress || transferBusy ||
                     engine.memoryHealth == nil)
                 LabeledContent("Validation activity", value: engine.legacyIdleValidationStatus)
-                if engine.legacyBatchActive {
-                    ProgressView("Batch processing")
+                LabeledContent("Translation model", value: engine.warmupStatus)
+                if let duration = engine.warmupLastDurationMs {
+                    LabeledContent("Last model warm-up", value: "\(Int(duration)) ms")
                 }
-                LabeledContent("Concurrent model workers", value: String(engine.legacyBatchWorkers))
-                LabeledContent("Last batch selected", value: String(engine.legacyBatchTotal))
-                LabeledContent("Last batch validated", value: String(engine.legacyBatchCompleted))
+                if let h = engine.memoryHealth {
+                    LabeledContent("Older entries remaining", value: String(h.legacyUnverified))
+                    let resolved = h.legacyValidated + h.legacySuperseded
+                    let totalHistorical = resolved + h.legacyUnverified
+                    if totalHistorical > 0 {
+                        ProgressView(value: Double(resolved), total: Double(totalHistorical)) {
+                            Text("Historical memory classified")
+                        } currentValueLabel: {
+                            Text("\(resolved) / \(totalHistorical)")
+                        }
+                    }
+                }
+                if engine.legacyBatchActive {
+                    ProgressView(value: Double(engine.legacyBatchProcessed),
+                        total: Double(max(1, engine.legacyBatchTotal))) {
+                        Text("Current batch — translated")
+                    } currentValueLabel: {
+                        Text("\(engine.legacyBatchProcessed) / \(engine.legacyBatchTotal)")
+                    }
+                    Text("Model results are saved only after the batch passes validation checks.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                LabeledContent("Model workers", value: String(engine.legacyBatchWorkers))
+                LabeledContent("Selected in batch", value: String(engine.legacyBatchTotal))
+                LabeledContent("Translated in batch", value: String(engine.legacyBatchProcessed))
+                LabeledContent("Validated in batch", value: String(engine.legacyBatchCompleted))
                 LabeledContent("Skipped or unsupported", value: String(engine.legacyBatchSkipped))
                 LabeledContent("Verified this session", value: String(engine.legacyValidatedThisSession))
+                if engine.legacyEntriesPerMinute > 0 {
+                    LabeledContent("Observed validation speed",
+                        value: String(format: "%.1f entries/min", engine.legacyEntriesPerMinute))
+                    if let estimate = engine.legacyEstimatedRemainingMinutes {
+                        LabeledContent("Estimated time remaining",
+                            value: estimate >= 60 ?
+                                String(format: "~%.1f hours", estimate / 60) :
+                                String(format: "~%.0f min", estimate))
+                        Text("Estimate assumes all remaining entries are eligible and the last batches' speed continues. Unsupported or incompatible entries can remain pending.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if engine.legacyBatchActive {
+                    Button("Stop validation") { engine.cancelLegacyValidation() }
+                }
                 if let h = engine.memoryHealth {
                     LabeledContent("OCR-related suggestions", value: String(h.suggestedOCRMatches))
                     LabeledContent("Fragment alignment suggestions", value: String(h.suggestedFragmentMatches))
