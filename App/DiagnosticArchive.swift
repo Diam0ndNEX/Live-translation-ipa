@@ -130,6 +130,7 @@ struct DiagnosticIntervalBucket: Codable {
         "modelFailures", "warmupAttempts", "warmupSucceeded",
         "warmupPredicted", "coldModelBatches", "adaptiveSpeculationSkipped",
         "handoffDeferred", "slowTailEnqueues",
+        "legacyBatchEntries", "legacyBatchVerified", "legacyBatchSkipped",
         "runtimeTransitions", "visualChanges",
         "ocrMeasurementCount", "translationMeasurementCount", "enqueueMeasurementCount"
     ]
@@ -204,7 +205,7 @@ actor DiagnosticExportWriter {
                 "warmup_started", "warmup_succeeded", "warmup_failed",
                 "model_session_created", "model_batch_completed", "model_batch_failed",
                 "warmup_source_unresolved", "warmup_predicted_source",
-                "model_batch_first_30s", "legacy_idle_started", "legacy_idle_completed",
+                "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started", "legacy_idle_completed",
                 "legacy_idle_deferred", "app_started", "capture_config_changed",
                 "capture_idle", "capture_live", "capture_paused", "capture_frozen"
             ]).union(stageCodes)
