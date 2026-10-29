@@ -27,9 +27,6 @@ struct TranslationActivityView: View {
                 }
                 Spacer(minLength: 0)
             }
-            if engine.activeTranslationSystem != .legacy, !engine.modeAvailability.isEmpty {
-                Text(engine.modeAvailability).font(.caption2).foregroundStyle(.secondary)
-            }
             if engine.pendingTranslationSystem != engine.activeTranslationSystem {
                 Text("Next capture: \(engine.pendingTranslationSystem.title)").font(.caption)
             }

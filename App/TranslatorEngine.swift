@@ -204,10 +204,11 @@ final class TranslatorEngine: ObservableObject {
         if paused { return TranslationActivity(title: "Translation paused", detail: captureAlive ? "Capture is still connected. Resume to translate." : "Resume translation when you are ready.", phase: .waiting) }
         if activeTranslationSystem != .legacy {
             if let modeWorkActivity { return modeWorkActivity }
+            var activity = TranslationActivity.preparation(modeAvailability, busy: modePreparationInProgress)
+            if activity.phase == .attention { return activity }
             if sourceCode == "auto", !modePreparationInProgress {
                 return TranslationActivity(title: "Waiting for source language", detail: "Read a caption or choose a source in Languages to prepare the selected system.", phase: .waiting)
             }
-            var activity = TranslationActivity.preparation(modeAvailability, busy: modePreparationInProgress)
             if modePreparationInProgress { activity.since = preparationStarted }
             return activity
         }

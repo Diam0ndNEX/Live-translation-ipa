@@ -32,7 +32,6 @@ struct TranslationSettings: View {
                     LabeledContent("Next capture session", value: engine.pendingTranslationSystem.title)
                     Text("Stop and restart capture to apply the selected system.").font(.footnote)
                 }
-                Text(engine.modeAvailability).font(.footnote).foregroundStyle(.secondary)
             } header: { Text("Translation system") }
 
             Section {
