@@ -277,10 +277,7 @@ struct TranslationModeReport: Codable {
             if let count = counters[reason], count >= 0 {
                 counts["session_" + reason] = min(count, 1_000_000)
             }
-            if let sample = distributions[reason], sample.count >= 0,
-               sample.mean.isFinite, sample.mean >= 0 {
-                samples["session_" + reason + "_mean_ms"] = [min(sample.mean, 60_000)]
-            }
+
         }
         let modes = ["legacy", "hybridRecovery", "lowLatency"]
         for warmup in safeWarmups {
@@ -288,10 +285,17 @@ struct TranslationModeReport: Codable {
             counts[cohort + "_" + warmup.phase, default: 0] += 1
             if let ms = warmup.durationMs { samples[cohort + "_" + warmup.phase, default: []].append(ms) }
         }
+        var finalDistributions = samples.mapValues(DiagnosticDistribution.init)
+        for reason in sessionReasons {
+            if let sample = distributions[reason], sample.count >= 0,
+               sample.mean.isFinite, sample.mean >= 0 {
+                finalDistributions["session_" + reason] = sample
+            }
+        }
         return Self(warmups: safeWarmups, active: modes.contains(active) ? active : "legacy", pending: modes.contains(pending) ? pending : "legacy",
             referenceSHA: referenceSHA.count == 40 && referenceSHA.allSatisfy { $0.isHexDigit } ? referenceSHA : "unknown",
             migration: ["persisted", "explicit_hybrid", "explicit_low_latency", "legacy_or_ambiguous", "unknown_value_legacy"].contains(migration) ? migration : "unknown",
-            events: safe, distributions: samples.mapValues(DiagnosticDistribution.init), counters: counts)
+            events: safe, distributions: finalDistributions, counters: counts)
     }
 }
 
