@@ -106,7 +106,8 @@ struct HomeView: View {
                 Text("TRANSLATE").font(.caption2.bold()).tracking(1.5).foregroundStyle(.secondary)
                 Spacer()
                 Button { selectTab(1) } label: {
-                    Label(packReady ? "Offline ready" : "Get language packs", systemImage: packReady ? "checkmark.shield" : "arrow.down.circle")
+                    Label(engine.languageStatusChecking ? "Checking packs…" : (packReady ? "Offline ready" : "Language packs"),
+                          systemImage: engine.languageStatusChecking ? "arrow.triangle.2.circlepath" : (packReady ? "checkmark.shield" : "arrow.down.circle"))
                         .font(.caption.weight(.medium)).foregroundStyle(packReady ? Color.mint : Theme.accent.start)
                 }.buttonStyle(.plain)
             }
@@ -216,7 +217,9 @@ struct HomeView: View {
                 Image(systemName: packReady ? "info.circle" : "arrow.down.circle.fill").foregroundStyle(.mint)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(packReady ? "Ready for your next video" : "One download. Then offline.").font(.subheadline.bold())
-                    Text(packReady ? "Tap Broadcast, choose ScreenLingo Capture, then Start Broadcast. Open your video when the floating window is ready." : "Download your language pair in Languages. Translation stays on your phone.")
+                    Text(packReady ? "Tap Broadcast, choose ScreenLingo Capture, then Start Broadcast. Open your video when the floating window is ready." :
+                        (engine.languageStatusChecking ? "Verifying installed Apple Default and Low Latency packs for the selected language pair." :
+                        "Only download a supported, missing pack for the pair you need. Other languages do not require installation."))
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }.card()
