@@ -196,6 +196,7 @@ final class TranslatorEngine: ObservableObject {
     private var modeDiagnosticEpochs: [UUID: Date] = [:]
     private var modeRevision = 0
     private var modeLastIdentity = ""
+    private var modeMemoryOrigins: [String: String] = [:]
     private var modePlans: [String: ([[CaptionTranslationUnit]], Packet, ModeCaption)] = [:]
     private let modeService = ModeTranslationService()
     private lazy var modeCoordinator = ThreeModeCoordinator(
@@ -242,6 +243,12 @@ final class TranslatorEngine: ObservableObject {
 
     private func noteModeEvent(_ caption: ModeCaption, reason: String, duration: Double?) {
         guard modeDiagnosticEpochs[caption.session] == diag.started else { return }
+        if ["speculative_model_submitted", "confirmed_model_submitted", "model_batch_failed", "model_batch_completed", "speculative_model_completed", "confirmed_model_completed"].contains(reason) {
+            diag.noteModelState(reason, durationMs: duration, candidate: caption.caption)
+        }
+        if caption.session == modeSessionID, reason == "hybrid_default_fallback" {
+            modeAvailability = "Fast recovery unavailable; using Apple default for this caption"
+        }
         diag.noteModeEvent(session: caption.session, caption: caption.caption, revision: caption.revision,
             source: caption.source, target: caption.target,
             fingerprint: SHA256.hash(data: Data(caption.fingerprint.utf8)).map { String(format: "%02x", $0) }.joined(),
@@ -312,6 +319,8 @@ final class TranslatorEngine: ObservableObject {
         for key in caption.keys {
             guard context == contextRevision, caption.session == modeSessionID else { return caption.keys.map { _ in nil } }
             if let hit = bank.values[key] {
+                if modeMemoryOrigins.count >= 3000 { modeMemoryOrigins.removeAll() }
+                modeMemoryOrigins[key] = bank.savedKeys.contains(key) ? "saved_ram" : "ram"
                 noteModeEvent(caption, reason: bank.savedKeys.contains(key) ? "memory_saved_ram_hit" : "memory_session_hit", duration: nil)
                 output.append(hit); continue
             }
@@ -319,6 +328,8 @@ final class TranslatorEngine: ObservableObject {
                 let hit = await memoryStore.lookup(key: key)
                 guard context == contextRevision else { return caption.keys.map { _ in nil } }
                 if hit.value != nil {
+                    if modeMemoryOrigins.count >= 3000 { modeMemoryOrigins.removeAll() }
+                    modeMemoryOrigins[key] = hit.outcome == "normalized_hit" ? "normalized" : hit.origin
                     let origin = hit.origin == "legacy" ? "memory_legacy_hit" : (hit.origin == "normalized" ? "memory_normalized_hit" : "memory_persistent_hit")
                     noteModeEvent(caption, reason: origin, duration: hit.durationMs)
                 }
@@ -338,6 +349,24 @@ final class TranslatorEngine: ObservableObject {
             rows[b][u].out[i] = output.values[index]; index += 1
         } } }
         guard let result = CaptionAssembly.complete(rows, glossary: pairs("glossary")), index == output.values.count else { return }
+        if diag.enabled {
+            diag.s.translations += 1; diag.s.chars += caption.text.count; diag.s.sentences += output.values.count
+            for i in output.values.indices {
+                let origin = output.origins[i]
+                if origin == "speculation" { diag.s.specHits += 1; diag.recordMemory(.speculativeHit, candidate: caption.caption) }
+                else if origin == "compatible_memory" || origin == "session_low_latency" {
+                    let provenance = origin == "session_low_latency" ? "ram" : (modeMemoryOrigins[caption.keys[i]] ?? "ram")
+                    let saved = ["persistent", "legacy", "normalized", "saved_ram"].contains(provenance)
+                    if saved { diag.s.savedHits += 1 } else { diag.s.cacheHits += 1 }
+                    let outcome: MemoryDiagnosticOutcome = provenance == "persistent" ? .persistentHit : (provenance == "legacy" ? .legacyHit : (provenance == "normalized" ? .normalizedHit : .ramHit))
+                    diag.recordMemory(outcome, candidate: caption.caption)
+                } else { diag.s.cacheMisses += 1; diag.recordMemory(.miss, candidate: caption.caption) }
+                if memoryTestMode == .temporaryMemory {
+                    if origin == "speculation" || origin == "compatible_memory" || origin == "session_low_latency" { diag.noteTemporaryReuse() }
+                    else { diag.recordMemory(.temporaryMiss, candidate: caption.caption) }
+                }
+            }
+        }
         // LL values never enter the shared preferred namespace, even in RAM.
         if memoryTestMode.allowsReuse {
             for i in output.values.indices where output.strategies[i] == .appleDefault {
@@ -834,7 +863,7 @@ final class TranslatorEngine: ObservableObject {
     /// Invalidate suspended work before changing language, capture state, or settings.
     private func invalidatePending() {
         interruptWarmupForLiveWork()
-        modeSessionID = UUID(); modeLastIdentity = ""; modePlans.removeAll()
+        modeSessionID = UUID(); modeLastIdentity = ""; modePlans.removeAll(); modeMemoryOrigins.removeAll()
         if modeDiagnosticEpochs.count >= 64 { modeDiagnosticEpochs.removeAll() }
         modeDiagnosticEpochs[modeSessionID] = diag.started
         modeCoordinator.reset(); modeService.reset()

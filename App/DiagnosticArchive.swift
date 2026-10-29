@@ -195,6 +195,7 @@ struct TranslationModeReport: Codable {
     let counters: [String: Int]
 
     static let reasons: Set<String> = [
+        "speculative_model_submitted", "confirmed_model_submitted", "model_batch_failed", "model_batch_completed", "speculative_model_completed", "confirmed_model_completed",
         "cancellation_requested", "cancelled_call_returned",
         "memory_saved_ram_hit", "memory_session_hit", "memory_legacy_hit", "memory_normalized_hit", "memory_persistent_hit",
         "pip_enqueue_legacy_recovery", "pip_enqueue_confirmed_fresh",

@@ -54,6 +54,8 @@ def cohorts(session):
                         e.get('target', 'unknown'), str(e.get('thermal', 'unknown')), route])
         if e.get('durationMs') is not None:
             samples.setdefault(key, []).append(e['durationMs'])
+            overall = key.rsplit('|', 1)[0] + '|overall'
+            samples.setdefault(overall, []).append(e['durationMs'])
     return {key: distribution(values) for key, values in sorted(samples.items())}
 
 def compare(sessions, matched_memory=False, counterbalanced=False):
@@ -90,6 +92,8 @@ def compare(sessions, matched_memory=False, counterbalanced=False):
                 item['changesPercent'] = changes
                 if mode == 'hybridRecovery' and route == 'recovery':
                     item['status'] = 'pass' if len(changes) == 2 and all(v <= -20 for v in changes.values()) else 'fail'
+                elif mode == 'hybridRecovery' and route == 'overall' and '|temporaryMemory|' in key:
+                    item['status'] = 'pass' if len(changes) == 2 and all(v <= -10 for v in changes.values()) else 'fail'
                 elif route in ['memory', 'successful_speculation']:
                     item['status'] = 'investigate' if any(v > 5 for v in changes.values()) else 'pass'
                 else:
@@ -99,7 +103,8 @@ def compare(sessions, matched_memory=False, counterbalanced=False):
             'cohorts': results, 'gates': gates,
             'qualityParity': 'unverified; requires independent multilingual rubric and visual review',
             'physicalPresentation': 'unmeasured; timings end at PiP enqueue',
-            'scope': 'bounded retained event samples; absent OCR captions require external ground truth'}
+            'scope': 'bounded retained event samples; absent OCR captions require external ground truth',
+            'uncertainty': 'Single exported cohorts do not establish run-to-run variance or statistical quality equivalence; repeat matched, counterbalanced runs'}
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)

@@ -117,7 +117,9 @@ final class ModeTranslationService {
         if #available(iOS 26.4, *), strategy == .lowLatency {
             availability = LanguageAvailability(preferredStrategy: .lowLatency)
         } else { availability = LanguageAvailability() }
-        guard await availability.status(from: source, to: target) == .installed, !Task.isCancelled else {
+        let pairAvailability = await availability.status(from: source, to: target)
+        guard !Task.isCancelled else { return nil }
+        guard pairAvailability == .installed else {
             event?(caption, "unsupported_or_uninstalled_pair", nil)
             status?("Translation languages unavailable. Open Languages to install the selected pair.")
             return nil
@@ -130,6 +132,7 @@ final class ModeTranslationService {
         lane.busy = true; lane.ticket = UUID(); lane.caption = caption; lane.cancellationAt = nil
         let ticket = lane.ticket
         event?(caption, "requested_" + strategy.rawValue, nil)
+        event?(caption, speculation ? "speculative_model_submitted" : "confirmed_model_submitted", nil)
         event?(caption, warm ? "retained_session_start" : "new_session_start", nil)
         event?(caption, speculation ? "speculative_queue_ms" : "recovery_queue_ms",
                (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)
@@ -160,6 +163,11 @@ final class ModeTranslationService {
                         self.event?(caption, "model_error", nil)
                     }
                     timeout.cancel()
+                    self.event?(caption, output == nil ? "model_batch_failed" : "model_batch_completed", nil)
+                    if output != nil {
+                        self.event?(caption, speculation ? "speculative_model_completed" : "confirmed_model_completed",
+                            (ProcessInfo.processInfo.systemUptime - start) * 1000)
+                    }
                     self.event?(caption, speculation ? "speculative_service_ms" : "recovery_service_ms",
                         (ProcessInfo.processInfo.systemUptime - start) * 1000)
                     if lane.ticket == ticket {
