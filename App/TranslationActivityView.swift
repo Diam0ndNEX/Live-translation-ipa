@@ -42,7 +42,7 @@ struct TranslationActivityView: View {
                     Text("Last successful model request: \(Int(ms)) ms · \(max(0, Int(context.date.timeIntervalSince(completed)))) s ago")
                         .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                 }
-                Text("This records an observed response; iOS may unload the model later.")
+                Text("Historical response only. A completed request does not prove the model is still loaded.")
                     .font(.caption2).foregroundStyle(.secondary)
             } else if engine.activeTranslationSystem != .legacy {
                 Text("No model response recorded for this preparation yet. Session setup alone does not run the model.")
@@ -70,7 +70,7 @@ private struct ReadinessStepView: View {
         case .working: return "In progress"
         case .complete: return "Verified"
         case .blocked: return "Unavailable"
-        case .idle: return "Idle"
+        case .idle: return title == "Model run" ? "Verified earlier" : "Recheck needed"
         }
     }
     private var color: Color {
