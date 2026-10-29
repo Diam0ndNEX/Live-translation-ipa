@@ -1,8 +1,92 @@
 import Foundation
 
+/// Backend lifetime is independent of whether a subtitle has already selected a result.
+struct TranslationBackendActivity: Equatable {
+    enum Kind: Int { case preparation, speculative, confirmed }
+    enum Stage { case checkingLanguages, preparingSessions, waitingForSlot, running, cancelling }
+    struct Job: Equatable {
+        let id: UUID
+        let kind: Kind
+        let source: String
+        let target: String
+        let strategy: RequestedTranslationStrategy
+        var stage: Stage
+        var since: Date
+    }
+    private(set) var jobs: [UUID: Job] = [:]
+
+    mutating func begin(kind: Kind, source: String, target: String, strategy: RequestedTranslationStrategy,
+                        stage: Stage, now: Date = Date()) -> UUID {
+        // Only the latest preparation/waiter per lane matters; real calls remain until return.
+        jobs = jobs.filter { $0.value.kind != kind || $0.value.stage == .running || $0.value.stage == .cancelling }
+        let id = UUID()
+        jobs[id] = Job(id: id, kind: kind, source: source, target: target, strategy: strategy, stage: stage, since: now)
+        return id
+    }
+    mutating func advance(_ id: UUID, to stage: Stage, now: Date = Date()) {
+        guard var job = jobs[id], job.stage != stage else { return }
+        job.stage = stage; job.since = now; jobs[id] = job
+    }
+    mutating func end(_ id: UUID) { jobs.removeValue(forKey: id) }
+
+    var executing: Bool { jobs.values.contains { $0.stage == .running || $0.stage == .cancelling } }
+    func liveReadiness(_ evidence: TranslationReadiness) -> TranslationReadiness {
+        var value = evidence
+        if value.languages == .working { value.languages = .pending }
+        if value.sessions == .working { value.sessions = .pending }
+        if value.execution == .working { value.execution = .pending }
+        if value.execution == .complete { value.execution = .idle }
+        for job in jobs.values {
+            switch job.stage {
+            case .checkingLanguages: value.languages = .working
+            case .preparingSessions: value.sessions = .working
+            case .running, .cancelling: value.execution = .working
+            case .waitingForSlot: break
+            }
+        }
+        return value
+    }
+    var current: Job? {
+        jobs.values.sorted {
+            func priority(_ job: Job) -> Int {
+                if job.stage == .cancelling { return 0 }
+                if job.kind == .confirmed { return 4 }
+                if job.kind == .speculative { return 3 }
+                return 2
+            }
+            let lhs = priority($0), rhs = priority($1)
+            return lhs == rhs ? $0.since > $1.since : lhs > rhs
+        }.first
+    }
+    var activity: TranslationActivity? {
+        guard let job = current else { return nil }
+        let title: String
+        let strategy = job.strategy == .lowLatency ? "Low latency" : "Apple default"
+        switch job.stage {
+        case .checkingLanguages: title = "Checking installed languages"
+        case .preparingSessions: title = "Preparing translation sessions"
+        case .waitingForSlot: title = "Waiting for translation resources"
+        case .running: title = job.kind == .speculative ? "Translating ahead" : "Translating confirmed text"
+        case .cancelling: title = "Waiting for cancelled model work to return"
+        }
+        return TranslationActivity(title: title, detail: "\(job.source) → \(job.target) · requested \(strategy) · \(jobs.count) active operation\(jobs.count == 1 ? "" : "s")",
+            phase: .working, since: job.since)
+    }
+
+    static func idle(capture: Bool, ownInterfaceVisible: Bool, modelObserved: Bool) -> TranslationActivity {
+        if capture && ownInterfaceVisible {
+            return TranslationActivity(title: "Capture connected · ScreenLingo visible", detail: "This app's own screen is excluded. Switch to your video or another app to translate its captions.", phase: .waiting)
+        }
+        if capture {
+            return TranslationActivity(title: "Watching for the next caption", detail: "No model request is running. Translation starts when new text needs it.", phase: .waiting)
+        }
+        return TranslationActivity(title: "Waiting for capture", detail: modelObserved ? "Previous model execution is recorded below. Start capture for new translations." : "Sessions can be prepared before capture; real model execution starts when text needs translation.", phase: .waiting)
+    }
+}
+
 /// Observed preparation milestones. Completion means evidence, never elapsed time.
 struct TranslationReadiness: Equatable {
-    enum Step { case pending, working, complete, blocked }
+    enum Step { case pending, working, complete, blocked, idle }
     enum Preparation { case checkingLanguages, languagesInstalled, languagesUnavailable, creatingSessions, checkingSessions, sessionsReady, sessionsWaiting, unavailable }
     var languages = Step.pending
     var sessions = Step.pending
@@ -64,6 +148,7 @@ struct TranslationReadiness: Equatable {
         else if languages == .blocked || sessions == .blocked || execution == .blocked { title = "Translator needs attention"; phase = .attention }
         else if languages == .working || sessions == .working { title = "Preparing translator"; phase = .working }
         else if sessions == .complete && execution == .complete { title = "Ready · model request verified"; phase = .ready }
+        else if sessions == .complete && execution == .idle { title = "Idle · previous model request recorded"; phase = .waiting }
         else if sessions == .complete { title = "Configured · first model run pending"; phase = .waiting }
         else { title = "Waiting for preparation"; phase = .waiting }
         return TranslationActivity(title: title, detail: explanation, phase: phase, since: activeSince)

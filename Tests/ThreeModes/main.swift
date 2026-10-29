@@ -3,6 +3,7 @@ import Foundation
 @MainActor
 final class Harness {
     struct Call {
+        let activityID: UUID
         let caption: ModeCaption
         let strategy: RequestedTranslationStrategy
         let speculative: Bool
@@ -16,6 +17,7 @@ final class Harness {
     var delayedMemory = false
     var pendingLookups: [CheckedContinuation<[String?], Never>] = []
     var cancellations: [Bool] = []
+    var backend = TranslationBackendActivity()
     lazy var coordinator = ThreeModeCoordinator(
         lookup: { [weak self] _ in
             guard let self else { return [nil] }
@@ -25,10 +27,19 @@ final class Harness {
             return self.memory
         },
         translate: { [weak self] caption, indices, strategy, spec in
-            await withCheckedContinuation { continuation in
-                self?.calls.append(Call(caption: caption, strategy: strategy, speculative: spec, indices: indices, continuation: continuation))
+            guard let self else { return nil }
+            let activityID = self.backend.begin(kind: spec ? .speculative : .confirmed, source: caption.source,
+                target: caption.target, strategy: strategy, stage: .running)
+            let result: [String]? = await withCheckedContinuation { continuation in
+                self.calls.append(Call(activityID: activityID, caption: caption, strategy: strategy, speculative: spec, indices: indices, continuation: continuation))
             }
-        }, cancel: { [weak self] spec in self?.cancellations.append(spec) },
+            self.backend.end(activityID)
+            return result
+        }, cancel: { [weak self] spec in
+            self?.cancellations.append(spec)
+            guard let self else { return }
+            for call in self.calls where call.speculative == spec { self.backend.advance(call.activityID, to: .cancelling) }
+        },
         selected: { [weak self] caption, output, reason in self?.selected.append((caption, output, reason)) },
         event: { [weak self] _, reason, _ in self?.events.append(reason) }, status: { [weak self] _ in self?.events.append("status") })
     let session = UUID()
@@ -94,6 +105,33 @@ final class Harness {
         missingAssets.prepare(.checkingLanguages)
         missingAssets.prepare(.languagesUnavailable)
         precondition(missingAssets.activity.phase == .attention && missingAssets.activeSince == nil)
+        // Backend lifetime must outlive caption selection and advisory cancellation.
+        var backendState = TranslationBackendActivity()
+        let previousPrep = backendState.begin(kind: .preparation, source: "pt", target: "en", strategy: .lowLatency, stage: .checkingLanguages)
+        let latestPrep = backendState.begin(kind: .preparation, source: "de", target: "en", strategy: .lowLatency, stage: .preparingSessions)
+        backendState.end(previousPrep)
+        precondition(backendState.current?.id == latestPrep && backendState.activity?.phase == .working)
+        let realRequest = backendState.begin(kind: .speculative, source: "de", target: "en", strategy: .lowLatency, stage: .running)
+        backendState.end(latestPrep)
+        backendState.advance(realRequest, to: .cancelling)
+        precondition(backendState.executing && backendState.activity?.title == "Waiting for cancelled model work to return")
+        let recoveryRequest = backendState.begin(kind: .confirmed, source: "de", target: "en", strategy: .lowLatency, stage: .waitingForSlot)
+        precondition(backendState.current?.id == recoveryRequest)
+        backendState.advance(recoveryRequest, to: .running)
+        backendState.end(realRequest)
+        precondition(backendState.executing && backendState.current?.id == recoveryRequest)
+        backendState.end(recoveryRequest)
+        precondition(!backendState.executing && backendState.activity == nil)
+        var previousSuccess = TranslationReadiness(source: "de", target: "en")
+        previousSuccess.finishExecution(success: true, milliseconds: 320)
+        precondition(backendState.liveReadiness(previousSuccess).execution == .idle)
+        precondition(backendState.liveReadiness(previousSuccess).durationMs == 320)
+        let nextRequest = backendState.begin(kind: .confirmed, source: "de", target: "en", strategy: .lowLatency, stage: .running)
+        precondition(backendState.liveReadiness(previousSuccess).execution == .working)
+        backendState.end(nextRequest)
+        precondition(backendState.liveReadiness(previousSuccess).execution == .idle)
+        precondition(TranslationBackendActivity.idle(capture: true, ownInterfaceVisible: false, modelObserved: true).title == "Watching for the next caption")
+        precondition(TranslationBackendActivity.idle(capture: true, ownInterfaceVisible: true, modelObserved: true).phase == .waiting)
         precondition(TranslationActivity.event("speculative_model_submitted")?.phase == .working)
         precondition(TranslationActivity.event("speculation_ready")?.phase == .ready)
         precondition(TranslationActivity.event("recovery_decision_source_mismatch")?.phase == .working)
@@ -153,7 +191,10 @@ final class Harness {
             memory.coordinator.observe(memory.caption(revision: 2), confirmed: true, speculate: false); await memory.settle()
             precondition(memory.selected.count == 1 && memory.calls.count == 1)
             precondition(memory.selected[0].1.strategies[0] == nil)
-            memory.reply(0, ["Late"]); await memory.settle(); memory.coordinator.reset()
+            precondition(memory.backend.executing && memory.backend.activity?.phase == .working)
+            memory.reply(0, ["Late"]); await memory.settle()
+            precondition(memory.backend.activity == nil)
+            memory.coordinator.reset()
 
             // No speculation uses LL; source corrections and language switches invalidate old output.
             let fresh = Harness(); fresh.coordinator.system = system

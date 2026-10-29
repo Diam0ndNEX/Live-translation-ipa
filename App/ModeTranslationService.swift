@@ -13,9 +13,13 @@ final class ModeTranslationService {
         var invalidated = false
         var caption: ModeCaption?
         var cancellationAt: Double?
+        var activityID: UUID?
     }
     private var hostedIsSpeculative = false
     private var hostedTask: Task<[String]?, Never>?
+    private var hostedActivityID: UUID?
+    var activityChanged: ((TranslationBackendActivity) -> Void)?
+    private var activity = TranslationBackendActivity() { didSet { activityChanged?(activity) } }
     private var generation = 0
     private var preparationRevision = 0
     private let speculative = Lane()
@@ -26,13 +30,17 @@ final class ModeTranslationService {
 
     func cancel(speculation: Bool) {
         let lane = speculation ? speculative : confirmed
-        if hostedIsSpeculative == speculation { hostedTask?.cancel() }
+        if hostedIsSpeculative == speculation {
+            hostedTask?.cancel()
+            if let id = hostedActivityID { activity.advance(id, to: .cancelling) }
+        }
         if #available(iOS 26.0, *), lane.busy {
             if lane.cancellationAt == nil {
                 lane.cancellationAt = ProcessInfo.processInfo.systemUptime
                 if let caption = lane.caption { event?(caption, "cancellation_requested", nil) }
             }
             lane.invalidated = true
+            if let id = lane.activityID { activity.advance(id, to: .cancelling) }
             lane.session?.cancel()
         }
     }
@@ -40,15 +48,20 @@ final class ModeTranslationService {
     func reset() {
         generation += 1
         hostedTask?.cancel()
+        if let id = hostedActivityID { activity.advance(id, to: .cancelling) }
         for lane in [speculative, confirmed] {
             if #available(iOS 26.0, *) { lane.session?.cancel() }
             lane.invalidated = true
+            if let id = lane.activityID { activity.advance(id, to: .cancelling) }
             if !lane.busy { lane.session = nil; lane.key = "" }
         }
     }
 
     func prepare(source: String, target: String, system: TranslationSystem,
                  progress: ((TranslationReadiness.Preparation) -> Void)? = nil) async -> String {
+        let activityID = activity.begin(kind: .preparation, source: source, target: target,
+            strategy: .lowLatency, stage: .checkingLanguages)
+        defer { activity.end(activityID) }
         preparationRevision &+= 1
         let preparation = preparationRevision
         guard #available(iOS 26.4, *) else {
@@ -66,6 +79,7 @@ final class ModeTranslationService {
         guard revision == generation, preparation == preparationRevision, !Task.isCancelled else { return "Preparation superseded" }
         progress?(.languagesInstalled)
         progress?(.creatingSessions)
+        activity.advance(activityID, to: .preparingSessions)
         if !confirmed.busy {
             install(confirmed, source: src, target: dst, strategy: .lowLatency)
         }
@@ -100,6 +114,10 @@ final class ModeTranslationService {
 
     func translate(_ caption: ModeCaption, indices: [Int], strategy: RequestedTranslationStrategy,
                    speculation: Bool) async -> [String]? {
+        let activityID = activity.begin(kind: speculation ? .speculative : .confirmed,
+            source: caption.source, target: caption.target, strategy: strategy, stage: .waitingForSlot)
+        var heldByActualCall = false
+        defer { if !heldByActualCall { activity.end(activityID) } }
         if strategy == .lowLatency {
             guard #available(iOS 26.4, *) else {
                 status?("Explicit low latency requires iOS 26.4 or later. Select Legacy or Hybrid Recovery to use Apple default.")
@@ -118,6 +136,7 @@ final class ModeTranslationService {
             event?(caption, "requested_appleDefault", nil)
             event?(caption, speculation ? "speculative_queue_ms" : "recovery_queue_ms", (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)
             let began = ProcessInfo.processInfo.systemUptime
+            activity.advance(activityID, to: .running); hostedActivityID = activityID
             let task = Task { @MainActor in
                 await self.hostedDefault?(indices.map { caption.units[$0] }, Locale.Language(identifier: caption.source),
                     Locale.Language(identifier: caption.target), speculation)
@@ -125,6 +144,7 @@ final class ModeTranslationService {
             hostedTask = task; hostedIsSpeculative = speculation
             let result = await withTaskCancellationHandler(operation: { await task.value }, onCancel: { task.cancel() })
             hostedTask = nil
+            if hostedActivityID == activityID { hostedActivityID = nil }
             event?(caption, speculation ? "speculative_service_ms" : "recovery_service_ms", (ProcessInfo.processInfo.systemUptime - began) * 1000)
             return result
         }
@@ -137,6 +157,7 @@ final class ModeTranslationService {
         }
         guard !Task.isCancelled else { return nil }
         let source = Locale.Language(identifier: caption.source), target = Locale.Language(identifier: caption.target)
+        activity.advance(activityID, to: .checkingLanguages)
         let availability: LanguageAvailability
         if #available(iOS 26.4, *), strategy == .lowLatency {
             availability = LanguageAvailability(preferredStrategy: .lowLatency)
@@ -154,6 +175,8 @@ final class ModeTranslationService {
         install(lane, source: source, target: target, strategy: strategy)
         guard let session = lane.session else { return nil }
         lane.busy = true; lane.ticket = UUID(); lane.caption = caption; lane.cancellationAt = nil
+        lane.activityID = activityID; heldByActualCall = true
+        activity.advance(activityID, to: .running)
         let ticket = lane.ticket
         event?(caption, "requested_" + strategy.rawValue, nil)
         event?(caption, speculation ? "speculative_model_submitted" : "confirmed_model_submitted", nil)
@@ -172,6 +195,7 @@ final class ModeTranslationService {
                     try? await Task.sleep(nanoseconds: 4_000_000_000)
                     guard !Task.isCancelled, !completed else { return }
                     lane.invalidated = true; session.cancel()
+                    self.activity.advance(activityID, to: .cancelling)
                     self.event?(caption, "model_timeout", nil)
                     finish(nil)
                 }
@@ -199,8 +223,10 @@ final class ModeTranslationService {
                             self.event?(caption, "cancelled_call_returned", (ProcessInfo.processInfo.systemUptime - cancelled) * 1000)
                         }
                         lane.busy = false; lane.caption = nil; lane.cancellationAt = nil
+                        lane.activityID = nil
                         if lane.invalidated || output == nil { lane.session = nil; lane.key = "" }
                     }
+                    self.activity.end(activityID)
                     finish(lane.invalidated ? nil : output)
                 }
             }
@@ -208,6 +234,7 @@ final class ModeTranslationService {
             Task { @MainActor in
                 guard lane.ticket == ticket, lane.busy else { return }
                 lane.invalidated = true; session.cancel()
+                self.activity.advance(activityID, to: .cancelling)
             }
         })
     }

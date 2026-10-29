@@ -40,4 +40,8 @@ assert 'warmupStatus' not in activity, 'Readiness must not depend on an old mode
 assert 'TranslationActivity.preparation' not in engine, 'Use observed preparation stages, not parsing status text'
 assert 'modelReadiness.prepare(stage)' in engine
 assert 'modelReadiness.finishExecution(success: true' in engine
+assert 'modeService.activityChanged' in engine
+assert 'backendActivity.liveReadiness(modelReadiness)' in engine
+assert 'let activity = backendActivity.activity' in activity
+assert 'heldByActualCall = true' in read('App/ModeTranslationService.swift')
 print('Legacy algorithm equivalence, installed schema/identity, no preview/refinement, bounded cache and model routing source contracts passed')

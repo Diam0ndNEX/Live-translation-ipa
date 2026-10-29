@@ -199,7 +199,12 @@ final class TranslatorEngine: ObservableObject {
     private var preparationTicket = UUID()
 
     @Published private(set) var modelReadiness = TranslationReadiness()
+    @Published private(set) var backendActivity = TranslationBackendActivity()
     @Published private(set) var currentRuntimeConditions = ""
+
+    var displayedReadiness: TranslationReadiness {
+        activeTranslationSystem == .legacy ? modelReadiness : backendActivity.liveReadiness(modelReadiness)
+    }
 
     var translationConditions: String {
         let thermal: String
@@ -216,8 +221,17 @@ final class TranslatorEngine: ObservableObject {
     }
 
     var translationActivity: TranslationActivity {
+        if activeTranslationSystem != .legacy, let activity = backendActivity.activity { return activity }
         if paused { return TranslationActivity(title: "Translation paused", detail: captureAlive ? "Capture is still connected. Resume to translate." : "Resume translation when you are ready.", phase: .waiting) }
         if activeTranslationSystem != .legacy, let work = modeWorkActivity, work.phase == .working || work.phase == .attention { return work }
+        if activeTranslationSystem != .legacy {
+            if displayedReadiness.activity.phase == .attention { return displayedReadiness.activity }
+            if sourceCode == "auto", modelReadiness.source.isEmpty {
+                return TranslationActivity(title: "Waiting for source language", detail: "Read a caption or choose a source language before preparation can run.", phase: .waiting)
+            }
+            return TranslationBackendActivity.idle(capture: captureAlive,
+                ownInterfaceVisible: appInterfaceVisible && flag("suppressOwnInterface", true), modelObserved: modelReadiness.completedAt != nil)
+        }
         if activeTranslationSystem == .legacy, isTranslating, modelReadiness.execution != .working {
             return TranslationActivity(title: "Processing current caption", detail: "Checking memory and scheduling complete translation units", phase: .working)
         }
@@ -328,7 +342,7 @@ final class TranslatorEngine: ObservableObject {
                 modeWorkActivity = activity
                 if reason.hasPrefix("pip_enqueue_") || reason == "display_failed" { modeActivitySelected = true }
             }
-            if modeActivityCaption?.matches(caption) == true, !modeActivitySelected {
+            if modeActivityCaption?.matches(caption) == true {
                 if modelReadiness.source != caption.source || modelReadiness.target != caption.target { modelReadiness = TranslationReadiness(source: caption.source, target: caption.target) }
                 if reason == "speculative_model_submitted" || reason == "confirmed_model_submitted" {
                     modelReadiness.beginExecution(label: "Running translation request")
@@ -691,6 +705,7 @@ final class TranslatorEngine: ObservableObject {
             await self?.translateLegacy(texts, source: source, target: target, speculative: speculative)
         }
         modeService.event = { [weak self] caption, reason, ms in self?.noteModeEvent(caption, reason: reason, duration: ms) }
+        modeService.activityChanged = { [weak self] activity in self?.backendActivity = activity }
         modeService.status = { [weak self] message in self?.modeAvailability = message }
         server.onPacket = { [weak self] packet in self?.handle(packet) }
         server.start()

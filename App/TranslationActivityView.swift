@@ -28,9 +28,9 @@ struct TranslationActivityView: View {
                 Spacer(minLength: 0)
             }
             HStack(spacing: 8) {
-                ReadinessStepView(title: "Languages", step: engine.modelReadiness.languages)
-                ReadinessStepView(title: "Session", step: engine.modelReadiness.sessions)
-                ReadinessStepView(title: "Model run", step: engine.modelReadiness.execution)
+                ReadinessStepView(title: "Languages", step: engine.displayedReadiness.languages)
+                ReadinessStepView(title: "Session", step: engine.displayedReadiness.sessions)
+                ReadinessStepView(title: "Model run", step: engine.displayedReadiness.execution)
             }
             Text(engine.modelReadiness.source.isEmpty ? "Selected: \(engine.sourceCode) → \(engine.targetCode)" : "Pair: \(engine.modelReadiness.source) → \(engine.modelReadiness.target)")
                 .font(.caption2).foregroundStyle(.secondary)
@@ -40,6 +40,9 @@ struct TranslationActivityView: View {
                         .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                 }
                 Text("This records an observed response; iOS may unload the model later.")
+                    .font(.caption2).foregroundStyle(.secondary)
+            } else if engine.activeTranslationSystem != .legacy {
+                Text("No model response recorded for this preparation yet. Session setup alone does not run the model.")
                     .font(.caption2).foregroundStyle(.secondary)
             }
             if let work = engine.modeWorkActivity, work.phase == .ready {
@@ -64,6 +67,7 @@ private struct ReadinessStepView: View {
         case .working: return "In progress"
         case .complete: return "Verified"
         case .blocked: return "Unavailable"
+        case .idle: return "Idle"
         }
     }
     private var color: Color {
@@ -71,7 +75,7 @@ private struct ReadinessStepView: View {
         case .complete: return .green
         case .working: return .accentColor
         case .blocked: return .orange
-        case .pending: return .secondary
+        case .pending, .idle: return .secondary
         }
     }
     var body: some View {
@@ -87,7 +91,7 @@ private struct ReadinessStepView: View {
                     }.clipped()
                 }.frame(height: 5)
             } else {
-                RoundedRectangle(cornerRadius: 3).fill(color.opacity(step == .pending ? 0.2 : 1)).frame(height: 5)
+                RoundedRectangle(cornerRadius: 3).fill(color.opacity(step == .pending || step == .idle ? 0.2 : 1)).frame(height: 5)
             }
             HStack(spacing: 4) {
                 if step == .working { ProgressView().controlSize(.mini) }
