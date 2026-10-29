@@ -232,6 +232,8 @@ final class TranslatorEngine: ObservableObject {
     private var modeActivityCaption: ModeCaption?
     private var modeActivitySelected = false
     private var preparationTicket = UUID()
+    private var lastModePreparationPair = ""
+    private var lastModePreparationAt = Date.distantPast
 
     @Published private(set) var modelReadiness = TranslationReadiness()
     @Published private(set) var backendActivity = TranslationBackendActivity()
@@ -522,11 +524,20 @@ final class TranslatorEngine: ObservableObject {
             SpeculationPolicy.credible(lines: packet.lines, threshold: num("speculationConfidence", 0.85))
         modeCoordinator.allowsReuse = memoryTestMode.allowsReuse && !bypassMemory
         if confirmed, activeTranslationSystem != .legacy {
-            let session = modeSessionID, system = activeTranslationSystem
-            Task { [weak self] in
-                guard let self else { return }
-                guard session == self.modeSessionID else { return }
-                await self.refreshModePreparation(source: source, target: caption.target, system: system)
+            let pair = source + ">" + caption.target + "|" + activeTranslationSystem.rawValue
+            let needsCheck = modelReadiness.source != source || modelReadiness.target != caption.target ||
+                (modelReadiness.sessions != .complete && modelReadiness.sessions != .working)
+            // isReady is a language-resource check, not a per-caption model warm-up.
+            // Calling it twice during Hybrid inference can contend with actual requests.
+            if needsCheck, !backendActivity.executing,
+               pair != lastModePreparationPair || Date().timeIntervalSince(lastModePreparationAt) >= 5 {
+                lastModePreparationPair = pair
+                lastModePreparationAt = Date()
+                let session = modeSessionID, system = activeTranslationSystem
+                Task { [weak self] in
+                    guard let self, session == self.modeSessionID, !self.backendActivity.executing else { return }
+                    await self.refreshModePreparation(source: source, target: caption.target, system: system)
+                }
             }
         }
         modeCoordinator.observe(caption, confirmed: confirmed, speculate: admitted)
