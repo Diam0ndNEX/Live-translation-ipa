@@ -58,11 +58,13 @@ def cohorts(session):
             samples.setdefault(overall, []).append(e['durationMs'])
     return {key: distribution(values) for key, values in sorted(samples.items())}
 
-def compare(sessions, matched_memory=False, counterbalanced=False):
+def compare(sessions, matched_memory=False, counterbalanced=False, matched_content=False):
     errors = []
     modes = [s.get('translationModes', {}).get('active') for s in sessions]
     if set(modes) != MODES or len(sessions) != 3:
         errors.append('Exactly one recorded session per mode is required')
+    if not matched_content:
+        errors.append("Matched content and equivalent retained capture windows are not attested")
     if not matched_memory:
         errors.append('Equivalent isolated starting memory snapshots/fresh input sets are not attested')
     if not counterbalanced:
@@ -109,10 +111,11 @@ def compare(sessions, matched_memory=False, counterbalanced=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('sessions', nargs=3)
+    parser.add_argument('--matched-content', action='store_true')
     parser.add_argument('--matched-memory', action='store_true')
     parser.add_argument('--counterbalanced', action='store_true')
     args = parser.parse_args()
-    report = compare([read_session(p) for p in args.sessions], args.matched_memory, args.counterbalanced)
+    report = compare([read_session(p) for p in args.sessions], args.matched_memory, args.counterbalanced, args.matched_content)
     print(json.dumps(report, indent=2, sort_keys=True))
 
 if __name__ == '__main__':

@@ -17,6 +17,7 @@ final class ModeTranslationService {
     private var hostedIsSpeculative = false
     private var hostedTask: Task<[String]?, Never>?
     private var generation = 0
+    private var preparationRevision = 0
     private let speculative = Lane()
     private let confirmed = Lane()
     var event: ((ModeCaption, String, Double?) -> Void)?
@@ -47,6 +48,8 @@ final class ModeTranslationService {
     }
 
     func prepare(source: String, target: String, system: TranslationSystem) async -> String {
+        preparationRevision &+= 1
+        let preparation = preparationRevision
         guard #available(iOS 26.4, *) else {
             return system == .hybridRecovery ? "Fast recovery needs iOS 26.4; Apple default fallback remains available" : "Explicit low latency requires iOS 26.4 or later"
         }
@@ -56,7 +59,7 @@ final class ModeTranslationService {
         guard await availability.status(from: src, to: dst) == .installed else {
             return "Low-latency languages unavailable. Install this pair in Languages."
         }
-        guard revision == generation, !Task.isCancelled else { return "Preparation superseded" }
+        guard revision == generation, preparation == preparationRevision, !Task.isCancelled else { return "Preparation superseded" }
         if !confirmed.busy {
             install(confirmed, source: src, target: dst, strategy: .lowLatency)
         }
@@ -64,7 +67,11 @@ final class ModeTranslationService {
             install(speculative, source: src, target: dst,
                     strategy: system == .lowLatency ? .lowLatency : .appleDefault)
         }
-        return "Languages and sessions ready; model residency unmeasured"
+        let pair = "\(src.minimalIdentifier)>\(dst.minimalIdentifier)|"
+        let speculativeStrategy: RequestedTranslationStrategy = system == .lowLatency ? .lowLatency : .appleDefault
+        let confirmedReady = !confirmed.invalidated && confirmed.key == pair + RequestedTranslationStrategy.lowLatency.rawValue && confirmed.session?.isReady == true
+        let speculativeReady = !speculative.invalidated && speculative.key == pair + speculativeStrategy.rawValue && speculative.session?.isReady == true
+        return confirmedReady && speculativeReady ? "Languages and sessions ready; model residency unmeasured" : "Languages installed; waiting for valid session resources"
     }
 
     @available(iOS 26.0, *)
@@ -97,6 +104,8 @@ final class ModeTranslationService {
             }
             guard !Task.isCancelled else { return nil }
             event?(caption, "requested_appleDefault", nil)
+            event?(caption, speculation ? "speculative_queue_ms" : "recovery_queue_ms", (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)
+            let began = ProcessInfo.processInfo.systemUptime
             let task = Task { @MainActor in
                 await self.hostedDefault?(indices.map { caption.units[$0] }, Locale.Language(identifier: caption.source),
                     Locale.Language(identifier: caption.target), speculation)
@@ -104,6 +113,7 @@ final class ModeTranslationService {
             hostedTask = task; hostedIsSpeculative = speculation
             let result = await withTaskCancellationHandler(operation: { await task.value }, onCancel: { task.cancel() })
             hostedTask = nil
+            event?(caption, speculation ? "speculative_service_ms" : "recovery_service_ms", (ProcessInfo.processInfo.systemUptime - began) * 1000)
             return result
         }
         let lane = speculation ? speculative : confirmed

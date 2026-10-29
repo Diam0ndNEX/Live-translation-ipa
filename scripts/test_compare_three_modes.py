@@ -18,7 +18,7 @@ class RecordedModeComparisonTests(unittest.TestCase):
         self.assertIsNone(distribution([1])['p95'])
     def test_synthetic_gate_math_only(self):
         sessions = [self.session('legacy', 1000), self.session('hybridRecovery', 750), self.session('lowLatency', 650)]
-        result = compare(sessions, True, True)
+        result = compare(sessions, True, True, True)
         self.assertTrue(result['controlledConditionsAttested'])
         self.assertEqual(result['gates'][0]['status'], 'pass')
         self.assertEqual(result['qualityParity'].split(';')[0], 'unverified')
@@ -28,9 +28,12 @@ class RecordedModeComparisonTests(unittest.TestCase):
         result = compare(sessions)
         self.assertFalse(result['controlledConditionsAttested'])
         self.assertTrue(all(g['status'] == 'unverified' for g in result['gates']))
+    def test_matching_hardware_alone_does_not_prove_matching_content(self):
+        sessions = [self.session(m, 1000) for m in ['legacy', 'hybridRecovery', 'lowLatency']]
+        self.assertFalse(compare(sessions, True, True)['controlledConditionsAttested'])
     def test_regression_is_not_hidden(self):
         sessions = [self.session('legacy', 1000), self.session('hybridRecovery', 1100), self.session('lowLatency', 650)]
-        self.assertEqual(compare(sessions, True, True)['gates'][0]['status'], 'fail')
+        self.assertEqual(compare(sessions, True, True, True)['gates'][0]['status'], 'fail')
 
 if __name__ == '__main__':
     unittest.main()

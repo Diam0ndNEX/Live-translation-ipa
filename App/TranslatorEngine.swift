@@ -238,7 +238,7 @@ final class TranslatorEngine: ObservableObject {
             Task { [weak self] in
                 guard let self else { return }
                 let status = await self.modeService.prepare(source: source, target: target, system: selection.0)
-                guard session == self.modeSessionID, source == self.sourceCode, target == self.targetCode else { return }
+                guard session == self.modeSessionID, source == self.sourceCode, target == self.targetCode, status != "Preparation superseded" else { return }
                 self.modeAvailability = status
             }
         }
@@ -312,7 +312,7 @@ final class TranslatorEngine: ObservableObject {
             Task { [weak self] in
                 guard let self else { return }
                 let state = await self.modeService.prepare(source: source, target: caption.target, system: system)
-                if session == self.modeSessionID { self.modeAvailability = state }
+                if session == self.modeSessionID, self.modeCoordinator.current?.source == source, state != "Preparation superseded" { self.modeAvailability = state }
             }
         }
         modeCoordinator.observe(caption, confirmed: confirmed, speculate: admitted)
@@ -3289,7 +3289,7 @@ final class TranslatorEngine: ObservableObject {
             guard sourceCode != "auto", !captureAlive else { return }
             let session = modeSessionID, system = activeTranslationSystem
             let result = await modeService.prepare(source: sourceCode, target: targetCode, system: system)
-            if session == modeSessionID { modeAvailability = result; warmupStatus = result }
+            if session == modeSessionID, result != "Preparation superseded" { modeAvailability = result; warmupStatus = result }
             return
         }
         guard !Task.isCancelled, runtimePolicy.allowsPrewarming, flag("keepWarm", true), !paused,
