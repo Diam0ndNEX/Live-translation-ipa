@@ -17,6 +17,7 @@ enum TranslationTestMode: String {
 struct ExactCaptionResult {
     let translated: String
     let sentences: Int
+    var persistenceKeys: [String] = []
 }
 
 enum ExactCaptionIdentity {
@@ -42,6 +43,20 @@ final class TranslationRAMBank {
         captions[key] = result
         if captionOrder.count > 64 { captions.removeValue(forKey: captionOrder.removeFirst()) }
     }
+    /// A marker means the writer accepted this key, or a saved hit already
+    /// proved it persisted. Refused admission must remain retryable.
+    @discardableResult
+    func confirmPersistence(_ key: String, alreadySaved: Bool = false, enqueue: () -> Bool) -> Bool {
+        guard !confirmedKeys.contains(key) else { return true }
+        guard alreadySaved || enqueue() else { return false }
+        confirmedKeys.insert(key)
+        return true
+    }
+
+    func captionNeedsPersistence(_ result: ExactCaptionResult) -> Bool {
+        result.persistenceKeys.contains { !confirmedKeys.contains($0) }
+    }
+
     func clear() {
         values.removeAll(); specKeys.removeAll(); savedKeys.removeAll(); confirmedKeys.removeAll()
         speculativeOrigins.removeAll(); use.removeAll(); captions.removeAll(); captionOrder.removeAll()
@@ -60,6 +75,11 @@ final class TranslationRAMBank {
 final class ProcessTranslationMemory {
     let normal = TranslationRAMBank()
     let temporary = TranslationRAMBank()
+    let normalPreviews = HybridPreviewCache()
+    let temporaryPreviews = HybridPreviewCache()
+    func previews(for mode: TranslationTestMode) -> HybridPreviewCache {
+        mode == .temporaryMemory ? temporaryPreviews : normalPreviews
+    }
     func bank(for mode: TranslationTestMode) -> TranslationRAMBank {
         mode == .temporaryMemory ? temporary : normal
     }

@@ -260,12 +260,15 @@ import Foundation
                      "Current model and PiP experiment flags must survive redacted exports")
         let newModeSnapshot = DiagnosticSessionExport(
             id: session, startedAt: Date(), endedAt: Date(), appVersion: "1.7.1", systemVersion: "test",
-            settings: ["temporaryMemoryTest": "true", "translationTestMode": "temporaryMemory",
+            settings: ["hybridTranslation": "true", "temporaryMemoryTest": "true", "translationTestMode": "temporaryMemory",
                        "startingRAMEntries": "12", "suppressOwnInterface": "true", "glossary": "private"],
             health: MemoryDiagnosticHealth(), counters: ["completedConfirmedUnitsRetained": 3,
-                       "temporaryMemoryHits": 12, "bypassedLookups": 0, "lookupMisses": 0,
+                       "hybridLowBatches": 4, "hybridPreviewEnqueues": 3, "hybridFinalEnqueues": 2, "hybridRefinementsSuperseded": 1, "temporaryMemoryHits": 12, "bypassedLookups": 0, "lookupMisses": 0,
                        "sharedConfirmedInFlightUnits": 2, "speculativeStopRequests": 3, "speculativeSessionsCreated": 4, "memoryAwareSpeculationSkipped": 11, "ramCaptionBypasses": 7, "savedUnitsPrefetched": 13, "savedCaptionBypasses": 6, "speculationBudgetSkipped": 8, "warmSessionTransfers": 10, "uncachedUnits": 5, "sharedInFlightUnits": 2, "speculativeUnitsReused": 4],
-            distributions: ["speculativeStopReleaseMs": DiagnosticDistribution([2, 3]),
+            distributions: ["hybridFirstEnqueueMs": DiagnosticDistribution([100, 120]),
+                            "hybridFinalEnqueueMs": DiagnosticDistribution([300, 400]),
+                            "hybridLowModelMs": DiagnosticDistribution([40, 50]),
+                            "speculativeStopReleaseMs": DiagnosticDistribution([2, 3]),
                             "queueBehindSpeculationMs": DiagnosticDistribution([30, 40])],
             events: [StructuredDiagnosticEvent(id: UUID(), timestamp: Date(), sessionID: session,
                 candidateID: nil, stage: "runtime_state", outcome: "external_capture_period",
@@ -275,6 +278,13 @@ import Foundation
                     reasonCode: "capture_stopped", durationMs: nil, privacy: "metadataOnly")],
             measurementBoundary: "OCR through PiP enqueue", textCapture: false)
         let newModeRoundtrip = try await writer.decode(try await writer.encode(newModeSnapshot))
+        precondition(newModeRoundtrip.settings["hybridTranslation"] == "true" &&
+                     newModeRoundtrip.counters["hybridLowBatches"] == 4 &&
+                     newModeRoundtrip.counters["hybridPreviewEnqueues"] == 3 &&
+                     newModeRoundtrip.counters["hybridRefinementsSuperseded"] == 1 &&
+                     newModeRoundtrip.distributions["hybridFirstEnqueueMs"]?.p50 == 100 &&
+                     newModeRoundtrip.distributions["hybridFinalEnqueueMs"]?.p50 == 300,
+                     "Hybrid first-result and final-quality evidence must survive privacy filtering separately")
         precondition(newModeRoundtrip.settings["translationTestMode"] == "temporaryMemory" &&
                      newModeRoundtrip.settings["startingRAMEntries"] == "12" &&
                      newModeRoundtrip.settings["suppressOwnInterface"] == "true" &&

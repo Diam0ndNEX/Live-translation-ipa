@@ -50,6 +50,39 @@ import CryptoKit
                      "Confirmed writes can retry after storage capacity is restored")
         #endif
 
+        // Exercise the actual RAM admission policy together with a real SQLite
+        // store. A full pending queue must not suppress the later durable retry.
+        let admissionDirectory = root.appendingPathComponent("admission-retry")
+        let admissionStore = TranslationMemoryStore(directory: admissionDirectory)
+        _ = try await admissionStore.prepare(legacyURLs: [])
+        let admissionFirst = "v4|\(rules)|pt>en|0:|Primeira admissão."
+        let admissionRetry = "v4|\(rules)|pt>en|0:|Admissão posterior."
+        let admissionRAM = TranslationRAMBank()
+        var admissionPending = [admissionFirst: "First admission."]
+        let rejected = admissionRAM.confirmPersistence(admissionRetry) {
+            guard admissionPending.count < 1 else { return false }
+            admissionPending[admissionRetry] = "Later admission."
+            return true
+        }
+        precondition(!rejected && !admissionRAM.confirmedKeys.contains(admissionRetry))
+        _ = try await admissionStore.save(admissionPending, revision: 1)
+        admissionPending.removeAll()
+        let retried = admissionRAM.confirmPersistence(admissionRetry) {
+            guard admissionPending.count < 1 else { return false }
+            admissionPending[admissionRetry] = "Later admission."
+            return true
+        }
+        precondition(retried && admissionPending[admissionRetry] == "Later admission.")
+        _ = try await admissionStore.save(admissionPending, revision: 2)
+        let reopenedAdmissionStore = TranslationMemoryStore(directory: admissionDirectory)
+        let admissionHealth = try await reopenedAdmissionStore.prepare(legacyURLs: [])
+        let firstAdmissionHit = await reopenedAdmissionStore.lookup(key: admissionFirst, timeoutMilliseconds: 50)
+        let retriedAdmissionHit = await reopenedAdmissionStore.lookup(key: admissionRetry, timeoutMilliseconds: 50)
+        precondition(admissionHealth.totalEntries == 2 && firstAdmissionHit.value == "First admission." &&
+                     retriedAdmissionHit.value == "Later admission.",
+                     "Rejected queue admission must retry durably without replacing prior memory")
+        print("Confirmed RAM admission, queue-full recovery and real SQLite reopen checks passed")
+
         // Reused SQL statements must bind each key afresh and observe mutations.
         let statementStore = TranslationMemoryStore(directory: root.appendingPathComponent("statement-reuse"))
         _ = try await statementStore.prepare(legacyURLs: [])

@@ -52,6 +52,10 @@ class ComparisonTests(unittest.TestCase):
         self.new['settings']['startingRAMEntries']='20'
         self.assertFalse(compare(self.old,self.new,self.evidence)['accepted'])
 
+    def test_hybrid_cannot_be_reported_as_matched_single_model(self):
+        self.new["settings"]["hybridTranslation"] = "true"
+        self.assertFalse(compare(self.old,self.new,self.evidence)["accepted"])
+
     def test_small_samples_do_not_claim_p95(self):
         self.new['distributions']['modelBatchMs']['count']=4
         self.assertFalse(compare(self.old,self.new,self.evidence)['accepted'])

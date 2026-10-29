@@ -134,7 +134,7 @@ struct HomeView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(engine.captureStatus.title).font(.subheadline.weight(.semibold))
                             .foregroundStyle(captureColor)
-                        Text(engine.captureAlive ? state : "Use the broadcast button below to start or restart")
+                        Text(engine.captureAlive ? state + (engine.outputModelLabel.isEmpty ? "" : " · " + engine.outputModelLabel) : "Use the broadcast button below to start or restart")
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }

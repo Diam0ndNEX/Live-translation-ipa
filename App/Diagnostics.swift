@@ -239,6 +239,8 @@ final class Diagnostics: ObservableObject {
     private var modelTimingSamples: [String: [Double]] = [:]
     var translationTestMode = TranslationTestMode.normal
     var startingRAMEntries = 0
+    var startingHybridPreviewEntries = 0
+    var hybridPreviewEntryCount: (() -> Int)?
     var ramEntryCount: (() -> Int)?
     private var sharedModelUnits = 0
     private var sharedConfirmedModelUnits = 0
@@ -454,6 +456,18 @@ final class Diagnostics: ObservableObject {
         completedWorkRecoveredUnits += max(0, count)
     }
 
+    func noteHybrid(_ reason: String, durationMs: Double? = nil) {
+        guard enabled, ["hybrid_low_submitted", "hybrid_low_completed", "hybrid_low_failed",
+            "hybrid_low_unavailable", "hybrid_first_enqueued", "hybrid_final_enqueued",
+            "hybrid_preview_enqueued", "hybrid_preview_cache_hit", "hybrid_refinement_superseded"].contains(reason) else { return }
+        if ["hybrid_low_completed", "hybrid_first_enqueued", "hybrid_final_enqueued"].contains(reason),
+           let durationMs, durationMs.isFinite, durationMs >= 0 {
+            modelTimingSamples[reason, default: []].append(durationMs)
+            if modelTimingSamples[reason, default: []].count > 1200 { modelTimingSamples[reason]?.removeFirst() }
+        }
+        appendStructured(stage: "model_state", outcome: reason, reason: reason, durationMs: durationMs)
+    }
+
     func noteModelState(_ reason: String, durationMs: Double? = nil, candidate: String? = nil) {
         guard enabled else { return }
         let allowed: Set<String> = [
@@ -582,7 +596,7 @@ final class Diagnostics: ObservableObject {
                     "selectiveSpeculation", "speculationConfidence", "confirmationDeadline",
                     "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest",
                     "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
-                    "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer",
+                    "lowLatencyTranslation", "hybridTranslation", "incrementalBatchRecovery", "directPiPBuffer",
                     "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
                     "deduplicateCopies", "contextualLanguage", "languageRecovery",
                     "continuousRotation", "smartCool", "persistDiagnosticSessions",
@@ -597,6 +611,7 @@ final class Diagnostics: ObservableObject {
         settings["freshTranslationTest"] = translationTestMode == .freshRequests ? "true" : "false"
         settings["temporaryMemoryTest"] = translationTestMode == .temporaryMemory ? "true" : "false"
         settings["startingRAMEntries"] = String(startingRAMEntries)
+        settings["startingHybridPreviewEntries"] = String(startingHybridPreviewEntries)
         settings.merge(legacyValidationPair) { _, new in new }
         var counters = cumulativeCounters()
         counters.merge(legacyValidationSnapshot) { _, new in new }
@@ -646,6 +661,9 @@ final class Diagnostics: ObservableObject {
                 "renderingMs": DiagnosticDistribution(pipeline.map { $0.stages.rendering }),
                 "speculativeModelMs": DiagnosticDistribution(modelTimingSamples["speculative_model_completed", default: []]),
                 "confirmedModelMs": DiagnosticDistribution(modelTimingSamples["confirmed_model_completed", default: []]),
+                "hybridFirstEnqueueMs": DiagnosticDistribution(modelTimingSamples["hybrid_first_enqueued", default: []]),
+                "hybridFinalEnqueueMs": DiagnosticDistribution(modelTimingSamples["hybrid_final_enqueued", default: []]),
+                "hybridLowModelMs": DiagnosticDistribution(modelTimingSamples["hybrid_low_completed", default: []]),
                 "modelBatchMs": DiagnosticDistribution(modelTimingSamples["model_batch_completed", default: []])],
             events: exportEventWindow(),
             intervals: diagnosticIntervals(at: Date()),
@@ -847,6 +865,7 @@ final class Diagnostics: ObservableObject {
         sharedModelUnits = 0; sharedConfirmedModelUnits = 0; memoryAwareSpeculationSkipped = 0; ramCaptionBypasses = 0; exactCaptionHits = 0; exactUnitsCoalesced = 0
         speculativeUnitCounts = [:]; queueWaitSamples = [:]
         temporaryMemoryHits = 0; startingRAMEntries = ramEntryCount?() ?? 0
+        startingHybridPreviewEntries = hybridPreviewEntryCount?() ?? 0
         started = Date()
         subtitleTraces = []; recorderCosts = RecorderCosts()
         lastFrames = 0; lastFrameTime = Date(); tickN = 0
@@ -1044,7 +1063,14 @@ final class Diagnostics: ObservableObject {
             "confirmedModelBatches": eventTotals["confirmed_model_submitted", default: 0],
             "speculativeModelBatches": eventTotals["speculative_model_submitted", default: 0],
             "warmupModelBatches": eventTotals["warmup_model_submitted", default: 0],
-            "actualModelBatches": eventTotals["confirmed_model_submitted", default: 0] +
+            "hybridLowBatches": eventTotals["hybrid_low_submitted", default: 0],
+            "hybridLowFailures": eventTotals["hybrid_low_failed", default: 0],
+            "hybridLowUnavailable": eventTotals["hybrid_low_unavailable", default: 0],
+            "hybridPreviewEnqueues": eventTotals["hybrid_preview_enqueued", default: 0],
+            "hybridFinalEnqueues": eventTotals["hybrid_final_enqueued", default: 0],
+            "hybridPreviewCacheHits": eventTotals["hybrid_preview_cache_hit", default: 0],
+            "hybridRefinementsSuperseded": eventTotals["hybrid_refinement_superseded", default: 0],
+            "actualModelBatches": eventTotals["hybrid_low_submitted", default: 0] + eventTotals["confirmed_model_submitted", default: 0] +
                 eventTotals["speculative_model_submitted", default: 0] + eventTotals["warmup_model_submitted", default: 0],
             "cancelledModelBatches": eventTotals["model_batch_cancelled", default: 0],
             "speculativeStopRequests": eventTotals["speculative_stop_requested", default: 0],

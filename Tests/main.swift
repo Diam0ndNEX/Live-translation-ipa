@@ -964,3 +964,83 @@ check(normalPairIdentity != TranslationModelMemoryPolicy.sessionKey(source: "pt"
 check(normalPairIdentity != TranslationModelMemoryPolicy.sessionKey(source: "pt", target: "de", lowLatency: false),
       "A changed target cannot borrow readiness for the previous pair")
 print("v1.8.0 unified ephemeral model-pair identity checks passed")
+
+// Refused admission is not a persisted or pending write. The same confirmed
+// cache key must remain eligible once Remember/queue capacity allows a retry.
+let admissionBank = TranslationRAMBank()
+let admissionCaption = ExactCaptionResult(translated: "A complete caption.", sentences: 1,
+    persistenceKeys: ["confirmed-key"])
+admissionBank.values["confirmed-key"] = "A complete caption."
+admissionBank.retainCaption(key: "exact-caption", result: admissionCaption)
+var admissionAttempts = 0
+let rejectedAdmission = admissionBank.confirmPersistence("confirmed-key") {
+    admissionAttempts += 1
+    return false
+}
+check(!rejectedAdmission && !admissionBank.confirmedKeys.contains("confirmed-key"),
+      "Remember off or a full queue must not mark a rejected write as already handled")
+check(admissionBank.captionNeedsPersistence(admissionCaption),
+      "Whole-caption reuse must retain the need to retry rejected unit admissions")
+check(admissionBank.captions["exact-caption"]?.translated == "A complete caption.",
+      "A rejected write must never make a complete cached caption unavailable")
+let acceptedAdmission = admissionBank.confirmPersistence("confirmed-key") {
+    admissionAttempts += 1
+    return true
+}
+check(acceptedAdmission && !admissionBank.captionNeedsPersistence(admissionCaption),
+      "A later confirmed reuse can admit the same key when the writer accepts it")
+check(admissionBank.confirmPersistence("confirmed-key", enqueue: {
+    admissionAttempts += 1
+    return false
+}) && admissionAttempts == 2, "Already accepted keys avoid duplicate queue work")
+var savedAdmissionAttempts = 0
+check(admissionBank.confirmPersistence("already-saved", alreadySaved: true, enqueue: {
+    savedAdmissionAttempts += 1
+    return false
+}) && savedAdmissionAttempts == 0, "Proven saved hits do not create new writes")
+let isolatedAdmissionBank = TranslationRAMBank()
+check(isolatedAdmissionBank.captionNeedsPersistence(admissionCaption),
+      "One RAM bank's admission markers cannot suppress another bank's work")
+admissionBank.clear()
+check(admissionBank.confirmedKeys.isEmpty && admissionBank.captions.isEmpty,
+      "Explicit RAM reset clears admission metadata with its volatile captions")
+print("v1.8.0 confirmed write admission, retries and complete-caption availability checks passed")
+
+let hybridMemoryOwner = ProcessTranslationMemory()
+let hybridKey = PipelineSafety.cacheKey(source: "pt", target: "en", text: "Olá.", protectedWords: [], rules: "quality")
+hybridMemoryOwner.normal.values[hybridKey] = "Saved high-fidelity wording."
+hybridMemoryOwner.previews(for: .normal).insert(hybridKey, text: "Fast preview.", speculativeID: 9)
+check(hybridMemoryOwner.normal.values[hybridKey] == "Saved high-fidelity wording.",
+      "Fast previews cannot overwrite the high-fidelity RAM bank")
+check(hybridMemoryOwner.previews(for: .temporaryMemory).lookup(hybridKey) == nil,
+      "Temporary testing cannot borrow normal-mode low-latency previews")
+hybridMemoryOwner.previews(for: .temporaryMemory).insert(hybridKey, text: "Temporary preview.", speculativeID: nil)
+hybridMemoryOwner.normalPreviews.clear()
+check(hybridMemoryOwner.temporaryPreviews.lookup(hybridKey)?.text == "Temporary preview.",
+      "Normal preview cleanup cannot erase temporary test memory")
+let previewLRU = HybridPreviewCache(capacity: 2)
+previewLRU.insert("A", text: "First.", speculativeID: 1)
+previewLRU.insert("B", text: "Second.", speculativeID: 2)
+_ = previewLRU.lookup("A")
+previewLRU.insert("C", text: "Third.", speculativeID: 3)
+check(previewLRU.count == 2 && previewLRU.lookup("B") == nil && previewLRU.lookup("A")?.speculativeID == 1,
+      "Preview memory must be bounded and retain exact provenance on LRU reuse")
+previewLRU.insert("blank", text: " ", speculativeID: nil)
+check(previewLRU.lookup("blank") == nil, "Blank fast responses never seed preview memory")
+check(!TranslationModelMemoryPolicy.effectiveLowLatency(lowOnly: true, hybrid: true),
+      "A conflicting imported low-only flag cannot relabel hybrid quality memory as low-latency memory")
+check(TranslationModelMemoryPolicy.effectiveLowLatency(lowOnly: true, hybrid: false),
+      "Existing low-only selections remain supported")
+let hybridRules = TranslationModelMemoryPolicy.rulesContext(base: existingMemoryRules,
+    lowLatency: TranslationModelMemoryPolicy.effectiveLowLatency(lowOnly: true, hybrid: true))
+check(hybridRules == existingMemoryRules, "Hybrid quality output preserves compatible high-fidelity memory identity")
+check(HybridTranslationPolicy.mayRunPreview(enabled: true, manual: false, freshOnly: false, lowPower: false, thermalNominal: true),
+      "Hybrid mode can preview live nominal-load subtitles")
+for blocked in [
+    HybridTranslationPolicy.mayRunPreview(enabled: false, manual: false, freshOnly: false, lowPower: false, thermalNominal: true),
+    HybridTranslationPolicy.mayRunPreview(enabled: true, manual: true, freshOnly: false, lowPower: false, thermalNominal: true),
+    HybridTranslationPolicy.mayRunPreview(enabled: true, manual: false, freshOnly: true, lowPower: false, thermalNominal: true),
+    HybridTranslationPolicy.mayRunPreview(enabled: true, manual: false, freshOnly: false, lowPower: true, thermalNominal: true),
+    HybridTranslationPolicy.mayRunPreview(enabled: true, manual: false, freshOnly: false, lowPower: false, thermalNominal: false)
+] { check(!blocked, "Manual/fresh-only/power/thermal policy must preserve quality-only fallback") }
+print("Hybrid preview isolation, LRU, memory identity and admission policy checks passed")

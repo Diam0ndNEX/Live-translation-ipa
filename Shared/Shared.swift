@@ -3,7 +3,7 @@ import Foundation
 
 enum AppVersion {
     static let version = "1.8.0"
-    static let build = 61
+    static let build = 63
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
@@ -126,6 +126,7 @@ struct Config: Codable, Equatable {
 /// Keeps the old memory context exactly unchanged unless a genuinely
 /// different user-selected model strategy is active.
 enum TranslationModelMemoryPolicy {
+    static func effectiveLowLatency(lowOnly: Bool, hybrid: Bool) -> Bool { lowOnly && !hybrid }
     /// Ephemeral session/availability identity only. Durable v4 keys and their
     /// rule digests remain independent and unchanged.
     static func sessionKey(source: String, target: String, lowLatency: Bool) -> String {

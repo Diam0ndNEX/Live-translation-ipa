@@ -37,6 +37,7 @@ jobs:
         run: |
           python3 scripts/test_compare_performance.py
           python3 scripts/test_compare_release.py
+          python3 scripts/test_compare_hybrid.py
       - name: Verify Experimental Features controls
         run: python3 scripts/test_experimental_settings.py
       - name: Check SQLite memory migration

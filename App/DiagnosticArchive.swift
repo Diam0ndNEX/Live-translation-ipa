@@ -136,6 +136,7 @@ struct DiagnosticIntervalBucket: Codable {
         "speculativeStopRequests", "speculativeSessionsCreated", "memoryAwareSpeculationSkipped", "ramCaptionBypasses", "savedUnitsPrefetched", "savedCaptionBypasses", "speculationBudgetSkipped", "warmSessionTransfers", "exactCaptionHits", "exactUnitsCoalesced", "sharedConfirmedInFlightUnits", "sharedInFlightUnits", "speculativeUnitsRetained",
         "speculativeUnitsReused", "speculativeUnitsEvictedUnused",
         "handoffDeferred", "slowTailEnqueues", "handoffReplayed", "handoffExpired", "enqueueFailed",
+        "hybridLowBatches", "hybridLowFailures", "hybridLowUnavailable", "hybridPreviewEnqueues", "hybridFinalEnqueues", "hybridPreviewCacheHits", "hybridRefinementsSuperseded",
         "actualModelBatches", "confirmedModelBatches", "speculativeModelBatches",
         "warmupModelBatches", "first30sModelBatches", "cancelledModelBatches",
         "legacyBatchEntries", "legacyBatchVerified", "legacyBatchSkipped",
@@ -203,6 +204,9 @@ actor DiagnosticExportWriter {
         ]
         let eventCodes: Set<String> = Set(MemoryDiagnosticOutcome.allCases.map { $0.rawValue })
             .union([
+                "hybrid_low_submitted", "hybrid_low_completed", "hybrid_low_failed", "hybrid_low_unavailable",
+                "hybrid_first_enqueued", "hybrid_final_enqueued", "hybrid_preview_enqueued",
+                "hybrid_preview_cache_hit", "hybrid_refinement_superseded",
                 "scheduling", "observed", "cache_hit", "computed", "accepted", "rejected_duplicate",
                 "rejected_recent_fragment", "rejected_empty", "rejected_revision",
                 "rejected_unstable", "rejected_low_confidence", "rejected_stale",
@@ -244,12 +248,12 @@ actor DiagnosticExportWriter {
             "skipUnchanged", "idleBackoff", "adaptiveConfirmation", "subtitleTracking",
             "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest",
             "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
-            "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer",
+            "lowLatencyTranslation", "hybridTranslation", "incrementalBatchRecovery", "directPiPBuffer",
             "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
             "deduplicateCopies", "contextualLanguage", "languageRecovery",
             "continuousRotation", "smartCool", "persistDiagnosticSessions",
             "diagSamples", "heartbeatInterval", "keepAwake", "suppressOwnInterface",
-            "temporaryMemoryTest", "translationTestMode", "startingRAMEntries"
+            "temporaryMemoryTest", "translationTestMode", "startingRAMEntries", "startingHybridPreviewEntries"
         ]
         let safeSettings = snapshot.settings.filter { pair in
             settingsKeys.contains(pair.key) && pair.value.utf8.count <= 48 &&
@@ -293,6 +297,7 @@ actor DiagnosticExportWriter {
         // nonfinite caller-supplied measurements. Reconstruct from bounded,
         // known timing statistics instead of copying potentially private labels.
         let allowedMetrics: Set<String> = [
+            "hybridFirstEnqueueMs", "hybridFinalEnqueueMs", "hybridLowModelMs",
             "memoryLookupMs", "memoryWriteMs", "ocrMs", "translationMs",
             "enqueueLatencyMs", "finalOCRMs", "transportMs", "confirmationMs",
             "deliveryFilteringMs", "queueMs", "processingMs", "displayHoldMs",
@@ -473,6 +478,15 @@ actor DiagnosticExportWriter {
             - Confirmed model requests: \(metric("confirmedModelMs"))
             - Speculative model requests: \(metric("speculativeModelMs"))
             - PiP frame preparation: \(metric("renderingMs"))
+
+            ## Hybrid models (first result and final quality are separate)
+            - First visible result: \(metric("hybridFirstEnqueueMs"))
+            - High-fidelity final result: \(metric("hybridFinalEnqueueMs"))
+            - Low-latency model batches: \(count("hybridLowBatches"))
+            - Fast preview enqueues / final enqueues: \(count("hybridPreviewEnqueues")) / \(count("hybridFinalEnqueues"))
+            - Refinements superseded before final enqueue: \(count("hybridRefinementsSuperseded"))
+            Preview results never enter the ordinary final-latency distribution or
+            the high-fidelity translation memory. These counts are not subtitle coverage.
 
             ## Subtitle lifecycle (candidates, not sentences)
             - Confirmed packets: \(count("confirmedCandidatePackets"))
