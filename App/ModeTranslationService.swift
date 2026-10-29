@@ -47,19 +47,25 @@ final class ModeTranslationService {
         }
     }
 
-    func prepare(source: String, target: String, system: TranslationSystem) async -> String {
+    func prepare(source: String, target: String, system: TranslationSystem,
+                 progress: ((TranslationReadiness.Preparation) -> Void)? = nil) async -> String {
         preparationRevision &+= 1
         let preparation = preparationRevision
         guard #available(iOS 26.4, *) else {
+            progress?(.unavailable)
             return system == .hybridRecovery ? "Fast recovery needs iOS 26.4; Apple default fallback remains available" : "Explicit low latency requires iOS 26.4 or later"
         }
         let revision = generation
         let src = Locale.Language(identifier: source), dst = Locale.Language(identifier: target)
         let availability = LanguageAvailability(preferredStrategy: .lowLatency)
+        progress?(.checkingLanguages)
         guard await availability.status(from: src, to: dst) == .installed else {
+            if revision == generation, preparation == preparationRevision, !Task.isCancelled { progress?(.languagesUnavailable) }
             return "Low-latency languages unavailable. Install this pair in Languages."
         }
         guard revision == generation, preparation == preparationRevision, !Task.isCancelled else { return "Preparation superseded" }
+        progress?(.languagesInstalled)
+        progress?(.creatingSessions)
         if !confirmed.busy {
             install(confirmed, source: src, target: dst, strategy: .lowLatency)
         }
@@ -70,11 +76,13 @@ final class ModeTranslationService {
         let pair = "\(src.minimalIdentifier)>\(dst.minimalIdentifier)|"
         let speculativeStrategy: RequestedTranslationStrategy = system == .lowLatency ? .lowLatency : .appleDefault
         let confirmedSession = confirmed.session, speculativeSession = speculative.session
+        progress?(.checkingSessions)
         let confirmedSessionReady = await confirmedSession?.isReady == true
         let speculativeSessionReady = await speculativeSession?.isReady == true
         guard revision == generation, preparation == preparationRevision, !Task.isCancelled else { return "Preparation superseded" }
         let confirmedReady = !confirmed.invalidated && confirmed.key == pair + RequestedTranslationStrategy.lowLatency.rawValue && confirmed.session === confirmedSession && confirmedSessionReady
         let speculativeReady = !speculative.invalidated && speculative.key == pair + speculativeStrategy.rawValue && speculative.session === speculativeSession && speculativeSessionReady
+        progress?(confirmedReady && speculativeReady ? .sessionsReady : .sessionsWaiting)
         return confirmedReady && speculativeReady ? "Languages and sessions ready; model residency unmeasured" : "Languages installed; waiting for valid session resources"
     }
 

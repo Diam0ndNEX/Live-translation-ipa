@@ -35,4 +35,9 @@ assert 'lowOrder.count > 256' in core
 assert 'preferredStrategy: .highFidelity' not in read('App/ModeTranslationService.swift')
 assert '"26.6"' in read('.github/workflows/build.yml')
 assert 'hybridPreview' not in engine
+activity = engine[engine.index('    var translationActivity:'):engine.index('    private func refreshModePreparation')]
+assert 'warmupStatus' not in activity, 'Readiness must not depend on an old mode\'s string label'
+assert 'TranslationActivity.preparation' not in engine, 'Use observed preparation stages, not parsing status text'
+assert 'modelReadiness.prepare(stage)' in engine
+assert 'modelReadiness.finishExecution(success: true' in engine
 print('Legacy algorithm equivalence, installed schema/identity, no preview/refinement, bounded cache and model routing source contracts passed')

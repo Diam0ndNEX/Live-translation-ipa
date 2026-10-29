@@ -193,43 +193,67 @@ final class TranslatorEngine: ObservableObject {
     @Published private(set) var activeTranslationSystem = TranslationSystem.legacy
     @Published private(set) var pendingTranslationSystem = TranslationSystem.legacy
     @Published private(set) var modeAvailability = ""
-    @Published private(set) var modePreparationInProgress = false
     @Published private(set) var modeWorkActivity: TranslationActivity?
     private var modeActivityCaption: ModeCaption?
     private var modeActivitySelected = false
     private var preparationTicket = UUID()
-    private var preparationStarted = Date()
+
+    @Published private(set) var modelReadiness = TranslationReadiness()
+    @Published private(set) var currentRuntimeConditions = ""
+
+    var translationConditions: String {
+        let thermal: String
+        switch ProcessInfo.processInfo.thermalState {
+        case .nominal: thermal = "Temperature normal"
+        case .fair: thermal = "Device warming"
+        case .serious: thermal = "High temperature · speculation reduced"
+        case .critical: thermal = "Critical temperature · work restricted"
+        @unknown default: thermal = "Temperature unknown"
+        }
+        return [captureStatus.title, thermal,
+                ProcessInfo.processInfo.isLowPowerModeEnabled ? "Low Power Mode on" : "Low Power Mode off",
+                activeTranslationSystem == .legacy ? (flag("keepWarm", true) ? "Idle warm-up enabled" : "Idle warm-up off") : "Session preparation only · no dummy warm-ups"].joined(separator: " · ")
+    }
 
     var translationActivity: TranslationActivity {
         if paused { return TranslationActivity(title: "Translation paused", detail: captureAlive ? "Capture is still connected. Resume to translate." : "Resume translation when you are ready.", phase: .waiting) }
-        if activeTranslationSystem != .legacy {
-            if let modeWorkActivity { return modeWorkActivity }
-            var activity = TranslationActivity.preparation(modeAvailability, busy: modePreparationInProgress)
-            if activity.phase == .attention { return activity }
-            if sourceCode == "auto", !modePreparationInProgress {
-                return TranslationActivity(title: "Waiting for source language", detail: "Read a caption or choose a source in Languages to prepare the selected system.", phase: .waiting)
+        if activeTranslationSystem != .legacy, let work = modeWorkActivity, work.phase == .working || work.phase == .attention { return work }
+        if activeTranslationSystem == .legacy, isTranslating, modelReadiness.execution != .working {
+            return TranslationActivity(title: "Processing current caption", detail: "Checking memory and scheduling complete translation units", phase: .working)
+        }
+        if modelReadiness.activeSince != nil || modelReadiness.sessions == .complete || modelReadiness.languages == .blocked || modelReadiness.sessions == .blocked || modelReadiness.execution == .blocked {
+            return modelReadiness.activity
+        }
+        if sourceCode == "auto", modelReadiness.source.isEmpty {
+            return TranslationActivity(title: "Waiting for source language", detail: "Automatic needs a caption or a recent confirmed language before preparation can run.", phase: .waiting)
+        }
+        if activeTranslationSystem == .legacy {
+            if !flag("keepWarm", true) { return TranslationActivity(title: "Idle warm-up is off", detail: "The model will run when live text requires translation.", phase: .waiting) }
+            if !runtimePolicy.allowsPrewarming || ProcessInfo.processInfo.isLowPowerModeEnabled || ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical {
+                return TranslationActivity(title: "Warm-up deferred by current conditions", detail: "Power, temperature or the current test policy limits idle work. Live text keeps priority.", phase: .waiting)
             }
-            if modePreparationInProgress { activity.since = preparationStarted }
-            return activity
+            if directSession == nil, Date().timeIntervalSince(lastWarm) < 25 {
+                return TranslationActivity(title: "Idle warm-up deferred", detail: "The existing warm-up cooldown is active. Live text can still request translation.", phase: .waiting)
+            }
         }
-        if isTranslating { return TranslationActivity(title: "Translating confirmed text", detail: "Legacy · Apple default strategy", phase: .working) }
-        if waitingToDisplay { return TranslationActivity(title: "Waiting to display", detail: "Holding the completed result for readability", phase: .waiting) }
-        if warmupStatus.contains("Warming") || warmupStatus.contains("warm-up…") {
-            return TranslationActivity(title: warmupStatus, detail: "Preparing the Legacy translator; live captions take priority", phase: .working)
-        }
-        if warmupStatus == "Ready" || warmupStatus == "Predicted source prepared" {
-            return TranslationActivity(title: "Legacy translator prepared", detail: captureAlive ? "Reading your screen · waiting for the next caption" : "Apple default strategy · start capture when ready", phase: .ready)
-        }
-        return TranslationActivity(title: warmupStatus, detail: "Legacy · Apple default strategy", phase: warmupStatus.contains("failed") ? .attention : .waiting)
+        return modelReadiness.activity
     }
 
     private func refreshModePreparation(source: String, target: String, system: TranslationSystem) async {
         guard system == activeTranslationSystem, system != .legacy else { return }
         let ticket = UUID(), session = modeSessionID
-        preparationTicket = ticket; preparationStarted = Date(); modePreparationInProgress = true
-        let result = await modeService.prepare(source: source, target: target, system: system)
+        preparationTicket = ticket
+        if modelReadiness.source != source || modelReadiness.target != target { modelReadiness = TranslationReadiness(source: source, target: target) }
+        let result = await modeService.prepare(source: source, target: target, system: system) { [weak self] stage in
+            guard let self, self.preparationTicket == ticket, self.modeSessionID == session else { return }
+            self.modelReadiness.prepare(stage)
+        }
         guard preparationTicket == ticket else { return }
-        modePreparationInProgress = false
+        if result == "Preparation superseded" || Task.isCancelled {
+            modelReadiness.activeSince = nil
+            if modelReadiness.languages == .working { modelReadiness.languages = .pending }
+            if modelReadiness.sessions == .working { modelReadiness.sessions = .pending }
+        }
         guard !Task.isCancelled, session == modeSessionID, system == activeTranslationSystem,
               target == targetCode, source == (sourceCode == "auto" ? detectedLang : sourceCode), result != "Preparation superseded" else { return }
         modeAvailability = result; warmupStatus = result
@@ -266,6 +290,7 @@ final class TranslatorEngine: ObservableObject {
         let selection = TranslationSystem.migrate(ud)
         pendingTranslationSystem = selection.0
         if activeTranslationSystem != selection.0 {
+            modelReadiness = TranslationReadiness()
             startupWarmupTask?.cancel(); startupWarmupTask = nil
             idleValidationTask?.cancel(); idleValidationTask = nil
             invalidatePending()
@@ -288,10 +313,12 @@ final class TranslatorEngine: ObservableObject {
                 await self.refreshModePreparation(source: source, target: target, system: selection.0)
             }
         }
+        if selection.0 == .legacy, !captureAlive, directSession == nil {
+            Task { [weak self] in await self?.prewarm() }
+        }
     }
 
     private func noteModeEvent(_ caption: ModeCaption, reason: String, duration: Double?) {
-        guard modeDiagnosticEpochs[caption.session] == diag.started else { return }
         if caption.session == modeSessionID {
             if reason == "confirmed" || reason == "speculation_admitted" {
                 modeActivityCaption = caption; modeActivitySelected = false
@@ -301,7 +328,18 @@ final class TranslatorEngine: ObservableObject {
                 modeWorkActivity = activity
                 if reason.hasPrefix("pip_enqueue_") || reason == "display_failed" { modeActivitySelected = true }
             }
+            if modeActivityCaption?.matches(caption) == true, !modeActivitySelected {
+                if modelReadiness.source != caption.source || modelReadiness.target != caption.target { modelReadiness = TranslationReadiness(source: caption.source, target: caption.target) }
+                if reason == "speculative_model_submitted" || reason == "confirmed_model_submitted" {
+                    modelReadiness.beginExecution(label: "Running translation request")
+                } else if reason == "speculative_model_completed" || reason == "confirmed_model_completed" {
+                    modelReadiness.finishExecution(success: true, milliseconds: duration)
+                } else if reason == "model_batch_failed" {
+                    modelReadiness.finishExecution(success: false, milliseconds: duration)
+                }
+            }
         }
+        guard modeDiagnosticEpochs[caption.session] == diag.started else { return }
         if ["speculative_model_submitted", "confirmed_model_submitted", "model_batch_failed", "model_batch_completed", "speculative_model_completed", "confirmed_model_completed"].contains(reason) {
             diag.noteModelState(reason, durationMs: duration, candidate: caption.caption)
         }
@@ -699,6 +737,8 @@ final class TranslatorEngine: ObservableObject {
 
     private func tick() {
         tickCount += 1
+        let conditions = translationConditions
+        if currentRuntimeConditions != conditions { currentRuntimeConditions = conditions }
         captureReadiness.tick(at: ProcessInfo.processInfo.systemUptime)
         publishCaptureStatus()
         let alive = Date().timeIntervalSince(lastPacketDate) < 5
@@ -764,6 +804,7 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func languageSelectionChanged() {
+        modelReadiness = TranslationReadiness()
         invalidatePending()
         languageRouter.reset(); languageContext.reset(); rotationBudget.reset()
         languageFailures = 0
@@ -934,8 +975,16 @@ final class TranslatorEngine: ObservableObject {
 
     /// Invalidate suspended work before changing language, capture state, or settings.
     private func invalidatePending() {
+        if activeTranslationSystem != .legacy {
+            modelReadiness.sessions = .pending; modelReadiness.execution = .pending
+            modelReadiness.activeSince = nil
+            modelReadiness.explanation = "Sessions were invalidated; the next request needs preparation."
+        } else if modelReadiness.execution == .working {
+            modelReadiness.execution = .pending; modelReadiness.activeSince = nil
+            modelReadiness.explanation = "Previous work was interrupted; waiting for the current request."
+        }
         modeWorkActivity = nil; modeActivityCaption = nil; modeActivitySelected = false
-        preparationTicket = UUID(); modePreparationInProgress = false
+        preparationTicket = UUID()
         interruptWarmupForLiveWork()
         modeSessionID = UUID(); modeLastIdentity = ""; modePlans.removeAll(); modeMemoryOrigins.removeAll()
         if modeDiagnosticEpochs.count >= 64 { modeDiagnosticEpochs.removeAll() }
@@ -2453,7 +2502,10 @@ final class TranslatorEngine: ObservableObject {
                     }
                     return TranslationSession(installedSource: source, target: target)
                 }
-                let result = await runBatch(lease.session, texts, speculative: true, partial: partial)
+                if activeTranslationSystem == .legacy, modelReadiness.source != source.minimalIdentifier || modelReadiness.target != target.minimalIdentifier {
+                    modelReadiness = TranslationReadiness(source: source.minimalIdentifier, target: target.minimalIdentifier)
+                }
+                let result = await runBatch(lease.session, texts, speculative: true, partial: partial, observeReadiness: true)
                 // A cancelled Swift task can still return a complete valid batch.
                 // Only explicit session cancellation (tracked by the lease),
                 // failure or context change prevents warm-session reuse.
@@ -2475,6 +2527,9 @@ final class TranslatorEngine: ObservableObject {
             }
             if diag.enabled { diag.s.sessionKind = "Direct session (iOS 26)" }
             guard let session = directSession else { return nil }
+            if activeTranslationSystem == .legacy, modelReadiness.source != source.minimalIdentifier || modelReadiness.target != target.minimalIdentifier {
+                modelReadiness = TranslationReadiness(source: source.minimalIdentifier, target: target.minimalIdentifier)
+            }
             let r = await runBatch(session, texts, speculative: speculative, partial: partial)
             if r == nil {
                 if directSession === session { directSession = nil }
@@ -2487,9 +2542,26 @@ final class TranslatorEngine: ObservableObject {
 
     private func runBatch(_ session: TranslationSession, _ texts: [String],
                           warmup: Bool = false, speculative: Bool = false,
-                          partial: (@MainActor (Int, String) -> Void)? = nil) async -> [String]? {
+                          partial: (@MainActor (Int, String) -> Void)? = nil,
+                          observeReadiness: Bool = false) async -> [String]? {
         let diagnosticEpoch = diag.started
+        let readinessContext = contextRevision
+        let readinessSource = modelReadiness.source, readinessTarget = modelReadiness.target
+        let observesReadiness = activeTranslationSystem == .legacy && (observeReadiness || session === directSession || session === warmupSession)
         func record(_ reason: String, durationMs: Double? = nil, candidate: String? = nil) {
+            if observesReadiness, readinessContext == contextRevision, activeTranslationSystem == .legacy,
+               modelReadiness.source == readinessSource, modelReadiness.target == readinessTarget {
+                if reason == "warmup_model_submitted" || reason == "confirmed_model_submitted" || reason == "speculative_model_submitted" {
+                    modelReadiness.beginExecution(label: warmup ? "Running Legacy warm-up" : "Running translation request")
+                } else if reason == "model_batch_completed" {
+                    modelReadiness.finishExecution(success: true, milliseconds: durationMs)
+                } else if reason == "model_batch_failed" {
+                    modelReadiness.finishExecution(success: false, milliseconds: durationMs)
+                } else if reason == "model_batch_cancelled" {
+                    modelReadiness.execution = .pending; modelReadiness.sessions = .pending; modelReadiness.activeSince = nil
+                    modelReadiness.explanation = "Model work was interrupted; live translation has priority."
+                }
+            }
             guard diagnosticEpoch == diag.started else { return }
             diag.noteModelState(reason, durationMs: durationMs, candidate: candidate)
         }
@@ -3356,6 +3428,7 @@ final class TranslatorEngine: ObservableObject {
     func prewarm() async {
         if activeTranslationSystem != .legacy {
             guard #available(iOS 26.4, *) else {
+                modelReadiness.prepare(.unavailable)
                 modeAvailability = activeTranslationSystem == .lowLatency ? "Explicit low latency requires iOS 26.4 or later" : "Fast recovery needs iOS 26.4; Apple default fallback remains available"
                 return
             }
@@ -3394,24 +3467,38 @@ final class TranslatorEngine: ObservableObject {
         let destination = targetCode
         let src = Locale.Language(identifier: code)
         let target = Locale.Language(identifier: destination)
+        if modelReadiness.source != code || modelReadiness.target != destination { modelReadiness = TranslationReadiness(source: code, target: destination) }
         guard src.languageCode != target.languageCode,
               let word = Self.warmWords[src.languageCode?.identifier ?? code] else { return }
         // Avoid reloading the same model while a usable warm session exists.
         let warmKey = "\(src.minimalIdentifier)>\(destination)|\((activeTranslationSystem == .lowLatency) ? "low" : "default")"
         guard directSession == nil || directKey != warmKey else {
             warmupStatus = "Ready"
+            // Retaining a handle alone is not evidence that the model ran.
+            if modelReadiness.sessions != .complete { modelReadiness.explanation = "A Legacy session is retained; waiting for an observed model request." }
             return
         }
-        guard await pairStatus(src, target) == .installed, !Task.isCancelled,
+        modelReadiness.prepare(.checkingLanguages)
+        let installed = await pairStatus(src, target) == .installed
+        guard !Task.isCancelled,
               workContext == contextRevision, !busy, queued == nil,
               !ProcessInfo.processInfo.isLowPowerModeEnabled,
               ProcessInfo.processInfo.thermalState != .serious,
-              ProcessInfo.processInfo.thermalState != .critical else { return }
+              ProcessInfo.processInfo.thermalState != .critical else {
+            if workContext == contextRevision {
+                modelReadiness.languages = .pending; modelReadiness.activeSince = nil
+                modelReadiness.explanation = "Preparation deferred for live work or current power and temperature conditions."
+            }
+            return
+        }
+        guard installed else { modelReadiness.prepare(.languagesUnavailable); return }
+        modelReadiness.prepare(.languagesInstalled)
         // Direct sessions can warm independently; the iOS 18 hosted path has one continuation.
         guard #available(iOS 26.0, *) else { return }
         lastWarm = Date()
         let t0 = Date()
         warmupStatus = predicted ? "Predictive warm-up…" : "Warming up…"
+        modelReadiness.prepare(.creatingSessions)
         diag.noteModelState("warmup_started")
         if predicted { diag.noteModelState("warmup_predicted_source") }
         let session: TranslationSession
@@ -3428,6 +3515,10 @@ final class TranslatorEngine: ObservableObject {
         let sample = Self.warmSentences[src.languageCode?.identifier ?? code]
         let warmed = await runBatch(session, [word] + (sample.map { [$0] } ?? []), warmup: true)
         guard !Task.isCancelled, !warmupSuperseded, workContext == contextRevision else {
+            if workContext == contextRevision {
+                modelReadiness.execution = .pending; modelReadiness.sessions = .pending
+                modelReadiness.activeSince = nil; modelReadiness.explanation = "Warm-up yielded to live translation; it did not establish readiness."
+            }
             warmupStatus = "Deferred for live translation"
             diag.noteModelState("warmup_preempted")
             return
@@ -3506,7 +3597,11 @@ final class TranslatorEngine: ObservableObject {
         let requestID = legacyRequestID
         let texts = pendingTexts
         let speculative = legacySpeculative
-        let result = await runBatch(session, texts, speculative: speculative)
+        if activeTranslationSystem == .legacy, let source = config.source?.minimalIdentifier, let target = config.target?.minimalIdentifier,
+           modelReadiness.source != source || modelReadiness.target != target {
+            modelReadiness = TranslationReadiness(source: source, target: target)
+        }
+        let result = await runBatch(session, texts, speculative: speculative, observeReadiness: true)
         if legacyRequestID == requestID { finishLegacy(result) }
     }
     private func finishLegacy(_ r: [String]?) {
