@@ -198,6 +198,9 @@ struct TranslationModeReport: Codable {
     static let reasons: Set<String> = [
         "speculative_model_submitted", "confirmed_model_submitted", "model_batch_failed", "model_batch_completed", "speculative_model_completed", "confirmed_model_completed",
         "cancellation_requested", "cancelled_call_returned",
+        "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
+        "hybrid_cross_strategy_overlap", "hybrid_overlapped_recovery_ms",
+        "backend_availability_ms", "backend_task_dispatch_ms", "pip_held_unchanged",
         "memory_saved_ram_hit", "memory_session_hit", "memory_legacy_hit", "memory_normalized_hit", "memory_persistent_hit",
         "pip_enqueue_legacy_recovery", "pip_enqueue_confirmed_fresh",
         "selected_origin_compatible_memory", "selected_origin_speculation", "selected_origin_recovery", "selected_origin_session_low_latency",
