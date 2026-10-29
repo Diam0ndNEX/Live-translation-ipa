@@ -431,7 +431,8 @@ final class TranslatorEngine: ObservableObject {
             if modeActivityCaption?.matches(caption) == true, !modeActivitySelected,
                let activity = TranslationActivity.event(reason) {
                 modeWorkActivity = activity
-                if reason.hasPrefix("pip_enqueue_") || reason == "display_failed" { modeActivitySelected = true }
+                if reason.hasPrefix("pip_enqueue_") || reason == "pip_held_unchanged" ||
+                    reason == "display_failed" { modeActivitySelected = true }
             }
             if modeActivityCaption?.matches(caption) == true {
                 if modelReadiness.source != caption.source || modelReadiness.target != caption.target { modelReadiness = TranslationReadiness(source: caption.source, target: caption.target) }
@@ -453,6 +454,14 @@ final class TranslatorEngine: ObservableObject {
         guard modeDiagnosticEpochs[caption.session] == diag.started else { return }
         if ["speculative_model_submitted", "confirmed_model_submitted", "model_batch_failed", "model_batch_completed", "speculative_model_completed", "confirmed_model_completed"].contains(reason) {
             diag.noteModelState(reason, durationMs: duration, candidate: caption.caption)
+        }
+        if caption.session == modeSessionID, reason == "hybrid_overlapped_recovery_ms",
+           let duration {
+            modeCoordinator.noteOverlappingRecovery(duration)
+        }
+        if caption.session == modeSessionID, reason == "cancelled_call_returned",
+           let duration {
+            diag.noteModelState("speculative_stop_released", durationMs: duration, candidate: caption.caption)
         }
         if caption.session == modeSessionID, reason == "hybrid_default_fallback" {
             modeAvailability = "Fast recovery unavailable; using Apple default for this caption"
@@ -597,9 +606,9 @@ final class TranslatorEngine: ObservableObject {
             processingAt: now, processingMs: 0, savedRequests: output.origins.filter { $0 == "compatible_memory" }.count, readyAt: now)
         isTranslating = false
         status = "\(caption.source) → \(caption.target) ✓"
-        let enqueued = show(caption.text, result, timing: timing)
-        if enqueued {
-            noteModeEvent(caption, reason: "pip_enqueue_" + reason,
+        let presented = show(caption.text, result, timing: timing)
+        if presented {
+            noteModeEvent(caption, reason: lastShowReusedFrame ? "pip_held_unchanged" : "pip_enqueue_" + reason,
                 duration: max(0, ProcessInfo.processInfo.systemUptime - caption.firstOCR) * 1000)
         } else { noteModeEvent(caption, reason: "display_failed", duration: nil) }
     }
@@ -673,6 +682,7 @@ final class TranslatorEngine: ObservableObject {
     private var modelUnitKeysInFlight = Set<String>()
     private var modelContextInFlight: Int?
     private var showing = false
+    private var lastShowReusedFrame = false
     private var pendingTexts: [String] = []
     private var legacyContinuation: CheckedContinuation<[String]?, Never>?
     private var lastPacketDate = Date.distantPast
@@ -2816,13 +2826,25 @@ final class TranslatorEngine: ObservableObject {
 
     @discardableResult
     private func show(_ text: String, _ result: String, timing: PresentationTiming) -> Bool {
+        lastShowReusedFrame = false
         clearTask?.cancel()
         clearTask = nil
         guard !frozen, (!paused || manualMode),
               CandidateValidity.isCurrent(timing.packet?.candidateID, active: activeCandidateID, enabled: flag("steadyCaptions", true), allowLegacy: true) else { return false }
         if activeTranslationSystem == .legacy, PipelineSafety.isRecentFragment(text, of: original, age: Date().timeIntervalSince(lastShowDate)) { return false }
+        let proposedStyle = pipStyle
+        if activeTranslationSystem != .legacy, showing,
+           pip.isShowingIdenticalFrame(original: text, translated: result,
+                                      showOriginal: showOriginal, size: windowSize.size,
+                                      style: proposedStyle) {
+            lastShowReusedFrame = true
+            lastTextDate = Date()
+            if timing.packet?.candidateID == activeCandidateID { activeCandidatePresented = true }
+            replayDeferredConfirmedIfPossible()
+            return true
+        }
         let renderStart = Date()
-        pip.style = pipStyle
+        pip.style = proposedStyle
         guard pip.render(original: text, translated: result, showOriginal: showOriginal,
                          size: windowSize.size) else {
             lastHandled = ""
