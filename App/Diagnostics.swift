@@ -725,7 +725,9 @@ final class Diagnostics: ObservableObject {
         currentHealth.ramEntries = ramEntryCount?() ?? memoryHealth.ramEntries
         return DiagnosticSessionExport(translationModes: TranslationModeReport(warmups: initialWarmupTrace, active: modeActiveSystem,
             pending: modePendingSystem, referenceSHA: TranslationSystem.referenceSHA,
-            migration: modeMigration, events: exportModeEventWindow(), distributions: [:], counters: [:]).sanitized(), id: diagnosticSessionID, startedAt: started, endedAt: Date(),
+            migration: modeMigration, events: exportModeEventWindow(),
+            distributions: modeTimingSamples.mapValues(DiagnosticDistribution.init),
+            counters: modeEventCounts).sanitized(), id: diagnosticSessionID, startedAt: started, endedAt: Date(),
             appVersion: AppVersion.full, systemVersion: UIDevice.current.systemVersion,
             hardwareModel: Self.hardwareModelCode, settings: settings, health: currentHealth, counters: counters,
             distributions: ["memoryLookupMs": DiagnosticDistribution(lookupSamples), "memoryWriteMs": DiagnosticDistribution(writeSamples),
