@@ -200,6 +200,7 @@ struct TranslationModeReport: Codable {
         "cancellation_requested", "cancelled_call_returned",
         "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
         "hybrid_cross_strategy_overlap", "hybrid_overlapped_recovery_ms",
+        "hybrid_no_fast_pack_fallback",
         "backend_availability_ms", "backend_task_dispatch_ms", "backend_installed_cache_hit",
         "pip_held_unchanged",
         "memory_saved_ram_hit", "memory_session_hit", "memory_legacy_hit", "memory_normalized_hit", "memory_persistent_hit",
@@ -270,6 +271,7 @@ struct TranslationModeReport: Codable {
         let sessionReasons = [
             "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
             "hybrid_cross_strategy_overlap", "hybrid_overlapped_recovery_ms",
+        "hybrid_no_fast_pack_fallback",
             "pip_held_unchanged", "backend_availability_ms", "backend_task_dispatch_ms",
             "backend_installed_cache_hit",
             "speculative_queue_ms", "recovery_queue_ms", "model_batch_completed",
