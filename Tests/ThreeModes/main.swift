@@ -73,6 +73,18 @@ final class Harness {
         readiness.requested(at: 12); readiness.tick(at: 42)
         precondition(readiness.state == .timedOut)
 
+        let noFastPack = Harness()
+        noFastPack.coordinator.system = .hybridRecovery
+        noFastPack.coordinator.fastRecoveryInstalled = false
+        noFastPack.coordinator.observe(noFastPack.caption(id: "only-default"), confirmed: true, speculate: false)
+        await noFastPack.settle()
+        precondition(noFastPack.calls.count == 1)
+        precondition(noFastPack.calls[0].strategy == .appleDefault)
+        precondition(noFastPack.events.contains("hybrid_no_fast_pack_fallback"))
+        noFastPack.reply(0, ["Default fallback works"])
+        await noFastPack.settle()
+        precondition(noFastPack.selected.count == 1)
+        noFastPack.coordinator.reset()
         var governor = HybridAdmissionPolicy()
         for _ in 0..<3 { precondition(governor.admit()); governor.record(used: false) }
         for _ in 0..<5 { precondition(!governor.admit()) }
