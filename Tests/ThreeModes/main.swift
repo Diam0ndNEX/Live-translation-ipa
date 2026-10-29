@@ -49,9 +49,11 @@ final class Harness {
             defaults.removePersistentDomain(forName: suite)
             defaults.set(low, forKey: "lowLatencyTranslation"); defaults.set(hybrid, forKey: "hybridTranslation")
             defaults.set("preserve", forKey: "unrelated")
-            precondition(TranslationSystem.migrate(defaults).0 == expected)
+            let migrated = TranslationSystem.migrate(defaults)
+            precondition(migrated.0 == expected)
             defaults.set(!low, forKey: "lowLatencyTranslation")
-            precondition(TranslationSystem.migrate(defaults).0 == expected)
+            let persisted = TranslationSystem.migrate(defaults)
+            precondition(persisted.0 == expected && persisted.1 == migrated.1)
             precondition(defaults.string(forKey: "unrelated") == "preserve")
         }
         defaults.set("future-mode", forKey: "translationSystem")

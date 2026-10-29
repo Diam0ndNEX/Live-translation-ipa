@@ -20,7 +20,10 @@ enum TranslationSystem: String, CaseIterable, Codable {
     }
     static func migrate(_ defaults: UserDefaults) -> (TranslationSystem, String) {
         if let value = defaults.string(forKey: "translationSystem") {
-            return (Self(rawValue: value) ?? .legacy, Self(rawValue: value) == nil ? "unknown_value_legacy" : "persisted")
+            guard let mode = Self(rawValue: value) else { return (.legacy, "unknown_value_legacy") }
+            let saved = defaults.string(forKey: "translationSystemMigration") ?? "persisted"
+            let reasons = ["explicit_hybrid", "explicit_low_latency", "legacy_or_ambiguous", "persisted"]
+            return (mode, reasons.contains(saved) ? saved : "persisted")
         }
         let mode: Self
         let reason: String
