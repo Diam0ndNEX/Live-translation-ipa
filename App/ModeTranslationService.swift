@@ -102,7 +102,7 @@ final class ModeTranslationService {
                 result?.allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } == true
             guard succeeded else {
                 warmupPolicy.finish(source: source, target: target, strategy: strategy, succeeded: false)
-                return nil
+                return completedStrategies > 0 ? completedStrategies : nil
             }
             // Promote only an actual successful idle session, never an abandoned handle.
             let destination = system == .hybridRecovery && strategy == .lowLatency ? confirmed : speculative
