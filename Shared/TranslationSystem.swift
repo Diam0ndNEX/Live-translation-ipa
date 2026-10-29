@@ -151,6 +151,41 @@ struct ModeOutput {
     var complete: Bool { !values.isEmpty && values.allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }
 }
 
+/// A bounded feedback controller; never changes Legacy or the explicit Low Latency mode.
+/// A successful speculative display clears backoff; repeated wasted speculation uses
+/// fast confirmed Low Latency instead of competing Apple Default inference.
+struct HybridAdmissionPolicy {
+    private(set) var consecutiveWaste = 0
+    private(set) var skipped = 0
+    private(set) var rejected = 0
+
+    mutating func admit() -> Bool {
+        guard skipped > 0 else { return true }
+        skipped -= 1
+        rejected += 1
+        return false
+    }
+
+    mutating func record(used: Bool) {
+        if used {
+            consecutiveWaste = 0
+            skipped = 0
+            return
+        }
+        consecutiveWaste += 1
+        if consecutiveWaste >= 3 {
+            skipped = max(skipped, 5)
+            consecutiveWaste = 0
+        }
+    }
+
+    mutating func overlappingRecovery(milliseconds: Double) {
+        guard milliseconds.isFinite, milliseconds >= 350 else { return }
+        skipped = max(skipped, 5)
+        consecutiveWaste = 0
+    }
+}
+
 /// Main-actor ownership is the atomic display selection latch. Model cancellation
 /// is advisory; both backend lanes remain occupied until their real calls return.
 @MainActor
@@ -179,6 +214,8 @@ final class ThreeModeCoordinator {
     private var speculativeStarted = 0.0
     private var speculativeFailed = false
     private var recoveryStarted = false
+    private var hybridAdmission = HybridAdmissionPolicy()
+    private var scoredSpeculation: ModeCaption?
     private var lowCache: [String: String] = [:]
     private var lowOrder: [String] = []
     private var defaultService: [String: [Double]] = [:]
@@ -208,6 +245,8 @@ final class ThreeModeCoordinator {
         current = nil; committed = nil; memoryProbePending = nil; speculativeCaption = nil; speculativeOutput = nil
         // The speculative task clears its occupied slot only after completion.
         recoveryStarted = false
+        hybridAdmission = HybridAdmissionPolicy()
+        scoredSpeculation = nil
         lowCache.removeAll(); lowOrder.removeAll()
         defaultService.removeAll(); lowService.removeAll()
     }
@@ -216,6 +255,13 @@ final class ThreeModeCoordinator {
         guard system != .legacy else { return }
         if !confirmed {
             guard speculate, speculation == nil, current == nil || committed == current else { return }
+            if system == .hybridRecovery && !hybridAdmission.admit() {
+                speculativeCaption = nil
+                speculativeOutput = nil
+                event(caption, "hybrid_speculation_throttled", nil)
+                return
+            }
+            scoredSpeculation = nil
             speculativeCaption = caption; speculativeOutput = nil; speculativeFailed = false
             speculativeStarted = clock()
             event(caption, "speculation_admitted", nil)
@@ -273,6 +319,19 @@ final class ThreeModeCoordinator {
             self.speculation?.cancel(); self.cancel(true)
             self.startRecovery(caption, reason: reason)
         }
+    }
+
+    func noteOverlappingRecovery(_ milliseconds: Double) {
+        guard system == .hybridRecovery else { return }
+        hybridAdmission.overlappingRecovery(milliseconds: milliseconds)
+    }
+
+    private func scoreSpeculation(for caption: ModeCaption, useful: Bool) {
+        guard system == .hybridRecovery, let early = speculativeCaption,
+              early.session == caption.session, scoredSpeculation != early else { return }
+        scoredSpeculation = early
+        hybridAdmission.record(used: useful)
+        event(caption, useful ? "hybrid_speculation_useful" : "hybrid_speculation_wasted", nil)
     }
 
     private func remainingWait(_ caption: ModeCaption) -> Double {
@@ -339,6 +398,7 @@ final class ThreeModeCoordinator {
 
     private func startRecovery(_ caption: ModeCaption, reason: String) {
         guard current == caption, committed != caption, !recoveryStarted else { return }
+        scoreSpeculation(for: caption, useful: false)
         recoveryStarted = true
         event(caption, "recovery_decision_" + reason, nil)
         confirmation = Task { [weak self] in
@@ -360,6 +420,7 @@ final class ThreeModeCoordinator {
         let reason = memoryOnly ? "memory_hit" : proposedReason
         guard current == caption, committed != caption, output.complete else { event(caption, "stale_rejected", nil); return }
         committed = caption; deadline?.cancel()
+        scoreSpeculation(for: caption, useful: output.origins.contains("speculation"))
         if allowsReuse {
             for i in output.values.indices where output.strategies[i] == .lowLatency {
                 let key = caption.keys[i]
@@ -417,9 +478,9 @@ enum CaptionClockOrigin {
 /// the documented total-age ceiling, never an unconditional confirmation delay.
 enum SpeculationWaitPolicy {
     static func remaining(elapsed: Double, ordinary: [Double], recovery: [Double], coldCeiling: Double) -> Double {
-        guard ordinary.count >= 5, recovery.count >= 5 else { return max(0, coldCeiling - elapsed) }
+        guard ordinary.count >= 5, recovery.count >= 5 else { return max(0, min(0.20, coldCeiling - elapsed)) }
         let defaultMedian = ordinary.sorted()[ordinary.count / 2]
         let recoveryMedian = recovery.sorted()[recovery.count / 2]
-        return max(0, min(0.25, defaultMedian - elapsed, recoveryMedian))
+        return max(0, min(0.20, defaultMedian - elapsed, recoveryMedian))
     }
 }
