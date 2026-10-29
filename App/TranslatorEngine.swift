@@ -150,6 +150,40 @@ final class TranslatorEngine: ObservableObject {
     // Languages
     @Published var languages: [LangItem] = TranslatorEngine.fallbackLanguages
     @Published var langStatus: [String: LanguageAvailability.Status] = [:]
+    @Published private(set) var defaultLangStatus: [String: LanguageAssetState] = [:]
+    @Published private(set) var lowLatencyLangStatus: [String: LanguageAssetState] = [:]
+    @Published private(set) var languageStatusChecking = false
+    private var languageStatusTicket = UUID()
+
+    private static func languageState(_ status: LanguageAvailability.Status) -> LanguageAssetState {
+        switch status {
+        case .installed: return .installed
+        case .supported: return .supported
+        case .unsupported: return .unsupported
+        }
+    }
+
+    private static func platformStatus(_ status: LanguageAssetState) -> LanguageAvailability.Status? {
+        switch status {
+        case .installed: return .installed
+        case .supported: return .supported
+        case .unsupported: return .unsupported
+        case .unchecked: return nil
+        }
+    }
+
+    func languageCoverage(for code: String) -> TranslationLanguageCoverage {
+        TranslationLanguageCoverage(appleDefault: defaultLangStatus[code] ?? .unchecked,
+                                    lowLatency: lowLatencyLangStatus[code] ?? .unchecked)
+    }
+
+    var languageSummary: String {
+        let code = sourceCode != "auto" ? sourceCode :
+            (detectedLang != "–" ? detectedLang : (lockedLang ?? ""))
+        guard !code.isEmpty else { return "Automatic source: select or detect a language to check its packs" }
+        return languageCoverage(for: code).explanation(for: pendingTranslationSystem)
+    }
+
     @Published var lockedLang: String? = nil { didSet { if diag.enabled { diag.s.lockedLang = lockedLang ?? "–" } } }
     // Output + diagnostics
     @Published var original = ""
@@ -342,6 +376,8 @@ final class TranslatorEngine: ObservableObject {
         pendingTranslationSystem = TranslationSystem.migrate(ud).0
         diag.modePendingSystem = pendingTranslationSystem.rawValue
         if !captureAlive { activateTranslationSystem() }
+        // Do not keep a stale "installed" result from a different model strategy.
+        Task { [weak self] in await self?.loadLanguages() }
     }
 
     private func activateTranslationSystem() {
@@ -2020,7 +2056,9 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func pairStatus(_ src: Locale.Language, _ target: Locale.Language) async -> LanguageAvailability.Status {
-        if target.minimalIdentifier == Locale.Language(identifier: targetCode).minimalIdentifier,
+        // Pipeline availability must use its own requested strategy, not Hybrid's aggregate UI status.
+        if activeTranslationSystem != .hybridRecovery,
+           target.minimalIdentifier == Locale.Language(identifier: targetCode).minimalIdentifier,
            src.minimalIdentifier == Locale.Language(identifier: sourceCode).minimalIdentifier,
            let s = langStatus[sourceCode] { return s }
         let k = "\(src.minimalIdentifier)>\(target.minimalIdentifier)|\((activeTranslationSystem == .lowLatency) ? "low" : "default")"
@@ -3771,15 +3809,19 @@ final class TranslatorEngine: ObservableObject {
 
     // MARK: Languages / downloads
     func loadLanguages() async {
-        let availability: LanguageAvailability
-        if #available(iOS 26.4, *), activeTranslationSystem == .lowLatency {
-            availability = LanguageAvailability(preferredStrategy: .lowLatency)
-        } else { availability = LanguageAvailability() }
-        let supported = await availability.supportedLanguages
+        let preferred = LanguageAvailability()
+        let traditional: LanguageAvailability?
+        if #available(iOS 26.4, *) {
+            traditional = LanguageAvailability(preferredStrategy: .lowLatency)
+        } else { traditional = nil }
+        // Both models can support different languages. Do not hide the installed
+        // Apple Default language list when switching to explicit Low Latency.
+        let defaultLanguages = await preferred.supportedLanguages
+        let lowLanguages = await traditional?.supportedLanguages ?? []
         var seen = Set<String>()
         var items: [LangItem] = []
-        for l in supported {
-            let code = l.minimalIdentifier
+        for language in defaultLanguages + lowLanguages {
+            let code = language.minimalIdentifier
             guard seen.insert(code).inserted else { continue }
             items.append(LangItem(code: code, name: Locale.current.localizedString(forIdentifier: code) ?? code))
         }
@@ -3788,44 +3830,86 @@ final class TranslatorEngine: ObservableObject {
     }
 
     func refreshStatus() async {
-        availCache.removeAll()
+        languageStatusTicket = UUID()
+        let ticket = languageStatusTicket
         let destination = targetCode
+        let currentSystem = pendingTranslationSystem
         let target = Locale.Language(identifier: destination)
-        let av: LanguageAvailability
-        if #available(iOS 26.4, *), (activeTranslationSystem == .lowLatency) {
-            av = LanguageAvailability(preferredStrategy: .lowLatency)
-        } else {
-            av = LanguageAvailability()
-        }
-        var out: [String: LanguageAvailability.Status] = [:]
-        // Read the active pair first so readiness does not wait behind every other language.
+        let appleDefault = LanguageAvailability()
+        let lowLatency: LanguageAvailability?
+        if #available(iOS 26.4, *) {
+            lowLatency = LanguageAvailability(preferredStrategy: .lowLatency)
+        } else { lowLatency = nil }
+        var defaultResults: [String: LanguageAssetState] = [:]
+        var lowResults: [String: LanguageAssetState] = [:]
+        var overallResults: [String: LanguageAvailability.Status] = [:]
+        languageStatusChecking = true
         var seen = Set<String>()
-        let preferred = sourceCode == "auto" ? [] : [sourceCode]
-        let codes = (preferred + languages.map(\.code)).filter { seen.insert($0).inserted }
+        let active = sourceCode == "auto" ? (detectedLang == "–" ? [] : [detectedLang]) : [sourceCode]
+        let codes = (active + languages.map(\.code)).filter { seen.insert($0).inserted }
         for code in codes {
+            guard ticket == languageStatusTicket, currentSystem == pendingTranslationSystem,
+                  destination == targetCode, !Task.isCancelled else { return }
             let source = Locale.Language(identifier: code)
-            let availability = await av.status(from: source, to: target)
-            guard destination == targetCode else { return }
-            out[code] = availability
-            availCache["\(source.minimalIdentifier)>\(target.minimalIdentifier)"] = (Date(), availability)
-            if code == sourceCode { langStatus[code] = availability }
+            let apple = Self.languageState(await appleDefault.status(from: source, to: target))
+            let low: LanguageAssetState
+            if let lowLatency {
+                low = Self.languageState(await lowLatency.status(from: source, to: target))
+            } else {
+                low = .unsupported
+            }
+            guard ticket == languageStatusTicket, currentSystem == pendingTranslationSystem,
+                  destination == targetCode, !Task.isCancelled else { return }
+            defaultResults[code] = apple
+            lowResults[code] = low
+            let coverage = TranslationLanguageCoverage(appleDefault: apple, lowLatency: low)
+            if let status = Self.platformStatus(coverage.overall(for: currentSystem)) {
+                overallResults[code] = status
+            }
+            // The live Legacy path uses a separately keyed Apple Default lookup.
+            availCache["\(source.minimalIdentifier)>\(target.minimalIdentifier)|default"] =
+                (Date(), Self.platformStatus(apple) ?? .unsupported)
+            if #available(iOS 26.4, *) {
+                availCache["\(source.minimalIdentifier)>\(target.minimalIdentifier)|low"] =
+                    (Date(), Self.platformStatus(low) ?? .unsupported)
+            }
+            if code == sourceCode {
+                langStatus[code] = overallResults[code]
+                defaultLangStatus[code] = apple
+                lowLatencyLangStatus[code] = low
+            }
         }
-        guard destination == targetCode else { return }
-        langStatus = out
+        guard ticket == languageStatusTicket, currentSystem == pendingTranslationSystem,
+              destination == targetCode, !Task.isCancelled else { return }
+        langStatus = overallResults
+        defaultLangStatus = defaultResults
+        lowLatencyLangStatus = lowResults
+        languageStatusChecking = false
     }
 
     func download(_ code: String) {
-        if pendingTranslationSystem != .legacy {
-            guard #available(iOS 26.4, *) else { downloadMessage = "Explicit low latency requires iOS 26.4"; return }
-            downloadConfig = .init(source: Locale.Language(identifier: code), target: Locale.Language(identifier: targetCode), preferredStrategy: .lowLatency)
+        guard code != targetCode else {
+            downloadMessage = "Select different source and target languages."
             return
         }
-        let src = Locale.Language(identifier: code)
-        let tgt = Locale.Language(identifier: targetCode)
-        if var c = downloadConfig, c.source == src, c.target == tgt {
-            c.invalidate(); downloadConfig = c
+        let coverage = languageCoverage(for: code)
+        guard let strategy = coverage.nextDownload(for: pendingTranslationSystem) else {
+            downloadMessage = coverage.explanation(for: pendingTranslationSystem)
+            toast(downloadMessage)
+            return
+        }
+        let source = Locale.Language(identifier: code)
+        let target = Locale.Language(identifier: targetCode)
+        if strategy == .lowLatency {
+            guard #available(iOS 26.4, *) else {
+                downloadMessage = "Explicit Low Latency requires iOS 26.4 or newer."
+                return
+            }
+            downloadConfig = .init(source: source, target: target, preferredStrategy: .lowLatency)
         } else {
-            downloadConfig = .init(source: src, target: tgt)
+            // A new configuration allows the hosted view to request permission
+            // for the Apple Default pack without touching any saved translations.
+            downloadConfig = .init(source: source, target: target)
         }
     }
     func runDownload(_ session: TranslationSession) async {
