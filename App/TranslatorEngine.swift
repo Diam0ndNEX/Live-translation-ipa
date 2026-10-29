@@ -160,6 +160,7 @@ final class TranslatorEngine: ObservableObject {
         case .installed: return .installed
         case .supported: return .supported
         case .unsupported: return .unsupported
+        @unknown default: return .unchecked
         }
     }
 
