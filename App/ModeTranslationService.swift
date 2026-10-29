@@ -47,7 +47,9 @@ final class ModeTranslationService {
     }
 
     func prepare(source: String, target: String, system: TranslationSystem) async -> String {
-        guard #available(iOS 26.4, *) else { return "Explicit low latency requires iOS 26.4 or later" }
+        guard #available(iOS 26.4, *) else {
+            return system == .hybridRecovery ? "Fast recovery needs iOS 26.4; Apple default fallback remains available" : "Explicit low latency requires iOS 26.4 or later"
+        }
         let revision = generation
         let src = Locale.Language(identifier: source), dst = Locale.Language(identifier: target)
         let availability = LanguageAvailability(preferredStrategy: .lowLatency)

@@ -199,6 +199,26 @@ final class Harness {
         precondition(capture.admit("second") == .rejected)
         precondition(capture.admit("third") == .newSession)
         precondition(capture.admit(nil) == .rejected)
+        // Language/caption identity supersedes recovery even when cancellation is ignored.
+        let language = Harness(); language.coordinator.system = .lowLatency
+        language.coordinator.observe(language.caption(), confirmed: true, speculate: false); await language.settle()
+        language.coordinator.observe(language.caption("Não tenho gatos.", revision: 2, id: "new-caption", source: "pt"), confirmed: true, speculate: false); await language.settle()
+        language.reply(0, ["Old language output"]); await language.settle()
+        precondition(language.selected.isEmpty)
+        language.reply(1, ["Current Portuguese output"]); await language.settle()
+        precondition(language.selected.count == 1 && language.selected[0].0.source == "pt")
+        language.coordinator.reset()
+
+        // Pressure stops tentative work and gives confirmed work a recovery path.
+        let pressure = Harness(); pressure.coordinator.system = .hybridRecovery
+        pressure.coordinator.observe(pressure.caption(), confirmed: false, speculate: true); await pressure.settle()
+        pressure.coordinator.observe(pressure.caption(), confirmed: true, speculate: true); await pressure.settle()
+        pressure.coordinator.reduceSpeculation(memoryPressure: true); await pressure.settle()
+        precondition(pressure.calls.count == 2 && pressure.calls[1].strategy == .lowLatency)
+        pressure.reply(1, ["Confirmed under pressure"]); pressure.reply(0, ["Obsolete tentative result"]); await pressure.settle()
+        precondition(pressure.selected.count == 1 && pressure.events.contains("memory_pressure"))
+        pressure.coordinator.reset()
+
         precondition(CaptionClockOrigin.monotonic(firstSeen: 80, wallFirstSeen: 1000, wallNow: 5000, uptimeNow: 100) == 80,
             "Wall-clock changes cannot reset a supplied monotonic OCR origin")
         precondition(CaptionClockOrigin.monotonic(firstSeen: nil, wallFirstSeen: 995, wallNow: 1000, uptimeNow: 100) == 95)

@@ -230,6 +230,9 @@ final class TranslatorEngine: ObservableObject {
         diag.modePendingSystem = selection.0.rawValue
         diag.modeMigration = selection.1
         modeAvailability = selection.0 == .legacy ? "Apple default; effective model identity unavailable" : "Checking installed low-latency languages"
+        if #unavailable(iOS 26.4), selection.0 != .legacy {
+            modeAvailability = selection.0 == .lowLatency ? "Explicit low latency requires iOS 26.4 or later" : "Fast recovery needs iOS 26.4; Apple default fallback remains available"
+        }
         if selection.0 != .legacy, sourceCode != "auto" {
             let session = modeSessionID, source = sourceCode, target = targetCode
             Task { [weak self] in
@@ -3279,6 +3282,10 @@ final class TranslatorEngine: ObservableObject {
     /// Loads the translation models before they're needed so the first real sentence isn't slow.
     func prewarm() async {
         if activeTranslationSystem != .legacy {
+            guard #available(iOS 26.4, *) else {
+                modeAvailability = activeTranslationSystem == .lowLatency ? "Explicit low latency requires iOS 26.4 or later" : "Fast recovery needs iOS 26.4; Apple default fallback remains available"
+                return
+            }
             guard sourceCode != "auto", !captureAlive else { return }
             let session = modeSessionID, system = activeTranslationSystem
             let result = await modeService.prepare(source: sourceCode, target: targetCode, system: system)

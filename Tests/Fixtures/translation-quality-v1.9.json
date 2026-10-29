@@ -1,0 +1,337 @@
+{
+  "schemaVersion": 1,
+  "status": "not_run_on_device",
+  "instructions": "Run every case with Legacy, Hybrid Recovery and Low Latency on the same device and language assets. Use isolated equivalent memory/fresh inputs. Save exact outputs and requested strategies separately. Never substitute expected invariants for observed model output.",
+  "rubric": {
+    "criticalErrors": [
+      "Changed or omitted negation",
+      "Changed number, currency or time",
+      "Wrong named person or speaker",
+      "Missing prefix or line",
+      "Invented completion of incomplete source"
+    ],
+    "semanticScore": "0 incorrect, 1 partly correct, 2 preserves all source meaning",
+    "fluencyScore": "0 hard to understand, 1 understandable, 2 natural",
+    "acceptance": "Any critical error fails that case. Report every per-language failure. Small samples cannot establish statistical quality parity."
+  },
+  "cases": [
+    {
+      "id": "q01",
+      "sourceLanguage": "pt",
+      "targetLanguage": "en",
+      "source": "Eu não tenho 20 gatos.",
+      "requiredMeaning": [
+        "negation",
+        "20",
+        "cats"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q02",
+      "sourceLanguage": "pt",
+      "targetLanguage": "en",
+      "source": "Não foi o João; foi a Ana.",
+      "requiredMeaning": [
+        "negation",
+        "João",
+        "Ana"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q03",
+      "sourceLanguage": "pt",
+      "targetLanguage": "en",
+      "source": "O comboio parte às 18:45, não às 18:15.",
+      "requiredMeaning": [
+        "18:45",
+        "18:15",
+        "contrast"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q04",
+      "sourceLanguage": "pt",
+      "targetLanguage": "en",
+      "source": "Ainda não terminei a primeira parte.",
+      "requiredMeaning": [
+        "not yet",
+        "first part"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q05",
+      "sourceLanguage": "de",
+      "targetLanguage": "en",
+      "source": "Ich habe nicht 20, sondern 12 Katzen.",
+      "requiredMeaning": [
+        "20",
+        "12",
+        "contrast"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q06",
+      "sourceLanguage": "de",
+      "targetLanguage": "en",
+      "source": "Bitte öffne die Tür nicht.",
+      "requiredMeaning": [
+        "negative request",
+        "door"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q07",
+      "sourceLanguage": "de",
+      "targetLanguage": "en",
+      "source": "Anna sagte: „Ich komme morgen nicht.“",
+      "requiredMeaning": [
+        "Anna",
+        "tomorrow",
+        "negation",
+        "speaker"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q08",
+      "sourceLanguage": "fr",
+      "targetLanguage": "en",
+      "source": "Ce n'est pas Marie, c'est Mario.",
+      "requiredMeaning": [
+        "Marie",
+        "Mario",
+        "contrast"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q09",
+      "sourceLanguage": "fr",
+      "targetLanguage": "en",
+      "source": "Il n'a jamais dit cela.",
+      "requiredMeaning": [
+        "never",
+        "said"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q10",
+      "sourceLanguage": "es",
+      "targetLanguage": "en",
+      "source": "No pagué 15 €, pagué 50 €.",
+      "requiredMeaning": [
+        "15",
+        "50",
+        "currency",
+        "contrast"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q11",
+      "sourceLanguage": "es",
+      "targetLanguage": "en",
+      "source": "No cierres la ventana todavía.",
+      "requiredMeaning": [
+        "negative request",
+        "window",
+        "not yet"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q12",
+      "sourceLanguage": "it",
+      "targetLanguage": "en",
+      "source": "Non ho perso il treno delle 09:30.",
+      "requiredMeaning": [
+        "negation",
+        "09:30",
+        "train"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q13",
+      "sourceLanguage": "nl",
+      "targetLanguage": "en",
+      "source": "Ik heb geen drie, maar twee kaartjes.",
+      "requiredMeaning": [
+        "3",
+        "2",
+        "contrast",
+        "tickets"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q14",
+      "sourceLanguage": "tr",
+      "targetLanguage": "en",
+      "source": "Kapıyı açma.",
+      "requiredMeaning": [
+        "negative imperative",
+        "door"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q15",
+      "sourceLanguage": "ja",
+      "targetLanguage": "en",
+      "source": "駅には行かないでください。",
+      "requiredMeaning": [
+        "negative request",
+        "station"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q16",
+      "sourceLanguage": "ja",
+      "targetLanguage": "en",
+      "source": "午後3時ではなく、午後5時です。",
+      "requiredMeaning": [
+        "3 PM",
+        "5 PM",
+        "contrast"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q17",
+      "sourceLanguage": "ko",
+      "targetLanguage": "en",
+      "source": "문을 열지 마세요.",
+      "requiredMeaning": [
+        "negative request",
+        "door"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q18",
+      "sourceLanguage": "ar",
+      "targetLanguage": "en",
+      "source": "لا تفتح الباب قبل الساعة ١٠.",
+      "requiredMeaning": [
+        "negative request",
+        "door",
+        "before",
+        "10"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q19",
+      "sourceLanguage": "en",
+      "targetLanguage": "de",
+      "source": "I did not say she stole 12 euros.",
+      "requiredMeaning": [
+        "negation",
+        "12",
+        "euros",
+        "reported speech"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    },
+    {
+      "id": "q20",
+      "sourceLanguage": "en",
+      "targetLanguage": "de",
+      "source": "I did not say she stole",
+      "requiredMeaning": [
+        "incomplete source",
+        "no invented ending"
+      ],
+      "scenarios": [
+        "confirmed fresh",
+        "matching speculation",
+        "incorrect tentative prefix then confirmed full source"
+      ]
+    }
+  ]
+}
