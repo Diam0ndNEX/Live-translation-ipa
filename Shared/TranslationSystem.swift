@@ -479,7 +479,7 @@ enum CaptionClockOrigin {
 /// the documented total-age ceiling, never an unconditional confirmation delay.
 enum SpeculationWaitPolicy {
     static func remaining(elapsed: Double, ordinary: [Double], recovery: [Double], coldCeiling: Double) -> Double {
-        guard ordinary.count >= 5, recovery.count >= 5 else { return max(0, min(0.20, coldCeiling - elapsed)) }
+        guard ordinary.count >= 5, recovery.count >= 5 else { return max(0, min(0.20, coldCeiling) - elapsed) }
         let defaultMedian = ordinary.sorted()[ordinary.count / 2]
         let recoveryMedian = recovery.sorted()[recovery.count / 2]
         return max(0, min(0.20, defaultMedian - elapsed, recoveryMedian))
