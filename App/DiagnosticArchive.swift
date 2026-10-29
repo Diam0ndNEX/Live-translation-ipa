@@ -133,7 +133,7 @@ struct DiagnosticIntervalBucket: Codable {
         "specPreemptionRequested", "specMatchingConfirmation",
         "specRetainedUnits", "completedConfirmedUnitsRetained", "temporaryMemoryHits",
         "uncachedUnits", "bypassedLookups", "temporaryMemoryMisses",
-        "exactCaptionHits", "exactUnitsCoalesced", "sharedInFlightUnits", "speculativeUnitsRetained",
+        "ramCaptionBypasses", "exactCaptionHits", "exactUnitsCoalesced", "sharedInFlightUnits", "speculativeUnitsRetained",
         "speculativeUnitsReused", "speculativeUnitsEvictedUnused",
         "handoffDeferred", "slowTailEnqueues", "handoffReplayed", "handoffExpired", "enqueueFailed",
         "actualModelBatches", "confirmedModelBatches", "speculativeModelBatches",
@@ -502,6 +502,7 @@ actor DiagnosticExportWriter {
             - Model batches sent: \(count("actualModelBatches"))
             - Cancelled model batches: \(count("cancelledModelBatches"))
             - Skipped unchanged frames: \(count("unchangedSkippedFrames"))
+            - Complete captions assembled from RAM around a busy model lane: \(count("ramCaptionBypasses"))
             - Exact assembled captions reused: \(count("exactCaptionHits"))
             - Exact duplicate units coalesced: \(count("exactUnitsCoalesced"))
             - Speculative units retained / reused / evicted unused: \(count("speculativeUnitsRetained")) / \(count("speculativeUnitsReused")) / \(count("speculativeUnitsEvictedUnused"))

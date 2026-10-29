@@ -760,3 +760,24 @@ print("v1.7.1 temporary mode, process lifetime and exact work-sharing checks pas
 check(ExactModelWorkPolicy.sharedUnits(inFlight: ["needed-A", "obsolete-B"], required: ["needed-A", "new-C"],
       workContext: 7, currentContext: 7, reuseAllowed: true) == 0,
       "One overlapping sentence must not keep an unrelated old batch ahead of new dialogue")
+
+// v1.7.2: a cached caption must be complete and preserve the ordinary formatter.
+let protectedCaption = TextIntel.protect("Hello Maria.", words: ["Maria"])
+let assembledCaption = CaptionAssembly.complete([
+    [CaptionTranslationUnit(label: "Ana", sentences: ["Olá Maria.", "Como vai?"],
+        out: [protectedCaption.text, "How are you?"], tokens: protectedCaption.tokens),
+     CaptionTranslationUnit(label: "Luis", sentences: ["Bem."], out: ["Fine."], tokens: [])],
+    [CaptionTranslationUnit(label: nil, sentences: ["Adeus."], out: ["Goodbye."], tokens: [])]
+], glossary: [("hello", "Welcome")])
+check(assembledCaption == "Ana: Welcome Maria. How are you?\nLuis: Fine.\nGoodbye.",
+      "Cached and model captions preserve sentence order, speaker labels, protected names, glossary and blocks")
+for unavailable: String? in [nil, "", "   "] {
+    check(CaptionAssembly.complete([[CaptionTranslationUnit(label: nil,
+        sentences: ["Primeira.", "Segunda."], out: ["First.", unavailable], tokens: [])]], glossary: []) == nil,
+        "One missing or blank unit prevents partial-caption presentation")
+}
+check(CaptionAssembly.complete([[CaptionTranslationUnit(label: nil, sentences: ["A.", "B."],
+    out: ["A."], tokens: [])]], glossary: []) == nil, "Incomplete result cardinality cannot silently lose a sentence")
+check(CaptionAssembly.complete([], glossary: []) == nil && CaptionAssembly.complete([[]], glossary: []) == nil,
+      "Empty assemblies cannot replace the current subtitle")
+print("v1.7.2 complete caption assembly checks passed")

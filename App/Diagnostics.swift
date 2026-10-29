@@ -241,6 +241,7 @@ final class Diagnostics: ObservableObject {
     var startingRAMEntries = 0
     var ramEntryCount: (() -> Int)?
     private var sharedModelUnits = 0
+    private var ramCaptionBypasses = 0
     private var exactCaptionHits = 0
     private var exactUnitsCoalesced = 0
     private var speculativeUnitCounts: [String: Int] = [:]
@@ -411,6 +412,10 @@ final class Diagnostics: ObservableObject {
     func noteSharedModelUnits(_ count: Int) {
         guard enabled else { return }
         sharedModelUnits += max(0, count)
+    }
+    func noteRAMCaptionBypass() {
+        guard enabled else { return }
+        ramCaptionBypasses += 1
     }
     func noteExactCaptionReuse() {
         guard enabled else { return }
@@ -824,7 +829,7 @@ final class Diagnostics: ObservableObject {
         lastRecordedThermalState = nil
         memoryOutcomes = [:]; lookupSamples = []; writeSamples = []
         modelTimingSamples = [:]; completedWorkRecoveredUnits = 0
-        sharedModelUnits = 0; exactCaptionHits = 0; exactUnitsCoalesced = 0
+        sharedModelUnits = 0; ramCaptionBypasses = 0; exactCaptionHits = 0; exactUnitsCoalesced = 0
         speculativeUnitCounts = [:]; queueWaitSamples = [:]
         temporaryMemoryHits = 0; startingRAMEntries = ramEntryCount?() ?? 0
         started = Date()
@@ -974,6 +979,7 @@ final class Diagnostics: ObservableObject {
             "completedConfirmedUnitsRetained": completedWorkRecoveredUnits,
             "temporaryMemoryHits": temporaryMemoryHits,
             "exactCaptionHits": exactCaptionHits,
+            "ramCaptionBypasses": ramCaptionBypasses,
             "sharedInFlightUnits": sharedModelUnits,
             "exactUnitsCoalesced": exactUnitsCoalesced,
             "speculativeUnitsRetained": speculativeUnitCounts["retained", default: 0],

@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.7.1"
-    static let build = 55
+    static let version = "1.7.2"
+    static let build = 56
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("1.7.2", "Complete exact RAM captions can bypass an occupied model lane without waiting for whole-caption repetition; shared complete-result assembly preserves speaker labels, protected words and glossary; explicit RAM-caption bypass accounting. Performance validation in progress."),
         ("1.7.1", "Process-only temporary-memory test toggle with speculation; independent normal RAM and saved history; exact assembled-caption reuse around obsolete model work; queue-owner and speculative-unit accounting; corrected bypass/miss labels and complete diagnostic allowlists."),
         ("1.7.0", "Normal-model performance: recover completed obsolete work, coalesce durable sentence writes, avoid redundant memory writes and reuse indexed lookup statements. Exclude own-app interface OCR and reset acquisition across app switches. Independent model timing samples and reproducible performance acceptance tooling."),
         ("1.5.0", "Restored speculative head starts and recovered exact completed work; stable localhost capture transport; successful OCR fallback resets; disposable warm-up and idle model cancellation; fewer duplicate database health queries; protected-name, photo-workspace and private-history fixes; median/mean/P90/P95 comparisons and continuity evidence. Retains selective legacy cleanup."),

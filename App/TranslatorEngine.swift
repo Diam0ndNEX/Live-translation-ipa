@@ -80,14 +80,6 @@ struct HistoryItem: Identifiable, Codable {
     var note: String? = nil
 }
 
-/// One speaker's line inside a block (label stays untranslated).
-private struct TUnit {
-    var label: String?
-    var sentences: [String]
-    var out: [String?]
-    var tokens: [(String, String)]
-}
-
 @MainActor
 final class TranslatorEngine: ObservableObject {
     /// Everything a preset remembers.
@@ -1307,25 +1299,29 @@ final class TranslatorEngine: ObservableObject {
         queued = blocks
         queuedAt = Date()
         queuedWaitOwner = busy ? activeQueueOwner : .scheduling
-        // Previously assembled exact results need no model lane. Never bypass OCR
+        // A complete exact RAM result needs no model lane. Never bypass OCR
         // confirmation, generation checks or the presentation policy.
+        let cacheProbeStarted = Date()
         if busy, !bypassMemory, memoryTestMode.allowsReuse,
            let key = ExactCaptionIdentity.key(blocks: blocks, source: sourceCode,
                                               target: targetCode, rules: memoryRuleToken),
-           let ready = ram.captions[key] {
+           let ready = cachedCaption(blocks, identity: key) {
             queued = nil
-            diag.noteExactCaptionReuse()
             if diag.enabled { diag.s.translations += 1; diag.s.chars += blocks.joined().count }
-            translateMs = 0
+            translateMs = Date().timeIntervalSince(cacheProbeStarted) * 1000
+            languageFailures = 0
+            diag.recordQueueWait(owner: .scheduling,
+                durationMs: max(0, cacheProbeStarted.timeIntervalSince(queuedAt) * 1000),
+                candidate: queuedPacket?.candidateID)
             status = "\(sourceCode) → \(targetCode) ✓"
             if memoryTestMode == .temporaryMemory { diag.noteTemporaryReuse(count: ready.sentences) }
             let now = Date()
             let timing = PresentationTiming(packet: queuedPacket, firstSeen: queuedTs,
-                queuedAt: queuedAt, processingAt: now, processingMs: 0,
+                queuedAt: queuedAt, processingAt: cacheProbeStarted, processingMs: translateMs,
                 savedRequests: 0, readyAt: now)
-            diag.recordTranslate(ms: 0, sentences: ready.sentences, from: sourceCode,
+            diag.recordTranslate(ms: translateMs, sentences: ready.sentences, from: sourceCode,
                                  to: targetCode, preview: ready.translated)
-            diag.trace(queuedPacket?.candidateID, stage: "ready", detail: "Exact assembled RAM result")
+            diag.trace(queuedPacket?.candidateID, stage: "ready", detail: "Complete exact RAM caption")
             schedulePresentation(joined, ready.translated, generation: generation,
                                  context: contextRevision, timing: timing)
             return
@@ -1537,13 +1533,6 @@ final class TranslatorEngine: ObservableObject {
         return result
     }
 
-    /// User glossary ("word=replacement" lines) applied to the finished translation.
-    private func applyGlossary(_ s: String) -> String {
-        var out = s
-        for (from, to) in pairs("glossary") { out = out.replacingOccurrences(of: from, with: to, options: [.caseInsensitive]) }
-        return out
-    }
-
     /// A partial model response can be kept only in the exact live context.
     /// Never present or persist a speculative unit before confirmation.
     private func retainIncrementalSpeculation(key: String?, value: String,
@@ -1584,6 +1573,76 @@ final class TranslatorEngine: ObservableObject {
             let tokens = TextIntel.protect(part.text, words: protected)
             return PreparedSourceUnit(label: part.label, sentences: splitSentences(tokens.text), tokens: tokens.tokens)
         }
+    }
+
+    /// Synchronous and RAM-only: safe while the model lane is awaiting unrelated work.
+    /// Probe every current unit before consuming provenance or confirming any result.
+    private func cachedCaption(_ blocks: [String], identity: String) -> ExactCaptionResult? {
+        if let ready = ram.captions[identity] {
+            diag.noteExactCaptionReuse()
+            return ready
+        }
+        guard sourceCode != "auto", memoryTestMode.allowsReuse, !bypassMemory else { return nil }
+        let source = Locale.Language(identifier: sourceCode)
+        guard source.languageCode != Locale.Language(identifier: targetCode).languageCode else { return nil }
+        let id = source.minimalIdentifier
+        let rules = memoryRuleToken
+        let never = list("neverTranslate", lower: false)
+        let fixes = pairs("sourceFixes")
+        var units: [[CaptionTranslationUnit]] = []
+        var hits: [(key: String, text: String, value: String, lookupMs: Double)] = []
+        for raw in blocks {
+            let text = cleanedSource(raw, enabled: flag("cleanOCR", true), fixes: fixes)
+            var row: [CaptionTranslationUnit] = []
+            for part in preparedSourceUnits(text, language: source.languageCode?.identifier ?? id,
+                    slang: flag("slang", true), speakers: flag("speakerDetect", true), protected: never) {
+                var values: [String?] = []
+                for sentence in part.sentences {
+                    let key = PipelineSafety.cacheKey(source: id, target: targetCode, text: sentence,
+                        protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: rules)
+                    let lookupStarted = ProcessInfo.processInfo.systemUptime
+                    guard let value = ram.values[key],
+                          !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+                    hits.append((key, sentence, value,
+                        (ProcessInfo.processInfo.systemUptime - lookupStarted) * 1000))
+                    values.append(value)
+                }
+                row.append(CaptionTranslationUnit(label: part.label, sentences: part.sentences,
+                                                  out: values, tokens: part.tokens))
+            }
+            units.append(row)
+        }
+        guard let result = CaptionAssembly.complete(units, glossary: pairs("glossary")) else { return nil }
+        // No suspension above: mode, rules, bank and candidate cannot change mid-probe.
+        let mayPersist = allowsPersistentTranslations && !flag("privateSession", false)
+        for hit in hits {
+            touchCache(hit.key)
+            let speculative = ram.specKeys.remove(hit.key) != nil
+            let saved = ram.savedKeys.remove(hit.key) != nil
+            if speculative {
+                diag.noteSpeculativeUnit("reused")
+                if let origin = ram.speculativeOrigins.removeValue(forKey: hit.key) { ram.speculationWindow.reuse(origin) }
+            }
+            diag.recordMemory(speculative ? .speculativeHit : .ramHit,
+                durationMs: hit.lookupMs,
+                candidate: queuedPacket?.candidateID, frameIndex: queuedPacket?.frames, unitKey: hit.key)
+            if mayPersist, TranslationUnitPlanning.mayRemember(hit.text, confirmed: true),
+               ram.confirmedKeys.insert(hit.key).inserted, !saved {
+                queueMemory(hit.key, hit.value, independentlyConfirmed: speculative)
+            }
+            if diag.enabled {
+                if speculative { diag.s.specHits += 1 }
+                else if saved { diag.s.savedHits += 1 }
+                else { diag.s.cacheHits += 1 }
+            }
+        }
+        for row in units { for unit in row { if let label = unit.label { diag.learn(label) } } }
+        diag.recordSourceLanguage(id, origin: .selected)
+        if diag.enabled { diag.s.sentences += hits.count }
+        diag.noteRAMCaptionBypass()
+        let ready = ExactCaptionResult(translated: result, sentences: hits.count)
+        ram.retainCaption(key: identity, result: ready)
+        return ready
     }
 
     private func sharedInFlightUnits(_ blocks: [String]) -> Int {
@@ -1643,7 +1702,7 @@ final class TranslatorEngine: ObservableObject {
         let fixes = pairs("sourceFixes")
         let never = list("neverTranslate", lower: false)
 
-        var units: [[TUnit]] = []
+        var units: [[CaptionTranslationUnit]] = []
         var pending: [String: [(b: Int, u: Int, s: Int, text: String, key: String)]] = [:]
         var srcLangs: [String: Locale.Language] = [:]
         var eligibleMemoryKeys = Set<String>()
@@ -1693,11 +1752,11 @@ final class TranslatorEngine: ObservableObject {
                                detail: "No compatible source language selected")
                 }
                 unresolvedSource = true
-                units.append([TUnit(label: nil, sentences: [text], out: [text], tokens: [])])
+                units.append([CaptionTranslationUnit(label: nil, sentences: [text], out: [text], tokens: [])])
                 continue
             }
             guard choice.language.languageCode != target.languageCode else {
-                units.append([TUnit(label: nil, sentences: [text], out: [text], tokens: [])])
+                units.append([CaptionTranslationUnit(label: nil, sentences: [text], out: [text], tokens: [])])
                 continue
             }
             let src = choice.language
@@ -1721,7 +1780,7 @@ final class TranslatorEngine: ObservableObject {
                 selectedSource: sourceCode != "auto", confidence: sourceConfidence, confirmed: display) && allowsPersistentTranslations
             let parts = preparedSourceUnits(text, language: src.languageCode?.identifier ?? id,
                 slang: slangOn, speakers: speakerOn, protected: never)
-            var row: [TUnit] = []
+            var row: [CaptionTranslationUnit] = []
             for (ui, d) in parts.enumerated() {
                 if display, let name = d.label { diag.learn(name) }
                 let sentences = d.sentences
@@ -1820,7 +1879,7 @@ final class TranslatorEngine: ObservableObject {
                         pending[id, default: []].append((bi, ui, si, s, key))
                     }
                 }
-                row.append(TUnit(label: d.label, sentences: sentences, out: outs, tokens: d.tokens))
+                row.append(CaptionTranslationUnit(label: d.label, sentences: sentences, out: outs, tokens: d.tokens))
             }
             units.append(row)
         }
@@ -1961,16 +2020,10 @@ final class TranslatorEngine: ObservableObject {
             status = failureReason ?? "Translation incomplete – keeping the previous result. Tap Retry."
             return
         }
-        var outBlocks: [String] = []
-        for row in units {
-            var lines: [String] = []
-            for u in row {
-                var body: [String] = []
-                for (si, s) in u.sentences.enumerated() { body.append(u.out[si] ?? s) }
-                let joined = TextIntel.restore(body.joined(separator: " "), tokens: u.tokens)
-                lines.append(u.label.map { "\($0): \(joined)" } ?? joined)
-            }
-            outBlocks.append(applyGlossary(lines.joined(separator: "\n")))
+        guard let assembled = CaptionAssembly.complete(units, glossary: pairs("glossary")) else {
+            lastHandled = ""
+            status = "Translation incomplete – keeping the previous result. Tap Retry."
+            return
         }
         languageFailures = 0
         translateMs = Date().timeIntervalSince(t0) * 1000
@@ -1981,18 +2034,18 @@ final class TranslatorEngine: ObservableObject {
            let key = ExactCaptionIdentity.key(blocks: blocks, source: sourceCode,
                                               target: targetCode, rules: rules) {
             ram.retainCaption(key: key, result: ExactCaptionResult(
-                translated: outBlocks.joined(separator: "\n"), sentences: sentenceCount))
+                translated: assembled, sentences: sentenceCount))
         }
         diag.recordTranslate(ms: translateMs, sentences: sentenceCount,
                              from: srcLangs.keys.sorted().joined(separator: "+"), to: targetCode,
-                             preview: outBlocks.joined(separator: " / "))
+                             preview: assembled)
         if diag.enabled { diag.s.translations += 1 }
         if diag.enabled { diag.s.chars += blocks.joined().count }
         status = "\(srcLangs.keys.sorted().joined(separator: "+")) → \(targetCode) ✓"
         let timing = PresentationTiming(packet: currentPacket, firstSeen: currentTs,
             queuedAt: currentQueuedAt, processingAt: processingStarted, processingMs: translateMs,
             savedRequests: savedRequests, readyAt: Date())
-        schedulePresentation(blocks.joined(separator: "\n"), outBlocks.joined(separator: "\n"),
+        schedulePresentation(blocks.joined(separator: "\n"), assembled,
                              generation: workGeneration, context: workContext, timing: timing)
     }
 
