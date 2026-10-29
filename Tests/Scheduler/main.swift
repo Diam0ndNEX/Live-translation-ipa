@@ -23,6 +23,12 @@ import Foundation
         // Keep an unrelated model suspended. Saved text must arrive before it
         // releases: this is the actual asynchronous coordinator used by the app.
         var modelReleased = false
+        var releaseModel: CheckedContinuation<Void, Never>?
+        let occupiedModel = Task { @MainActor in
+            await withCheckedContinuation { releaseModel = $0 }
+            modelReleased = true
+        }
+        await until { releaseModel != nil }
         let accepted = probe.start(keys: ["A", "A", "B"], isCurrent: { current }, lookup: lookup,
             retain: { values[$0] = $1 }, completed: { completed += 1 })
         precondition(accepted)
@@ -33,7 +39,9 @@ import Foundation
         pending.removeValue(forKey: "B")!.resume(returning: "Second")
         await until { completed == 1 }
         precondition(lookups == ["A", "B"] && values["B"] == "Second" && !modelReleased)
-        modelReleased = true
+        releaseModel?.resume()
+        await occupiedModel.value
+        precondition(modelReleased)
 
         probe.start(keys: ["old"], isCurrent: { current }, lookup: lookup,
             retain: { values[$0] = $1 }, completed: { completed += 1 })
@@ -77,6 +85,28 @@ import Foundation
         precondition(!probe.start(keys: [], isCurrent: { current }, lookup: lookup,
             retain: { values[$0] = $1 }, completed: { completed += 1 }))
         probe.cancel()
+
+        final class Handle { var cancelled = false }
+        let owner = SpeculativeSessionOwner<Handle> { $0.cancelled = true }
+        let warmed = Handle()
+        var finishModel: CheckedContinuation<Void, Never>?
+        let obsoleteTask = Task { @MainActor in
+            let lease = owner.begin(key: "pt>en|default", make: { warmed })
+            await withCheckedContinuation { finishModel = $0 }
+            precondition(Task.isCancelled, "This completed model result belongs to an obsolete task")
+            owner.finish(lease, reusable: true)
+        }
+        await until { finishModel != nil }
+        obsoleteTask.cancel()
+        finishModel?.resume()
+        await obsoleteTask.value
+        precondition(owner.takeReusable(key: "pt>en|default") === warmed && !warmed.cancelled,
+            "Cooperative task replacement must preserve a successfully completed warm session")
+        let invalidated = owner.begin(key: "pt>en|default", make: { Handle() })
+        owner.reset()
+        owner.finish(invalidated, reusable: true)
+        precondition(invalidated.session.cancelled && owner.takeReusable(key: "pt>en|default") == nil,
+            "Context invalidation still permanently retires obsolete sessions")
         print("Real asynchronous saved-caption bypass, replacement, context, miss and bounds checks passed")
     }
 }

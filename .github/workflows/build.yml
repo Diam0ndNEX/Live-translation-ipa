@@ -31,7 +31,7 @@ jobs:
           /tmp/pipeline-tests
       - name: Check asynchronous caption scheduler
         run: |
-          swiftc -parse-as-library Shared/CaptionMemoryProbe.swift Tests/Scheduler/main.swift -o /tmp/scheduler-tests
+          swiftc -parse-as-library Shared/CaptionMemoryProbe.swift Shared/SpeculativeSessionOwner.swift Tests/Scheduler/main.swift -o /tmp/scheduler-tests
           /tmp/scheduler-tests
       - name: Verify performance acceptance gate
         run: |

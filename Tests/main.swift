@@ -931,6 +931,8 @@ check(captureEvidence.state == .active, "An obsolete extension cannot stop the r
 captureEvidence.receive(frames: 3, session: "second", stopped: true, at: 15)
 check(captureEvidence.state == .stopped, "An explicit stop clears readiness immediately")
 captureEvidence.requested(at: 20)
+captureEvidence.tick(at: 21)
+check(captureEvidence.state == .waiting, "A restart request must discard the old heartbeat deadline")
 captureEvidence.tick(at: 50)
 check(captureEvidence.state == .idle, "A cancelled broadcast picker cannot remain waiting indefinitely")
 captureEvidence.receive(frames: 1, session: nil, stopped: false, at: 51)

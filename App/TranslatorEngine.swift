@@ -657,7 +657,8 @@ final class TranslatorEngine: ObservableObject {
         interruptWarmupForLiveWork()
         contextRevision += 1
         generation += 1
-        cancelDrain(preemptSpeculation: true)
+        cancelDrain()
+        if speculativeSessions.cancelActive() { diag.noteModelState("speculative_stop_requested") }
         speculativeSessions.reset()
         deferredConfirmedPacket = nil
         confirmedHandoffDeadlineTask?.cancel()
@@ -1021,11 +1022,11 @@ final class TranslatorEngine: ObservableObject {
             cancelPresentation()
             queued = nil; specQueued = nil
             let shared = sharedInFlightUnits(candidateTexts)
-            // A confirmed caption first gets its memory-only route. Cancelling
-            // the speculative session here would discard its warm state before
-            // enqueue can discover that the replacement needs no model at all.
+            // Confirmed captions first get their memory-only route. Enqueue
+            // owns task cancellation after checking exact memory and in-flight
+            // sharing, so reusable model work survives a ready replacement.
             if shared == 0, !confirmed || activeQueueOwner != .speculative {
-                cancelDrain(preemptSpeculation: confirmed)
+                cancelDrain()
             } else if shared > 0, activeQueueOwner == .confirmed {
                 diag.noteSharedModelUnits(shared, confirmed: true)
             }
@@ -1362,7 +1363,7 @@ final class TranslatorEngine: ObservableObject {
             let shared = sharedInFlightUnits(blocks)
             if shared == 0 {
                 if diag.enabled { diag.s.specPreemptionRequested += 1 }
-                cancelDrain(preemptSpeculation: true)
+                cancelDrain()
             }
             else { diag.noteSharedModelUnits(shared) }
         } else if currentSpeculativeText == joined {
@@ -1435,14 +1436,13 @@ final class TranslatorEngine: ObservableObject {
             letters: text.filter(\.isLetter).count)
     }
 
-    /// Swift Task cancellation alone may leave Apple's model request running.
-    /// Only the disposable speculative session receives explicit cancellation;
-    /// confirmed work retains its own warm session and the drain still awaits unwind.
-    private func cancelDrain(preemptSpeculation: Bool) {
+    /// Obsolete work loses presentation authority immediately. Routine subtitle
+    /// replacement cancels its task without permanently poisoning the model
+    /// session: completed valid requests may return that warm handle for reuse.
+    /// Context invalidation explicitly retires the speculative lease separately.
+    /// The single drain still awaits unwind before another model call begins.
+    private func cancelDrain() {
         drainTask?.cancel()
-        if preemptSpeculation, speculativeSessions.cancelActive() {
-            diag.noteModelState("speculative_stop_requested")
-        }
     }
 
     private func startDrain() {

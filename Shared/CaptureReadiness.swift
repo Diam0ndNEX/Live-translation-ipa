@@ -34,6 +34,8 @@ struct CaptureReadiness {
     mutating func requested(at now: TimeInterval) {
         guard ![State.active, .connected].contains(state) else { return }
         requestedAt = now
+        lastPacketAt = nil
+        frameReceived = false
         state = .waiting
     }
 

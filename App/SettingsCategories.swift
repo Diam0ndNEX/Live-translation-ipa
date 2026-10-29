@@ -43,7 +43,7 @@ struct TranslationSettings: View {
                     }
                 }
                 Toggle("Adapt early translation to usefulness", isOn: $adaptiveSpeculation)
-                Text("Reduces speculative model work if many early results go unused, while keeping opportunities to recover.")
+                Text("Reduces speculative model work when early results go unused or consume too much confirmed-caption waiting time. Keeps recovery probes; confirmed subtitles are never throttled.")
                     .font(.footnote).foregroundStyle(.secondary)
             } header: { Text("Translation scheduling") }
 

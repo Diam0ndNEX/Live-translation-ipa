@@ -269,7 +269,10 @@ import Foundation
                             "queueBehindSpeculationMs": DiagnosticDistribution([30, 40])],
             events: [StructuredDiagnosticEvent(id: UUID(), timestamp: Date(), sessionID: session,
                 candidateID: nil, stage: "runtime_state", outcome: "external_capture_period",
-                reasonCode: "external_capture_period", durationMs: nil, privacy: "metadataOnly")],
+                reasonCode: "external_capture_period", durationMs: nil, privacy: "metadataOnly"),
+                StructuredDiagnosticEvent(id: UUID(), timestamp: Date(), sessionID: session,
+                    candidateID: nil, stage: "runtime_state", outcome: "capture_stopped",
+                    reasonCode: "capture_stopped", durationMs: nil, privacy: "metadataOnly")],
             measurementBoundary: "OCR through PiP enqueue", textCapture: false)
         let newModeRoundtrip = try await writer.decode(try await writer.encode(newModeSnapshot))
         precondition(newModeRoundtrip.settings["translationTestMode"] == "temporaryMemory" &&
@@ -292,6 +295,8 @@ import Foundation
                      newModeRoundtrip.distributions["speculativeStopReleaseMs"]?.count == 2 &&
                      newModeRoundtrip.distributions["queueBehindSpeculationMs"]?.count == 2,
                      "New timing and reuse fields must not disappear in archive filtering")
+        precondition(newModeRoundtrip.events.contains { $0.reasonCode == "capture_stopped" },
+                     "Explicit capture stop must remain readable through archive privacy filtering")
         precondition(newModeRoundtrip.events[0].reasonCode == "external_capture_period",
                      "Fixed app-visibility codes must remain readable, not redacted")
 

@@ -221,7 +221,7 @@ actor DiagnosticExportWriter {
                 "warmup_source_unresolved", "warmup_predicted_source", "warmup_preempted",
                 "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started", "legacy_idle_completed",
                 "legacy_idle_deferred", "app_interface_visible", "external_capture_period", "app_started", "capture_config_changed",
-                "capture_idle", "capture_live", "capture_paused", "capture_frozen"
+                "capture_idle", "capture_live", "capture_paused", "capture_frozen", "capture_stopped"
             ]).union(stageCodes)
         let safeEvents = snapshot.events.suffix(2400).map { event in
             StructuredDiagnosticEvent(id: event.id, timestamp: event.timestamp,
