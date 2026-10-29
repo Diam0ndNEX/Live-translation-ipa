@@ -1,9 +1,15 @@
-# ScreenLingo v1.7.2 · build 57
+# ScreenLingo v1.7.2 · build 58
 
 Speculative requests own a separate reusable session: obsolete work receives an
 explicit session stop without invalidating the warm confirmed session. The drain
 waits for release before issuing another model request. Cancellation release timing
 and session creation counts make the benefit and overhead measurable.
+
+Confirmed batches retain complete sentence responses as they arrive. A queued
+replacement can assemble its full caption from those exact units before unrelated
+responses finish; incomplete batches retry only unfinished request units. No partial
+caption is presented. Fresh-only testing keeps its bypass policy, and optional
+incremental speculative recovery still respects its existing toggle.
 
 Complete exact RAM captions can bypass a busy model lane without needing prior
 whole-caption repetition. Saved-memory-dominant, low-yield scenes use bounded

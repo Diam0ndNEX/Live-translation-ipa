@@ -856,3 +856,22 @@ await MainActor.run {
     precondition(!owner.cancelActive(), "An idle lane has no model request to cancel")
 }
 print("v1.7.2 speculative model ownership, explicit preemption and warm reuse checks passed")
+
+let contextIndexedPlan = TranslationBatchPlan(["Zqa arrived.", "Zqa arrived.", "Zqa arrived."],
+    contexts: ["speaker=Maria", "speaker=Joana", "speaker=Maria"])
+check(contextIndexedPlan.uniqueContexts == ["speaker=Maria", "speaker=Joana"],
+      "Streaming responses retain exact request contexts even when placeholder wording is identical")
+check(contextIndexedPlan.expand(["Maria arrived.", "Joana arrived."]) ==
+    ["Maria arrived.", "Joana arrived.", "Maria arrived."],
+    "Completed streamed units preserve protected-name context and duplicate positions")
+var streamedOutputs: [String?] = [nil, nil]
+let currentStreamCaption = { () -> String? in
+    CaptionAssembly.complete([[CaptionTranslationUnit(label: "Ana", sentences: ["A.", "B."],
+        out: streamedOutputs, tokens: [])]], glossary: [])
+}
+streamedOutputs[1] = "Second."
+check(currentStreamCaption() == nil, "An out-of-order completed unit cannot expose an incomplete caption")
+streamedOutputs[0] = "First."
+check(currentStreamCaption() == "Ana: First. Second.",
+      "A full replacement can assemble in reading order once all of its required units complete")
+print("v1.7.2 streamed unit context mapping and complete-caption wakeup checks passed")

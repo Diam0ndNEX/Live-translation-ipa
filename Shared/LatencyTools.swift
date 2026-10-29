@@ -9,9 +9,10 @@ enum CaptureCadence {
 
 struct TranslationBatchPlan {
     let unique: [String]
+    let uniqueContexts: [String]
     private let positions: [Int]
     init(_ sentences: [String], contexts: [String] = []) {
-        var unique: [String] = [], positions: [Int] = [], lookup: [String: Int] = [:]
+        var unique: [String] = [], identities: [String] = [], positions: [Int] = [], lookup: [String: Int] = [:]
         for (position, sentence) in sentences.enumerated() {
             let identity = contexts.count == sentences.count ? contexts[position] : sentence
             if let index = lookup[identity] { positions.append(index) }
@@ -19,9 +20,10 @@ struct TranslationBatchPlan {
                 lookup[identity] = unique.count
                 positions.append(unique.count)
                 unique.append(sentence)
+                identities.append(identity)
             }
         }
-        self.unique = unique; self.positions = positions
+        self.unique = unique; self.uniqueContexts = identities; self.positions = positions
     }
     func expand(_ results: [String?]) -> [String?]? {
         guard results.count == unique.count else { return nil }

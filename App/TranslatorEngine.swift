@@ -1309,33 +1309,7 @@ final class TranslatorEngine: ObservableObject {
         queued = blocks
         queuedAt = Date()
         queuedWaitOwner = busy ? activeQueueOwner : .scheduling
-        // A complete exact RAM result needs no model lane. Never bypass OCR
-        // confirmation, generation checks or the presentation policy.
-        let cacheProbeStarted = Date()
-        if busy, !bypassMemory, memoryTestMode.allowsReuse,
-           let key = ExactCaptionIdentity.key(blocks: blocks, source: sourceCode,
-                                              target: targetCode, rules: memoryRuleToken),
-           let ready = cachedCaption(blocks, identity: key) {
-            queued = nil
-            if diag.enabled { diag.s.translations += 1; diag.s.chars += blocks.joined().count }
-            translateMs = Date().timeIntervalSince(cacheProbeStarted) * 1000
-            languageFailures = 0
-            diag.recordQueueWait(owner: .scheduling,
-                durationMs: max(0, cacheProbeStarted.timeIntervalSince(queuedAt) * 1000),
-                candidate: queuedPacket?.candidateID)
-            status = "\(sourceCode) → \(targetCode) ✓"
-            if memoryTestMode == .temporaryMemory { diag.noteTemporaryReuse(count: ready.sentences) }
-            let now = Date()
-            let timing = PresentationTiming(packet: queuedPacket, firstSeen: queuedTs,
-                queuedAt: queuedAt, processingAt: cacheProbeStarted, processingMs: translateMs,
-                savedRequests: 0, readyAt: now)
-            diag.recordTranslate(ms: translateMs, sentences: ready.sentences, from: sourceCode,
-                                 to: targetCode, preview: ready.translated)
-            diag.trace(queuedPacket?.candidateID, stage: "ready", detail: "Complete exact RAM caption")
-            schedulePresentation(joined, ready.translated, generation: generation,
-                                 context: contextRevision, timing: timing)
-            return
-        }
+        if presentQueuedFromRAMIfComplete() { return }
         if SubtitlePerformancePolicy.preemptSpeculation(activeText: currentSpeculativeText, confirmedText: joined) {
             // Different input cannot supply an exact whole-caption reuse result.
             // Cancellation unwinds the single drain before confirmed work starts.
@@ -1349,6 +1323,40 @@ final class TranslatorEngine: ObservableObject {
             if diag.enabled { diag.s.specMatchingConfirmation += 1 }
         }
         startDrain()
+    }
+
+    @discardableResult
+    private func presentQueuedFromRAMIfComplete() -> Bool {
+        guard let blocks = queued else { return false }
+        let joined = blocks.joined(separator: "\n")
+        // A complete exact RAM result needs no model lane. Never bypass OCR
+        // confirmation, generation checks or the presentation policy.
+        let cacheProbeStarted = Date()
+        if busy, !bypassMemory, memoryTestMode.allowsReuse,
+           let key = ExactCaptionIdentity.key(blocks: blocks, source: sourceCode,
+                                              target: targetCode, rules: memoryRuleToken),
+           let ready = cachedCaption(blocks, identity: key) {
+            queued = nil
+            if diag.enabled { diag.s.translations += 1; diag.s.chars += blocks.joined().count }
+            translateMs = Date().timeIntervalSince(cacheProbeStarted) * 1000
+            languageFailures = 0
+            diag.recordQueueWait(owner: queuedWaitOwner,
+                durationMs: max(0, cacheProbeStarted.timeIntervalSince(queuedAt) * 1000),
+                candidate: queuedPacket?.candidateID)
+            status = "\(sourceCode) → \(targetCode) ✓"
+            if memoryTestMode == .temporaryMemory { diag.noteTemporaryReuse(count: ready.sentences) }
+            let now = Date()
+            let timing = PresentationTiming(packet: queuedPacket, firstSeen: queuedTs,
+                queuedAt: queuedAt, processingAt: cacheProbeStarted, processingMs: translateMs,
+                savedRequests: 0, readyAt: now)
+            diag.recordTranslate(ms: translateMs, sentences: ready.sentences, from: sourceCode,
+                                 to: targetCode, preview: ready.translated)
+            diag.trace(queuedPacket?.candidateID, stage: "ready", detail: "Complete exact RAM caption")
+            schedulePresentation(joined, ready.translated, generation: generation,
+                                 context: contextRevision, timing: timing)
+            return true
+        }
+        return false
     }
 
     private func handleClear() {
@@ -1554,23 +1562,31 @@ final class TranslatorEngine: ObservableObject {
         return result
     }
 
-    /// A partial model response can be kept only in the exact live context.
-    /// Never present or persist a speculative unit before confirmation.
-    private func retainIncrementalSpeculation(key: String?, value: String,
-                                               context: Int, rules: String, destination: String,
-                                               speculativeID: UInt64?) {
-        guard let key, context == contextRevision,
-              rules == memoryRuleToken, destination == targetCode,
-              !bypassMemory, !flag("freshTranslationTest", false),
+    /// Keep a completed unit, never a partial sentence. The old caption is not
+    /// presented or persisted; a queued replacement must assemble every unit.
+    private func retainCompletedModelUnit(key: String, value: String,
+        context: Int, rules: String, destination: String, mode: TranslationTestMode,
+        bank: TranslationRAMBank, confirmed: Bool, speculativeID: UInt64?, epoch: Date) {
+        guard context == contextRevision, mode == memoryTestMode, bank === ram,
+              mode.allowsReuse, !bypassMemory, rules == memoryRuleToken,
+              destination == targetCode,
               !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              ram.values[key] == nil else { return }
-        ram.values[key] = value
-        if ram.specKeys.insert(key).inserted { diag.noteSpeculativeUnit("retained") }
-        if let speculativeID { ram.speculativeOrigins[key] = speculativeID }
-        ram.savedKeys.remove(key)
+              bank.values[key] == nil else { return }
+        bank.values[key] = value
+        bank.savedKeys.remove(key)
+        if !confirmed {
+            if bank.specKeys.insert(key).inserted, diag.started == epoch { diag.noteSpeculativeUnit("retained") }
+            if let speculativeID { bank.speculativeOrigins[key] = speculativeID }
+        }
         touchCache(key)
         trimCache()
-        if diag.enabled { diag.s.specRetainedUnits += 1 }
+        if diag.started == epoch {
+            if confirmed { diag.noteCompletedWorkRecovery(1) }
+            else if diag.enabled { diag.s.specRetainedUnits += 1 }
+        }
+        // A needed result may arrive before unrelated units in the old batch.
+        // This uses the existing complete-caption and presentation safeguards.
+        presentQueuedFromRAMIfComplete()
     }
 
     private struct PreparedSourceUnit {
@@ -1937,19 +1953,19 @@ final class TranslatorEngine: ObservableObject {
                 diag.trace(workCandidate, stage: "freshTranslation",
                            detail: "Uncached units submitted to on-device translation")
             }
-            let streamPartials = !display && installed && flag("incrementalBatchRecovery", false)
+            let streamPartials = installed && workMode.allowsReuse &&
+                (display || flag("incrementalBatchRecovery", false))
+            var completedParts: [Int: String] = [:]
             var partialHandler: (@MainActor (Int, String) -> Void)?
             if streamPartials {
-                let exactKeys: [String?] = plan.unique.map { text in
-                    let matchingKeys = Set(items.filter { $0.text == text }.map { $0.key })
-                    return matchingKeys.count == 1 ? matchingKeys.first : nil
-                }
+                let exactKeys = plan.uniqueContexts
                 partialHandler = { [weak self] index, value in
                     guard index >= 0, index < exactKeys.count else { return }
-                    self?.retainIncrementalSpeculation(
-                        key: exactKeys[index], value: value,
+                    completedParts[index] = value
+                    self?.retainCompletedModelUnit(key: exactKeys[index], value: value,
                         context: workContext, rules: rules, destination: destination,
-                        speculativeID: speculativeID)
+                        mode: workMode, bank: workRAM, confirmed: display,
+                        speculativeID: speculativeID, epoch: diagnosticEpoch)
                 }
             }
             modelUnitKeysInFlight = Set(items.map { $0.key })
@@ -2001,8 +2017,12 @@ final class TranslatorEngine: ObservableObject {
                 if !display { return }
                 diag.log("Batch failed – retrying unique sentences")
                 uniqueResults = []
-                for sentence in plan.unique {
+                for (index, sentence) in plan.unique.enumerated() {
                     guard isCurrent() else { return }
+                    if let completed = completedParts[index] {
+                        uniqueResults.append(completed)
+                        continue
+                    }
                     if !display && diag.enabled { diag.s.specModelRequests += 1 }
                     let result = await translateBatch([sentence], source: src, target: target, installed: installed, speculative: !display)
                     uniqueResults.append(result?.count == 1 ? result?.first : nil)
