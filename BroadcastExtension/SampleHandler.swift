@@ -317,6 +317,11 @@ class SampleHandler: RPBroadcastSampleHandler {
         let heights = lines.map(\.h).sorted()
         feedback.textHeight = heights.isEmpty ? 0 : heights[min(heights.count-1, Int(Double(heights.count-1)*0.8))]
         let recognizedKey = lines.map(\.t).joined(separator: "\n")
+        // A new caption may extend beyond the old crop. Rediscover the whole
+        // configured area before admitting changed text to source confirmation.
+        if focusEnabled, captionFocus.requiresRediscovery(scan: focus, recognized: recognizedKey, previous: lastRecognizedKey) {
+            return
+        }
         if recognizedKey != lastRecognizedKey { lastChanged = Date(); lastRecognizedKey = recognizedKey }
 
         if lines.isEmpty {

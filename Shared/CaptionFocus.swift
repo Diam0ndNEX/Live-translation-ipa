@@ -21,6 +21,11 @@ struct CaptionFocus {
         guard upper - lower >= 0.04 else { region = nil; return Scan(y0: y0, y1: y1, broad: true) }
         return Scan(y0: lower, y1: upper, broad: false)
     }
+    mutating func requiresRediscovery(scan: Scan, recognized: String, previous: String) -> Bool {
+        guard !scan.broad, recognized != previous else { return false }
+        region = nil
+        return true
+    }
     mutating func observe(bounds: [(center: Double, height: Double, confidence: Double)]) {
         guard !bounds.isEmpty, bounds.allSatisfy({ $0.confidence >= 0.85 && $0.height > 0 }) else { region = nil; return }
         let low = bounds.map { $0.center - $0.height / 2 }.min()!
