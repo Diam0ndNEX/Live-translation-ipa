@@ -1555,11 +1555,17 @@ final class TranslatorEngine: ObservableObject {
         return (Locale.Language(identifier: choice.code), choice.origin)
     }
 
+    private var lowLatencyModel: Bool {
+        if #available(iOS 26.4, *) { return flag("lowLatencyTranslation", false) }
+        return false
+    }
+
     private func pairStatus(_ src: Locale.Language, _ target: Locale.Language) async -> LanguageAvailability.Status {
         if target.minimalIdentifier == Locale.Language(identifier: targetCode).minimalIdentifier,
            src.minimalIdentifier == Locale.Language(identifier: sourceCode).minimalIdentifier,
            let s = langStatus[sourceCode] { return s }
-        let k = "\(src.minimalIdentifier)>\(target.minimalIdentifier)|\(flag("lowLatencyTranslation", false) ? "low" : "default")"
+        let k = TranslationModelMemoryPolicy.sessionKey(source: src.minimalIdentifier,
+            target: target.minimalIdentifier, lowLatency: lowLatencyModel)
         if let c = availCache[k], Date().timeIntervalSince(c.0) < 60 { return c.1 }
         let availability: LanguageAvailability
         if #available(iOS 26.4, *), flag("lowLatencyTranslation", false) {
@@ -2201,7 +2207,8 @@ final class TranslatorEngine: ObservableObject {
                                 installed: Bool, speculative: Bool = false,
                                 partial: (@MainActor (Int, String) -> Void)? = nil) async -> [String]? {
         if #available(iOS 26.0, *), installed {
-            let k = "\(source.minimalIdentifier)>\(targetCode)|\(flag("lowLatencyTranslation", false) ? "low" : "default")"
+            let k = TranslationModelMemoryPolicy.sessionKey(source: source.minimalIdentifier,
+                target: target.minimalIdentifier, lowLatency: lowLatencyModel)
             guard !Task.isCancelled else { return nil }
             if diag.enabled { diag.s.sessionKind = "Direct session (iOS 26)" }
             if speculative {
@@ -3150,7 +3157,8 @@ final class TranslatorEngine: ObservableObject {
         guard src.languageCode != target.languageCode,
               let word = Self.warmWords[src.languageCode?.identifier ?? code] else { return }
         // Avoid reloading the same model while a usable warm session exists.
-        let warmKey = "\(src.minimalIdentifier)>\(destination)|\(flag("lowLatencyTranslation", false) ? "low" : "default")"
+        let warmKey = TranslationModelMemoryPolicy.sessionKey(source: src.minimalIdentifier,
+            target: target.minimalIdentifier, lowLatency: lowLatencyModel)
         guard directSession == nil || directKey != warmKey else {
             warmupStatus = "Ready"
             return
@@ -3284,9 +3292,10 @@ final class TranslatorEngine: ObservableObject {
     func refreshStatus() async {
         availCache.removeAll()
         let destination = targetCode
+        let strategy = lowLatencyModel
         let target = Locale.Language(identifier: destination)
         let av: LanguageAvailability
-        if #available(iOS 26.4, *), flag("lowLatencyTranslation", false) {
+        if #available(iOS 26.4, *), strategy {
             av = LanguageAvailability(preferredStrategy: .lowLatency)
         } else {
             av = LanguageAvailability()
@@ -3299,12 +3308,14 @@ final class TranslatorEngine: ObservableObject {
         for code in codes {
             let source = Locale.Language(identifier: code)
             let availability = await av.status(from: source, to: target)
-            guard destination == targetCode else { return }
+            guard destination == targetCode, strategy == lowLatencyModel else { return }
             out[code] = availability
-            availCache["\(source.minimalIdentifier)>\(target.minimalIdentifier)"] = (Date(), availability)
+            let key = TranslationModelMemoryPolicy.sessionKey(source: source.minimalIdentifier,
+                target: target.minimalIdentifier, lowLatency: strategy)
+            availCache[key] = (Date(), availability)
             if code == sourceCode { langStatus[code] = availability }
         }
-        guard destination == targetCode else { return }
+        guard destination == targetCode, strategy == lowLatencyModel else { return }
         langStatus = out
     }
 

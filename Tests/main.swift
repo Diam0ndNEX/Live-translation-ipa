@@ -956,3 +956,11 @@ await MainActor.run {
     precondition(transferred?.cancellationCount == 0, "Cancelling the next lease must leave the transferred confirmed handle usable")
 }
 print("v1.8.0 blocking budget, capture readiness and sole-owner warm-session transfer checks passed")
+
+let normalPairIdentity = TranslationModelMemoryPolicy.sessionKey(source: "pt", target: "en", lowLatency: false)
+check(normalPairIdentity == "pt>en|default", "Availability producers and consumers share the exact retained-session identity")
+check(normalPairIdentity != TranslationModelMemoryPolicy.sessionKey(source: "pt", target: "en", lowLatency: true),
+      "Different available model strategies cannot borrow readiness or warm sessions")
+check(normalPairIdentity != TranslationModelMemoryPolicy.sessionKey(source: "pt", target: "de", lowLatency: false),
+      "A changed target cannot borrow readiness for the previous pair")
+print("v1.8.0 unified ephemeral model-pair identity checks passed")
