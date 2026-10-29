@@ -69,8 +69,12 @@ final class ModeTranslationService {
         }
         let pair = "\(src.minimalIdentifier)>\(dst.minimalIdentifier)|"
         let speculativeStrategy: RequestedTranslationStrategy = system == .lowLatency ? .lowLatency : .appleDefault
-        let confirmedReady = !confirmed.invalidated && confirmed.key == pair + RequestedTranslationStrategy.lowLatency.rawValue && confirmed.session?.isReady == true
-        let speculativeReady = !speculative.invalidated && speculative.key == pair + speculativeStrategy.rawValue && speculative.session?.isReady == true
+        let confirmedSession = confirmed.session, speculativeSession = speculative.session
+        let confirmedSessionReady = await confirmedSession?.isReady == true
+        let speculativeSessionReady = await speculativeSession?.isReady == true
+        guard revision == generation, preparation == preparationRevision, !Task.isCancelled else { return "Preparation superseded" }
+        let confirmedReady = !confirmed.invalidated && confirmed.key == pair + RequestedTranslationStrategy.lowLatency.rawValue && confirmed.session === confirmedSession && confirmedSessionReady
+        let speculativeReady = !speculative.invalidated && speculative.key == pair + speculativeStrategy.rawValue && speculative.session === speculativeSession && speculativeSessionReady
         return confirmedReady && speculativeReady ? "Languages and sessions ready; model residency unmeasured" : "Languages installed; waiting for valid session resources"
     }
 
