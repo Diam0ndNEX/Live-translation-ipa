@@ -97,15 +97,23 @@ final class ModeTranslationService {
                 source: source, target: target, rules: testMode, text: "",
                 units: samples, keys: samples.indices.map { "warmup-\($0)" }, firstOCR: ProcessInfo.processInfo.systemUptime)
             let result = await translate(caption, indices: Array(samples.indices), strategy: strategy, speculation: false, warmup: true)
-            let succeeded = !Task.isCancelled && revision == generation && result != nil && !warmupLane.invalidated
-            warmupPolicy.finish(source: source, target: target, strategy: strategy, succeeded: succeeded)
-            guard succeeded else { return nil }
-            // Promote the exercised handle, keeping confirmed recovery independent of a cancelled warm-up.
+            let succeeded = !Task.isCancelled && revision == generation && !warmupLane.invalidated &&
+                result?.count == samples.count &&
+                result?.allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } == true
+            guard succeeded else {
+                warmupPolicy.finish(source: source, target: target, strategy: strategy, succeeded: false)
+                return nil
+            }
+            // Promote only an actual successful idle session, never an abandoned handle.
             let destination = system == .hybridRecovery && strategy == .lowLatency ? confirmed : speculative
-            guard !destination.busy else { return nil }
+            guard !destination.busy, let session = warmupLane.session else {
+                warmupPolicy.finish(source: source, target: target, strategy: strategy, succeeded: false)
+                return nil
+            }
             destination.session?.cancel()
-            destination.session = warmupLane.session; destination.key = warmupLane.key; destination.invalidated = false
+            destination.session = session; destination.key = warmupLane.key; destination.invalidated = false
             warmupLane.session = nil; warmupLane.key = ""
+            warmupPolicy.finish(source: source, target: target, strategy: strategy, succeeded: true)
             completedStrategies += 1
         }
         return completedStrategies
