@@ -94,6 +94,7 @@ final class ThreeModeCoordinator {
     var matchingLowLatencyDeadline = 4.0
     private(set) var current: ModeCaption?
     private var committed: ModeCaption?
+    private var memoryProbePending: ModeCaption?
     private var confirmation: Task<Void, Never>?
     private var deadline: Task<Void, Never>?
     private var speculation: Task<Void, Never>?
@@ -120,7 +121,7 @@ final class ThreeModeCoordinator {
         if memoryPressure { lowCache.removeAll(); lowOrder.removeAll() }
         if let current, committed != current {
             event(current, memoryPressure ? "memory_pressure" : "thermal_reduced_speculation", nil)
-            startRecovery(current, reason: "speculation_absent")
+            if memoryProbePending != current { startRecovery(current, reason: "speculation_absent") }
         }
     }
 
@@ -128,7 +129,7 @@ final class ThreeModeCoordinator {
         confirmation?.cancel(); deadline?.cancel(); speculation?.cancel()
         cancel(true); cancel(false)
         confirmation = nil; deadline = nil
-        current = nil; committed = nil; speculativeCaption = nil; speculativeOutput = nil
+        current = nil; committed = nil; memoryProbePending = nil; speculativeCaption = nil; speculativeOutput = nil
         // The speculative task clears its occupied slot only after completion.
         recoveryStarted = false
         lowCache.removeAll(); lowOrder.removeAll()
@@ -151,7 +152,7 @@ final class ThreeModeCoordinator {
                 self.speculativeOutput = output
                 self.speculativeFailed = output == nil
                 self.event(caption, output == nil ? "speculation_failed" : "speculation_ready", nil)
-                if let current = self.current, current.matches(caption), self.committed != current {
+                if let current = self.current, current.matches(caption), self.committed != current, self.memoryProbePending != current {
                     if let output { self.commit(current, output, "speculation_match_in_flight") }
                     else { self.startRecovery(current, reason: "speculation_failed") }
                 }
@@ -163,7 +164,7 @@ final class ThreeModeCoordinator {
         if let previous = current, previous.caption == caption.caption, previous.fingerprint != caption.fingerprint {
             event(caption, "source_correction", nil)
         }
-        current = caption; committed = nil; recoveryStarted = false
+        current = caption; committed = nil; memoryProbePending = caption; recoveryStarted = false
         cancel(false)
         confirmation?.cancel(); deadline?.cancel()
         // Never wait for model work before the independent memory probe.
@@ -171,6 +172,7 @@ final class ThreeModeCoordinator {
             guard let self else { return }
             let hits = await self.lookupValues(caption)
             guard !Task.isCancelled, self.current == caption else { return }
+            self.memoryProbePending = nil
             if hits.allSatisfy({ $0 != nil }) {
                 self.commit(caption, ModeOutput(values: hits.compactMap { $0 }, strategies: hits.map { _ in nil },
                     origins: hits.map { _ in "compatible_memory" }), "memory_hit")
@@ -235,7 +237,7 @@ final class ThreeModeCoordinator {
                 event(caption, "same_strategy_retry", nil)
                 result = await translate(caption, missing, strategy, false)
             }
-            guard let result, result.count == missing.count else { return nil }
+            guard !Task.isCancelled, let result, result.count == missing.count else { return nil }
             let duration = clock() - began
             let cohort = caption.policyCohort
             if strategy == .appleDefault {
@@ -277,7 +279,9 @@ final class ThreeModeCoordinator {
         }
     }
 
-    private func commit(_ caption: ModeCaption, _ output: ModeOutput, _ reason: String) {
+    private func commit(_ caption: ModeCaption, _ output: ModeOutput, _ proposedReason: String) {
+        let memoryOnly = output.origins.allSatisfy { $0 == "compatible_memory" || $0 == "session_low_latency" }
+        let reason = memoryOnly ? "memory_hit" : proposedReason
         guard current == caption, committed != caption, output.complete else { event(caption, "stale_rejected", nil); return }
         committed = caption; deadline?.cancel()
         if allowsReuse {

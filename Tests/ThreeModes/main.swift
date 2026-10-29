@@ -13,9 +13,17 @@ final class Harness {
     var selected: [(ModeCaption, ModeOutput, String)] = []
     var events: [String] = []
     var memory: [String?] = [nil]
+    var delayedMemory = false
+    var pendingLookups: [CheckedContinuation<[String?], Never>] = []
     var cancellations: [Bool] = []
     lazy var coordinator = ThreeModeCoordinator(
-        lookup: { [weak self] _ in self?.memory ?? [nil] },
+        lookup: { [weak self] _ in
+            guard let self else { return [nil] }
+            if self.delayedMemory {
+                return await withCheckedContinuation { self.pendingLookups.append($0) }
+            }
+            return self.memory
+        },
         translate: { [weak self] caption, indices, strategy, spec in
             await withCheckedContinuation { continuation in
                 self?.calls.append(Call(caption: caption, strategy: strategy, speculative: spec, indices: indices, continuation: continuation))
@@ -122,6 +130,19 @@ final class Harness {
         let legacy = Harness(); legacy.coordinator.system = .legacy
         legacy.coordinator.observe(legacy.caption(), confirmed: true, speculate: true); await legacy.settle()
         precondition(legacy.calls.isEmpty && legacy.selected.isEmpty)
+        // A simultaneous speculative completion cannot outrun preferred-memory selection.
+        let preferredRace = Harness(); preferredRace.coordinator.system = .hybridRecovery
+        preferredRace.coordinator.observe(preferredRace.caption(), confirmed: false, speculate: true); await preferredRace.settle()
+        preferredRace.delayedMemory = true
+        preferredRace.coordinator.observe(preferredRace.caption(), confirmed: true, speculate: true); await preferredRace.settle()
+        precondition(preferredRace.pendingLookups.count == 1)
+        preferredRace.reply(0, ["New speculative wording"]); await preferredRace.settle()
+        precondition(preferredRace.selected.isEmpty, "Memory priority waits only for the independent active probe")
+        preferredRace.pendingLookups[0].resume(returning: ["Preferred saved wording"]); await preferredRace.settle()
+        precondition(preferredRace.selected.count == 1 && preferredRace.selected[0].1.values == ["Preferred saved wording"])
+        precondition(preferredRace.selected[0].2 == "memory_hit" && preferredRace.calls.count == 1)
+        preferredRace.coordinator.reset()
+
         // Cold Hybrid deadline permits recovery without waiting for stale cancellation.
         let deadline = Harness(); deadline.coordinator.system = .hybridRecovery
         deadline.coordinator.coldSpeculationCeiling = 0
@@ -150,6 +171,7 @@ final class Harness {
         ready.coordinator.observe(ready.caption(id: "another"), confirmed: true, speculate: false); await ready.settle()
         precondition(ready.selected.count == 2 && ready.calls.count == 1)
         precondition(ready.selected[1].1.origins == ["session_low_latency"])
+        precondition(ready.selected[1].2 == "memory_hit", "Session-cache reuse must not be reported as fresh recovery")
         ready.coordinator.reset()
 
         // Exact repeated units are translated once and expanded to complete output.
