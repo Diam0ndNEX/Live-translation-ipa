@@ -73,6 +73,16 @@ final class Harness {
         readiness.requested(at: 12); readiness.tick(at: 42)
         precondition(readiness.state == .timedOut)
 
+        var governor = HybridAdmissionPolicy()
+        for _ in 0..<3 { precondition(governor.admit()); governor.record(used: false) }
+        for _ in 0..<5 { precondition(!governor.admit()) }
+        precondition(governor.admit())
+        governor.record(used: true)
+        precondition(governor.admit())
+        governor.overlappingRecovery(700)
+        for _ in 0..<5 { precondition(!governor.admit()) }
+        governor.overlappingRecovery(42)
+        precondition(governor.admit())
         let readinessStart = Date(timeIntervalSince1970: 100)
         precondition(InitialWarmupPolicy.strategies(for: .legacy).isEmpty)
         for source in ["en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh-Hans", "zh-Hant", "ar", "tr", "hi", "id", "nl", "pl", "th", "vi", "uk"] {
@@ -399,7 +409,7 @@ final class Harness {
         precondition(pressure.selected.count == 1 && pressure.events.contains("memory_pressure"))
         pressure.coordinator.reset()
 
-        precondition(abs(SpeculationWaitPolicy.remaining(elapsed: 0.4, ordinary: [], recovery: [], coldCeiling: 0.7) - 0.3) < 0.0001)
+        precondition(SpeculationWaitPolicy.remaining(elapsed: 0.4, ordinary: [], recovery: [], coldCeiling: 0.7) == 0)
         precondition(SpeculationWaitPolicy.remaining(elapsed: 0.8, ordinary: [], recovery: [], coldCeiling: 0.7) == 0)
         precondition(abs(SpeculationWaitPolicy.remaining(elapsed: 0.2, ordinary: [0.5, 0.5, 0.5, 0.5, 0.5], recovery: [0.1, 0.1, 0.1, 0.1, 0.1], coldCeiling: 0.7) - 0.1) < 0.0001)
         precondition(SpeculationWaitPolicy.remaining(elapsed: 0.6, ordinary: [0.5, 0.5, 0.5, 0.5, 0.5], recovery: [0.1, 0.1, 0.1, 0.1, 0.1], coldCeiling: 0.7) == 0)
