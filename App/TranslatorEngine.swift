@@ -512,7 +512,9 @@ final class TranslatorEngine: ObservableObject {
         memoryTestMode = next
         diag.translationTestMode = next
         diag.startingRAMEntries = next.allowsReuse ? ram.values.count : 0
-        temporaryMemoryEntries = processMemory.temporary.values.count
+        if temporaryMemoryEntries != processMemory.temporary.values.count {
+            temporaryMemoryEntries = processMemory.temporary.values.count
+        }
         bypassMemory = false
         rotRev += 1
         syncConfig()
@@ -2240,7 +2242,9 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func touchCache(_ key: String) {
-        temporaryMemoryEntries = processMemory.temporary.values.count
+        if temporaryMemoryEntries != processMemory.temporary.values.count {
+            temporaryMemoryEntries = processMemory.temporary.values.count
+        }
         ram.clock &+= 1
         ram.use[key] = ram.clock
     }
@@ -2568,7 +2572,9 @@ final class TranslatorEngine: ObservableObject {
             if ram.specKeys.remove(key) != nil { diag.noteSpeculativeUnit("evictedUnused") }; ram.speculativeOrigins.removeValue(forKey: key); ram.savedKeys.remove(key); ram.confirmedKeys.remove(key)
         }
         // Report entries evicted, not maintenance batches; persistence is untouched.
-        temporaryMemoryEntries = processMemory.temporary.values.count
+        if temporaryMemoryEntries != processMemory.temporary.values.count {
+            temporaryMemoryEntries = processMemory.temporary.values.count
+        }
         diag.recordMemory(.ramEviction, count: victims.count)
     }
 
