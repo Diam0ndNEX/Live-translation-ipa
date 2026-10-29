@@ -823,3 +823,36 @@ check(!SubtitleAcquisitionPolicy.rejectsDisplayedFragment(confirmed: true,
     text: "Now we leave.", displayed: "We are going to the station tomorrow.", age: 0.5),
     "Genuinely new confirmed dialogue remains eligible")
 print("v1.7.2 memory-aware speculation and fragment admission checks passed")
+
+// Session cancellation permanently invalidates Apple's session. Exercise the
+// actual ownership coordinator with controllable handles, not the OS model.
+final class TestModelHandle { var cancellationCount = 0 }
+await MainActor.run {
+    let owner = SpeculativeSessionOwner<TestModelHandle> { $0.cancellationCount += 1 }
+    let confirmed = TestModelHandle()
+    let first = owner.begin(key: "pt>en|default", make: { TestModelHandle() })
+    precondition(owner.cancelActive(now: 10))
+    precondition(!owner.cancelActive(now: 11), "Repeated preemption must not cancel a session twice")
+    precondition(first.cancellationRequestedAt == 10 && first.session.cancellationCount == 1)
+    precondition(confirmed.cancellationCount == 0, "Speculative preemption cannot invalidate confirmed-session ownership")
+    owner.finish(first, reusable: true)
+    let second = owner.begin(key: "pt>en|default", make: { TestModelHandle() })
+    precondition(second.session !== first.session, "A cancelled session must never serve another request")
+    owner.finish(second, reusable: true)
+    let reused = owner.begin(key: "pt>en|default", make: { TestModelHandle() })
+    precondition(reused.session === second.session, "Successful speculative work keeps its warm session")
+    owner.finish(reused, reusable: true)
+    let changedPair = owner.begin(key: "de>en|default", make: { TestModelHandle() })
+    precondition(changedPair.session !== reused.session, "Different language/model pairs never borrow an incompatible session")
+    owner.reset()
+    precondition(changedPair.session.cancellationCount == 1)
+    owner.finish(changedPair, reusable: true)
+    let newContext = owner.begin(key: "de>en|default", make: { TestModelHandle() })
+    precondition(newContext.session !== changedPair.session, "Late context-invalidated completions cannot restore cancelled state")
+    owner.finish(changedPair, reusable: true)
+    precondition(owner.cancelActive(now: 20), "An old completion must not release a newer active lease")
+    precondition(newContext.session.cancellationCount == 1)
+    owner.finish(newContext, reusable: false)
+    precondition(!owner.cancelActive(), "An idle lane has no model request to cancel")
+}
+print("v1.7.2 speculative model ownership, explicit preemption and warm reuse checks passed")

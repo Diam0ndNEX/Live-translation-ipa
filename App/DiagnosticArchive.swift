@@ -133,7 +133,7 @@ struct DiagnosticIntervalBucket: Codable {
         "specPreemptionRequested", "specMatchingConfirmation",
         "specRetainedUnits", "completedConfirmedUnitsRetained", "temporaryMemoryHits",
         "uncachedUnits", "bypassedLookups", "temporaryMemoryMisses",
-        "memoryAwareSpeculationSkipped", "ramCaptionBypasses", "exactCaptionHits", "exactUnitsCoalesced", "sharedInFlightUnits", "speculativeUnitsRetained",
+        "speculativeStopRequests", "speculativeSessionsCreated", "memoryAwareSpeculationSkipped", "ramCaptionBypasses", "exactCaptionHits", "exactUnitsCoalesced", "sharedConfirmedInFlightUnits", "sharedInFlightUnits", "speculativeUnitsRetained",
         "speculativeUnitsReused", "speculativeUnitsEvictedUnused",
         "handoffDeferred", "slowTailEnqueues", "handoffReplayed", "handoffExpired", "enqueueFailed",
         "actualModelBatches", "confirmedModelBatches", "speculativeModelBatches",
@@ -217,6 +217,7 @@ actor DiagnosticExportWriter {
                 "warmup_model_submitted", "speculative_model_submitted", "confirmed_model_submitted", "model_batch_cancelled",
                 "warmup_model_completed", "speculative_model_completed", "confirmed_model_completed",
                 "model_session_created", "model_batch_completed", "model_batch_failed",
+                "speculative_session_created", "speculative_stop_requested", "speculative_stop_released",
                 "warmup_source_unresolved", "warmup_predicted_source", "warmup_preempted",
                 "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started", "legacy_idle_completed",
                 "legacy_idle_deferred", "app_interface_visible", "external_capture_period", "app_started", "capture_config_changed",
@@ -296,7 +297,7 @@ actor DiagnosticExportWriter {
             "enqueueLatencyMs", "finalOCRMs", "transportMs", "confirmationMs",
             "deliveryFilteringMs", "queueMs", "processingMs", "displayHoldMs",
             "renderingMs", "speculativeModelMs", "confirmedModelMs", "modelBatchMs",
-            "queueBehindSpeculationMs", "queueBehindConfirmedMs", "queueSchedulingMs"
+            "speculativeStopReleaseMs", "queueBehindSpeculationMs", "queueBehindConfirmedMs", "queueSchedulingMs"
         ]
         let safeMetrics = snapshot.distributions.filter { key, value in
             allowedMetrics.contains(key) && value.count >= 0 &&
@@ -500,11 +501,13 @@ actor DiagnosticExportWriter {
             - Completed speculative units retained: \(count("specRetainedUnits"))
             - Completed confirmed units retained: \(count("completedConfirmedUnitsRetained"))
             - Model batches sent: \(count("actualModelBatches"))
+            - Explicit speculative stop requests: \(count("speculativeStopRequests"))
             - Cancelled model batches: \(count("cancelledModelBatches"))
             - Skipped unchanged frames: \(count("unchangedSkippedFrames"))
             - Speculation opportunities skipped with dominant saved reuse: \(count("memoryAwareSpeculationSkipped"))
             - Complete captions assembled from RAM around a busy model lane: \(count("ramCaptionBypasses"))
             - Exact assembled captions reused: \(count("exactCaptionHits"))
+            - Exact confirmed in-flight units shared with replacement captions: \(count("sharedConfirmedInFlightUnits"))
             - Exact duplicate units coalesced: \(count("exactUnitsCoalesced"))
             - Speculative units retained / reused / evicted unused: \(count("speculativeUnitsRetained")) / \(count("speculativeUnitsReused")) / \(count("speculativeUnitsEvictedUnused"))
 

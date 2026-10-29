@@ -264,6 +264,9 @@ final class TranslatorEngine: ObservableObject {
     private var lastShowDate = Date.distantPast
     private let modelPerf = OSSignposter(subsystem: "com.diam0ndnex.screenlingo", category: "model")
     private var directSession: TranslationSession?
+    private let speculativeSessions = SpeculativeSessionOwner<TranslationSession> { session in
+        if #available(iOS 26.0, *) { session.cancel() }
+    }
     private var directKey = ""
     private var clearTask: Task<Void, Never>?
     private var tickCount = 0
@@ -636,7 +639,8 @@ final class TranslatorEngine: ObservableObject {
         interruptWarmupForLiveWork()
         contextRevision += 1
         generation += 1
-        drainTask?.cancel()
+        cancelDrain(preemptSpeculation: true)
+        speculativeSessions.reset()
         deferredConfirmedPacket = nil
         confirmedHandoffDeadlineTask?.cancel()
         confirmedHandoffDeadlineTask = nil
@@ -985,7 +989,9 @@ final class TranslatorEngine: ObservableObject {
             generation += 1
             cancelPresentation()
             queued = nil; specQueued = nil
-            if sharedInFlightUnits(candidateTexts) == 0 { drainTask?.cancel() }
+            let shared = sharedInFlightUnits(candidateTexts)
+            if shared == 0 { cancelDrain(preemptSpeculation: confirmed) }
+            else if activeQueueOwner == .confirmed { diag.noteSharedModelUnits(shared, confirmed: true) }
         } else if p.stable != false {
             if !activeCandidateConfirmed { activeCandidateConfirmedAt = now }
             activeCandidateConfirmed = true
@@ -1336,7 +1342,7 @@ final class TranslatorEngine: ObservableObject {
             let shared = sharedInFlightUnits(blocks)
             if shared == 0 {
                 if diag.enabled { diag.s.specPreemptionRequested += 1 }
-                drainTask?.cancel()
+                cancelDrain(preemptSpeculation: true)
             }
             else { diag.noteSharedModelUnits(shared) }
         } else if currentSpeculativeText == joined {
@@ -1375,6 +1381,16 @@ final class TranslatorEngine: ObservableObject {
         return SourceLanguageRouter.shouldDropTarget(selected: sourceCode, target: targetCode,
             hypotheses: Dictionary(uniqueKeysWithValues: evidence.map { ($0.key.rawValue, $0.value) }),
             letters: text.filter(\.isLetter).count)
+    }
+
+    /// Swift Task cancellation alone may leave Apple's model request running.
+    /// Only the disposable speculative session receives explicit cancellation;
+    /// confirmed work retains its own warm session and the drain still awaits unwind.
+    private func cancelDrain(preemptSpeculation: Bool) {
+        drainTask?.cancel()
+        if preemptSpeculation, speculativeSessions.cancelActive() {
+            diag.noteModelState("speculative_stop_requested")
+        }
     }
 
     private func startDrain() {
@@ -1652,7 +1668,7 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func sharedInFlightUnits(_ blocks: [String]) -> Int {
-        guard activeQueueOwner == .speculative, drainTask?.isCancelled == false,
+        guard activeQueueOwner != .scheduling, drainTask?.isCancelled == false,
               sourceCode != "auto", memoryTestMode.allowsReuse, !bypassMemory,
               !modelUnitKeysInFlight.isEmpty else { return 0 }
         let source = Locale.Language(identifier: sourceCode)
@@ -2065,6 +2081,26 @@ final class TranslatorEngine: ObservableObject {
                                 partial: (@MainActor (Int, String) -> Void)? = nil) async -> [String]? {
         if #available(iOS 26.0, *), installed {
             let k = "\(source.minimalIdentifier)>\(targetCode)|\(flag("lowLatencyTranslation", false) ? "low" : "default")"
+            guard !Task.isCancelled else { return nil }
+            if diag.enabled { diag.s.sessionKind = "Direct session (iOS 26)" }
+            if speculative {
+                let workContext = contextRevision
+                let diagnosticEpoch = diag.started
+                let lease = speculativeSessions.begin(key: k) {
+                    diag.noteModelState("speculative_session_created")
+                    if #available(iOS 26.4, *), flag("lowLatencyTranslation", false) {
+                        return TranslationSession(installedSource: source, target: target, preferredStrategy: .lowLatency)
+                    }
+                    return TranslationSession(installedSource: source, target: target)
+                }
+                let result = await runBatch(lease.session, texts, speculative: true, partial: partial)
+                speculativeSessions.finish(lease, reusable: result != nil && !Task.isCancelled && workContext == contextRevision)
+                if let requested = lease.cancellationRequestedAt, diag.started == diagnosticEpoch {
+                    diag.noteModelState("speculative_stop_released",
+                        durationMs: max(0, ProcessInfo.processInfo.systemUptime - requested) * 1000)
+                }
+                return result
+            }
             if directSession == nil || directKey != k {
                 diag.noteModelState("model_session_created")
                 if #available(iOS 26.4, *), flag("lowLatencyTranslation", false) {
@@ -2077,8 +2113,9 @@ final class TranslatorEngine: ObservableObject {
             if diag.enabled { diag.s.sessionKind = "Direct session (iOS 26)" }
             guard let session = directSession else { return nil }
             let r = await runBatch(session, texts, speculative: speculative, partial: partial)
-            if r == nil { directSession = nil }
-            else { warmupStatus = "Ready" }
+            if r == nil {
+                if directSession === session { directSession = nil }
+            } else { warmupStatus = "Ready" }
             return r
         }
         if diag.enabled { diag.s.sessionKind = "Hosted view (iOS 18)" }

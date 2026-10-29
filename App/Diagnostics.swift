@@ -241,6 +241,7 @@ final class Diagnostics: ObservableObject {
     var startingRAMEntries = 0
     var ramEntryCount: (() -> Int)?
     private var sharedModelUnits = 0
+    private var sharedConfirmedModelUnits = 0
     private var memoryAwareSpeculationSkipped = 0
     private var ramCaptionBypasses = 0
     private var exactCaptionHits = 0
@@ -410,9 +411,10 @@ final class Diagnostics: ObservableObject {
         temporaryMemoryHits += max(0, count)
     }
 
-    func noteSharedModelUnits(_ count: Int) {
+    func noteSharedModelUnits(_ count: Int, confirmed: Bool = false) {
         guard enabled else { return }
         sharedModelUnits += max(0, count)
+        if confirmed { sharedConfirmedModelUnits += max(0, count) }
     }
     func noteMemoryAwareSpeculationSkip() {
         guard enabled else { return }
@@ -454,12 +456,13 @@ final class Diagnostics: ObservableObject {
             "warmup_model_submitted", "speculative_model_submitted", "confirmed_model_submitted", "model_batch_cancelled",
             "warmup_model_completed", "speculative_model_completed", "confirmed_model_completed",
             "model_session_created", "model_batch_failed", "model_batch_completed",
+            "speculative_session_created", "speculative_stop_requested", "speculative_stop_released",
             "warmup_source_unresolved", "warmup_predicted_source", "warmup_preempted",
             "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started",
             "legacy_idle_completed", "legacy_idle_deferred"
         ]
         guard allowed.contains(reason) else { return }
-        if ["model_batch_completed", "confirmed_model_completed", "speculative_model_completed"].contains(reason),
+        if ["model_batch_completed", "confirmed_model_completed", "speculative_model_completed", "speculative_stop_released"].contains(reason),
            let durationMs, durationMs.isFinite, durationMs >= 0 {
             modelTimingSamples[reason, default: []].append(durationMs)
             if modelTimingSamples[reason, default: []].count > 1200 {
@@ -629,6 +632,7 @@ final class Diagnostics: ObservableObject {
                 "confirmationMs": DiagnosticDistribution(pipeline.map { $0.stages.confirmation }),
                 "deliveryFilteringMs": DiagnosticDistribution(pipeline.map { $0.stages.delivery }),
                 "queueMs": DiagnosticDistribution(pipeline.map { $0.stages.queue }),
+                "speculativeStopReleaseMs": DiagnosticDistribution(modelTimingSamples["speculative_stop_released", default: []]),
                 "queueBehindSpeculationMs": DiagnosticDistribution(queueWaitSamples[.speculative, default: []]),
                 "queueBehindConfirmedMs": DiagnosticDistribution(queueWaitSamples[.confirmed, default: []]),
                 "queueSchedulingMs": DiagnosticDistribution(queueWaitSamples[.scheduling, default: []]),
@@ -834,7 +838,7 @@ final class Diagnostics: ObservableObject {
         lastRecordedThermalState = nil
         memoryOutcomes = [:]; lookupSamples = []; writeSamples = []
         modelTimingSamples = [:]; completedWorkRecoveredUnits = 0
-        sharedModelUnits = 0; memoryAwareSpeculationSkipped = 0; ramCaptionBypasses = 0; exactCaptionHits = 0; exactUnitsCoalesced = 0
+        sharedModelUnits = 0; sharedConfirmedModelUnits = 0; memoryAwareSpeculationSkipped = 0; ramCaptionBypasses = 0; exactCaptionHits = 0; exactUnitsCoalesced = 0
         speculativeUnitCounts = [:]; queueWaitSamples = [:]
         temporaryMemoryHits = 0; startingRAMEntries = ramEntryCount?() ?? 0
         started = Date()
@@ -987,6 +991,7 @@ final class Diagnostics: ObservableObject {
             "ramCaptionBypasses": ramCaptionBypasses,
             "memoryAwareSpeculationSkipped": memoryAwareSpeculationSkipped,
             "sharedInFlightUnits": sharedModelUnits,
+            "sharedConfirmedInFlightUnits": sharedConfirmedModelUnits,
             "exactUnitsCoalesced": exactUnitsCoalesced,
             "speculativeUnitsRetained": speculativeUnitCounts["retained", default: 0],
             "speculativeUnitsReused": speculativeUnitCounts["reused", default: 0],
@@ -1032,6 +1037,8 @@ final class Diagnostics: ObservableObject {
             "actualModelBatches": eventTotals["confirmed_model_submitted", default: 0] +
                 eventTotals["speculative_model_submitted", default: 0] + eventTotals["warmup_model_submitted", default: 0],
             "cancelledModelBatches": eventTotals["model_batch_cancelled", default: 0],
+            "speculativeStopRequests": eventTotals["speculative_stop_requested", default: 0],
+            "speculativeSessionsCreated": eventTotals["speculative_session_created", default: 0],
             "handoffReplayed": eventTotals["handoff_replayed", default: 0],
             "handoffExpired": eventTotals["handoff_expired", default: 0],
             "enqueueFailed": eventTotals["enqueue_failed", default: 0],
