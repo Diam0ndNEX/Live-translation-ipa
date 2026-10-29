@@ -42,6 +42,37 @@ final class Harness {
 
 @main struct ThreeModeTests {
     @MainActor static func main() async {
+        // Capture readiness comes from transport evidence, not a translated caption.
+        var capture = CaptureReadiness()
+        precondition(capture.state == .idle)
+        capture.requested(at: 0); precondition(capture.state == .waiting)
+        capture.receive(frames: 0, session: "first", stopped: false, at: 1)
+        precondition(capture.state == .connected)
+        capture.receive(frames: 1, session: "first", stopped: false, at: 2)
+        precondition(capture.state == .active)
+        capture.requested(at: 3); precondition(capture.state == .active)
+        capture.tick(at: 7); precondition(capture.state == .lost)
+        capture.receive(frames: 0, session: "second", stopped: false, at: 8)
+        precondition(capture.state == .connected)
+        capture.receive(frames: 5, session: "first", stopped: true, at: 9)
+        precondition(capture.state == .connected)
+        capture.receive(frames: 1, session: "second", stopped: false, at: 10)
+        capture.receive(frames: 1, session: "second", stopped: true, at: 11)
+        precondition(capture.state == .stopped)
+        capture.requested(at: 12); capture.tick(at: 42)
+        precondition(capture.state == .timedOut)
+
+        let preparing = TranslationActivity.preparation("", busy: true)
+        precondition(preparing.phase == .working)
+        precondition(TranslationActivity.preparation("Languages and sessions ready; model residency unmeasured", busy: false).phase == .ready)
+        precondition(TranslationActivity.preparation("Explicit low latency requires iOS 26.4 or later", busy: false).phase == .attention)
+        precondition(TranslationActivity.event("speculative_model_submitted")?.phase == .working)
+        precondition(TranslationActivity.event("speculation_ready")?.phase == .ready)
+        precondition(TranslationActivity.event("recovery_decision_source_mismatch")?.phase == .working)
+        precondition(TranslationActivity.event("pip_enqueue_memory_hit")?.title == "Saved translation reused")
+        precondition(TranslationActivity.event("pip_enqueue_speculation_match_in_flight")?.phase == .ready)
+        precondition(TranslationActivity.event("display_failed")?.phase == .attention)
+        precondition(TranslationActivity.event("cancelled_call_returned") == nil)
         let suite = "three-mode-tests-" + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }

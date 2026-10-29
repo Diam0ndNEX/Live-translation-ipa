@@ -2037,7 +2037,7 @@ private struct DiagnosticsBody: View {
             Text("Right now").font(.subheadline.weight(.semibold))
             feedRow("text.viewfinder", "Reads", engine.lastRaw.isEmpty ? "Nothing yet" : engine.lastRaw)
             feedRow("character.bubble", "Shows", engine.translated.isEmpty ? "Nothing yet" : engine.translated)
-            Text("Model: " + engine.warmupStatus).font(.caption2).foregroundStyle(.secondary)
+            Text("Translator: " + engine.translationActivity.title).font(.caption2).foregroundStyle(.secondary)
             Text(engine.status).font(.caption2).foregroundStyle(.secondary)
         }
         .card()

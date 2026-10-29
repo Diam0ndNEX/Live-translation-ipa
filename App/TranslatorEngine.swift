@@ -169,6 +169,8 @@ final class TranslatorEngine: ObservableObject {
     @Published private(set) var legacyValidationElapsedSeconds = 0.0
     @Published private(set) var warmupLastDurationMs: Double?
     @Published var captureAlive = false
+    @Published private(set) var captureStatus = CaptureReadiness.State.idle
+    private var captureReadiness = CaptureReadiness()
     @Published var frames = 0
     @Published var ocrCount = 0
     @Published var extensionVersion = "–"
@@ -191,6 +193,46 @@ final class TranslatorEngine: ObservableObject {
     @Published private(set) var activeTranslationSystem = TranslationSystem.legacy
     @Published private(set) var pendingTranslationSystem = TranslationSystem.legacy
     @Published private(set) var modeAvailability = ""
+    @Published private(set) var modePreparationInProgress = false
+    @Published private(set) var modeWorkActivity: TranslationActivity?
+    private var modeActivityCaption: ModeCaption?
+    private var modeActivitySelected = false
+    private var preparationTicket = UUID()
+    private var preparationStarted = Date()
+
+    var translationActivity: TranslationActivity {
+        if paused { return TranslationActivity(title: "Translation paused", detail: captureAlive ? "Capture is still connected. Resume to translate." : "Resume translation when you are ready.", phase: .waiting) }
+        if activeTranslationSystem != .legacy {
+            if let modeWorkActivity { return modeWorkActivity }
+            if sourceCode == "auto", !modePreparationInProgress {
+                return TranslationActivity(title: "Waiting for source language", detail: "Read a caption or choose a source in Languages to prepare the selected system.", phase: .waiting)
+            }
+            var activity = TranslationActivity.preparation(modeAvailability, busy: modePreparationInProgress)
+            if modePreparationInProgress { activity.since = preparationStarted }
+            return activity
+        }
+        if isTranslating { return TranslationActivity(title: "Translating confirmed text", detail: "Legacy · Apple default strategy", phase: .working) }
+        if waitingToDisplay { return TranslationActivity(title: "Waiting to display", detail: "Holding the completed result for readability", phase: .waiting) }
+        if warmupStatus.contains("Warming") || warmupStatus.contains("warm-up…") {
+            return TranslationActivity(title: warmupStatus, detail: "Preparing the Legacy translator; live captions take priority", phase: .working)
+        }
+        if warmupStatus == "Ready" || warmupStatus == "Predicted source prepared" {
+            return TranslationActivity(title: "Legacy translator prepared", detail: captureAlive ? "Reading your screen · waiting for the next caption" : "Apple default strategy · start capture when ready", phase: .ready)
+        }
+        return TranslationActivity(title: warmupStatus, detail: "Legacy · Apple default strategy", phase: warmupStatus.contains("failed") ? .attention : .waiting)
+    }
+
+    private func refreshModePreparation(source: String, target: String, system: TranslationSystem) async {
+        guard system == activeTranslationSystem, system != .legacy else { return }
+        let ticket = UUID(), session = modeSessionID
+        preparationTicket = ticket; preparationStarted = Date(); modePreparationInProgress = true
+        let result = await modeService.prepare(source: source, target: target, system: system)
+        guard preparationTicket == ticket else { return }
+        modePreparationInProgress = false
+        guard !Task.isCancelled, session == modeSessionID, system == activeTranslationSystem,
+              target == targetCode, source == (sourceCode == "auto" ? detectedLang : sourceCode), result != "Preparation superseded" else { return }
+        modeAvailability = result; warmupStatus = result
+    }
     private var captureIdentity = CaptureSessionIdentityGate()
     private var modeSessionID = UUID()
     private var modeDiagnosticEpochs: [UUID: Date] = [:]
@@ -207,7 +249,11 @@ final class TranslatorEngine: ObservableObject {
         cancel: { [weak self] speculative in self?.modeService.cancel(speculation: speculative) },
         selected: { [weak self] caption, output, reason in self?.selectModeResult(caption, output: output, reason: reason) },
         event: { [weak self] caption, reason, ms in self?.noteModeEvent(caption, reason: reason, duration: ms) },
-        status: { [weak self] message in self?.modeAvailability = message; self?.status = message; self?.isTranslating = false })
+        status: { [weak self] message in
+            self?.modeAvailability = message; self?.status = message; self?.isTranslating = false
+            self?.modeWorkActivity = TranslationActivity(title: "Translation needs attention", detail: message, phase: .attention)
+            self?.modeActivitySelected = true
+        })
 
     func translationSystemChanged() {
         pendingTranslationSystem = TranslationSystem.migrate(ud).0
@@ -237,15 +283,24 @@ final class TranslatorEngine: ObservableObject {
             let session = modeSessionID, source = sourceCode, target = targetCode
             Task { [weak self] in
                 guard let self else { return }
-                let status = await self.modeService.prepare(source: source, target: target, system: selection.0)
-                guard session == self.modeSessionID, source == self.sourceCode, target == self.targetCode, status != "Preparation superseded" else { return }
-                self.modeAvailability = status
+                guard session == self.modeSessionID else { return }
+                await self.refreshModePreparation(source: source, target: target, system: selection.0)
             }
         }
     }
 
     private func noteModeEvent(_ caption: ModeCaption, reason: String, duration: Double?) {
         guard modeDiagnosticEpochs[caption.session] == diag.started else { return }
+        if caption.session == modeSessionID {
+            if reason == "confirmed" || reason == "speculation_admitted" {
+                modeActivityCaption = caption; modeActivitySelected = false
+            }
+            if modeActivityCaption?.matches(caption) == true, !modeActivitySelected,
+               let activity = TranslationActivity.event(reason) {
+                modeWorkActivity = activity
+                if reason.hasPrefix("pip_enqueue_") || reason == "display_failed" { modeActivitySelected = true }
+            }
+        }
         if ["speculative_model_submitted", "confirmed_model_submitted", "model_batch_failed", "model_batch_completed", "speculative_model_completed", "confirmed_model_completed"].contains(reason) {
             diag.noteModelState(reason, durationMs: duration, candidate: caption.caption)
         }
@@ -311,8 +366,8 @@ final class TranslatorEngine: ObservableObject {
             let session = modeSessionID, system = activeTranslationSystem
             Task { [weak self] in
                 guard let self else { return }
-                let state = await self.modeService.prepare(source: source, target: caption.target, system: system)
-                if session == self.modeSessionID, self.modeCoordinator.current?.source == source, state != "Preparation superseded" { self.modeAvailability = state }
+                guard session == self.modeSessionID else { return }
+                await self.refreshModePreparation(source: source, target: caption.target, system: system)
             }
         }
         modeCoordinator.observe(caption, confirmed: confirmed, speculate: admitted)
@@ -632,8 +687,19 @@ final class TranslatorEngine: ObservableObject {
         } // Prepare a recent source pair before capture, when possible.
     }
 
+    func captureRequested() {
+        captureReadiness.requested(at: ProcessInfo.processInfo.systemUptime)
+        publishCaptureStatus()
+    }
+
+    private func publishCaptureStatus() {
+        if captureStatus != captureReadiness.state { captureStatus = captureReadiness.state }
+    }
+
     private func tick() {
         tickCount += 1
+        captureReadiness.tick(at: ProcessInfo.processInfo.systemUptime)
+        publishCaptureStatus()
         let alive = Date().timeIntervalSince(lastPacketDate) < 5
         if captureAlive && !alive {
             status = "Capture stopped – iOS may have closed the capture extension. Tap the broadcast icon again (try Speed: Fast)."
@@ -867,6 +933,8 @@ final class TranslatorEngine: ObservableObject {
 
     /// Invalidate suspended work before changing language, capture state, or settings.
     private func invalidatePending() {
+        modeWorkActivity = nil; modeActivityCaption = nil; modeActivitySelected = false
+        preparationTicket = UUID(); modePreparationInProgress = false
         interruptWarmupForLiveWork()
         modeSessionID = UUID(); modeLastIdentity = ""; modePlans.removeAll(); modeMemoryOrigins.removeAll()
         if modeDiagnosticEpochs.count >= 64 { modeDiagnosticEpochs.removeAll() }
@@ -1074,6 +1142,8 @@ final class TranslatorEngine: ObservableObject {
         let now = Date()
         if p.kind == "stopped" {
             guard captureIdentity.stop(p.captureSessionID) else { return }
+            captureReadiness.receive(frames: p.frames, session: p.captureSessionID, stopped: true, at: ProcessInfo.processInfo.systemUptime)
+            publishCaptureStatus()
             captureAlive = false; lastPacketDate = .distantPast
             invalidatePending()
             diag.noteRuntimeState("heartbeat_timeout")
@@ -1081,6 +1151,8 @@ final class TranslatorEngine: ObservableObject {
         }
         let captureAdmission = captureIdentity.admit(p.captureSessionID)
         guard captureAdmission != .rejected else { return }
+        captureReadiness.receive(frames: p.frames, session: p.captureSessionID, stopped: false, at: ProcessInfo.processInfo.systemUptime)
+        publishCaptureStatus()
         if captureAdmission == .newSession, captureAlive { invalidatePending(); captureAlive = false }
         let wasAlive = captureAlive
         lastPacketDate = now
@@ -3287,9 +3359,7 @@ final class TranslatorEngine: ObservableObject {
                 return
             }
             guard sourceCode != "auto", !captureAlive else { return }
-            let session = modeSessionID, system = activeTranslationSystem
-            let result = await modeService.prepare(source: sourceCode, target: targetCode, system: system)
-            if session == modeSessionID, result != "Preparation superseded" { modeAvailability = result; warmupStatus = result }
+            await refreshModePreparation(source: sourceCode, target: targetCode, system: activeTranslationSystem)
             return
         }
         guard !Task.isCancelled, runtimePolicy.allowsPrewarming, flag("keepWarm", true), !paused,

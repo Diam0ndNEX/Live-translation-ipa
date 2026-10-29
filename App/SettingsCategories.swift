@@ -43,7 +43,7 @@ struct TranslationSettings: View {
                 Toggle("Predict the language for warm-up", isOn: $predictiveWarmup)
                 Text("Prepares a recently confirmed source language when Automatic hasn't resolved one yet. Live translation always has priority.")
                     .font(.footnote).foregroundStyle(.secondary)
-                LabeledContent("Translator status", value: engine.warmupStatus)
+                TranslationActivityView()
                 if let ms = engine.warmupLastDurationMs {
                     LabeledContent("Last warm-up", value: "\(Int(ms)) ms")
                 }
