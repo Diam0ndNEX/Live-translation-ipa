@@ -202,6 +202,7 @@ final class ThreeModeCoordinator {
     var system: TranslationSystem = .legacy
     var allowsReuse = true
     var adaptiveHybrid = true
+    var fastRecoveryInstalled = true
     var coldSpeculationCeiling = 0.7
     var matchingLowLatencyDeadline = 4.0
     private(set) var current: ModeCaption?
@@ -404,9 +405,15 @@ final class ThreeModeCoordinator {
         event(caption, "recovery_decision_" + reason, nil)
         confirmation = Task { [weak self] in
             guard let self else { return }
-            var result = await self.resolve(caption, strategy: .lowLatency, speculative: false)
+            // If Hybrid's optional fast language pack is known missing, do not
+            // burn two failed Low Latency requests before Apple Default fallback.
+            let useLowLatency = self.system == .lowLatency || self.fastRecoveryInstalled
+            if !useLowLatency { self.event(caption, "hybrid_no_fast_pack_fallback", nil) }
+            var result = await self.resolve(caption, strategy: useLowLatency ? .lowLatency : .appleDefault,
+                                            speculative: false)
             // Hybrid alone permits one default fallback after bounded LL failure.
-            if result == nil, self.system == .hybridRecovery, !Task.isCancelled, self.current == caption {
+            if result == nil, self.system == .hybridRecovery, useLowLatency,
+               !Task.isCancelled, self.current == caption {
                 self.event(caption, "hybrid_default_fallback", nil)
                 result = await self.resolve(caption, strategy: .appleDefault, speculative: false)
             }
