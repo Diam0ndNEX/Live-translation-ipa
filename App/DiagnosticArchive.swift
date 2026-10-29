@@ -264,6 +264,24 @@ struct TranslationModeReport: Codable {
                 }
             }
         }
+        // Full-session totals survive bounded event-ring eviction. Only known
+        // metadata reasons and numeric samples can reach the exported report.
+        let sessionReasons = [
+            "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
+            "hybrid_cross_strategy_overlap", "hybrid_overlapped_recovery_ms",
+            "pip_held_unchanged", "backend_availability_ms", "backend_task_dispatch_ms",
+            "speculative_queue_ms", "recovery_queue_ms", "model_batch_completed",
+            "cancelled_call_returned"
+        ]
+        for reason in sessionReasons {
+            if let count = counters[reason], count >= 0 {
+                counts["session_" + reason] = min(count, 1_000_000)
+            }
+            if let sample = distributions[reason], sample.count >= 0,
+               sample.mean.isFinite, sample.mean >= 0 {
+                samples["session_" + reason + "_mean_ms"] = [min(sample.mean, 60_000)]
+            }
+        }
         let modes = ["legacy", "hybridRecovery", "lowLatency"]
         for warmup in safeWarmups {
             let cohort = "warmup_" + warmup.system.rawValue + "_" + warmup.testMode + "_" + warmup.source + "_" + warmup.target + "_" + warmup.strategy.rawValue
