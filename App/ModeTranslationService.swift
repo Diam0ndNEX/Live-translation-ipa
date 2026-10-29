@@ -132,34 +132,56 @@ final class ModeTranslationService {
         }
         let revision = generation
         let src = Locale.Language(identifier: source), dst = Locale.Language(identifier: target)
-        let availability = LanguageAvailability(preferredStrategy: .lowLatency)
         progress?(.checkingLanguages)
-        guard await availability.status(from: src, to: dst) == .installed else {
-            if revision == generation, preparation == preparationRevision, !Task.isCancelled { progress?(.languagesUnavailable) }
-            return "Low-latency languages unavailable. Install this pair in Languages."
+        let lowState = await LanguageAvailability(preferredStrategy: .lowLatency).status(from: src, to: dst)
+        let defaultState = system == .hybridRecovery ?
+            await LanguageAvailability().status(from: src, to: dst) : .unsupported
+        guard revision == generation, preparation == preparationRevision, !Task.isCancelled else {
+            return "Preparation superseded"
         }
-        guard revision == generation, preparation == preparationRevision, !Task.isCancelled else { return "Preparation superseded" }
+        let lowInstalled = lowState == .installed
+        let defaultInstalled = defaultState == .installed
+        guard lowInstalled || (system == .hybridRecovery && defaultInstalled) else {
+            progress?(.languagesUnavailable)
+            return lowState == .unsupported ?
+                "Low Latency does not support this pair; check Apple Default in Languages." :
+                "The required language pack is not installed. Open Languages for this pair."
+        }
         progress?(.languagesInstalled)
         progress?(.creatingSessions)
         activity.advance(activityID, to: .preparingSessions)
-        if !confirmed.busy {
-            install(confirmed, source: src, target: dst, strategy: .lowLatency)
-        }
-        if !speculative.busy {
-            install(speculative, source: src, target: dst,
-                    strategy: system == .lowLatency ? .lowLatency : .appleDefault)
-        }
         let pair = "\(src.minimalIdentifier)>\(dst.minimalIdentifier)|"
         let speculativeStrategy: RequestedTranslationStrategy = system == .lowLatency ? .lowLatency : .appleDefault
-        let confirmedSession = confirmed.session, speculativeSession = speculative.session
+        if lowInstalled && !confirmed.busy {
+            install(confirmed, source: src, target: dst, strategy: .lowLatency)
+        }
+        if (system == .lowLatency ? lowInstalled : defaultInstalled) && !speculative.busy {
+            install(speculative, source: src, target: dst, strategy: speculativeStrategy)
+        }
+        let confirmedSession = lowInstalled ? confirmed.session : nil
+        let speculativeSession = (system == .lowLatency ? lowInstalled : defaultInstalled) ? speculative.session : nil
         progress?(.checkingSessions)
         let confirmedSessionReady = await confirmedSession?.isReady == true
         let speculativeSessionReady = await speculativeSession?.isReady == true
-        guard revision == generation, preparation == preparationRevision, !Task.isCancelled else { return "Preparation superseded" }
-        let confirmedReady = !confirmed.invalidated && confirmed.key == pair + RequestedTranslationStrategy.lowLatency.rawValue && confirmed.session === confirmedSession && confirmedSessionReady
-        let speculativeReady = !speculative.invalidated && speculative.key == pair + speculativeStrategy.rawValue && speculative.session === speculativeSession && speculativeSessionReady
-        progress?(confirmedReady && speculativeReady ? .sessionsReady : .sessionsWaiting)
-        return confirmedReady && speculativeReady ? "Languages and sessions ready; model residency unmeasured" : "Languages installed; waiting for valid session resources"
+        guard revision == generation, preparation == preparationRevision, !Task.isCancelled else {
+            return "Preparation superseded"
+        }
+        let confirmedReady = lowInstalled && !confirmed.invalidated &&
+            confirmed.key == pair + RequestedTranslationStrategy.lowLatency.rawValue &&
+            confirmed.session === confirmedSession && confirmedSessionReady
+        let speculativeReady = !speculative.invalidated &&
+            speculative.key == pair + speculativeStrategy.rawValue &&
+            speculative.session === speculativeSession && speculativeSessionReady
+        let ready = system == .hybridRecovery ? (speculativeReady || confirmedReady) : (speculativeReady && confirmedReady)
+        progress?(ready ? .sessionsReady : .sessionsWaiting)
+        if ready && system == .hybridRecovery && !lowInstalled {
+            return "Apple Default ready. Fast Low Latency recovery needs its language pack; translation can continue."
+        }
+        if ready && system == .hybridRecovery && !defaultInstalled {
+            return "Low Latency ready. Apple Default needs its language pack; translation can continue."
+        }
+        return ready ? "Languages and sessions ready; model residency unmeasured" :
+            "Languages installed; waiting for valid session resources"
     }
 
     @available(iOS 26.0, *)
