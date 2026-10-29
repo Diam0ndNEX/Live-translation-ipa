@@ -199,6 +199,10 @@ final class Harness {
         precondition(capture.admit("second") == .rejected)
         precondition(capture.admit("third") == .newSession)
         precondition(capture.admit(nil) == .rejected)
+        precondition(CaptionClockOrigin.monotonic(firstSeen: 80, wallFirstSeen: 1000, wallNow: 5000, uptimeNow: 100) == 80,
+            "Wall-clock changes cannot reset a supplied monotonic OCR origin")
+        precondition(CaptionClockOrigin.monotonic(firstSeen: nil, wallFirstSeen: 995, wallNow: 1000, uptimeNow: 100) == 95)
+        precondition(CaptionClockOrigin.monotonic(firstSeen: 500, wallFirstSeen: 995, wallNow: 1000, uptimeNow: 100) == 95)
         print("Three-mode migration, sharing, atomic selection, mismatch, cancellation, memory isolation, strategy purity and semantic identity checks passed")
     }
 }

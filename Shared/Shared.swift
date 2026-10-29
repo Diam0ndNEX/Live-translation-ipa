@@ -88,6 +88,7 @@ struct Packet: Codable {
     var lastVisualChangeAt: Double? = nil
     var effectiveOCRIntervalMs: Double? = nil
     var captureSessionID: String? = nil
+    var firstSeenMonotonic: Double? = nil
 }
 
 /// App → extension (sent back over the same localhost link)

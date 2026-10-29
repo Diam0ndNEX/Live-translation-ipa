@@ -318,3 +318,10 @@ struct CaptureSessionIdentityGate {
         if retired.count > 64 { retired.removeFirst(retired.count - 64) }
     }
 }
+
+enum CaptionClockOrigin {
+    static func monotonic(firstSeen: Double?, wallFirstSeen: Double, wallNow: Double, uptimeNow: Double) -> Double {
+        if let firstSeen, firstSeen.isFinite, firstSeen >= 0, firstSeen <= uptimeNow { return firstSeen }
+        return max(0, uptimeNow - max(0, wallNow - wallFirstSeen))
+    }
+}

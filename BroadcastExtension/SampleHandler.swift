@@ -15,6 +15,8 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var skipped = 0
     private var lastRun = Date.distantPast
     private var readStartedAt = 0.0
+    private var readStartedMonotonic = 0.0
+    private var candidateStartedMonotonic: Double?
     private var candidateStartedAt = 0.0
     private var lastPing = Date.distantPast
     private var candidateKey = ""
@@ -151,6 +153,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         // The lock also prevents overlapping callbacks from mutating confirmation state.
         lastRun = now
         readStartedAt = now.timeIntervalSince1970
+        readStartedMonotonic = ProcessInfo.processInfo.systemUptime
         autoreleasepool { recognize(pb, orientation, cfg, edge: plan.edge) }
     }
 
@@ -267,7 +270,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         let margin = 0.03
         let broadY0 = max(0, cfg.y0 - margin), broadY1 = min(1, cfg.y1 + margin)
         let focusEnabled = cfg.focusedCaptionOCR == true
-        let focus = focusEnabled ? captionFocus.scan(at: readStartedAt, y0: broadY0, y1: broadY1,
+        let focus = focusEnabled ? captionFocus.scan(at: readStartedMonotonic, y0: broadY0, y1: broadY1,
             context: "\(orientation.rawValue)|\(cfg.rot ?? 0)|\(cfg.rev ?? 0)|\(cfg.lang)|\(cfg.y0)|\(cfg.y1)") :
             CaptionFocus.Scan(y0: broadY0, y1: broadY1, broad: true)
         let y0 = focus.y0, y1 = focus.y1
@@ -336,13 +339,15 @@ class SampleHandler: RPBroadcastSampleHandler {
         let need = max(1, cfg.stability ?? 2)
         let key = lines.map(\.t).joined(separator: "\n")
         if cfg.subtitleTracking == true || cfg.adaptiveConfirmation == true || cfg.strictCaptionIdentity == true {
-            let decision = tracker.observe(lines, at: readStartedAt, required: need,
+            let strict = cfg.strictCaptionIdentity == true
+            let decision = tracker.observe(lines, at: strict ? readStartedMonotonic : readStartedAt, required: need,
                 adaptive: cfg.adaptiveConfirmation ?? false, spatial: cfg.strictCaptionIdentity == true || (cfg.subtitleTracking ?? false),
                 deadline: cfg.confirmationDeadline ?? 0.6, minimumConfidence: cfg.confidence ?? 0.3,
                 strictSource: cfg.strictCaptionIdentity ?? false)
             candidateID = "\(captureID):\(cfg.rev ?? 0):\(decision.id)"
             confirmationReason = decision.reason
-            candidateStartedAt = decision.firstSeen
+            candidateStartedAt = strict ? readStartedAt - max(0, readStartedMonotonic - decision.firstSeen) : decision.firstSeen
+            candidateStartedMonotonic = strict ? decision.firstSeen : nil
             candidateCount = decision.ready || decision.duplicate ? 0 : 1
             guard !decision.duplicate else { return }
             if decision.ready {
@@ -393,7 +398,8 @@ class SampleHandler: RPBroadcastSampleHandler {
                                              lastVisualChangeAt: lastVisualChangeAt == .distantPast ?
                                                 nil : lastVisualChangeAt.timeIntervalSince1970,
                                              effectiveOCRIntervalMs: effectiveOCRIntervalMs,
-                                             captureSessionID: captureID))
+                                             captureSessionID: captureID,
+                                             firstSeenMonotonic: kind == "ocr" && config.strictCaptionIdentity == true ? candidateStartedMonotonic : nil))
         }
         var data = encode(lines)
         if let d = data, d.count > 60000 { data = encode(Array(lines.prefix(30))) }

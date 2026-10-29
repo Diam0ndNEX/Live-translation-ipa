@@ -282,7 +282,9 @@ final class TranslatorEngine: ObservableObject {
         }
         guard !inputs.isEmpty else { return }
         let captionID = packet.candidateID ?? "manual-\(modeRevision)"
-        let monotonicOrigin = ProcessInfo.processInfo.systemUptime - max(0, Date().timeIntervalSince1970 - (packet.firstSeenAt ?? packet.ts ?? Date().timeIntervalSince1970))
+        let monotonicOrigin = CaptionClockOrigin.monotonic(firstSeen: packet.firstSeenMonotonic,
+            wallFirstSeen: packet.firstSeenAt ?? packet.ts ?? Date().timeIntervalSince1970,
+            wallNow: Date().timeIntervalSince1970, uptimeNow: ProcessInfo.processInfo.systemUptime)
         let caption = ModeCaption(system: activeTranslationSystem, session: modeSessionID, caption: captionID, revision: modeRevision,
             source: source, target: targetCode, rules: memoryRuleToken, text: text,
             units: inputs, keys: keys, firstOCR: monotonicOrigin)
