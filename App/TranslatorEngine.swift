@@ -846,7 +846,9 @@ final class TranslatorEngine: ObservableObject {
         if extensionVersion != p.version { extensionVersion = p.version }
         if let t = p.ocrMs, t != ocrMs { ocrMs = t }
         if let m = p.memFreeMB, m != extFreeMB { extFreeMB = m }
-        diag.onPacket(p, transport: p.ts.map { max(0, now.timeIntervalSince1970 - $0) * 1000 })
+        if p.kind != "ocr" || p.rev == nil || p.rev == rotRev {
+            diag.onPacket(p, transport: p.ts.map { max(0, now.timeIntervalSince1970 - $0) * 1000 })
+        }
 
         if !wasAlive {
             interruptWarmupForLiveWork()
@@ -1652,7 +1654,7 @@ final class TranslatorEngine: ObservableObject {
                 (!display || workGeneration == generation) &&
                 CandidateValidity.isCurrent(workCandidate, active: activeCandidateID,
                     enabled: flag("steadyCaptions", true))
-            if display && !current && diag.detailedCollection {
+            if display && !current && diag.detailedCollection && diag.started == diagnosticEpoch {
                 diag.trace(workCandidate, stage: "cancelled",
                            detail: "Obsolete translation generation or candidate")
             }
@@ -1750,8 +1752,10 @@ final class TranslatorEngine: ObservableObject {
                             if display {
                                 // Never attribute an obsolete result to the newer
                                 // packet. Count it as cancelled, not as a usable hit.
-                                diag.recordMemory(.cancelled, durationMs: lookup.durationMs,
-                                    candidate: workCandidate, unitKey: key)
+                                if diag.started == diagnosticEpoch {
+                                    diag.recordMemory(.cancelled, durationMs: lookup.durationMs,
+                                        candidate: workCandidate, unitKey: key)
+                                }
                             }
                             return
                         }
