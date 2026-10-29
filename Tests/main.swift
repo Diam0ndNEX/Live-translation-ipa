@@ -756,3 +756,7 @@ for index in 0..<100 {
 }
 check(temporaryTestBank.captions.count == 64, "Assembled-caption acceleration remains bounded")
 print("v1.7.1 temporary mode, process lifetime and exact work-sharing checks passed")
+
+check(ExactModelWorkPolicy.sharedUnits(inFlight: ["needed-A", "obsolete-B"], required: ["needed-A", "new-C"],
+      workContext: 7, currentContext: 7, reuseAllowed: true) == 0,
+      "One overlapping sentence must not keep an unrelated old batch ahead of new dialogue")

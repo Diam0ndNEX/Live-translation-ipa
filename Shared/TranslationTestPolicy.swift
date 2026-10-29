@@ -70,7 +70,8 @@ final class ProcessTranslationMemory {
 enum ExactModelWorkPolicy {
     static func sharedUnits(inFlight: Set<String>, required: Set<String>,
                             workContext: Int?, currentContext: Int, reuseAllowed: Bool) -> Int {
-        guard reuseAllowed, workContext == currentContext else { return 0 }
+        guard reuseAllowed, workContext == currentContext,
+              inFlight.isSubset(of: required) else { return 0 }
         return inFlight.intersection(required).count
     }
 }

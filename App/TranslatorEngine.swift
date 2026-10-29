@@ -370,6 +370,8 @@ final class TranslatorEngine: ObservableObject {
     }
 
     init() {
+        sourceCode = UserDefaults.standard.string(forKey: "source") ?? "auto"
+        targetCode = UserDefaults.standard.string(forKey: "target") ?? "en"
         memoryTestMode = TranslationTestMode(freshRequests: flag("freshTranslationTest", false),
                                            temporaryMemory: flag("temporaryMemoryTest", false))
         diag.translationTestMode = memoryTestMode
@@ -377,8 +379,6 @@ final class TranslatorEngine: ObservableObject {
             guard let self, self.memoryTestMode.allowsReuse else { return 0 }
             return self.ram.values.count
         }
-        sourceCode = UserDefaults.standard.string(forKey: "source") ?? "auto"
-        targetCode = UserDefaults.standard.string(forKey: "target") ?? "en"
         server.onPacket = { [weak self] packet in self?.handle(packet) }
         server.start()
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -2275,6 +2275,7 @@ final class TranslatorEngine: ObservableObject {
         })
         memoryRevision += 1
         let revision = memoryRevision
+        let diagnosticEpoch = diag.started
         Task { [weak self] in
             guard let self else { return }
             let writeStart = ProcessInfo.processInfo.systemUptime
@@ -2294,19 +2295,25 @@ final class TranslatorEngine: ObservableObject {
                     }
                 }
                 self.memoryFailure = nil
-                self.diag.recordMemory(.persisted, durationMs: (ProcessInfo.processInfo.systemUptime - writeStart) * 1000)
+                if self.diag.started == diagnosticEpoch {
+                    self.diag.recordMemory(.persisted, durationMs: (ProcessInfo.processInfo.systemUptime - writeStart) * 1000)
+                }
             } catch MemoryStoreError.storageFull {
                 storageFull = true
                 // Avoid retry storms on every changed subtitle when storage is full.
                 // Confirmed results remain pending for the next explicit/periodic retry.
                 self.storageFullRetryNotBefore = Date().addingTimeInterval(30)
                 self.memoryFailure = "Device storage full; remembered translations are pending, not saved"
-                self.diag.recordMemory(.writeFailed,
-                    durationMs: (ProcessInfo.processInfo.systemUptime - writeStart) * 1000)
+                if self.diag.started == diagnosticEpoch {
+                    self.diag.recordMemory(.writeFailed,
+                        durationMs: (ProcessInfo.processInfo.systemUptime - writeStart) * 1000)
+                }
             } catch {
                 self.memoryFailure = "Memory write failed; pending entries will retry"
-                self.diag.recordMemory(.writeFailed,
-                    durationMs: (ProcessInfo.processInfo.systemUptime - writeStart) * 1000)
+                if self.diag.started == diagnosticEpoch {
+                    self.diag.recordMemory(.writeFailed,
+                        durationMs: (ProcessInfo.processInfo.systemUptime - writeStart) * 1000)
+                }
             }
             self.memorySaving = false
             self.memoryPendingWrites = self.pendingMemory.count
