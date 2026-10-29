@@ -33,7 +33,7 @@ struct TranslationSettings: View {
                         Text("Low latency").tag("low")
                         Text("Hybrid · fast then refine").tag("hybrid")
                     }
-                    Text("Hybrid reuses compatible high-fidelity memory first. For new live subtitles, a fast preview appears before the high-fidelity refinement. Only high-fidelity results enter its normal saved memory. Preview work pauses under power or thermal pressure.")
+                    Text("Hybrid combines low latency with Apple’s default translation strategy, matching the older normal route. It reuses compatible saved memory first. For new live subtitles, a fast preview appears before the Apple-default refinement. Only the default-strategy result enters its normal saved memory. Preview work pauses under power or thermal pressure.")
                         .font(.footnote).foregroundStyle(.secondary)
                     if hybridTranslation {
                         LabeledContent("Hybrid activity", value: engine.hybridStatus)

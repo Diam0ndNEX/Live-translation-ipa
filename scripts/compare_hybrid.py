@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compare an explicitly selected hybrid run against a single high-fidelity baseline.
+"""Compare an explicitly selected hybrid run against a single Apple-default baseline.
 First-visible speed and final-quality latency are independent, mandatory gates.
 """
 import argparse
@@ -17,16 +17,16 @@ def assess(baseline, candidate, evidence=None):
     report = compare(baseline, candidate)
     issues = [x for x in report['issues'] if not x.startswith('Mismatched hybrid model mode;')]
     if normalized(baseline['settings'].get('hybridTranslation', 'false')) is not False:
-        issues.append('Baseline must be the existing single high-fidelity mode')
+        issues.append('Baseline must be the existing single Apple-default mode')
     if normalized(candidate['settings'].get('hybridTranslation', 'false')) is not True:
         issues.append('Candidate must explicitly select Hybrid')
     for key in ('hybridLowBatches', 'confirmedModelBatches', 'hybridPreviewEnqueues'):
         if candidate.get('counters', {}).get(key, 0) < 1:
             issues.append(f'Both strategies/preview path not exercised: {key}')
     if 'hybridRefinementsSuperseded' not in candidate.get('counters', {}):
-        issues.append('Missing high-fidelity refinement coverage evidence')
+        issues.append('Missing final refinement coverage evidence')
     if candidate.get('counters', {}).get('hybridRefinementsSuperseded', 0) > baseline['counters'].get('unpresentedConfirmed', 0):
-        issues.append('High-fidelity refinement coverage worsened')
+        issues.append('Final refinement coverage worsened')
     factor = .75 if test_mode(candidate['settings']) == 'temporaryMemory' else .90
     cells = []
     old = baseline['distributions'].get('enqueueLatencyMs', {})

@@ -1589,10 +1589,12 @@ final class TranslatorEngine: ObservableObject {
         let availability: LanguageAvailability
         if #available(iOS 26.4, *), lowLatencyModel {
             availability = LanguageAvailability(preferredStrategy: .lowLatency)
-        } else if #available(iOS 26.4, *) {
+        } else if #available(iOS 26.4, *), !hybridEnabled {
             availability = LanguageAvailability(preferredStrategy: .highFidelity)
         } else { availability = LanguageAvailability() }
+        let revision = contextRevision
         let s = await availability.status(from: src, to: target)
+        guard revision == contextRevision else { return s }
         availCache[k] = (Date(), s)
         return s
     }
@@ -2070,7 +2072,7 @@ final class TranslatorEngine: ObservableObject {
             guard isCurrent() else { return }
             if !display { trimCache(); return }
             if let result = preview.caption {
-                hybridStatus = "Fast preview · refining with high fidelity"
+                hybridStatus = "Fast preview · refining with Apple default"
                 let timing = PresentationTiming(packet: currentPacket, firstSeen: currentTs,
                     queuedAt: currentQueuedAt, processingAt: processingStarted,
                     processingMs: Date().timeIntervalSince(t0) * 1000,
@@ -2342,7 +2344,7 @@ final class TranslatorEngine: ObservableObject {
                     if #available(iOS 26.4, *), lowLatencyModel {
                         return TranslationSession(installedSource: source, target: target, preferredStrategy: .lowLatency)
                     }
-                    if #available(iOS 26.4, *) {
+                    if #available(iOS 26.4, *), !hybridEnabled {
                         return TranslationSession(installedSource: source, target: target, preferredStrategy: .highFidelity)
                     }
                     return TranslationSession(installedSource: source, target: target)
@@ -2368,7 +2370,7 @@ final class TranslatorEngine: ObservableObject {
                 diag.noteModelState("model_session_created")
                 if #available(iOS 26.4, *), lowLatencyModel {
                     directSession = TranslationSession(installedSource: source, target: target, preferredStrategy: .lowLatency)
-                } else if #available(iOS 26.4, *) {
+                } else if #available(iOS 26.4, *), !hybridEnabled {
                     directSession = TranslationSession(installedSource: source, target: target, preferredStrategy: .highFidelity)
                 } else { directSession = TranslationSession(installedSource: source, target: target) }
                 directKey = k
@@ -2532,10 +2534,10 @@ final class TranslatorEngine: ObservableObject {
         if hybridEnabled {
             if !hybridPreviewVisible { diag.noteHybrid("hybrid_first_enqueued", durationMs: total) }
             diag.noteHybrid("hybrid_final_enqueued", durationMs: total)
-            hybridStatus = "High-fidelity result ready"
+            hybridStatus = "Apple default result ready"
         }
         hybridPreviewVisible = false
-        outputModelLabel = lowLatencyModel ? "Low latency" : "High fidelity"
+        outputModelLabel = lowLatencyModel ? "Low latency" : (hybridEnabled ? "Apple default" : "High fidelity")
         latency.last = LatencyBreakdown(
             recognition: packet?.ocrMs ?? 0,
             confirmation: max(0, read - first) * 1000,
@@ -3320,7 +3322,7 @@ final class TranslatorEngine: ObservableObject {
         let session: TranslationSession
         if #available(iOS 26.4, *), lowLatencyModel {
             session = TranslationSession(installedSource: src, target: target, preferredStrategy: .lowLatency)
-        } else if #available(iOS 26.4, *) {
+        } else if #available(iOS 26.4, *), !hybridEnabled {
             session = TranslationSession(installedSource: src, target: target, preferredStrategy: .highFidelity)
         } else { session = TranslationSession(installedSource: src, target: target) }
         warmupSuperseded = false
@@ -3435,11 +3437,12 @@ final class TranslatorEngine: ObservableObject {
         availCache.removeAll()
         let destination = targetCode
         let strategy = lowLatencyModel
+        let defaultStrategy = hybridEnabled
         let target = Locale.Language(identifier: destination)
         let av: LanguageAvailability
         if #available(iOS 26.4, *), strategy {
             av = LanguageAvailability(preferredStrategy: .lowLatency)
-        } else if #available(iOS 26.4, *) {
+        } else if #available(iOS 26.4, *), !defaultStrategy {
             av = LanguageAvailability(preferredStrategy: .highFidelity)
         } else { av = LanguageAvailability() }
         var out: [String: LanguageAvailability.Status] = [:]
@@ -3450,14 +3453,14 @@ final class TranslatorEngine: ObservableObject {
         for code in codes {
             let source = Locale.Language(identifier: code)
             let availability = await av.status(from: source, to: target)
-            guard destination == targetCode, strategy == lowLatencyModel else { return }
+            guard destination == targetCode, strategy == lowLatencyModel, defaultStrategy == hybridEnabled else { return }
             out[code] = availability
             let key = TranslationModelMemoryPolicy.sessionKey(source: source.minimalIdentifier,
                 target: target.minimalIdentifier, lowLatency: strategy)
             availCache[key] = (Date(), availability)
             if code == sourceCode { langStatus[code] = availability }
         }
-        guard destination == targetCode, strategy == lowLatencyModel else { return }
+        guard destination == targetCode, strategy == lowLatencyModel, defaultStrategy == hybridEnabled else { return }
         langStatus = out
     }
 

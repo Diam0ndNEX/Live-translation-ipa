@@ -43,11 +43,11 @@ final class HybridTranslationRunner {
             let result = PipelineSafety.orderedTranslations(responses.map { ($0.clientIdentifier, $0.targetText) }, count: texts.count)
             guard revision == epoch else { return nil }
             if result == nil, session === current { session = nil }
-            status = result == nil ? "Fast preview incomplete; using high fidelity" : "Fast model ready"
+            status = result == nil ? "Fast preview incomplete; using Apple default" : "Fast model ready"
             return result
         } catch {
             if session === current { session = nil }
-            status = Task.isCancelled ? "Fast preview superseded" : "Fast model unavailable; using high fidelity"
+            status = Task.isCancelled ? "Fast preview superseded" : "Fast model unavailable; using Apple default"
             return nil
         }
     }
