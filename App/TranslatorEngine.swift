@@ -3895,6 +3895,21 @@ final class TranslatorEngine: ObservableObject {
             return
         }
         let coverage = languageCoverage(for: code)
+        if coverage.overall(for: pendingTranslationSystem) == .unchecked {
+            let destination = targetCode, system = pendingTranslationSystem
+            downloadMessage = "Checking installed packs before requesting a download"
+            Task { [weak self] in
+                guard let self else { return }
+                await self.refreshStatus()
+                guard destination == self.targetCode, system == self.pendingTranslationSystem else { return }
+                if self.languageCoverage(for: code).overall(for: system) == .unchecked {
+                    self.downloadMessage = "Could not verify language availability. Try Refresh Languages."
+                } else {
+                    self.download(code)
+                }
+            }
+            return
+        }
         guard let strategy = coverage.nextDownload(for: pendingTranslationSystem) else {
             downloadMessage = coverage.explanation(for: pendingTranslationSystem)
             toast(downloadMessage)
