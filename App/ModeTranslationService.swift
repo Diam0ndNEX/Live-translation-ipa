@@ -28,6 +28,8 @@ final class ModeTranslationService {
     private let warmupLane = Lane()
     private var warmupPolicy = InitialWarmupPolicy()
     var warmupEvent: ((InitialWarmupEvent) -> Void)?
+    var modelRequestCompleted: ((String, String, RequestedTranslationStrategy, Double) -> Void)?
+    private(set) var warmupSkipDescription = ""
     var event: ((ModeCaption, String, Double?) -> Void)?
     var status: ((String) -> Void)?
     var hostedDefault: (([String], Locale.Language, Locale.Language, Bool) async -> [String]?)?
@@ -83,15 +85,21 @@ final class ModeTranslationService {
               !speculative.busy, !confirmed.busy else { return nil }
         let revision = generation
         var completedStrategies = 0
+        warmupSkipDescription = ""
         for strategy in InitialWarmupPolicy.strategies(for: system) {
             guard !Task.isCancelled, generation == revision, !warmupLane.busy,
                   !speculative.busy, !confirmed.busy else { return nil }
-            guard warmupPolicy.claim(source: source, target: target, strategy: strategy) else { continue }
+            guard warmupPolicy.claim(source: source, target: target, strategy: strategy) else {
+                warmupSkipDescription = warmupPolicy.skippedReason(source: source, target: target, strategy: strategy)
+                continue
+            }
             let caption = ModeCaption(system: system, session: UUID(), caption: "initial-warmup", revision: 0,
                 source: source, target: target, rules: testMode, text: "",
                 units: samples, keys: samples.indices.map { "warmup-\($0)" }, firstOCR: ProcessInfo.processInfo.systemUptime)
             let result = await translate(caption, indices: Array(samples.indices), strategy: strategy, speculation: false, warmup: true)
-            guard !Task.isCancelled, revision == generation, result != nil, !warmupLane.invalidated else { return nil }
+            let succeeded = !Task.isCancelled && revision == generation && result != nil && !warmupLane.invalidated
+            warmupPolicy.finish(source: source, target: target, strategy: strategy, succeeded: succeeded)
+            guard succeeded else { return nil }
             // Promote the exercised handle, keeping confirmed recovery independent of a cancelled warm-up.
             let destination = system == .hybridRecovery && strategy == .lowLatency ? confirmed : speculative
             guard !destination.busy else { return nil }
@@ -199,7 +207,9 @@ final class ModeTranslationService {
             let result = await withTaskCancellationHandler(operation: { await task.value }, onCancel: { task.cancel() })
             hostedTask = nil
             if hostedActivityID == activityID { hostedActivityID = nil }
-            report(speculation ? "speculative_service_ms" : "recovery_service_ms", (ProcessInfo.processInfo.systemUptime - began) * 1000)
+            let elapsed = (ProcessInfo.processInfo.systemUptime - began) * 1000
+            report(speculation ? "speculative_service_ms" : "recovery_service_ms", elapsed)
+            if result != nil { modelRequestCompleted?(caption.source, caption.target, strategy, elapsed) }
             return result
         }
         let lane = warmup ? warmupLane : (speculation ? speculative : confirmed)
@@ -269,8 +279,9 @@ final class ModeTranslationService {
                     timeout.cancel()
                     report(output == nil ? "model_batch_failed" : "model_batch_completed", nil)
                     if output != nil {
-                        report(speculation ? "speculative_model_completed" : "confirmed_model_completed",
-                            (ProcessInfo.processInfo.systemUptime - start) * 1000)
+                        let elapsed = (ProcessInfo.processInfo.systemUptime - start) * 1000
+                        self.modelRequestCompleted?(caption.source, caption.target, strategy, elapsed)
+                        report(speculation ? "speculative_model_completed" : "confirmed_model_completed", elapsed)
                     }
                     report(speculation ? "speculative_service_ms" : "recovery_service_ms",
                         (ProcessInfo.processInfo.systemUptime - start) * 1000)
