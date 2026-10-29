@@ -349,7 +349,13 @@ final class TranslatorEngine: ObservableObject {
                 } else if reason == "speculative_model_completed" || reason == "confirmed_model_completed" {
                     modelReadiness.finishExecution(success: true, milliseconds: duration)
                 } else if reason == "model_batch_failed" {
-                    modelReadiness.finishExecution(success: false, milliseconds: duration)
+                    if !modeActivitySelected {
+                        modelReadiness.finishExecution(success: false, milliseconds: duration)
+                    } else if modelReadiness.execution == .working {
+                        modelReadiness.execution = modelReadiness.completedAt == nil ? .pending : .complete
+                        modelReadiness.activeSince = nil
+                        modelReadiness.explanation = "Unneeded model work ended after the caption result was selected."
+                    }
                 }
             }
         }

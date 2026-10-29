@@ -192,7 +192,7 @@ final class Harness {
             precondition(memory.selected.count == 1 && memory.calls.count == 1)
             precondition(memory.selected[0].1.strategies[0] == nil)
             precondition(memory.backend.executing && memory.backend.activity?.phase == .working)
-            memory.reply(0, ["Late"]); await memory.settle()
+            memory.reply(0, nil); await memory.settle()
             precondition(memory.backend.activity == nil)
             memory.coordinator.reset()
 
