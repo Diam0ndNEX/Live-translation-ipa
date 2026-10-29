@@ -43,6 +43,15 @@ class ComparisonTests(unittest.TestCase):
         self.new['settings']['adaptiveConfirmation']='0'
         self.assertTrue(compare(self.old,self.new,self.evidence)['accepted'])
 
+    def test_temporary_mode_cannot_compare_as_normal(self):
+        self.new['settings']['temporaryMemoryTest']='1'
+        self.assertFalse(compare(self.old,self.new,self.evidence)['accepted'])
+
+    def test_resumed_cache_cannot_compare_as_empty(self):
+        self.old['settings']['startingRAMEntries']='0'
+        self.new['settings']['startingRAMEntries']='20'
+        self.assertFalse(compare(self.old,self.new,self.evidence)['accepted'])
+
     def test_small_samples_do_not_claim_p95(self):
         self.new['distributions']['modelBatchMs']['count']=4
         self.assertFalse(compare(self.old,self.new,self.evidence)['accepted'])

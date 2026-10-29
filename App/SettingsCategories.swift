@@ -141,6 +141,7 @@ struct DiagnosticsSettings: View {
     @AppStorage("diagSamples") private var samples = 600
     @AppStorage("persistDiagnosticSessions") private var persistSessions = false
     @AppStorage("freshTranslationTest") private var freshTranslationTest = false
+    @AppStorage("temporaryMemoryTest") private var temporaryMemoryTest = false
 
     var body: some View {
         List {
@@ -175,8 +176,24 @@ struct DiagnosticsSettings: View {
             } header: { Text("Diagnostics collection") }
 
             Section {
-                Toggle("Fresh translation test", isOn: $freshTranslationTest)
+                Toggle("Fresh requests only", isOn: Binding(get: { freshTranslationTest }, set: { enabled in
+                    freshTranslationTest = enabled
+                    if enabled { temporaryMemoryTest = false }
+                    engine.testModeSettingsChanged()
+                }))
                 Text("For controlled comparisons, bypasses translation-memory reuse and pre-translation without deleting saved results. Turn off after testing.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Toggle("Temporary-memory test", isOn: Binding(get: { temporaryMemoryTest }, set: { enabled in
+                    temporaryMemoryTest = enabled
+                    if enabled { freshTranslationTest = false }
+                    engine.testModeSettingsChanged()
+                }))
+                Text("Uses an isolated RAM cache and your speculation settings. Saved translations and history are untouched. The cache survives app switches and toggle changes, and is lost when the app process terminates.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                if temporaryMemoryTest {
+                    LabeledContent("Temporary entries", value: "\(engine.temporaryMemoryEntries)")
+                }
+                Text("Changing test mode starts a new diagnostic session so results are not mixed.")
                     .font(.footnote).foregroundStyle(.secondary)
                 NavigationLink {
                     PipelineSimulatorView()
@@ -193,10 +210,9 @@ struct DiagnosticsSettings: View {
                     engine.toast("Counters reset")
                 }
             }
-            ResetSection(keys: ["diagSamples", "persistDiagnosticSessions", "freshTranslationTest"])
+            ResetSection(keys: ["diagSamples", "persistDiagnosticSessions", "freshTranslationTest", "temporaryMemoryTest"])
         }
         .settingsPage("Diagnostics & tests")
-        .onChange(of: freshTranslationTest) { _, _ in engine.pipelineSettingsChanged() }
         .onChange(of: persistSessions) { _, _ in engine.diagnosticsSettingsChanged() }
         .onChange(of: samples) { _, _ in engine.applyStorageSettings() }
     }

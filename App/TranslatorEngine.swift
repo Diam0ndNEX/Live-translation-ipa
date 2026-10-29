@@ -100,7 +100,7 @@ final class TranslatorEngine: ObservableObject {
         "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode", "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "smartCool", "steadyCaptions", "languageRecovery", "deduplicateCopies", "continuousRotation", "contextualLanguage"
     ]
     /// App look & behaviour that presets do not touch.
-    static let interfaceKeys = ["memoryRAMCapacity", "memorySoftLimit", "persistDiagnosticSessions", "suppressOwnInterface", "directPiPBuffer", "legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
+    static let interfaceKeys = ["memoryRAMCapacity", "memorySoftLimit", "persistDiagnosticSessions", "suppressOwnInterface", "directPiPBuffer", "legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "temporaryMemoryTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
     static var settingKeys: [String] { presetKeys + interfaceKeys }
     static let defaults: [String: Any] = [
         "suppressOwnInterface": true, "memoryRAMCapacity": 3000, "memorySoftLimit": 100000, "persistDiagnosticSessions": false, "directPiPBuffer": false,
@@ -122,7 +122,7 @@ final class TranslatorEngine: ObservableObject {
         "adaptiveOCR": true, "adaptiveConfirmation": false, "subtitleTracking": true, "selectiveSpeculation": true,
         "speculationConfidence": 0.85, "confirmationDeadline": 0.6, "smartCool": true, "steadyCaptions": true,
         "languageRecovery": true, "deduplicateCopies": true, "continuousRotation": false, "contextualLanguage": true,
-        "coolMode": false, "diagnosticsEnabled": true, "detailedCollection": false, "freshTranslationTest": false, "showSessionSpeakers": true,
+        "coolMode": false, "diagnosticsEnabled": true, "detailedCollection": false, "freshTranslationTest": false, "temporaryMemoryTest": false, "showSessionSpeakers": true,
         "legacyIdleValidationEnabled": false, "privateSession": false, "diagIncludeText": false, "sessionLimit": 0, "readerSize": 28.0,
         "readerOriginal": true, "readerAlignment": false, "ocrConfidence": 0.3, "ocrCorrection": true, "idleBackoff": true
     ]
@@ -253,24 +253,23 @@ final class TranslatorEngine: ObservableObject {
     private var deferredConfirmedPacket: Packet?
     private var confirmedHandoffDeadlineTask: Task<Void, Never>?
     private var deferredConfirmedReceivedAt = Date.distantPast
-    private var speculationWindow = SpeculativeWorkWindow()
-    private var speculativeOrigins: [String: UInt64] = [:]
     private var specPacket: Packet?
     private var currentSpeculativeText: String?
-    private var savedKeys = Set<String>()
-    private var confirmedKeys = Set<String>()
     private var subtitleRegions = SubtitleRegions()
     private var movieTextFocus = MovieTextFocus()
     private var languageFailures = 0
     private var rulesSnapshot = "", rulesDigest = ""
     private var busy = false
+    private var activeQueueOwner = ModelQueueOwner.scheduling
+    private var queuedWaitOwner = ModelQueueOwner.scheduling
+    private var modelUnitKeysInFlight = Set<String>()
+    private var modelContextInFlight: Int?
     private var showing = false
     private var pendingTexts: [String] = []
     private var legacyContinuation: CheckedContinuation<[String]?, Never>?
     private var lastPacketDate = Date.distantPast
     private var lastTextDate = Date()
     private var lastShowDate = Date.distantPast
-    private var cache: [String: String] = [:]
     private let modelPerf = OSSignposter(subsystem: "com.diam0ndnex.screenlingo", category: "model")
     private var directSession: TranslationSession?
     private var directKey = ""
@@ -279,7 +278,6 @@ final class TranslatorEngine: ObservableObject {
     private var toastToken = 0
     // Translation speed system
     private var specQueued: [String]?
-    private var specKeys = Set<String>()
     private var lastSpecText = ""
     private var lastWarm = Date.distantPast
     private var lastUnresolvedWarmupNotice = Date.distantPast
@@ -301,9 +299,13 @@ final class TranslatorEngine: ObservableObject {
     private var memoryRetryAttempts = 0
     private var storageFullRetryNotBefore = Date.distantPast
     private var memoryPressureCapacity: Int?
+    private let processMemory = ProcessTranslationMemory()
+    @Published private(set) var memoryTestMode = TranslationTestMode.normal
+    @Published private(set) var temporaryMemoryEntries = 0
+    private var ram: TranslationRAMBank { processMemory.bank(for: memoryTestMode) }
+    private var allowsPersistentTranslations: Bool { memoryTestMode.allowsPersistentTranslations }
+
     private var memoryReady = false
-    private var cacheUse: [String: UInt64] = [:]
-    private var cacheClock: UInt64 = 0
     private var segmentationCache = SegmentationCache(capacity: 512)
     private var bypassMemory = false
     private var memoryRevision = 0
@@ -368,6 +370,13 @@ final class TranslatorEngine: ObservableObject {
     }
 
     init() {
+        memoryTestMode = TranslationTestMode(freshRequests: flag("freshTranslationTest", false),
+                                           temporaryMemory: flag("temporaryMemoryTest", false))
+        diag.translationTestMode = memoryTestMode
+        diag.ramEntryCount = { [weak self] in
+            guard let self, self.memoryTestMode.allowsReuse else { return 0 }
+            return self.ram.values.count
+        }
         sourceCode = UserDefaults.standard.string(forKey: "source") ?? "auto"
         targetCode = UserDefaults.standard.string(forKey: "target") ?? "en"
         server.onPacket = { [weak self] packet in self?.handle(packet) }
@@ -479,9 +488,9 @@ final class TranslatorEngine: ObservableObject {
         diag.event(.language, "Source selection changed: \(sourceCode) → \(targetCode)")
     }
 
-    var unconsumedSpeculation: Int { specKeys.count }
+    var unconsumedSpeculation: Int { ram.specKeys.count }
     private var speculationAllowed: Bool {
-        if flag("freshTranslationTest", false) { return false }
+        if !memoryTestMode.allowsSpeculation { return false }
         if !flag("coolMode", false) { return true }
         return flag("smartCool", true) && ocrMs < 100 && queued == nil
             && !ProcessInfo.processInfo.isLowPowerModeEnabled && ProcessInfo.processInfo.thermalState == .nominal
@@ -490,6 +499,24 @@ final class TranslatorEngine: ObservableObject {
     private var runtimePolicy: RuntimePolicy {
         RuntimePolicy(coolMode: flag("coolMode", false), diagnosticsEnabled: flag("diagnosticsEnabled", true),
                       detailedRequested: flag("detailedCollection", false))
+    }
+
+    func testModeSettingsChanged() {
+        let next = TranslationTestMode(freshRequests: flag("freshTranslationTest", false),
+                                       temporaryMemory: flag("temporaryMemoryTest", false))
+        guard next != memoryTestMode else { return }
+        // Close the old measurement cohort before changing cache access policy.
+        diag.reset()
+        invalidatePending()
+        idleValidationTask?.cancel()
+        memoryTestMode = next
+        diag.translationTestMode = next
+        diag.startingRAMEntries = next.allowsReuse ? ram.values.count : 0
+        temporaryMemoryEntries = processMemory.temporary.values.count
+        bypassMemory = false
+        rotRev += 1
+        syncConfig()
+        if let health = memoryHealth { applyMemoryHealth(health) }
     }
 
     func diagnosticsSettingsChanged() {
@@ -730,7 +757,7 @@ final class TranslatorEngine: ObservableObject {
 
     func applyStorageSettings() {
         if history.count > historyCapacity { history = Array(history.prefix(historyCapacity)) }
-        if cache.count > max(500, min(6000, int("memoryRAMCapacity", 3000))) { trimCache(); memoryDirty = true }
+        if ram.values.count > max(500, min(6000, int("memoryRAMCapacity", 3000))) { trimCache(); memoryDirty = true }
         saveMemory()
     }
 
@@ -951,7 +978,7 @@ final class TranslatorEngine: ObservableObject {
             generation += 1
             cancelPresentation()
             queued = nil; specQueued = nil
-            drainTask?.cancel()
+            if sharedInFlightUnits(candidateTexts) == 0 { drainTask?.cancel() }
         } else if p.stable != false {
             if !activeCandidateConfirmed { activeCandidateConfirmedAt = now }
             activeCandidateConfirmed = true
@@ -971,7 +998,7 @@ final class TranslatorEngine: ObservableObject {
         // First, unconfirmed sighting: translate quietly now so the result is ready the moment the text is confirmed.
         if p.stable == false {
             if speculationAllowed && flag("translateAhead", true) {
-                if !speculationWindow.allowsOpportunity(enabled: flag("adaptiveSpeculation", true)) {
+                if !ram.speculationWindow.allowsOpportunity(enabled: flag("adaptiveSpeculation", true)) {
                     if diag.enabled { diag.s.adaptiveSpeculationSkipped += 1 }
                     diag.notePipelineDecision(candidate: p.candidateID,
                         frameIndex: p.frames, stage: "stability",
@@ -1275,11 +1302,39 @@ final class TranslatorEngine: ObservableObject {
         if queued != nil { diag.noteQueueReplacement() }
         queued = blocks
         queuedAt = Date()
+        queuedWaitOwner = busy ? activeQueueOwner : .scheduling
+        // Previously assembled exact results need no model lane. Never bypass OCR
+        // confirmation, generation checks or the presentation policy.
+        if busy, !bypassMemory, memoryTestMode.allowsReuse,
+           let key = ExactCaptionIdentity.key(blocks: blocks, source: sourceCode,
+                                              target: targetCode, rules: memoryRuleToken),
+           let ready = ram.captions[key] {
+            queued = nil
+            diag.noteExactCaptionReuse()
+            if diag.enabled { diag.s.translations += 1; diag.s.chars += blocks.joined().count }
+            translateMs = 0
+            status = "\(sourceCode) → \(targetCode) ✓"
+            if memoryTestMode == .temporaryMemory { diag.noteTemporaryReuse(count: ready.sentences) }
+            let now = Date()
+            let timing = PresentationTiming(packet: queuedPacket, firstSeen: queuedTs,
+                queuedAt: queuedAt, processingAt: now, processingMs: 0,
+                savedRequests: 0, readyAt: now)
+            diag.recordTranslate(ms: 0, sentences: ready.sentences, from: sourceCode,
+                                 to: targetCode, preview: ready.translated)
+            diag.trace(queuedPacket?.candidateID, stage: "ready", detail: "Exact assembled RAM result")
+            schedulePresentation(joined, ready.translated, generation: generation,
+                                 context: contextRevision, timing: timing)
+            return
+        }
         if SubtitlePerformancePolicy.preemptSpeculation(activeText: currentSpeculativeText, confirmedText: joined) {
             // Different input cannot supply an exact whole-caption reuse result.
             // Cancellation unwinds the single drain before confirmed work starts.
-            if diag.enabled { diag.s.specPreemptionRequested += 1 }
-            drainTask?.cancel()
+            let shared = sharedInFlightUnits(blocks)
+            if shared == 0 {
+                if diag.enabled { diag.s.specPreemptionRequested += 1 }
+                drainTask?.cancel()
+            }
+            else { diag.noteSharedModelUnits(shared) }
         } else if currentSpeculativeText == joined {
             if diag.enabled { diag.s.specMatchingConfirmation += 1 }
         }
@@ -1338,6 +1393,7 @@ final class TranslatorEngine: ObservableObject {
         busy = true
         defer {
             busy = false
+            activeQueueOwner = .scheduling
             drainTask = nil
             replayDeferredConfirmedIfPossible()
             startDrain()
@@ -1347,11 +1403,16 @@ final class TranslatorEngine: ObservableObject {
             if let b = queued {
                 queued = nil
                 currentTs = queuedTs; currentPacket = queuedPacket; currentQueuedAt = queuedAt
+                diag.recordQueueWait(owner: queuedWaitOwner,
+                    durationMs: max(0, Date().timeIntervalSince(queuedAt) * 1000),
+                    candidate: queuedPacket?.candidateID)
+                activeQueueOwner = .confirmed
                 await process(b, display: true)
             } else if let sp = specQueued {
                 specQueued = nil
                 currentPacket = specPacket
                 if speculationAllowed {
+                    activeQueueOwner = .speculative
                     currentSpeculativeText = sp.joined(separator: "\n")
                     await process(sp, display: false)
                     currentSpeculativeText = nil
@@ -1488,14 +1549,60 @@ final class TranslatorEngine: ObservableObject {
               rules == memoryRuleToken, destination == targetCode,
               !bypassMemory, !flag("freshTranslationTest", false),
               !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-              cache[key] == nil else { return }
-        cache[key] = value
-        specKeys.insert(key)
-        if let speculativeID { speculativeOrigins[key] = speculativeID }
-        savedKeys.remove(key)
+              ram.values[key] == nil else { return }
+        ram.values[key] = value
+        if ram.specKeys.insert(key).inserted { diag.noteSpeculativeUnit("retained") }
+        if let speculativeID { ram.speculativeOrigins[key] = speculativeID }
+        ram.savedKeys.remove(key)
         touchCache(key)
         trimCache()
         if diag.enabled { diag.s.specRetainedUnits += 1 }
+    }
+
+    private struct PreparedSourceUnit {
+        let label: String?
+        let sentences: [String]
+        let tokens: [(String, String)]
+    }
+
+    private func cleanedSource(_ raw: String, enabled: Bool, fixes: [(String, String)]) -> String {
+        var text = enabled ? TextIntel.cleanOCR(raw) : raw
+        for (from, to) in fixes { text = text.replacingOccurrences(of: from, with: to, options: [.caseInsensitive]) }
+        return text
+    }
+
+    /// Shared by real processing and the in-flight exact-key overlap check.
+    private func preparedSourceUnits(_ text: String, language: String, slang: Bool,
+                                     speakers: Bool, protected: [String]) -> [PreparedSourceUnit] {
+        let expanded = slang ? TextIntel.expandSlang(text, lang: language) : text
+        let parts = speakers ? TextIntel.splitDialogue(expanded) : [(label: String?.none, text: expanded)]
+        return parts.map { part in
+            let tokens = TextIntel.protect(part.text, words: protected)
+            return PreparedSourceUnit(label: part.label, sentences: splitSentences(tokens.text), tokens: tokens.tokens)
+        }
+    }
+
+    private func sharedInFlightUnits(_ blocks: [String]) -> Int {
+        guard activeQueueOwner == .speculative, drainTask?.isCancelled == false,
+              sourceCode != "auto", memoryTestMode.allowsReuse, !bypassMemory,
+              !modelUnitKeysInFlight.isEmpty else { return 0 }
+        let source = Locale.Language(identifier: sourceCode)
+        let id = source.minimalIdentifier
+        let rules = memoryRuleToken
+        let never = list("neverTranslate", lower: false)
+        var keys = Set<String>()
+        for raw in blocks {
+            let text = cleanedSource(raw, enabled: flag("cleanOCR", true), fixes: pairs("sourceFixes"))
+            for part in preparedSourceUnits(text, language: source.languageCode?.identifier ?? id,
+                    slang: flag("slang", true), speakers: flag("speakerDetect", true), protected: never) {
+                for sentence in part.sentences {
+                    keys.insert(PipelineSafety.cacheKey(source: id, target: targetCode, text: sentence,
+                        protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: rules))
+                }
+            }
+        }
+        return ExactModelWorkPolicy.sharedUnits(inFlight: modelUnitKeysInFlight, required: keys,
+            workContext: modelContextInFlight, currentContext: contextRevision, reuseAllowed: true)
     }
 
     private func process(_ blocks: [String], display: Bool = true) async {
@@ -1505,16 +1612,18 @@ final class TranslatorEngine: ObservableObject {
         if display { processingStarted = t0; savedRequests = 0 }
         let workGeneration = generation
         let workContext = contextRevision
+        let workMode = memoryTestMode
+        let workRAM = ram
         let workCandidate = activeCandidateID
         let rules = memoryRuleToken
         let destination = targetCode
         let speculativeStart = Date()
         let diagnosticEpoch = diag.started
-        let speculativeID: UInt64? = display ? nil : speculationWindow.begin()
+        let speculativeID: UInt64? = display ? nil : ram.speculationWindow.begin()
         if !display && diag.enabled { diag.s.specStarted += 1 }
         defer {
             let discarded = Task.isCancelled || workContext != contextRevision || workCandidate != activeCandidateID
-            if let speculativeID { speculationWindow.finish(speculativeID, discarded: discarded) }
+            if let speculativeID { workRAM.speculationWindow.finish(speculativeID, discarded: discarded) }
             if !display && diag.enabled && diag.started == diagnosticEpoch {
                 let ms = Date().timeIntervalSince(speculativeStart) * 1000
                 diag.s.specProcessingMs += ms
@@ -1539,7 +1648,7 @@ final class TranslatorEngine: ObservableObject {
         var unresolvedSource = false
         var failureReason: String? = nil
         func isCurrent() -> Bool {
-            let current = !Task.isCancelled && workContext == contextRevision &&
+            let current = !Task.isCancelled && workContext == contextRevision && workMode == memoryTestMode &&
                 (!display || workGeneration == generation) &&
                 CandidateValidity.isCurrent(workCandidate, active: activeCandidateID,
                     enabled: flag("steadyCaptions", true))
@@ -1552,25 +1661,24 @@ final class TranslatorEngine: ObservableObject {
 
         /// Remembers a finished sentence. Early (translate-ahead) results are marked so we can show how often they pay off.
         func store(_ key: String, _ out: String) {
-            guard isCurrent() else { return }
+            guard isCurrent(), memoryTestMode.allowsReuse else { return }
             guard !out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-            cache[key] = out
-            savedKeys.remove(key)
+            ram.values[key] = out
+            ram.savedKeys.remove(key)
             if display && eligibleMemoryKeys.contains(key) && !flag("freshTranslationTest", false) {
-                confirmedKeys.insert(key)
+                ram.confirmedKeys.insert(key)
                 queueMemory(key, out, independentlyConfirmed: true)
             }
             memoryDirty = true
             touchCache(key)
             if !display {
-                specKeys.insert(key)
-                if let speculativeID { speculativeOrigins[key] = speculativeID }
+                if ram.specKeys.insert(key).inserted { diag.noteSpeculativeUnit("retained") }
+                if let speculativeID { ram.speculativeOrigins[key] = speculativeID }
             }
         }
 
         for (bi, raw) in blocks.enumerated() {
-            var text = cleanOn ? TextIntel.cleanOCR(raw) : raw
-            for (from, to) in fixes { text = text.replacingOccurrences(of: from, with: to, options: [.caseInsensitive]) }
+            let text = cleanedSource(raw, enabled: cleanOn, fixes: fixes)
             if display && diag.detailedCollection && text != raw {
                 diag.trace(workCandidate, stage: "ocrCorrection",
                            detail: "Recognized text was cleaned or corrected")
@@ -1606,14 +1714,13 @@ final class TranslatorEngine: ObservableObject {
                 SourceLanguageRouter.sameLanguage($0.key.rawValue, id)
             }.values.max() ?? 0) : 0
             let memoryEligible = MemoryRetentionPolicy.mayPersist(privateSession: flag("privateSession", false),
-                selectedSource: sourceCode != "auto", confidence: sourceConfidence, confirmed: display)
-            if slangOn { text = TextIntel.expandSlang(text, lang: src.languageCode?.identifier ?? id) }
-            let parts = speakerOn ? TextIntel.splitDialogue(text) : [(label: String?.none, text: text)]
+                selectedSource: sourceCode != "auto", confidence: sourceConfidence, confirmed: display) && allowsPersistentTranslations
+            let parts = preparedSourceUnits(text, language: src.languageCode?.identifier ?? id,
+                slang: slangOn, speakers: speakerOn, protected: never)
             var row: [TUnit] = []
             for (ui, d) in parts.enumerated() {
                 if display, let name = d.label { diag.learn(name) }
-                let prot = TextIntel.protect(d.text, words: never)
-                let sentences = splitSentences(prot.text)
+                let sentences = d.sentences
                 if display && diag.detailedCollection {
                     diag.trace(workCandidate, stage: "segmentation",
                                detail: "Translation units assigned to stable block")
@@ -1621,15 +1728,18 @@ final class TranslatorEngine: ObservableObject {
                 if display && diag.enabled { diag.s.sentences += sentences.count }
                 var outs: [String?] = []
                 for (si, s) in sentences.enumerated() {
-                    let key = PipelineSafety.cacheKey(source: id, target: destination, text: s, protectedWords: prot.tokens.map { "\($0.0)=\($0.1)" }, rules: rules)
+                    let key = PipelineSafety.cacheKey(source: id, target: destination, text: s, protectedWords: d.tokens.map { "\($0.0)=\($0.1)" }, rules: rules)
                     if memoryEligible && TranslationUnitPlanning.mayRemember(s, confirmed: display) {
                         eligibleMemoryKeys.insert(key)
                     }
                     let lookupStart = ProcessInfo.processInfo.systemUptime
                     let bypassReuse = bypassMemory || flag("freshTranslationTest", false)
-                    var resolvedHit = bypassReuse ? nil : cache[key]
+                    if display && bypassReuse {
+                        diag.recordMemory(.bypassed, candidate: workCandidate, unitKey: key)
+                    }
+                    var resolvedHit = bypassReuse ? nil : ram.values[key]
                     var diskHit = false
-                    if resolvedHit == nil, !bypassReuse, memoryReady, flag("remember", true), !flag("privateSession", false) {
+                    if resolvedHit == nil, !bypassReuse, allowsPersistentTranslations, memoryReady, flag("remember", true), !flag("privateSession", false) {
                         let lookup: MemoryLookupResult
                         if let previous = resolvedLookups[key] { lookup = previous }
                         else {
@@ -1661,18 +1771,20 @@ final class TranslatorEngine: ObservableObject {
                                               frameIndex: currentPacket?.frames, unitKey: key)
                         }
                         if let value = resolvedHit {
-                            cache[key] = value; savedKeys.insert(key); touchCache(key)
+                            ram.values[key] = value; ram.savedKeys.insert(key); touchCache(key)
                         }
                     }
                     if let hit = resolvedHit {
                         touchCache(key)
                         outs.append(hit); translatedAny = true
                         if display {
-                            let speculativeHit = specKeys.remove(key) != nil
-                            if speculativeHit, let origin = speculativeOrigins.removeValue(forKey: key) {
-                                speculationWindow.reuse(origin)
+                            if memoryTestMode == .temporaryMemory { diag.noteTemporaryReuse() }
+                            let speculativeHit = ram.specKeys.remove(key) != nil
+                            if speculativeHit { diag.noteSpeculativeUnit("reused") }
+                            if speculativeHit, let origin = ram.speculativeOrigins.removeValue(forKey: key) {
+                                ram.speculationWindow.reuse(origin)
                             }
-                            let savedFromRAM = savedKeys.remove(key) != nil
+                            let savedFromRAM = ram.savedKeys.remove(key) != nil
                             let savedHit = diskHit || savedFromRAM
                             if !diskHit { diag.recordMemory(speculativeHit ? .speculativeHit : .ramHit,
                                                                   durationMs: (ProcessInfo.processInfo.systemUptime - lookupStart) * 1000,
@@ -1683,7 +1795,7 @@ final class TranslatorEngine: ObservableObject {
                             // independently confirmed by stable OCR, it is safe to use
                             // as evidence for lazy legacy reconciliation without another
                             // model call. Ordinary RAM/SQLite hits remain untrusted proof.
-                            if memoryEligible && confirmedKeys.insert(key).inserted && !savedHit {
+                            if memoryEligible && ram.confirmedKeys.insert(key).inserted && !savedHit {
                                 queueMemory(key, hit, independentlyConfirmed: speculativeHit)
                             }
                             if diag.enabled {
@@ -1695,11 +1807,14 @@ final class TranslatorEngine: ObservableObject {
                         }
                     } else {
                         outs.append(nil)
+                        if display && memoryTestMode == .temporaryMemory {
+                            diag.recordMemory(.temporaryMiss, candidate: workCandidate, unitKey: key)
+                        }
                         if display && diag.enabled { diag.s.cacheMisses += 1 }
                         pending[id, default: []].append((bi, ui, si, s, key))
                     }
                 }
-                row.append(TUnit(label: d.label, sentences: sentences, out: outs, tokens: prot.tokens))
+                row.append(TUnit(label: d.label, sentences: sentences, out: outs, tokens: d.tokens))
             }
             units.append(row)
         }
@@ -1725,6 +1840,7 @@ final class TranslatorEngine: ObservableObject {
             let installed = availability == .installed
             let plan = TranslationBatchPlan(items.map { $0.text }, contexts: items.map { $0.key })
             if display { savedRequests += items.count - plan.unique.count }
+            diag.noteExactUnitCoalescing(items.count - plan.unique.count)
             if !display && diag.enabled { diag.s.specModelRequests += plan.unique.count }
             if display && diag.detailedCollection {
                 diag.trace(workCandidate, stage: "freshTranslation",
@@ -1745,8 +1861,12 @@ final class TranslatorEngine: ObservableObject {
                         speculativeID: speculativeID)
                 }
             }
+            modelUnitKeysInFlight = Set(items.map { $0.key })
+            modelContextInFlight = workContext
             let batch = await translateBatch(plan.unique, source: src, target: target, installed: installed,
                                              speculative: !display, partial: partialHandler)
+            modelUnitKeysInFlight.removeAll()
+            modelContextInFlight = nil
             if !isCurrent() {
                 // Cancellation is cooperative: confirmed or speculative model work
                 // can finish after a different caption arrives. Recover only completed exact-key
@@ -1756,14 +1876,14 @@ final class TranslatorEngine: ObservableObject {
                     keys: items.map { $0.key },
                     values: batch.flatMap { plan.expand($0.map(Optional.some)) },
                     workContext: workContext, currentContext: contextRevision,
-                    reuseAllowed: !bypassMemory && !flag("freshTranslationTest", false) &&
+                    reuseAllowed: workMode == memoryTestMode && !bypassMemory && !flag("freshTranslationTest", false) &&
                         rules == memoryRuleToken && destination == targetCode)
                 var retained = 0
-                for (key, value) in recovered where cache[key] == nil {
-                    cache[key] = value
-                    savedKeys.remove(key)
-                    if !display { specKeys.insert(key) }
-                    if let speculativeID { speculativeOrigins[key] = speculativeID }
+                for (key, value) in recovered where ram.values[key] == nil {
+                    ram.values[key] = value
+                    ram.savedKeys.remove(key)
+                    if !display, ram.specKeys.insert(key).inserted { diag.noteSpeculativeUnit("retained") }
+                    if let speculativeID { ram.speculativeOrigins[key] = speculativeID }
                     touchCache(key)
                     retained += 1
                 }
@@ -1829,7 +1949,7 @@ final class TranslatorEngine: ObservableObject {
             }
             return
         }
-        if !display { return }          // translate-ahead: the result now waits in the cache
+        if !display { return }          // translate-ahead: the result now waits in the active RAM bank
         guard !failed else {
             lastHandled = ""
             status = failureReason ?? "Translation incomplete – keeping the previous result. Tap Retry."
@@ -1851,6 +1971,12 @@ final class TranslatorEngine: ObservableObject {
         diag.trace(currentPacket?.candidateID, stage: "ready", detail: "Translation assembled")
         var sentenceCount = 0
         for row in units { for u in row { sentenceCount += u.sentences.count } }
+        if memoryTestMode.allowsReuse,
+           let key = ExactCaptionIdentity.key(blocks: blocks, source: sourceCode,
+                                              target: targetCode, rules: rules) {
+            ram.retainCaption(key: key, result: ExactCaptionResult(
+                translated: outBlocks.joined(separator: "\n"), sentences: sentenceCount))
+        }
         diag.recordTranslate(ms: translateMs, sentences: sentenceCount,
                              from: srcLangs.keys.sorted().joined(separator: "+"), to: targetCode,
                              preview: outBlocks.joined(separator: " / "))
@@ -1893,6 +2019,11 @@ final class TranslatorEngine: ObservableObject {
     private func runBatch(_ session: TranslationSession, _ texts: [String],
                           warmup: Bool = false, speculative: Bool = false,
                           partial: (@MainActor (Int, String) -> Void)? = nil) async -> [String]? {
+        let diagnosticEpoch = diag.started
+        func record(_ reason: String, durationMs: Double? = nil, candidate: String? = nil) {
+            guard diagnosticEpoch == diag.started else { return }
+            diag.noteModelState(reason, durationMs: durationMs, candidate: candidate)
+        }
         let marker = modelPerf.beginInterval("TranslationBatch")
         defer { modelPerf.endInterval("TranslationBatch", marker) }
         let began = ProcessInfo.processInfo.systemUptime
@@ -1901,7 +2032,7 @@ final class TranslatorEngine: ObservableObject {
             let age = Date().timeIntervalSince($0)
             return age >= 0 && age <= 30
         } == true
-        diag.noteModelState(warmup ? "warmup_model_submitted" :
+        record(warmup ? "warmup_model_submitted" :
             (speculative ? "speculative_model_submitted" : "confirmed_model_submitted"), candidate: modelCandidate)
         let reqs = texts.enumerated().map { TranslationSession.Request(sourceText: $0.element, clientIdentifier: String($0.offset)) }
         do {
@@ -1926,26 +2057,26 @@ final class TranslatorEngine: ObservableObject {
                 result = PipelineSafety.orderedTranslations(
                     res.map { ($0.clientIdentifier, $0.targetText) }, count: texts.count)
             }
-            diag.noteModelState(result == nil ? "model_batch_failed" : "model_batch_completed",
+            record(result == nil ? "model_batch_failed" : "model_batch_completed",
                 durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
             if result != nil {
-                diag.noteModelState(warmup ? "warmup_model_completed" :
+                record(warmup ? "warmup_model_completed" :
                     (speculative ? "speculative_model_completed" : "confirmed_model_completed"),
                     durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000,
                     candidate: modelCandidate)
             }
             if first30s {
-                diag.noteModelState("model_batch_first_30s",
+                record("model_batch_first_30s",
                     durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
             }
             return result
         } catch {
             if Task.isCancelled || (warmup && warmupSuperseded) {
-                diag.noteModelState("model_batch_cancelled",
+                record("model_batch_cancelled",
                     durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
                 return nil
             }
-            diag.noteModelState("model_batch_failed",
+            record("model_batch_failed",
                 durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
             diag.event(.error, "Translation engine failed: \(error.localizedDescription)")
             return nil
@@ -2040,7 +2171,7 @@ final class TranslatorEngine: ObservableObject {
         if total > 0 { diag.recordLatency(ms: total) }
         if history.first?.original != text {
             sessionTranslations += 1; sessionCharacters += text.count
-            if !flag("privateSession", false) {
+            if memoryTestMode.allowsHistoryInsertion && !flag("privateSession", false) {
                 history.insert(HistoryItem(original: text, translated: result,
                                            sourceLanguage: sourceCode == "auto" ? detectedLang : sourceCode,
                                            targetLanguage: targetCode), at: 0)
@@ -2105,12 +2236,13 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func touchCache(_ key: String) {
-        cacheClock &+= 1
-        cacheUse[key] = cacheClock
+        temporaryMemoryEntries = processMemory.temporary.values.count
+        ram.clock &+= 1
+        ram.use[key] = ram.clock
     }
 
     private func queueMemory(_ key: String, _ value: String, independentlyConfirmed: Bool = false) {
-        guard flag("remember", true), !flag("privateSession", false),
+        guard allowsPersistentTranslations, flag("remember", true), !flag("privateSession", false),
               !flag("freshTranslationTest", false) else { return }
         // Bound pending writes without claiming unsaved entries are durable.
         guard pendingMemory[key] != nil || pendingMemory.count < 3000 else {
@@ -2247,16 +2379,17 @@ final class TranslatorEngine: ObservableObject {
         diagnosticHealth.integrity = health.integrity
         diagnosticHealth.failedWrites = health.failedWrites
         diagnosticHealth.pendingWrites = memoryPendingWrites
-        diagnosticHealth.ramEntries = cache.count
+        diagnosticHealth.ramEntries = ram.values.count
         diagnosticHealth.categoryCounts = health.categoryCounts
         diag.memoryHealth = diagnosticHealth
     }
 
     func clearRAMCache() {
         invalidatePending()
-        cache.removeAll(); cacheUse.removeAll()
+        processMemory.normal.clear()
         segmentationCache.clear()
-        specKeys.removeAll(); speculativeOrigins.removeAll(); savedKeys.removeAll(); confirmedKeys.removeAll()
+        // Temporary test entries are process-owned and are not reset by normal
+        // memory maintenance, diagnostics reset, mode toggles or app switches.
     }
 
     func deleteUnvalidatedLegacy() async throws -> Int {
@@ -2408,22 +2541,23 @@ final class TranslatorEngine: ObservableObject {
     private func trimCache() {
         let configured = max(250, min(6000, int("memoryRAMCapacity", 3000)))
         let limit = min(configured, memoryPressureCapacity ?? configured)
-        let excess = cache.count - limit
+        let excess = ram.values.count - limit
         guard excess > 0 else { return }
         // The common case is one insertion beyond capacity. Finding the oldest
         // key with a linear scan avoids sorting the entire cache on every frame.
         let victims: [String]
         if excess == 1 {
-            victims = cacheUse.min(by: { $0.value < $1.value }).map { [$0.key] } ??
-                      Array(cache.keys.prefix(1))
+            victims = ram.use.min(by: { $0.value < $1.value }).map { [$0.key] } ??
+                      Array(ram.values.keys.prefix(1))
         } else {
-            victims = cacheUse.sorted(by: { $0.value < $1.value }).prefix(excess).map(\.key)
+            victims = ram.use.sorted(by: { $0.value < $1.value }).prefix(excess).map(\.key)
         }
         for key in victims {
-            cache[key] = nil; cacheUse[key] = nil
-            specKeys.remove(key); speculativeOrigins.removeValue(forKey: key); savedKeys.remove(key); confirmedKeys.remove(key)
+            ram.values[key] = nil; ram.use[key] = nil
+            if ram.specKeys.remove(key) != nil { diag.noteSpeculativeUnit("evictedUnused") }; ram.speculativeOrigins.removeValue(forKey: key); ram.savedKeys.remove(key); ram.confirmedKeys.remove(key)
         }
         // Report entries evicted, not maintenance batches; persistence is untouched.
+        temporaryMemoryEntries = processMemory.temporary.values.count
         diag.recordMemory(.ramEviction, count: victims.count)
     }
 
@@ -2434,7 +2568,7 @@ final class TranslatorEngine: ObservableObject {
         pendingMemory.isEmpty && !legacyValidationBusy && !warming &&
         !captureAlive && !pipActive && !busy &&
         UIApplication.shared.applicationState == .active &&
-        !flag("privateSession", false) && !flag("freshTranslationTest", false) &&
+        allowsPersistentTranslations && !flag("privateSession", false) && !flag("freshTranslationTest", false) &&
         !ProcessInfo.processInfo.isLowPowerModeEnabled &&
         ProcessInfo.processInfo.thermalState != .serious &&
         ProcessInfo.processInfo.thermalState != .critical
@@ -2446,7 +2580,7 @@ final class TranslatorEngine: ObservableObject {
                                          rules: String) -> Bool {
         !Task.isCancelled && !captureAlive && !pipActive && !busy &&
         UIApplication.shared.applicationState == .active &&
-        !flag("privateSession", false) && !flag("freshTranslationTest", false) &&
+        allowsPersistentTranslations && !flag("privateSession", false) && !flag("freshTranslationTest", false) &&
         !ProcessInfo.processInfo.isLowPowerModeEnabled &&
         ProcessInfo.processInfo.thermalState != .serious &&
         ProcessInfo.processInfo.thermalState != .critical &&
@@ -2817,8 +2951,7 @@ final class TranslatorEngine: ObservableObject {
     func retranslate() {
         guard !original.isEmpty else { return }
         invalidatePending()
-        cache.removeAll()
-        specKeys.removeAll(); speculativeOrigins.removeAll(); savedKeys.removeAll(); confirmedKeys.removeAll()
+        if memoryTestMode != .temporaryMemory { ram.clear() }
         bypassMemory = true
         lastHandled = ""
         let blocks = original.components(separatedBy: "\n")
@@ -2984,6 +3117,7 @@ final class TranslatorEngine: ObservableObject {
     func resetAllSettings() { resetKeys(Self.settingKeys) }
     /// Re-reads everything after settings were changed in bulk.
     func reloadSettings() {
+        testModeSettingsChanged()
         suppressRecent = true
         sourceCode = ud.string(forKey: "source") ?? "auto"
         targetCode = ud.string(forKey: "target") ?? "en"

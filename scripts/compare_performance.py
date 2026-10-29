@@ -36,6 +36,12 @@ def normalized(value):
     return value
 
 
+def test_mode(settings):
+    if normalized(settings.get('freshTranslationTest', 'false')): return 'freshRequests'
+    if normalized(settings.get('temporaryMemoryTest', 'false')): return 'temporaryMemory'
+    return 'normal'
+
+
 def compare(baseline, candidate, evidence=None):
     issues = []
     for label, data in (('baseline', baseline), ('candidate', candidate)):
@@ -50,6 +56,11 @@ def compare(baseline, candidate, evidence=None):
             issues.append(f'Mismatched setting: {key}')
     if normalized(baseline['settings'].get('suppressOwnInterface', 'false')) != normalized(candidate['settings'].get('suppressOwnInterface', 'false')):
         issues.append('Mismatched own-interface suppression; repeat with matched measurement boundaries')
+    if test_mode(baseline['settings']) != test_mode(candidate['settings']):
+        issues.append('Mismatched translation test mode')
+    a, b = baseline['settings'].get('startingRAMEntries'), candidate['settings'].get('startingRAMEntries')
+    if a is not None and b is not None and int(a) != int(b):
+        issues.append('Different starting RAM populations; repeat under matched cache conditions')
     cells = []
     for metric in METRICS:
         old = baseline['distributions'].get(metric, {})

@@ -702,3 +702,57 @@ let oldConfigBytes = String(data: encodedConfig, encoding: .utf8)!
 check((try! JSONDecoder().decode(Config.self, from: Data(oldConfigBytes.utf8))).appInterfaceVisible == nil,
       "Old app/extension configs remain decodable without visibility metadata")
 print("v1.7.0 capture visibility boundary checks passed")
+
+// v1.7.1: test memory is process-owned, isolated, and survives mode selection.
+let processTestMemory = ProcessTranslationMemory()
+let normalTestBank = processTestMemory.bank(for: .normal)
+normalTestBank.values["saved-context"] = "Original normal RAM"
+let temporaryTestBank = processTestMemory.bank(for: .temporaryMemory)
+check(temporaryTestBank.values.isEmpty, "Temporary mode starts without existing normal memory")
+temporaryTestBank.values["saved-context"] = "Temporary result"
+temporaryTestBank.specKeys.insert("saved-context")
+check(normalTestBank.values["saved-context"] == "Original normal RAM", "Test results cannot overwrite normal RAM")
+_ = processTestMemory.bank(for: .normal)
+check(processTestMemory.bank(for: .temporaryMemory).values["saved-context"] == "Temporary result",
+      "Switching the toggle off/on must not erase temporary memory")
+normalTestBank.clear()
+check(temporaryTestBank.values["saved-context"] == "Temporary result",
+      "Normal-memory maintenance must not erase temporary test entries")
+check(ProcessTranslationMemory().temporary.values.isEmpty,
+      "A new app process has no persisted temporary bank to restore")
+check(TranslationTestMode.temporaryMemory.allowsReuse && TranslationTestMode.temporaryMemory.allowsSpeculation,
+      "Temporary testing must exercise reuse AND speculation")
+check(!TranslationTestMode.temporaryMemory.allowsPersistentTranslations && !TranslationTestMode.temporaryMemory.allowsHistoryInsertion,
+      "Temporary output cannot be promoted to saved translations or permanent history")
+check(!TranslationTestMode.freshRequests.allowsReuse && !TranslationTestMode.freshRequests.allowsSpeculation,
+      "Fresh-only testing retains its deliberately strict behavior")
+check(TranslationTestMode(freshRequests: true, temporaryMemory: true) == .freshRequests,
+      "Imported conflicting switches have a deterministic safe policy")
+let wholeCaptionKey = ExactCaptionIdentity.key(blocks: ["Olá.", "Outra frase."], source: "pt", target: "en", rules: "R")!
+temporaryTestBank.retainCaption(key: wholeCaptionKey, result: ExactCaptionResult(translated: "Hello.\nAnother sentence.", sentences: 2))
+check(temporaryTestBank.captions[wholeCaptionKey]?.sentences == 2, "Exact full-caption results preserve complete assembly")
+for variant in [
+    ExactCaptionIdentity.key(blocks: ["Olá.\nOutra frase."], source: "pt", target: "en", rules: "R"),
+    ExactCaptionIdentity.key(blocks: ["Olá.", "Outra frase."], source: "pt", target: "de", rules: "R"),
+    ExactCaptionIdentity.key(blocks: ["Olá.", "Outra frase."], source: "pt", target: "en", rules: "Changed names/rules"),
+    ExactCaptionIdentity.key(blocks: ["Olá!", "Outra frase."], source: "pt", target: "en", rules: "R")
+] { check(variant != wholeCaptionKey, "Caption fast path cannot collapse block, wording, target or rule context") }
+check(ExactCaptionIdentity.key(blocks: ["Olá."], source: "auto", target: "en", rules: "R") == nil,
+      "Whole-caption fast path must not guess an Automatic source")
+check(ExactModelWorkPolicy.sharedUnits(inFlight: ["exact-A"], required: ["exact-A", "new-B"],
+      workContext: 7, currentContext: 7, reuseAllowed: true) == 1,
+      "A growing caption can use a shared exact in-flight sentence without cancelling its model request")
+check(ExactModelWorkPolicy.sharedUnits(inFlight: ["exact-A"], required: ["similar-A"],
+      workContext: 7, currentContext: 7, reuseAllowed: true) == 0,
+      "Near matches never authorize retaining obsolete model work")
+check(ExactModelWorkPolicy.sharedUnits(inFlight: ["exact-A"], required: ["exact-A"],
+      workContext: 7, currentContext: 8, reuseAllowed: true) == 0,
+      "Mode/settings/capture mutation invalidates in-flight sharing")
+check(ExactModelWorkPolicy.sharedUnits(inFlight: ["exact-A"], required: ["exact-A"],
+      workContext: 7, currentContext: 7, reuseAllowed: false) == 0,
+      "Fresh-test bypass cannot be defeated by in-flight sharing")
+for index in 0..<100 {
+    temporaryTestBank.retainCaption(key: "bounded-\(index)", result: ExactCaptionResult(translated: "Whole caption \(index)", sentences: 1))
+}
+check(temporaryTestBank.captions.count == 64, "Assembled-caption acceleration remains bounded")
+print("v1.7.1 temporary mode, process lifetime and exact work-sharing checks passed")

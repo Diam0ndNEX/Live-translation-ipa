@@ -1,12 +1,17 @@
-# ScreenLingo v1.7.0 · build 54
+# ScreenLingo v1.7.1 · build 55
 
-Normal-model performance candidate, based on v1.5.0 build 53. Low-latency
-translation remains optional and OFF by default. Targets redundant memory work,
-completed obsolete result recovery, own-interface OCR and representative diagnostics.
-No measured device speedup is claimed.
+Adds an isolated **Temporary-memory test** toggle: RAM reuse and speculation stay
+available without reading/writing saved translations or inserting permanent history.
+The temporary bank survives app switching, diagnostic reset and toggle changes; a new
+app process starts empty. Normal RAM is isolated and preserved. Existing bounded RAM
+eviction still applies under capacity/pressure.
 
-[Changes and release acceptance](docs/v1.7.0-performance.md) define the 90% target,
-quality/reliability gates and pending tests.
+Keeps shared exact sentence work alive for growing captions, permits ready exact
+assembled captions to bypass obsolete model work, and exports queue-owner timing,
+unit reuse and corrected bypass/miss counters. Normal models, accurate OCR and full
+caption presentation remain unchanged. Device speed/quality acceptance is pending.
+
+[Changes, safety and verification](docs/v1.7.1-testing-and-scheduling.md).
 
 Run the existing pipeline compilation in `.github/workflows/build.yml`, plus
 `bash scripts/test_memory.sh`, `bash scripts/test_transport.sh`,

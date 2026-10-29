@@ -258,6 +258,32 @@ import Foundation
         precondition(safeContinuity.settings["lowLatencyTranslation"] == "true" &&
                      safeContinuity.settings["directPiPBuffer"] == "false",
                      "Current model and PiP experiment flags must survive redacted exports")
+        let newModeSnapshot = DiagnosticSessionExport(
+            id: session, startedAt: Date(), endedAt: Date(), appVersion: "1.7.1", systemVersion: "test",
+            settings: ["temporaryMemoryTest": "true", "translationTestMode": "temporaryMemory",
+                       "startingRAMEntries": "12", "suppressOwnInterface": "true", "glossary": "private"],
+            health: MemoryDiagnosticHealth(), counters: ["completedConfirmedUnitsRetained": 3,
+                       "temporaryMemoryHits": 12, "bypassedLookups": 0, "lookupMisses": 0,
+                       "uncachedUnits": 5, "sharedInFlightUnits": 2, "speculativeUnitsReused": 4],
+            distributions: ["queueBehindSpeculationMs": DiagnosticDistribution([30, 40])],
+            events: [StructuredDiagnosticEvent(id: UUID(), timestamp: Date(), sessionID: session,
+                candidateID: nil, stage: "runtime_state", outcome: "external_capture_period",
+                reasonCode: "external_capture_period", durationMs: nil, privacy: "metadataOnly")],
+            measurementBoundary: "OCR through PiP enqueue", textCapture: false)
+        let newModeRoundtrip = try await writer.decode(try await writer.encode(newModeSnapshot))
+        precondition(newModeRoundtrip.settings["translationTestMode"] == "temporaryMemory" &&
+                     newModeRoundtrip.settings["startingRAMEntries"] == "12" &&
+                     newModeRoundtrip.settings["suppressOwnInterface"] == "true" &&
+                     newModeRoundtrip.settings["glossary"] == nil,
+                     "Fixed test metadata must survive export while user wording stays excluded")
+        precondition(newModeRoundtrip.counters["completedConfirmedUnitsRetained"] == 3 &&
+                     newModeRoundtrip.counters["temporaryMemoryHits"] == 12 &&
+                     newModeRoundtrip.counters["sharedInFlightUnits"] == 2 &&
+                     newModeRoundtrip.distributions["queueBehindSpeculationMs"]?.count == 2,
+                     "New timing and reuse fields must not disappear in archive filtering")
+        precondition(newModeRoundtrip.events[0].reasonCode == "external_capture_period",
+                     "Fixed app-visibility codes must remain readable, not redacted")
+
         let unsafeDistribution = DiagnosticSessionExport(
             id: UUID(), startedAt: Date(), endedAt: Date(),
             appVersion: "1.5.0", systemVersion: "test",

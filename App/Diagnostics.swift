@@ -237,6 +237,15 @@ final class Diagnostics: ObservableObject {
     private var unitIDs: [String: UUID] = [:]
     private var memoryOutcomes: [MemoryDiagnosticOutcome: Int] = [:]
     private var modelTimingSamples: [String: [Double]] = [:]
+    var translationTestMode = TranslationTestMode.normal
+    var startingRAMEntries = 0
+    var ramEntryCount: (() -> Int)?
+    private var sharedModelUnits = 0
+    private var exactCaptionHits = 0
+    private var exactUnitsCoalesced = 0
+    private var speculativeUnitCounts: [String: Int] = [:]
+    private var queueWaitSamples: [ModelQueueOwner: [Double]] = [:]
+    private var temporaryMemoryHits = 0
     private var completedWorkRecoveredUnits = 0
     private var lookupSamples: [Double] = []
     private var writeSamples: [Double] = []
@@ -394,6 +403,35 @@ final class Diagnostics: ObservableObject {
         legacyValidationPair = ["legacyInventorySource": source, "legacyInventoryTarget": target]
     }
 
+    func noteTemporaryReuse(count: Int = 1) {
+        guard enabled else { return }
+        temporaryMemoryHits += max(0, count)
+    }
+
+    func noteSharedModelUnits(_ count: Int) {
+        guard enabled else { return }
+        sharedModelUnits += max(0, count)
+    }
+    func noteExactCaptionReuse() {
+        guard enabled else { return }
+        exactCaptionHits += 1
+    }
+    func noteExactUnitCoalescing(_ count: Int) {
+        guard enabled else { return }
+        exactUnitsCoalesced += max(0, count)
+    }
+    func noteSpeculativeUnit(_ outcome: String) {
+        guard enabled, ["retained", "reused", "evictedUnused"].contains(outcome) else { return }
+        speculativeUnitCounts[outcome, default: 0] += 1
+    }
+    func recordQueueWait(owner: ModelQueueOwner, durationMs: Double, candidate: String?) {
+        guard enabled, durationMs.isFinite, durationMs >= 0 else { return }
+        queueWaitSamples[owner, default: []].append(durationMs)
+        if queueWaitSamples[owner, default: []].count > 1200 { queueWaitSamples[owner]?.removeFirst() }
+        appendStructured(candidate: stableCandidateID(candidate), stage: "queue_wait",
+                         outcome: owner.rawValue, reason: owner.rawValue, durationMs: durationMs)
+    }
+
     func noteCompletedWorkRecovery(_ count: Int) {
         guard enabled else { return }
         completedWorkRecoveredUnits += max(0, count)
@@ -530,13 +568,17 @@ final class Diagnostics: ObservableObject {
                     "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
                     "deduplicateCopies", "contextualLanguage", "languageRecovery",
                     "continuousRotation", "smartCool", "persistDiagnosticSessions",
-                    "diagSamples", "heartbeatInterval", "keepAwake", "suppressOwnInterface"]
+                    "diagSamples", "heartbeatInterval", "keepAwake", "suppressOwnInterface", "temporaryMemoryTest"]
         var settings: [String: String] = [:]
         for key in keys {
             if let value = UserDefaults.standard.object(forKey: key) ?? TranslatorEngine.defaults[key] {
                 settings[key] = String(describing: value)
             }
         }
+        settings["translationTestMode"] = translationTestMode.rawValue
+        settings["freshTranslationTest"] = translationTestMode == .freshRequests ? "true" : "false"
+        settings["temporaryMemoryTest"] = translationTestMode == .temporaryMemory ? "true" : "false"
+        settings["startingRAMEntries"] = String(startingRAMEntries)
         settings.merge(legacyValidationPair) { _, new in new }
         var counters = cumulativeCounters()
         counters.merge(legacyValidationSnapshot) { _, new in new }
@@ -544,7 +586,7 @@ final class Diagnostics: ObservableObject {
         counters["sessionCacheHits"] = s.cacheHits
         counters["savedMemoryHits"] = s.savedHits
         counters["speculativeHits"] = s.specHits
-        counters["lookupMisses"] = s.cacheMisses
+        counters["uncachedUnits"] = s.cacheMisses
         counters["speculativeModelRequests"] = s.specModelRequests
         counters["supersededSpeculativePipelines"] = s.specDiscarded
         counters["confirmedCandidatePackets"] = s.confirmedCandidatePackets
@@ -564,9 +606,11 @@ final class Diagnostics: ObservableObject {
         counters["queueReplacements"] = s.queueReplacements
         counters["visualChanges"] = s.visualChanges
         counters["emptyOCRPasses"] = s.emptyOCRPasses
+        var currentHealth = memoryHealth
+        currentHealth.ramEntries = ramEntryCount?() ?? memoryHealth.ramEntries
         return DiagnosticSessionExport(id: diagnosticSessionID, startedAt: started, endedAt: Date(),
             appVersion: AppVersion.full, systemVersion: UIDevice.current.systemVersion,
-            hardwareModel: Self.hardwareModelCode, settings: settings, health: memoryHealth, counters: counters,
+            hardwareModel: Self.hardwareModelCode, settings: settings, health: currentHealth, counters: counters,
             distributions: ["memoryLookupMs": DiagnosticDistribution(lookupSamples), "memoryWriteMs": DiagnosticDistribution(writeSamples),
                 "ocrMs": DiagnosticDistribution(ocr.map { $0.v }), "translationMs": DiagnosticDistribution(translate.map { $0.v }),
                 "enqueueLatencyMs": DiagnosticDistribution(latency.map { $0.v }),
@@ -575,6 +619,9 @@ final class Diagnostics: ObservableObject {
                 "confirmationMs": DiagnosticDistribution(pipeline.map { $0.stages.confirmation }),
                 "deliveryFilteringMs": DiagnosticDistribution(pipeline.map { $0.stages.delivery }),
                 "queueMs": DiagnosticDistribution(pipeline.map { $0.stages.queue }),
+                "queueBehindSpeculationMs": DiagnosticDistribution(queueWaitSamples[.speculative, default: []]),
+                "queueBehindConfirmedMs": DiagnosticDistribution(queueWaitSamples[.confirmed, default: []]),
+                "queueSchedulingMs": DiagnosticDistribution(queueWaitSamples[.scheduling, default: []]),
                 "processingMs": DiagnosticDistribution(pipeline.map { $0.stages.translation }),
                 "displayHoldMs": DiagnosticDistribution(pipeline.map { $0.stages.displayHold }),
                 "renderingMs": DiagnosticDistribution(pipeline.map { $0.stages.rendering }),
@@ -777,6 +824,9 @@ final class Diagnostics: ObservableObject {
         lastRecordedThermalState = nil
         memoryOutcomes = [:]; lookupSamples = []; writeSamples = []
         modelTimingSamples = [:]; completedWorkRecoveredUnits = 0
+        sharedModelUnits = 0; exactCaptionHits = 0; exactUnitsCoalesced = 0
+        speculativeUnitCounts = [:]; queueWaitSamples = [:]
+        temporaryMemoryHits = 0; startingRAMEntries = ramEntryCount?() ?? 0
         started = Date()
         subtitleTraces = []; recorderCosts = RecorderCosts()
         lastFrames = 0; lastFrameTime = Date(); tickN = 0
@@ -922,6 +972,16 @@ final class Diagnostics: ObservableObject {
             "specMatchingConfirmation": s.specMatchingConfirmation,
             "specRetainedUnits": s.specRetainedUnits,
             "completedConfirmedUnitsRetained": completedWorkRecoveredUnits,
+            "temporaryMemoryHits": temporaryMemoryHits,
+            "exactCaptionHits": exactCaptionHits,
+            "sharedInFlightUnits": sharedModelUnits,
+            "exactUnitsCoalesced": exactUnitsCoalesced,
+            "speculativeUnitsRetained": speculativeUnitCounts["retained", default: 0],
+            "speculativeUnitsReused": speculativeUnitCounts["reused", default: 0],
+            "speculativeUnitsEvictedUnused": speculativeUnitCounts["evictedUnused", default: 0],
+            "uncachedUnits": s.cacheMisses,
+            "bypassedLookups": memoryOutcomes[.bypassed, default: 0],
+            "temporaryMemoryMisses": memoryOutcomes[.temporaryMiss, default: 0],
             "speculativeDiscarded": s.specDiscarded,
             "legacyVerified": memoryHealth.legacyValidated,
             "legacySuperseded": memoryHealth.legacySuperseded,

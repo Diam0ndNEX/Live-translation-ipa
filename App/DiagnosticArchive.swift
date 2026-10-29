@@ -54,6 +54,7 @@ struct MemoryDiagnosticHealth: Codable {
 enum MemoryDiagnosticOutcome: String, Codable, CaseIterable {
     case ramHit, persistentHit, legacyHit, speculativeHit, miss, timeout
     case compatibilityRejected, normalizedHit, databaseUnavailable, persisted, writeFailed, ramEviction, cancelled
+    case bypassed, temporaryMiss
 }
 
 struct StructuredDiagnosticEvent: Codable, Identifiable {
@@ -130,7 +131,10 @@ struct DiagnosticIntervalBucket: Codable {
         "modelFailures", "warmupAttempts", "warmupSucceeded",
         "warmupPredicted", "coldModelBatches", "adaptiveSpeculationSkipped",
         "specPreemptionRequested", "specMatchingConfirmation",
-        "specRetainedUnits",
+        "specRetainedUnits", "completedConfirmedUnitsRetained", "temporaryMemoryHits",
+        "uncachedUnits", "bypassedLookups", "temporaryMemoryMisses",
+        "exactCaptionHits", "exactUnitsCoalesced", "sharedInFlightUnits", "speculativeUnitsRetained",
+        "speculativeUnitsReused", "speculativeUnitsEvictedUnused",
         "handoffDeferred", "slowTailEnqueues", "handoffReplayed", "handoffExpired", "enqueueFailed",
         "actualModelBatches", "confirmedModelBatches", "speculativeModelBatches",
         "warmupModelBatches", "first30sModelBatches", "cancelledModelBatches",
@@ -195,11 +199,11 @@ actor DiagnosticExportWriter {
             "frame_arrival", "rotation", "ocr_execution", "duplicate_detection", "ocr_filtering",
             "stability", "text_grouping", "ocr_correction", "language_detection",
             "memory_lookup", "translation", "pip_preparation", "pip_enqueue", "runtime_state",
-            "model_state", "cancellation"
+            "model_state", "cancellation", "queue_wait"
         ]
         let eventCodes: Set<String> = Set(MemoryDiagnosticOutcome.allCases.map { $0.rawValue })
             .union([
-                "observed", "cache_hit", "computed", "accepted", "rejected_duplicate",
+                "scheduling", "observed", "cache_hit", "computed", "accepted", "rejected_duplicate",
                 "rejected_recent_fragment", "rejected_empty", "rejected_revision",
                 "rejected_unstable", "rejected_low_confidence", "rejected_stale",
                 "filtered", "confirmed", "speculative", "ready", "enqueued",
@@ -215,7 +219,7 @@ actor DiagnosticExportWriter {
                 "model_session_created", "model_batch_completed", "model_batch_failed",
                 "warmup_source_unresolved", "warmup_predicted_source", "warmup_preempted",
                 "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started", "legacy_idle_completed",
-                "legacy_idle_deferred", "app_started", "capture_config_changed",
+                "legacy_idle_deferred", "app_interface_visible", "external_capture_period", "app_started", "capture_config_changed",
                 "capture_idle", "capture_live", "capture_paused", "capture_frozen"
             ]).union(stageCodes)
         let safeEvents = snapshot.events.suffix(2400).map { event in
@@ -243,7 +247,8 @@ actor DiagnosticExportWriter {
             "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
             "deduplicateCopies", "contextualLanguage", "languageRecovery",
             "continuousRotation", "smartCool", "persistDiagnosticSessions",
-            "diagSamples", "heartbeatInterval", "keepAwake"
+            "diagSamples", "heartbeatInterval", "keepAwake", "suppressOwnInterface",
+            "temporaryMemoryTest", "translationTestMode", "startingRAMEntries"
         ]
         let safeSettings = snapshot.settings.filter { pair in
             settingsKeys.contains(pair.key) && pair.value.utf8.count <= 48 &&
@@ -290,7 +295,8 @@ actor DiagnosticExportWriter {
             "memoryLookupMs", "memoryWriteMs", "ocrMs", "translationMs",
             "enqueueLatencyMs", "finalOCRMs", "transportMs", "confirmationMs",
             "deliveryFilteringMs", "queueMs", "processingMs", "displayHoldMs",
-            "renderingMs", "speculativeModelMs", "confirmedModelMs", "modelBatchMs"
+            "renderingMs", "speculativeModelMs", "confirmedModelMs", "modelBatchMs",
+            "queueBehindSpeculationMs", "queueBehindConfirmedMs", "queueSchedulingMs"
         ]
         let safeMetrics = snapshot.distributions.filter { key, value in
             allowedMetrics.contains(key) && value.count >= 0 &&
@@ -461,7 +467,7 @@ actor DiagnosticExportWriter {
 
             ## Normal performance
             - OCR: \(metric("ocrMs"))
-            - Model translation: \(metric("translationMs"))
+            - Result processing (includes reuse): \(metric("translationMs"))
             - OCR-to-PiP enqueue: \(metric("enqueueLatencyMs"))
             - Confirmed model requests: \(metric("confirmedModelMs"))
             - Speculative model requests: \(metric("speculativeModelMs"))
@@ -481,15 +487,24 @@ actor DiagnosticExportWriter {
 
             ## Work avoided and reuse (different event units)
             - Session RAM cache hits: \(count("sessionCacheHits"))
-            - Persistent memory hits: \(count("savedMemoryHits"))
+            - Saved-origin results reused (includes prefetched RAM): \(count("savedMemoryHits"))
+            - Direct persistent lookups resolved: \(count("persistentHits"))
+            - Temporary-memory hits: \(count("temporaryMemoryHits"))
             - Pre-translated results reused: \(count("speculativeHits"))
-            - New translation requests: \(count("lookupMisses"))
+            - Uncached translation units: \(count("uncachedUnits"))
+            - Actual database misses: \(count("lookupMisses"))
+            - Deliberately bypassed lookups: \(count("bypassedLookups"))
+            - Temporary-memory misses: \(count("temporaryMemoryMisses"))
             - Speculative requests: \(count("speculativeModelRequests"))
             - Speculative pipelines discarded: \(count("supersededSpeculativePipelines"))
-            - Completed superseded units retained: \(count("specRetainedUnits"))
+            - Completed speculative units retained: \(count("specRetainedUnits"))
+            - Completed confirmed units retained: \(count("completedConfirmedUnitsRetained"))
             - Model batches sent: \(count("actualModelBatches"))
             - Cancelled model batches: \(count("cancelledModelBatches"))
             - Skipped unchanged frames: \(count("unchangedSkippedFrames"))
+            - Exact assembled captions reused: \(count("exactCaptionHits"))
+            - Exact duplicate units coalesced: \(count("exactUnitsCoalesced"))
+            - Speculative units retained / reused / evicted unused: \(count("speculativeUnitsRetained")) / \(count("speculativeUnitsReused")) / \(count("speculativeUnitsEvictedUnused"))
 
             ## Translation memory
             - Database entries: \(safe.health.totalEntries)
@@ -830,7 +845,7 @@ enum DiagnosticTraceReview {
         "pip_enqueue", "cancellation", "runtime_state", "first OCR", "seen", "confirmed",
         "processing", "speculating", "cache", "ready", "enqueued",
         "superseded", "memory", "cancelled", "ocrCorrection", "language",
-        "freshTranslation", "translationResult", "model_state"
+        "freshTranslation", "translationResult", "model_state", "queue_wait"
     ]
     private static let allowedReasons: Set<String> = [
         "accepted", "rejected_duplicate", "rejected_recent_fragment",
@@ -845,7 +860,7 @@ enum DiagnosticTraceReview {
         "writeFailed", "ramEviction", "other", "incompatible", "conflict",
         "enqueue_failed", "slow_tail", "confirmed_model_submitted", "confirmed_model_completed",
         "speculative_model_submitted", "speculative_model_completed", "model_batch_completed",
-        "model_batch_failed", "model_batch_cancelled"
+        "model_batch_failed", "model_batch_cancelled", "scheduling", "app_interface_visible", "external_capture_period"
     ]
     static func review(_ input: [StructuredDiagnosticEvent], limit: Int = 12)
         -> [DiagnosticReviewedCandidate] {
