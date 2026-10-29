@@ -186,6 +186,17 @@ final class Harness {
         precondition(focus.scan(at: 1, y0: 0, y1: 1, context: "rotated").broad)
         focus.observe(bounds: [(center: 0.2, height: 0.04, confidence: 0.5)])
         precondition(focus.scan(at: 1.1, y0: 0, y1: 1, context: "rotated").broad)
+        // A quick broadcast restart never allows delayed old UDP packets to revive it.
+        var capture = CaptureSessionIdentityGate()
+        precondition(capture.admit("first") == .newSession)
+        precondition(capture.admit("first") == .current)
+        precondition(capture.admit("second") == .newSession)
+        precondition(capture.admit("first") == .rejected)
+        precondition(!capture.stop("first"))
+        precondition(capture.stop("second"))
+        precondition(capture.admit("second") == .rejected)
+        precondition(capture.admit("third") == .newSession)
+        precondition(capture.admit(nil) == .rejected)
         print("Three-mode migration, sharing, atomic selection, mismatch, cancellation, memory isolation, strategy purity and semantic identity checks passed")
     }
 }

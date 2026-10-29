@@ -191,8 +191,9 @@ final class TranslatorEngine: ObservableObject {
     @Published private(set) var activeTranslationSystem = TranslationSystem.legacy
     @Published private(set) var pendingTranslationSystem = TranslationSystem.legacy
     @Published private(set) var modeAvailability = ""
-    private var captureTransportID: String?
+    private var captureIdentity = CaptureSessionIdentityGate()
     private var modeSessionID = UUID()
+    private var modeDiagnosticEpochs: [UUID: Date] = [:]
     private var modeRevision = 0
     private var modeLastIdentity = ""
     private var modePlans: [String: ([[CaptionTranslationUnit]], Packet, ModeCaption)] = [:]
@@ -217,6 +218,8 @@ final class TranslatorEngine: ObservableObject {
         let selection = TranslationSystem.migrate(ud)
         pendingTranslationSystem = selection.0
         if activeTranslationSystem != selection.0 {
+            startupWarmupTask?.cancel(); startupWarmupTask = nil
+            idleValidationTask?.cancel(); idleValidationTask = nil
             invalidatePending()
             directSession = nil; directKey = ""; availCache.removeAll()
         }
@@ -238,11 +241,11 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func noteModeEvent(_ caption: ModeCaption, reason: String, duration: Double?) {
-        guard caption.session == modeSessionID else { return }
+        guard modeDiagnosticEpochs[caption.session] == diag.started else { return }
         diag.noteModeEvent(session: caption.session, caption: caption.caption, revision: caption.revision,
             source: caption.source, target: caption.target,
             fingerprint: SHA256.hash(data: Data(caption.fingerprint.utf8)).map { String(format: "%02x", $0) }.joined(),
-            reason: reason, firstOCR: caption.firstOCR, duration: duration)
+            reason: reason, firstOCR: caption.firstOCR, duration: duration, mode: caption.system?.rawValue)
     }
 
     private func handleModeCaption(_ blocks: [String], packet: Packet) {
@@ -273,7 +276,7 @@ final class TranslatorEngine: ObservableObject {
         guard !inputs.isEmpty else { return }
         let captionID = packet.candidateID ?? "manual-\(modeRevision)"
         let monotonicOrigin = ProcessInfo.processInfo.systemUptime - max(0, Date().timeIntervalSince1970 - (packet.firstSeenAt ?? packet.ts ?? Date().timeIntervalSince1970))
-        let caption = ModeCaption(session: modeSessionID, caption: captionID, revision: modeRevision,
+        let caption = ModeCaption(system: activeTranslationSystem, session: modeSessionID, caption: captionID, revision: modeRevision,
             source: source, target: targetCode, rules: memoryRuleToken, text: text,
             units: inputs, keys: keys, firstOCR: monotonicOrigin)
         let confirmed = packet.stable != false
@@ -308,10 +311,17 @@ final class TranslatorEngine: ObservableObject {
         var output: [String?] = []
         for key in caption.keys {
             guard context == contextRevision, caption.session == modeSessionID else { return caption.keys.map { _ in nil } }
-            if let hit = bank.values[key] { output.append(hit); continue }
+            if let hit = bank.values[key] {
+                noteModeEvent(caption, reason: bank.savedKeys.contains(key) ? "memory_saved_ram_hit" : "memory_session_hit", duration: nil)
+                output.append(hit); continue
+            }
             if allowsPersistentTranslations, memoryReady, flag("remember", true), !flag("privateSession", false) {
                 let hit = await memoryStore.lookup(key: key)
                 guard context == contextRevision else { return caption.keys.map { _ in nil } }
+                if hit.value != nil {
+                    let origin = hit.origin == "legacy" ? "memory_legacy_hit" : (hit.origin == "normalized" ? "memory_normalized_hit" : "memory_persistent_hit")
+                    noteModeEvent(caption, reason: origin, duration: hit.durationMs)
+                }
                 output.append(hit.value)
             } else { output.append(nil) }
         }
@@ -537,6 +547,7 @@ final class TranslatorEngine: ObservableObject {
         activeTranslationSystem = migration.0; pendingTranslationSystem = migration.0
         diag.modeActiveSystem = migration.0.rawValue; diag.modePendingSystem = migration.0.rawValue
         diag.modeMigration = migration.1
+        modeAvailability = migration.0 == .legacy ? "Apple default; effective model identity unavailable" : "Checking installed low-latency languages"
         sourceCode = UserDefaults.standard.string(forKey: "source") ?? "auto"
         targetCode = UserDefaults.standard.string(forKey: "target") ?? "en"
         memoryTestMode = TranslationTestMode(freshRequests: flag("freshTranslationTest", false),
@@ -546,6 +557,7 @@ final class TranslatorEngine: ObservableObject {
             guard let self, self.memoryTestMode.allowsReuse else { return 0 }
             return self.ram.values.count
         }
+        modeDiagnosticEpochs[modeSessionID] = diag.started
         modeCoordinator.system = activeTranslationSystem
         modeService.hostedDefault = { [weak self] texts, source, target, speculative in
             await self?.translateLegacy(texts, source: source, target: target, speculative: speculative)
@@ -776,7 +788,8 @@ final class TranslatorEngine: ObservableObject {
                            detailCeiling: (ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical || (extFreeMB > 0 && extFreeMB < 12)) ? maxEdge : 2400,
                            confirmationBurst: !flag("coolMode", false),
                            appInterfaceVisible: appInterfaceVisible && flag("suppressOwnInterface", true),
-                           focusedCaptionOCR: activeTranslationSystem != .legacy && flag("subtitleTracking", true)))
+                           focusedCaptionOCR: activeTranslationSystem != .legacy && flag("subtitleTracking", true),
+                           strictCaptionIdentity: activeTranslationSystem != .legacy))
     }
 
     // MARK: PiP
@@ -822,6 +835,8 @@ final class TranslatorEngine: ObservableObject {
     private func invalidatePending() {
         interruptWarmupForLiveWork()
         modeSessionID = UUID(); modeLastIdentity = ""; modePlans.removeAll()
+        if modeDiagnosticEpochs.count >= 64 { modeDiagnosticEpochs.removeAll() }
+        modeDiagnosticEpochs[modeSessionID] = diag.started
         modeCoordinator.reset(); modeService.reset()
         contextRevision += 1
         generation += 1
@@ -1024,16 +1039,15 @@ final class TranslatorEngine: ObservableObject {
         let p = incoming
         let now = Date()
         if p.kind == "stopped" {
-            guard p.captureSessionID == nil || p.captureSessionID == captureTransportID else { return }
+            guard captureIdentity.stop(p.captureSessionID) else { return }
             captureAlive = false; lastPacketDate = .distantPast
             invalidatePending()
             diag.noteRuntimeState("heartbeat_timeout")
             return
         }
-        if let transportID = p.captureSessionID, transportID != captureTransportID {
-            captureTransportID = transportID
-            if captureAlive { invalidatePending(); captureAlive = false }
-        }
+        let captureAdmission = captureIdentity.admit(p.captureSessionID)
+        guard captureAdmission != .rejected else { return }
+        if captureAdmission == .newSession, captureAlive { invalidatePending(); captureAlive = false }
         let wasAlive = captureAlive
         lastPacketDate = now
         if !captureAlive { captureAlive = true }
@@ -2517,7 +2531,7 @@ final class TranslatorEngine: ObservableObject {
                 reason: "slow_tail", durationMs: total)
         }
         if activeTranslationSystem == .legacy, let candidate = packet?.candidateID {
-            diag.legacyModeEnqueued(candidate, duration: total)
+            diag.legacyModeEnqueued(candidate, duration: total, source: sourceCode == "auto" ? detectedLang : sourceCode)
         }
         diag.recordPipeline(latency.last)
         if total > 0 { diag.recordLatency(ms: total) }

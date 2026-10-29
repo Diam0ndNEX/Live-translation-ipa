@@ -11,6 +11,8 @@ final class ModeTranslationService {
         var busy = false
         var ticket = UUID()
         var invalidated = false
+        var caption: ModeCaption?
+        var cancellationAt: Double?
     }
     private var hostedIsSpeculative = false
     private var hostedTask: Task<[String]?, Never>?
@@ -25,6 +27,10 @@ final class ModeTranslationService {
         let lane = speculation ? speculative : confirmed
         if hostedIsSpeculative == speculation { hostedTask?.cancel() }
         if #available(iOS 26.0, *), lane.busy {
+            if lane.cancellationAt == nil {
+                lane.cancellationAt = ProcessInfo.processInfo.systemUptime
+                if let caption = lane.caption { event?(caption, "cancellation_requested", nil) }
+            }
             lane.invalidated = true
             lane.session?.cancel()
         }
@@ -121,7 +127,7 @@ final class ModeTranslationService {
         let warm = lane.session != nil && !lane.invalidated && lane.key == "\(caption.source)>\(caption.target)|\(strategy.rawValue)"
         install(lane, source: source, target: target, strategy: strategy)
         guard let session = lane.session else { return nil }
-        lane.busy = true; lane.ticket = UUID()
+        lane.busy = true; lane.ticket = UUID(); lane.caption = caption; lane.cancellationAt = nil
         let ticket = lane.ticket
         event?(caption, "requested_" + strategy.rawValue, nil)
         event?(caption, warm ? "retained_session_start" : "new_session_start", nil)
@@ -157,7 +163,10 @@ final class ModeTranslationService {
                     self.event?(caption, speculation ? "speculative_service_ms" : "recovery_service_ms",
                         (ProcessInfo.processInfo.systemUptime - start) * 1000)
                     if lane.ticket == ticket {
-                        lane.busy = false
+                        if let cancelled = lane.cancellationAt {
+                            self.event?(caption, "cancelled_call_returned", (ProcessInfo.processInfo.systemUptime - cancelled) * 1000)
+                        }
+                        lane.busy = false; lane.caption = nil; lane.cancellationAt = nil
                         if lane.invalidated || output == nil { lane.session = nil; lane.key = "" }
                     }
                     finish(lane.invalidated ? nil : output)

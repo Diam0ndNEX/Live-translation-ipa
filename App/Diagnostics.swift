@@ -352,15 +352,6 @@ final class Diagnostics: ObservableObject {
             "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical"
         ]
         guard allowed.contains(reason) else { return }
-        if modeActiveSystem == "legacy", let candidate {
-            if reason == "confirmed_model_submitted" {
-                legacyModeContexts[candidate]?.fresh = true
-                legacyModeEvent(candidate, reason: "requested_appleDefault")
-            }
-            if reason == "speculative_model_submitted" { legacyModeEvent(candidate, reason: "requested_appleDefault") }
-            if reason == "confirmed_model_completed" { legacyModeEvent(candidate, reason: "recovery_service_ms", duration: durationMs) }
-            if reason == "speculative_model_completed" { legacyModeEvent(candidate, reason: "speculative_service_ms", duration: durationMs) }
-        }
         appendStructured(stage: "runtime_state", outcome: reason, reason: reason,
                          durationMs: nil)
     }
@@ -472,6 +463,15 @@ final class Diagnostics: ObservableObject {
             "legacy_idle_completed", "legacy_idle_deferred"
         ]
         guard allowed.contains(reason) else { return }
+        if modeActiveSystem == "legacy", let candidate {
+            if reason == "confirmed_model_submitted" {
+                legacyModeContexts[candidate]?.fresh = true
+                legacyModeEvent(candidate, reason: "requested_appleDefault")
+            }
+            if reason == "speculative_model_submitted" { legacyModeEvent(candidate, reason: "requested_appleDefault") }
+            if reason == "confirmed_model_completed" { legacyModeEvent(candidate, reason: "recovery_service_ms", duration: durationMs) }
+            if reason == "speculative_model_completed" { legacyModeEvent(candidate, reason: "speculative_service_ms", duration: durationMs) }
+        }
         if ["model_batch_completed", "confirmed_model_completed", "speculative_model_completed", "speculative_stop_released"].contains(reason),
            let durationMs, durationMs.isFinite, durationMs >= 0 {
             modelTimingSamples[reason, default: []].append(durationMs)
@@ -582,7 +582,7 @@ final class Diagnostics: ObservableObject {
 
     private struct LegacyModeContext {
         let session: UUID
-        let source: String
+        var source: String
         let target: String
         let fingerprint: String
         let firstOCR: Double
@@ -615,7 +615,8 @@ final class Diagnostics: ObservableObject {
             firstOCR: context.firstOCR, duration: duration)
     }
 
-    func legacyModeEnqueued(_ caption: String, duration: Double) {
+    func legacyModeEnqueued(_ caption: String, duration: Double, source: String) {
+        legacyModeContexts[caption]?.source = source
         guard let context = legacyModeContexts[caption], modeActiveSystem == "legacy" else { return }
         let reason: String
         if context.fresh { reason = context.mismatch ? "pip_enqueue_legacy_recovery" : "pip_enqueue_confirmed_fresh" }
@@ -630,11 +631,11 @@ final class Diagnostics: ObservableObject {
     private var modeTrace: [TranslationModeTrace] = []
 
     func noteModeEvent(session: UUID, caption: String, revision: Int, source: String, target: String,
-                       fingerprint: String, reason: String, firstOCR: Double, duration: Double?) {
+                       fingerprint: String, reason: String, firstOCR: Double, duration: Double?, mode: String? = nil) {
         guard enabled else { return }
         // Caption identifiers are hashed by the producer, never OCR text.
         let safeCaption = SHA256.hash(data: Data(caption.utf8)).map { String(format: "%02x", $0) }.joined()
-        modeTrace.append(TranslationModeTrace(mode: modeActiveSystem, testMode: translationTestMode.rawValue, session: session, caption: safeCaption, revision: revision,
+        modeTrace.append(TranslationModeTrace(mode: mode ?? modeActiveSystem, testMode: translationTestMode.rawValue, session: session, caption: safeCaption, revision: revision,
             source: source, target: target, fingerprint: fingerprint, reason: reason,
             monotonicTime: ProcessInfo.processInfo.systemUptime, firstOCR: firstOCR,
             durationMs: duration, thermal: ProcessInfo.processInfo.thermalState.rawValue))

@@ -195,6 +195,8 @@ struct TranslationModeReport: Codable {
     let counters: [String: Int]
 
     static let reasons: Set<String> = [
+        "cancellation_requested", "cancelled_call_returned",
+        "memory_saved_ram_hit", "memory_session_hit", "memory_legacy_hit", "memory_normalized_hit", "memory_persistent_hit",
         "pip_enqueue_legacy_recovery", "pip_enqueue_confirmed_fresh",
         "selected_origin_compatible_memory", "selected_origin_speculation", "selected_origin_recovery", "selected_origin_session_low_latency",
         "selected_strategy_appleDefault", "selected_strategy_lowLatency", "memory_pressure", "thermal_reduced_speculation",

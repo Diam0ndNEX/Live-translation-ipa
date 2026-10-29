@@ -330,10 +330,11 @@ class SampleHandler: RPBroadcastSampleHandler {
         // Stability: send once the same text was read N times in a row (skips half-faded text).
         let need = max(1, cfg.stability ?? 2)
         let key = lines.map(\.t).joined(separator: "\n")
-        if cfg.subtitleTracking == true || cfg.adaptiveConfirmation == true {
+        if cfg.subtitleTracking == true || cfg.adaptiveConfirmation == true || cfg.strictCaptionIdentity == true {
             let decision = tracker.observe(lines, at: readStartedAt, required: need,
-                adaptive: cfg.adaptiveConfirmation ?? false, spatial: cfg.subtitleTracking ?? false,
-                deadline: cfg.confirmationDeadline ?? 0.6, minimumConfidence: cfg.confidence ?? 0.3)
+                adaptive: cfg.adaptiveConfirmation ?? false, spatial: cfg.strictCaptionIdentity == true || (cfg.subtitleTracking ?? false),
+                deadline: cfg.confirmationDeadline ?? 0.6, minimumConfidence: cfg.confidence ?? 0.3,
+                strictSource: cfg.strictCaptionIdentity ?? false)
             candidateID = "\(captureID):\(cfg.rev ?? 0):\(decision.id)"
             confirmationReason = decision.reason
             candidateStartedAt = decision.firstSeen

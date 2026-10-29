@@ -47,6 +47,7 @@ enum ConfirmedSourceIdentity {
 }
 
 struct ModeCaption: Equatable {
+    var system: TranslationSystem? = nil
     let session: UUID
     let caption: String
     let revision: Int
@@ -59,7 +60,7 @@ struct ModeCaption: Equatable {
     let firstOCR: Double
     var fingerprint: String { ConfirmedSourceIdentity.normalize(text) }
     func matches(_ other: Self) -> Bool {
-        session == other.session && caption == other.caption && source == other.source &&
+        system == other.system && session == other.session && caption == other.caption && source == other.source &&
         target == other.target && rules == other.rules && fingerprint == other.fingerprint &&
         units.map(ConfirmedSourceIdentity.normalize) == other.units.map(ConfirmedSourceIdentity.normalize)
     }
@@ -286,5 +287,34 @@ final class ThreeModeCoordinator {
         }
         event(caption, "selected_" + reason, nil)
         selected(caption, output, reason)
+        // Once selected, competing work has no display authority or inference purpose.
+        speculation?.cancel(); cancel(true)
+        confirmation?.cancel(); cancel(false)
+    }
+}
+
+/// Reject delayed UDP packets from a stopped/replaced broadcast, including a
+/// quick restart before heartbeat expiry. Retention is bounded to 64 broadcasts.
+struct CaptureSessionIdentityGate {
+    enum Admission { case current, newSession, rejected }
+    private(set) var current: String?
+    private var retired: [String] = []
+    mutating func admit(_ id: String?) -> Admission {
+        guard let id else { return current == nil ? .current : .rejected }
+        guard !retired.contains(id) else { return .rejected }
+        if id == current { return .current }
+        if let current { retire(current) }
+        current = id
+        return .newSession
+    }
+    mutating func stop(_ id: String?) -> Bool {
+        guard id == current else { return false }
+        if let current { retire(current) }
+        current = nil
+        return true
+    }
+    private mutating func retire(_ id: String) {
+        if !retired.contains(id) { retired.append(id) }
+        if retired.count > 64 { retired.removeFirst(retired.count - 64) }
     }
 }
