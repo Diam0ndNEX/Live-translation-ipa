@@ -629,6 +629,9 @@ final class Diagnostics: ObservableObject {
     var modePendingSystem = "legacy"
     var modeMigration = "persisted"
     private var modeTrace: [TranslationModeTrace] = []
+    private var openingModeTrace: [TranslationModeTrace] = []
+    private var modeTimingSamples: [String: [Double]] = [:]
+    private var modeEventCounts: [String: Int] = [:]
     private var initialWarmupTrace: [InitialWarmupEvent] = []
 
     func noteInitialWarmup(_ observation: InitialWarmupEvent) {
@@ -642,11 +645,28 @@ final class Diagnostics: ObservableObject {
         guard enabled else { return }
         // Caption identifiers are hashed by the producer, never OCR text.
         let safeCaption = SHA256.hash(data: Data(caption.utf8)).map { String(format: "%02x", $0) }.joined()
-        modeTrace.append(TranslationModeTrace(mode: mode ?? modeActiveSystem, testMode: translationTestMode.rawValue, session: session, caption: safeCaption, revision: revision,
+        let entry = TranslationModeTrace(mode: mode ?? modeActiveSystem, testMode: translationTestMode.rawValue,
+            session: session, caption: safeCaption, revision: revision,
             source: source, target: target, fingerprint: fingerprint, reason: reason,
             monotonicTime: ProcessInfo.processInfo.systemUptime, firstOCR: firstOCR,
-            durationMs: duration, thermal: ProcessInfo.processInfo.thermalState.rawValue))
+            durationMs: duration, thermal: ProcessInfo.processInfo.thermalState.rawValue)
+        modeTrace.append(entry)
         if modeTrace.count > 2400 { modeTrace.removeFirst(modeTrace.count - 2400) }
+        // Keep early and late execution boundaries in the same export for comparisons.
+        if Date().timeIntervalSince(started) < 120, openingModeTrace.count < 160,
+           (reason.hasPrefix("recovery_decision_") || reason.hasPrefix("pip_enqueue_") ||
+            reason == "pip_held_unchanged" || reason == "confirmed" ||
+            reason == "hybrid_cross_strategy_overlap" || reason == "hybrid_speculation_throttled" ||
+            reason == "speculative_model_completed" || reason == "confirmed_model_completed") {
+            openingModeTrace.append(entry)
+        }
+        modeEventCounts[reason, default: 0] += 1
+        if let duration, duration.isFinite, duration >= 0 {
+            modeTimingSamples[reason, default: []].append(duration)
+            if modeTimingSamples[reason, default: []].count > 1200 {
+                modeTimingSamples[reason]?.removeFirst()
+            }
+        }
     }
 
     func sessionSnapshot() -> DiagnosticSessionExport {
@@ -705,7 +725,7 @@ final class Diagnostics: ObservableObject {
         currentHealth.ramEntries = ramEntryCount?() ?? memoryHealth.ramEntries
         return DiagnosticSessionExport(translationModes: TranslationModeReport(warmups: initialWarmupTrace, active: modeActiveSystem,
             pending: modePendingSystem, referenceSHA: TranslationSystem.referenceSHA,
-            migration: modeMigration, events: modeTrace, distributions: [:], counters: [:]).sanitized(), id: diagnosticSessionID, startedAt: started, endedAt: Date(),
+            migration: modeMigration, events: exportModeEventWindow(), distributions: [:], counters: [:]).sanitized(), id: diagnosticSessionID, startedAt: started, endedAt: Date(),
             appVersion: AppVersion.full, systemVersion: UIDevice.current.systemVersion,
             hardwareModel: Self.hardwareModelCode, settings: settings, health: currentHealth, counters: counters,
             distributions: ["memoryLookupMs": DiagnosticDistribution(lookupSamples), "memoryWriteMs": DiagnosticDistribution(writeSamples),
@@ -725,13 +745,30 @@ final class Diagnostics: ObservableObject {
                 "renderingMs": DiagnosticDistribution(pipeline.map { $0.stages.rendering }),
                 "speculativeModelMs": DiagnosticDistribution(modelTimingSamples["speculative_model_completed", default: []]),
                 "confirmedModelMs": DiagnosticDistribution(modelTimingSamples["confirmed_model_completed", default: []]),
-                "modelBatchMs": DiagnosticDistribution(modelTimingSamples["model_batch_completed", default: []])],
+                "modelBatchMs": DiagnosticDistribution(modelTimingSamples["model_batch_completed", default: []]),
+                "modeAvailabilityCheckMs": DiagnosticDistribution(modeTimingSamples["backend_availability_ms", default: []]),
+                "modeTaskDispatchMs": DiagnosticDistribution(modeTimingSamples["backend_task_dispatch_ms", default: []]),
+                "modeSpeculativeQueueMs": DiagnosticDistribution(modeTimingSamples["speculative_queue_ms", default: []]),
+                "modeRecoveryQueueMs": DiagnosticDistribution(modeTimingSamples["recovery_queue_ms", default: []]),
+                "hybridOverlappedRecoveryMs": DiagnosticDistribution(modeTimingSamples["hybrid_overlapped_recovery_ms", default: []]),
+                "modeCancellationReleaseMs": DiagnosticDistribution(modeTimingSamples["cancelled_call_returned", default: []])],
             events: exportEventWindow(),
             intervals: diagnosticIntervals(at: Date()),
             oneSecondIntervals: detailedCollection ? recentIntervals(at: Date(), period: 1) : nil,
             fiveSecondIntervals: diagnosticIntervals(at: Date(), period: 5),
             measurementBoundary: "First OCR sighting to PiP sample-buffer enqueue; physical display unmeasured. Distributions use the latest bounded samples within this session, not all-time aggregates. Stages can overlap.",
             textCapture: false)
+    }
+
+    private func exportModeEventWindow() -> [TranslationModeTrace] {
+        let recent = Array(modeTrace.suffix(2240))
+        var identities = Set<String>()
+        let merged = openingModeTrace + recent
+        return merged.filter { event in
+            let identity = event.session.uuidString + event.caption +
+                String(event.revision) + event.reason + String(event.monotonicTime)
+            return identities.insert(identity).inserted
+        }.sorted { $0.monotonicTime < $1.monotonicTime }
     }
 
     private func exportEventWindow() -> [StructuredDiagnosticEvent] {
@@ -911,7 +948,9 @@ final class Diagnostics: ObservableObject {
 
     func reset() {
         persistSession()
-        modeTrace.removeAll(); initialWarmupTrace.removeAll(); legacyModeContexts.removeAll(); lastLegacySpeculation = nil
+        modeTrace.removeAll(); openingModeTrace.removeAll()
+        modeTimingSamples.removeAll(); modeEventCounts.removeAll()
+        initialWarmupTrace.removeAll(); legacyModeContexts.removeAll(); lastLegacySpeculation = nil
         diagnosticSessionID = UUID(); candidateIDs = [:]; frameIDs = [:]; unitIDs = [:]; structuredEvents = []
         legacyValidationSnapshot = [:]; legacyValidationPair = [:]
         eventTotals = [:]; intervalHistory = []; intervalStart = Date()
