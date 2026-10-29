@@ -79,9 +79,9 @@ final class Harness {
         precondition(governor.admit())
         governor.record(used: true)
         precondition(governor.admit())
-        governor.overlappingRecovery(700)
+        governor.overlappingRecovery(milliseconds: 700)
         for _ in 0..<5 { precondition(!governor.admit()) }
-        governor.overlappingRecovery(42)
+        governor.overlappingRecovery(milliseconds: 42)
         precondition(governor.admit())
         let readinessStart = Date(timeIntervalSince1970: 100)
         precondition(InitialWarmupPolicy.strategies(for: .legacy).isEmpty)
