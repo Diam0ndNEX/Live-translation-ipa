@@ -27,6 +27,8 @@ final class ModeTranslationService {
     private let confirmed = Lane()
     private let warmupLane = Lane()
     private var warmupPolicy = InitialWarmupPolicy()
+    private var recentlyInstalled: [String: Double] = [:]
+    private let installedCheckTTL: Double = 30
     var warmupEvent: ((InitialWarmupEvent) -> Void)?
     var modelRequestCompleted: ((String, String, RequestedTranslationStrategy, Double) -> Void)?
     private(set) var warmupSkipDescription = ""
@@ -253,11 +255,23 @@ final class ModeTranslationService {
         let source = Locale.Language(identifier: caption.source), target = Locale.Language(identifier: caption.target)
         activity.advance(activityID, to: .checkingLanguages)
         let languageCheckStart = ProcessInfo.processInfo.systemUptime
-        let availability: LanguageAvailability
-        if #available(iOS 26.4, *), strategy == .lowLatency {
-            availability = LanguageAvailability(preferredStrategy: .lowLatency)
-        } else { availability = LanguageAvailability() }
-        let pairAvailability = await availability.status(from: source, to: target)
+        let availabilityKey = "\(source.minimalIdentifier)>\(target.minimalIdentifier)|\(strategy.rawValue)"
+        let pairAvailability: LanguageAvailability.Status
+        if let verifiedAt = recentlyInstalled[availabilityKey],
+           languageCheckStart - verifiedAt < installedCheckTTL {
+            pairAvailability = .installed
+            report("backend_installed_cache_hit", nil)
+        } else {
+            let availability: LanguageAvailability
+            if #available(iOS 26.4, *), strategy == .lowLatency {
+                availability = LanguageAvailability(preferredStrategy: .lowLatency)
+            } else { availability = LanguageAvailability() }
+            pairAvailability = await availability.status(from: source, to: target)
+            if pairAvailability == .installed {
+                if recentlyInstalled.count >= 100 { recentlyInstalled.removeAll() }
+                recentlyInstalled[availabilityKey] = ProcessInfo.processInfo.systemUptime
+            }
+        }
         report("backend_availability_ms", (ProcessInfo.processInfo.systemUptime - languageCheckStart) * 1000)
         guard !Task.isCancelled else { return nil }
         guard pairAvailability == .installed else {
@@ -311,6 +325,7 @@ final class ModeTranslationService {
                         let response = try await session.translations(from: requests)
                         output = PipelineSafety.orderedTranslations(response.map { ($0.clientIdentifier, $0.targetText) }, count: indices.count)
                     } catch {
+                        self.recentlyInstalled.removeValue(forKey: availabilityKey)
                         report("model_error", nil)
                     }
                     timeout.cancel()
