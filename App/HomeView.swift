@@ -37,7 +37,8 @@ struct HomeView: View {
         }
     }
     private var packReady: Bool {
-        engine.sourceCode == "auto" ? engine.langStatus.values.contains(.installed) : engine.langStatus[engine.sourceCode] == .installed
+        let code = engine.sourceCode == "auto" ? engine.detectedLang : engine.sourceCode
+        return engine.langStatus[code] == .installed
     }
     private var previewRatio: CGFloat {
         let size = (WindowSize(rawValue: winSize) ?? .normal).size
@@ -122,6 +123,9 @@ struct HomeView: View {
                 Label("Detected \(engine.detectedLang.uppercased())\(engine.lockedLang != nil ? " · locked" : "")", systemImage: "sparkle.magnifyingglass")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Text(engine.languageStatusChecking ? "Checking installed language assets…" : engine.languageSummary)
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }.card()
     }
 
