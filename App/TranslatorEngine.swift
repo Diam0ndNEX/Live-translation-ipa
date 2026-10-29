@@ -519,7 +519,10 @@ final class TranslatorEngine: ObservableObject {
             thermal != .serious && thermal != .critical &&
             SpeculationPolicy.credible(lines: packet.lines, threshold: num("speculationConfidence", 0.85))
         modeCoordinator.allowsReuse = memoryTestMode.allowsReuse && !bypassMemory
-        modeCoordinator.adaptiveHybrid = flag("adaptiveSpeculation", true)
+        let fastPack = languageCoverage(for: source).lowLatency
+        let fastPackKnownMissing = fastPack == .supported || fastPack == .unsupported
+        modeCoordinator.fastRecoveryInstalled = !fastPackKnownMissing
+        modeCoordinator.adaptiveHybrid = flag("adaptiveSpeculation", true) && !fastPackKnownMissing
         if confirmed, activeTranslationSystem != .legacy {
             let pair = source + ">" + caption.target + "|" + activeTranslationSystem.rawValue
             let needsCheck = modelReadiness.source != source || modelReadiness.target != caption.target ||
