@@ -43,6 +43,79 @@ enum RequestedTranslationStrategy: String, Codable {
     case appleDefault, lowLatency
 }
 
+/// Device language availability for each requested translation strategy.
+/// "Supported" is not installed; an unavailable strategy must never invalidate another.
+enum LanguageAssetState: String, Equatable {
+    case installed, supported, unsupported, unchecked
+}
+
+struct TranslationLanguageCoverage: Equatable {
+    let appleDefault: LanguageAssetState
+    let lowLatency: LanguageAssetState
+
+    func overall(for system: TranslationSystem) -> LanguageAssetState {
+        switch system {
+        case .legacy: return appleDefault
+        case .lowLatency: return lowLatency
+        case .hybridRecovery:
+            if appleDefault == .installed || lowLatency == .installed { return .installed }
+            if appleDefault == .supported || lowLatency == .supported { return .supported }
+            if appleDefault == .unchecked || lowLatency == .unchecked { return .unchecked }
+            return .unsupported
+        }
+    }
+
+    func nextDownload(for system: TranslationSystem) -> RequestedTranslationStrategy? {
+        switch system {
+        case .legacy:
+            return appleDefault == .supported ? .appleDefault : nil
+        case .lowLatency:
+            return lowLatency == .supported ? .lowLatency : nil
+        case .hybridRecovery:
+            // Prefer completing fast recovery if default is already usable.
+            if lowLatency == .supported { return .lowLatency }
+            if appleDefault == .supported { return .appleDefault }
+            return nil
+        }
+    }
+
+    func explanation(for system: TranslationSystem) -> String {
+        switch system {
+        case .legacy:
+            switch appleDefault {
+            case .installed: return "Apple Default installed for this language pair"
+            case .supported: return "Apple Default supports this pair; download required"
+            case .unsupported: return "Apple Default does not support this language pair"
+            case .unchecked: return "Apple Default availability has not been checked"
+            }
+        case .lowLatency:
+            switch lowLatency {
+            case .installed: return "Low Latency language pack installed"
+            case .supported: return "Low Latency pack available but not installed"
+            case .unsupported: return "Low Latency does not support this language pair"
+            case .unchecked: return "Low Latency availability has not been checked"
+            }
+        case .hybridRecovery:
+            if appleDefault == .installed && lowLatency == .installed {
+                return "Apple Default and Low Latency installed"
+            }
+            if appleDefault == .installed {
+                return lowLatency == .supported ?
+                    "Apple Default ready; install Low Latency for faster recovery" :
+                    "Apple Default ready; Low Latency recovery unavailable for this pair"
+            }
+            if lowLatency == .installed {
+                return appleDefault == .supported ?
+                    "Low Latency ready; Apple Default requires download" :
+                    "Low Latency ready; Apple Default unavailable for this pair"
+            }
+            if overall(for: system) == .unsupported { return "Neither strategy supports this language pair" }
+            if overall(for: system) == .supported { return "No installed strategy for this pair; download required" }
+            return "Checking Apple Default and Low Latency language availability"
+        }
+    }
+}
+
 enum ConfirmedSourceIdentity {
     static func normalize(_ text: String) -> String {
         text.precomposedStringWithCanonicalMapping.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
