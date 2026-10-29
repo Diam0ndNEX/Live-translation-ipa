@@ -31,6 +31,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var lastUsefulText = Date()
     private var ocrSig: [UInt8] = []
     private let perf = OSSignposter(subsystem: "com.diam0ndnex.screenlingo", category: "capture")
+    private var captionFocus = CaptionFocus()
     private var tracker = SubtitleTracker()
     private let captureID = UUID().uuidString
     private var candidateID: String?
@@ -264,7 +265,12 @@ class SampleHandler: RPBroadcastSampleHandler {
 
         // Only read the chosen area, at reduced size: this is the big speed-up.
         let margin = 0.03
-        let y0 = max(0, cfg.y0 - margin), y1 = min(1, cfg.y1 + margin)
+        let broadY0 = max(0, cfg.y0 - margin), broadY1 = min(1, cfg.y1 + margin)
+        let focusEnabled = cfg.focusedCaptionOCR == true
+        let focus = focusEnabled ? captionFocus.scan(at: readStartedAt, y0: broadY0, y1: broadY1,
+            context: "\(orientation.rawValue)|\(cfg.rot ?? 0)|\(cfg.rev ?? 0)|\(cfg.lang)|\(cfg.y0)|\(cfg.y1)") :
+            CaptionFocus.Scan(y0: broadY0, y1: broadY1, broad: true)
+        let y0 = focus.y0, y1 = focus.y1
         var edge = plannedEdge
         if freeMB() < 15 { edge = min(edge, 800) }          // memory getting tight
 
@@ -297,6 +303,9 @@ class SampleHandler: RPBroadcastSampleHandler {
         }
         // A successful contrast retry is a successful read too. Otherwise the
         // old empty streak could clear the caption after just one later miss.
+        if focusEnabled {
+            captionFocus.observe(bounds: lines.map { (center: $0.y, height: $0.h, confidence: $0.confidence ?? 0) })
+        }
         emptyReads.finish(foundText: !lines.isEmpty)
         if !lines.isEmpty {
             lastUsefulText = Date()

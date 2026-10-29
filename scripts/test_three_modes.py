@@ -15,13 +15,16 @@ def function(source, name):
 engine = read('App/TranslatorEngine.swift')
 for name in ['process', 'drain', 'speculate', 'cachedCaption', 'extractTexts', 'selectBlocks']:
     assert function(engine, name) == function(old('App/TranslatorEngine.swift'), name), name + ' Legacy policy changed'
-assert read('App/TranslationMemoryStore.swift') == old('App/TranslationMemoryStore.swift')
+assert function(read('App/TranslationMemoryStore.swift'), 'createSchema') == function(old('App/TranslationMemoryStore.swift'), 'createSchema')
+assert function(read('App/TranslationMemoryStore.swift'), 'upgradeSchemaV2') == function(old('App/TranslationMemoryStore.swift'), 'upgradeSchemaV2')
 assert old('App/TranslationMemoryStore.swift', 'origin/codex/screenlingo-v1.8.0-performance') == old('App/TranslationMemoryStore.swift')
 for token in ['com.diam0ndnex.screenlingo', 'com.diam0ndnex.screenlingo.broadcast']:
     assert token in read('project.yml')
 assert 'ScreenLingo/TranslationMemory' in engine
 assert 'base: snapshot, lowLatency: false' in engine
 assert 'where output.strategies[i] == .appleDefault' in engine
+assert 'knownDefault: true' in engine
+assert 'activeTranslationSystem != .legacy && flag("subtitleTracking", true)' in engine
 assert 'activeTranslationSystem == .legacy else' in engine
 assert 'modeCoordinator.observe(caption' in engine
 core = read('Shared/TranslationSystem.swift')

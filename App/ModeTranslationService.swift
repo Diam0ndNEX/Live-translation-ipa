@@ -12,13 +12,18 @@ final class ModeTranslationService {
         var ticket = UUID()
         var invalidated = false
     }
+    private var hostedIsSpeculative = false
+    private var hostedTask: Task<[String]?, Never>?
+    private var generation = 0
     private let speculative = Lane()
     private let confirmed = Lane()
     var event: ((ModeCaption, String, Double?) -> Void)?
     var status: ((String) -> Void)?
+    var hostedDefault: (([String], Locale.Language, Locale.Language, Bool) async -> [String]?)?
 
     func cancel(speculation: Bool) {
         let lane = speculation ? speculative : confirmed
+        if hostedIsSpeculative == speculation { hostedTask?.cancel() }
         if #available(iOS 26.0, *), lane.busy {
             lane.invalidated = true
             lane.session?.cancel()
@@ -26,6 +31,8 @@ final class ModeTranslationService {
     }
 
     func reset() {
+        generation += 1
+        hostedTask?.cancel()
         for lane in [speculative, confirmed] {
             if #available(iOS 26.0, *) { lane.session?.cancel() }
             lane.invalidated = true
@@ -35,11 +42,13 @@ final class ModeTranslationService {
 
     func prepare(source: String, target: String, system: TranslationSystem) async -> String {
         guard #available(iOS 26.4, *) else { return "Explicit low latency requires iOS 26.4 or later" }
+        let revision = generation
         let src = Locale.Language(identifier: source), dst = Locale.Language(identifier: target)
         let availability = LanguageAvailability(preferredStrategy: .lowLatency)
         guard await availability.status(from: src, to: dst) == .installed else {
             return "Low-latency languages unavailable. Install this pair in Languages."
         }
+        guard revision == generation, !Task.isCancelled else { return "Preparation superseded" }
         if !confirmed.busy {
             install(confirmed, source: src, target: dst, strategy: .lowLatency)
         }
@@ -50,23 +59,44 @@ final class ModeTranslationService {
         return "Languages and sessions ready; model residency unmeasured"
     }
 
-    @available(iOS 26.4, *)
+    @available(iOS 26.0, *)
     private func install(_ lane: Lane, source: Locale.Language, target: Locale.Language,
                          strategy: RequestedTranslationStrategy) {
         let key = "\(source.minimalIdentifier)>\(target.minimalIdentifier)|\(strategy.rawValue)"
         guard lane.session == nil || lane.key != key || lane.invalidated else { return }
-        lane.session = strategy == .lowLatency ?
-            TranslationSession(installedSource: source, target: target, preferredStrategy: .lowLatency) :
-            TranslationSession(installedSource: source, target: target)
+        if strategy == .lowLatency {
+            guard #available(iOS 26.4, *) else { return }
+            lane.session = TranslationSession(installedSource: source, target: target, preferredStrategy: .lowLatency)
+        } else { lane.session = TranslationSession(installedSource: source, target: target) }
         lane.key = key; lane.invalidated = false
     }
 
     func translate(_ caption: ModeCaption, indices: [Int], strategy: RequestedTranslationStrategy,
                    speculation: Bool) async -> [String]? {
-        guard #available(iOS 26.4, *) else {
-            status?("Explicit low latency requires iOS 26.4 or later. Select Legacy to use the established pipeline.")
-            event?(caption, "unsupported_os", nil)
-            return nil
+        if strategy == .lowLatency {
+            guard #available(iOS 26.4, *) else {
+                status?("Explicit low latency requires iOS 26.4 or later. Select Legacy or Hybrid Recovery to use Apple default.")
+                event?(caption, "unsupported_os", nil)
+                return nil
+            }
+        }
+        guard #available(iOS 26.0, *) else {
+            guard strategy == .appleDefault else { return nil }
+            let enqueued = ProcessInfo.processInfo.systemUptime
+            while hostedTask != nil {
+                if Task.isCancelled || ProcessInfo.processInfo.systemUptime - enqueued > 4 { return nil }
+                try? await Task.sleep(nanoseconds: 20_000_000)
+            }
+            guard !Task.isCancelled else { return nil }
+            event?(caption, "requested_appleDefault", nil)
+            let task = Task { @MainActor in
+                await self.hostedDefault?(indices.map { caption.units[$0] }, Locale.Language(identifier: caption.source),
+                    Locale.Language(identifier: caption.target), speculation)
+            }
+            hostedTask = task; hostedIsSpeculative = speculation
+            let result = await withTaskCancellationHandler(operation: { await task.value }, onCancel: { task.cancel() })
+            hostedTask = nil
+            return result
         }
         let lane = speculation ? speculative : confirmed
         let enqueued = ProcessInfo.processInfo.systemUptime
@@ -77,7 +107,10 @@ final class ModeTranslationService {
         }
         guard !Task.isCancelled else { return nil }
         let source = Locale.Language(identifier: caption.source), target = Locale.Language(identifier: caption.target)
-        let availability = strategy == .lowLatency ? LanguageAvailability(preferredStrategy: .lowLatency) : LanguageAvailability()
+        let availability: LanguageAvailability
+        if #available(iOS 26.4, *), strategy == .lowLatency {
+            availability = LanguageAvailability(preferredStrategy: .lowLatency)
+        } else { availability = LanguageAvailability() }
         guard await availability.status(from: source, to: target) == .installed, !Task.isCancelled else {
             event?(caption, "unsupported_or_uninstalled_pair", nil)
             status?("Translation languages unavailable. Open Languages to install the selected pair.")

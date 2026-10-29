@@ -164,6 +164,8 @@ struct DiagnosticIntervalBucket: Codable {
 
 /// Versioned, bounded, metadata-only timeline for the three-mode coordinator.
 struct TranslationModeTrace: Codable {
+    var mode: String? = nil
+    var testMode: String? = nil
     let session: UUID
     let caption: String
     let revision: Int
@@ -178,6 +180,11 @@ struct TranslationModeTrace: Codable {
 }
 
 struct TranslationModeReport: Codable {
+    var effectiveModelIdentity: String? = "unknown"
+    var referenceVersion: String? = "1.7.2-58"
+    var referenceSDK: String? = "iphoneos26.5"
+    var coldSpeculationCeilingMs: Int? = 700
+    var modelTimeoutMs: Int? = 4000
     var schemaVersion = 1
     let active: String
     let pending: String
@@ -188,6 +195,9 @@ struct TranslationModeReport: Codable {
     let counters: [String: Int]
 
     static let reasons: Set<String> = [
+        "pip_enqueue_legacy_recovery", "pip_enqueue_confirmed_fresh",
+        "selected_origin_compatible_memory", "selected_origin_speculation", "selected_origin_recovery", "selected_origin_session_low_latency",
+        "selected_strategy_appleDefault", "selected_strategy_lowLatency", "memory_pressure", "thermal_reduced_speculation",
         "speculation_admitted", "speculation_failed", "speculation_ready", "superseded_missing",
         "source_correction", "speculation_match_unfinished", "memory_lookup_start", "memory_lookup_end",
         "speculative_enqueue", "recovery_enqueue", "same_strategy_retry", "hybrid_default_fallback",
@@ -207,17 +217,35 @@ struct TranslationModeReport: Codable {
             }
         }
         let safe = Array(events.suffix(2400)).filter {
+            ["legacy", "hybridRecovery", "lowLatency"].contains($0.mode ?? active) &&
+            ["normal", "temporaryMemory", "freshRequests"].contains($0.testMode ?? "normal") &&
             Self.reasons.contains($0.reason) && code($0.caption) && code($0.source, limit: 32) && code($0.target, limit: 32) &&
             $0.fingerprint.count == 64 && $0.fingerprint.allSatisfy { $0.isHexDigit } &&
             $0.monotonicTime.isFinite && $0.firstOCR.isFinite && $0.revision >= 0 &&
             ($0.durationMs == nil || ($0.durationMs!.isFinite && $0.durationMs! >= 0)) && (0...3).contains($0.thermal)
         }
         var samples: [String: [Double]] = [:], counts: [String: Int] = [:]
+        var confirmations: [String: Double] = [:], recoveries: [String: Double] = [:]
+        var strategies: [String: String] = [:], residency: [String: String] = [:]
         for event in safe {
-            counts[event.reason, default: 0] += 1
+            let identity = event.session.uuidString + event.caption + String(event.revision)
+            if event.reason == "confirmed" { confirmations[identity] = event.monotonicTime }
+            if event.reason.hasPrefix("recovery_decision_") { recoveries[identity] = event.monotonicTime }
+            if event.reason.hasPrefix("requested_") { strategies[identity] = String(event.reason.dropFirst(10)) }
+            if ["new_session_start", "retained_session_start"].contains(event.reason) { residency[identity] = event.reason }
+            let cohort = (event.mode ?? active) + "_" + (event.testMode ?? "normal") + "_" + event.source + "_" + event.target + "_thermal" + String(event.thermal)
+            counts[cohort + "_" + event.reason, default: 0] += 1
             if let duration = event.durationMs {
-                let key = event.source + "_" + event.target + "_thermal" + String(event.thermal) + "_" + event.reason
+                let key = cohort + "_" + (strategies[identity] ?? "memory_or_unknown") + "_" + (residency[identity] ?? "unobserved") + "_" + event.reason
                 samples[key, default: []].append(duration)
+            }
+            if event.reason.hasPrefix("pip_enqueue_") {
+                if let confirmed = confirmations[identity] {
+                    samples[cohort + "_" + event.reason + "_confirmationToEnqueue", default: []].append(max(0, event.monotonicTime - confirmed) * 1000)
+                }
+                if let decision = recoveries[identity] {
+                    samples[cohort + "_" + event.reason + "_recoveryDecisionToEnqueue", default: []].append(max(0, event.monotonicTime - decision) * 1000)
+                }
             }
         }
         let modes = ["legacy", "hybridRecovery", "lowLatency"]
@@ -474,8 +502,10 @@ actor DiagnosticExportWriter {
         // Flat, machine-readable timing distributions for spreadsheet-based A/B
         // checks. No source text or full raw screen content is included.
         let metricsHeader = "metric,samples,mean_ms,p50_ms,p90_ms,p95_ms,p99_ms,max_ms"
-        let metricsRows = safe.distributions.keys.sorted().compactMap { name -> String? in
-            guard let value = safe.distributions[name] else { return nil }
+        var allDistributions = safe.distributions
+        for (name, value) in safe.translationModes?.distributions ?? [:] { allDistributions["mode_" + name] = value }
+        let metricsRows = allDistributions.keys.sorted().compactMap { name -> String? in
+            guard let value = allDistributions[name] else { return nil }
             let cells: [String] = [
                 name, String(value.count), String(value.mean),
                 value.p50.map { String($0) } ?? "",
@@ -624,7 +654,7 @@ actor DiagnosticExportWriter {
         ]
         let manifestData = try JSONSerialization.data(withJSONObject: manifest, options: [.prettyPrinted, .sortedKeys])
         let readme = Data("""
-            ScreenLingo diagnostic ZIP v3 — private, portable, offline
+            ScreenLingo diagnostic ZIP v4 — private, portable, offline
             Start with summary.md: human-readable findings, measured latency and
             candidate continuity. All numbers come from redacted session.json.
             manifest.json: ZIP format and session metadata.
@@ -639,6 +669,10 @@ actor DiagnosticExportWriter {
             metrics.csv: sample count, mean, median, P90, P95, P99 by timing stage.
             events.csv: recent candidate/frame/unit event timeline with opaque UUIDs
               and millisecond-precision Unix timestamps for exact ordering.
+            translation_modes.json: bounded mode/caption/revision/strategy timeline,
+              queue/service timings and mode/path/language/thermal cohorts.
+              Retained/new session labels do not prove resident model warmth.
+              Mode counters/distributions cover retained events, not the entire session.
             findings.json: observed and suspected issues; heuristics, not verified errors.
             README.txt: this file.
 
@@ -651,10 +685,12 @@ actor DiagnosticExportWriter {
             No recognized text, translated text, frames, audio or paths are included.
             This ZIP is only created when you explicitly request export.
             """.utf8)
+        let modesData = try JSONEncoder().encode(safe.translationModes)
         let zip = try DiagnosticStoredZIP.make(entries: [
             (name: "manifest.json", contents: manifestData),
             (name: "summary.md", contents: summary),
             (name: "session.json", contents: sessionData),
+            (name: "translation_modes.json", contents: modesData),
             (name: "intervals.csv", contents: intervalsCSV),
             (name: "seconds_1.csv", contents: secondsOneCSV),
             (name: "seconds_5.csv", contents: secondsFiveCSV),

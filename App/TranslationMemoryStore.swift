@@ -796,14 +796,26 @@ actor TranslationMemoryStore {
     /// reached confirmed OCR (including an exact-match speculative result after
     /// confirmation), never from ordinary RAM, disk or imported memory hits.
     func save(_ entries: [String:String], revision: Int,
-              independentlyConfirmedKeys: Set<String> = []) throws -> MemoryStoreHealth {
+              independentlyConfirmedKeys: Set<String> = [],
+              knownDefaultStrategyKeys: Set<String> = []) throws -> MemoryStoreHealth {
         guard active else { throw MemoryStoreError.unavailable }
         guard revision > latestRevision else { throw MemoryStoreError.staleRevision }
         do {
             try transaction {
                 for (key, value) in entries {
                     guard keyParts(key)?.rules != nil, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
-                    _ = try insert(key: key, value: value, compatible: true)
+                    let inserted = try insert(key: key, value: value, compatible: true)
+                    if knownDefaultStrategyKeys.contains(key) {
+                        // Add a new observation; do not relabel or erase historical provenance.
+                        // The existing schema can represent this metadata without a migration.
+                        let fingerprint = digest(Data((key + "\u{1F}" + value + "\u{1F}appleDefault").utf8))
+                        try execute("""
+                            INSERT OR IGNORE INTO memory_provenance(entry_id,source_format,source_fingerprint,legacy_key,import_batch,import_timestamp,original_metadata)
+                            VALUES(?,?,?,?,?,?,?)
+                            """, [.integer(inserted.id), .text("live_v190"), .text(fingerprint), .text(key),
+                                   .text("live_v190"), .real(Date().timeIntervalSince1970),
+                                   .text("{\"requestedStrategy\":\"appleDefault\",\"effectiveModel\":\"unknown\",\"qualityTier\":\"preferred\",\"sourceConfirmed\":true}")])
+                    }
                     if independentlyConfirmedKeys.contains(key) {
                         try reconcileLegacy(key: key, confirmedValue: value)
                     }

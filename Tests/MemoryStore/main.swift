@@ -18,6 +18,57 @@ import CryptoKit
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         let rules = String(repeating: "a", count: 64)
         let key = "v4|\(rules)|pt>en|0:|Olá."
+        // The audited 1.7.2 and 1.8.0 store producers are byte-identical.
+        // Independent populated installation fixtures exercise reopen without JSON,
+        // preserving historical low-strategy records, legacy provenance and row IDs.
+        for version in ["1.7.2", "1.8.0"] {
+            let directory = root.appendingPathComponent("upgrade-" + version)
+            let oldJSON = root.appendingPathComponent("legacy-" + version + ".json")
+            try JSONSerialization.data(withJSONObject: ["legacy source": "Original legacy answer"]).write(to: oldJSON)
+            let preferred = "v4|\(rules)|pt>en|0:|Preserve preferred translation."
+            let low = "v4|\(String(repeating: "b", count: 64))|pt>en|0:|Preserve historical low output."
+            let installed = TranslationMemoryStore(directory: directory)
+            _ = try await installed.prepare(legacyURLs: [oldJSON])
+            _ = try await installed.save([preferred: "Preferred answer", low: "Historical fast answer"], revision: 1)
+            let before = try await installed.search(limit: 100)
+            let beforeHealth = try await installed.health()
+            let retainedSettings = root.appendingPathComponent("settings-" + version + ".json")
+            let settings = try JSONSerialization.data(withJSONObject: ["source": "pt", "target": "en", "historyData": "retained"])
+            try settings.write(to: retainedSettings)
+            let upgrade = TranslationMemoryStore(directory: directory)
+            _ = try await upgrade.prepare(legacyURLs: [oldJSON])
+            let after = try await upgrade.search(limit: 100)
+            let afterHealth = try await upgrade.health()
+            precondition(before.map(\.id).sorted() == after.map(\.id).sorted())
+            precondition(beforeHealth.totalEntries == afterHealth.totalEntries)
+            precondition(afterHealth.schemaVersion == 2)
+            let preferredHit = await upgrade.lookup(key: preferred, timeoutMilliseconds: 50)
+            let lowHit = await upgrade.lookup(key: low, timeoutMilliseconds: 50)
+            precondition(preferredHit.value == "Preferred answer" && lowHit.value == "Historical fast answer")
+            let retained = try Data(contentsOf: retainedSettings)
+            precondition(retained == settings)
+            precondition(FileManager.default.fileExists(atPath: oldJSON.path))
+        }
+        print("Isolated populated 1.7.2 and 1.8.0 schema-2 upgrade/reopen fixtures passed")
+        let provenanceDirectory = root.appendingPathComponent("new-request-provenance")
+        let provenanceStore = TranslationMemoryStore(directory: provenanceDirectory)
+        _ = try await provenanceStore.prepare(legacyURLs: [])
+        let provenanceKey = "v4|\(rules)|pt>en|0:|Confirmed new output."
+        _ = try await provenanceStore.save([provenanceKey: "Confirmed answer"], revision: 1,
+            independentlyConfirmedKeys: [provenanceKey], knownDefaultStrategyKeys: [provenanceKey])
+        _ = try await provenanceStore.save([provenanceKey: "Confirmed answer"], revision: 2,
+            knownDefaultStrategyKeys: [provenanceKey])
+        var provenanceDB: OpaquePointer?
+        precondition(sqlite3_open_v2(provenanceDirectory.appendingPathComponent("memory.sqlite").path,
+            &provenanceDB, SQLITE_OPEN_READONLY, nil) == SQLITE_OK)
+        var provenanceQuery: OpaquePointer?
+        precondition(sqlite3_prepare_v2(provenanceDB,
+            "SELECT original_metadata FROM memory_provenance WHERE source_format='live_v190'", -1, &provenanceQuery, nil) == SQLITE_OK)
+        precondition(sqlite3_step(provenanceQuery) == SQLITE_ROW)
+        let metadata = String(cString: sqlite3_column_text(provenanceQuery, 0))
+        precondition(metadata.contains("appleDefault") && metadata.contains("unknown"))
+        precondition(sqlite3_step(provenanceQuery) == SQLITE_DONE, "Repeated admission must not duplicate provenance observations")
+        sqlite3_finalize(provenanceQuery); sqlite3_close_v2(provenanceDB)
         // Deterministic disk-full fault in the second INSERT of a transaction.
         // A partial batch must roll back completely while prior memory survives.
         #if MEMORY_FAULT_TESTING

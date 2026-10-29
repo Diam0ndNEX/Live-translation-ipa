@@ -26,7 +26,7 @@ final class Harness {
     let session = UUID()
     func caption(_ text: String = "I do not have 10 cats.", revision: Int = 1, id: String = "caption", source: String = "en") -> ModeCaption {
         ModeCaption(session: session, caption: id, revision: revision, source: source, target: "de", rules: "rules", text: text,
-            units: [text], keys: [text], firstOCR: 1)
+            units: [text], keys: [source + ">de|" + text], firstOCR: 1)
     }
     func reply(_ index: Int, _ values: [String]?) { calls[index].continuation.resume(returning: values) }
     func settle() async { for _ in 0..<100 { await Task.yield() } }
@@ -122,6 +122,70 @@ final class Harness {
         let legacy = Harness(); legacy.coordinator.system = .legacy
         legacy.coordinator.observe(legacy.caption(), confirmed: true, speculate: true); await legacy.settle()
         precondition(legacy.calls.isEmpty && legacy.selected.isEmpty)
+        // Cold Hybrid deadline permits recovery without waiting for stale cancellation.
+        let deadline = Harness(); deadline.coordinator.system = .hybridRecovery
+        deadline.coordinator.coldSpeculationCeiling = 0
+        deadline.coordinator.observe(deadline.caption(), confirmed: false, speculate: true); await deadline.settle()
+        deadline.coordinator.observe(deadline.caption(), confirmed: true, speculate: true); await deadline.settle()
+        precondition(deadline.calls.count == 2 && deadline.calls[1].strategy == .lowLatency)
+        deadline.reply(0, ["Default wins selection"]); deadline.reply(1, ["Late recovery"])
+        await deadline.settle(); precondition(deadline.selected.count == 1)
+        deadline.coordinator.reset()
+
+        // Failed speculation followed by failed LL permits default fallback only in Hybrid.
+        let fallback = Harness(); fallback.coordinator.system = .hybridRecovery
+        fallback.coordinator.observe(fallback.caption(), confirmed: true, speculate: false); await fallback.settle()
+        fallback.reply(0, nil); await fallback.settle(); fallback.reply(1, nil); await fallback.settle()
+        precondition(fallback.calls.count == 3 && fallback.calls[2].strategy == .appleDefault)
+        fallback.reply(2, ["Default fallback"]); await fallback.settle()
+        precondition(fallback.selected.count == 1); fallback.coordinator.reset()
+
+        // Matching completed speculation is selected immediately, without another model call.
+        let ready = Harness(); ready.coordinator.system = .lowLatency
+        ready.coordinator.observe(ready.caption(), confirmed: false, speculate: true); await ready.settle()
+        ready.reply(0, ["Ready"]); await ready.settle()
+        ready.coordinator.observe(ready.caption(), confirmed: true, speculate: true); await ready.settle()
+        precondition(ready.selected.count == 1 && ready.calls.count == 1)
+        // Another caption can reuse the session-only LL cache, without contaminating preferred memory.
+        ready.coordinator.observe(ready.caption(id: "another"), confirmed: true, speculate: false); await ready.settle()
+        precondition(ready.selected.count == 2 && ready.calls.count == 1)
+        precondition(ready.selected[1].1.origins == ["session_low_latency"])
+        ready.coordinator.reset()
+
+        // Exact repeated units are translated once and expanded to complete output.
+        let duplicate = Harness(); duplicate.memory = [nil, nil]; duplicate.coordinator.system = .lowLatency
+        let unique = duplicate.caption()
+        let repeated = ModeCaption(session: unique.session, caption: unique.caption, revision: 1,
+            source: unique.source, target: unique.target, rules: unique.rules, text: unique.text,
+            units: unique.units + unique.units, keys: unique.keys + unique.keys, firstOCR: 1)
+        duplicate.coordinator.observe(repeated, confirmed: true, speculate: false); await duplicate.settle()
+        precondition(duplicate.calls.count == 1 && duplicate.calls[0].indices == [0])
+        duplicate.reply(0, ["Complete"]); await duplicate.settle()
+        precondition(duplicate.selected[0].1.values == ["Complete", "Complete"])
+        duplicate.coordinator.reset()
+
+        // Real source correction after display creates a new selectable revision.
+        let revision = Harness(); revision.coordinator.system = .lowLatency
+        revision.coordinator.observe(revision.caption(), confirmed: true, speculate: false); await revision.settle()
+        revision.reply(0, ["First"]); await revision.settle()
+        revision.coordinator.observe(revision.caption("I do not have 20 cats.", revision: 2), confirmed: true, speculate: false); await revision.settle()
+        revision.reply(1, ["Corrected"]); await revision.settle()
+        precondition(revision.selected.count == 2 && revision.events.contains("source_correction"))
+        revision.coordinator.reset()
+
+        // Focus loss, orientation/context changes and periodic scans recover the broad area.
+        var focus = CaptionFocus()
+        precondition(focus.scan(at: 0, y0: 0, y1: 1, context: "up").broad)
+        focus.observe(bounds: [(center: 0.2, height: 0.04, confidence: 0.99)])
+        let focused = focus.scan(at: 0.1, y0: 0, y1: 1, context: "up")
+        precondition(!focused.broad && focused.y0 < 0.2 && focused.y1 > 0.2)
+        precondition(focus.scan(at: 0.8, y0: 0, y1: 1, context: "up").broad)
+        focus.observe(bounds: [])
+        precondition(focus.scan(at: 0.9, y0: 0, y1: 1, context: "up").broad)
+        focus.observe(bounds: [(center: 0.2, height: 0.04, confidence: 0.99)])
+        precondition(focus.scan(at: 1, y0: 0, y1: 1, context: "rotated").broad)
+        focus.observe(bounds: [(center: 0.2, height: 0.04, confidence: 0.5)])
+        precondition(focus.scan(at: 1.1, y0: 0, y1: 1, context: "rotated").broad)
         print("Three-mode migration, sharing, atomic selection, mismatch, cancellation, memory isolation, strategy purity and semantic identity checks passed")
     }
 }

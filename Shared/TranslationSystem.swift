@@ -87,6 +87,8 @@ final class ThreeModeCoordinator {
     var clock: () -> Double = { ProcessInfo.processInfo.systemUptime }
     var system: TranslationSystem = .legacy
     var allowsReuse = true
+    var coldSpeculationCeiling = 0.7
+    var matchingLowLatencyDeadline = 4.0
     private(set) var current: ModeCaption?
     private var committed: ModeCaption?
     private var confirmation: Task<Void, Never>?
@@ -107,6 +109,16 @@ final class ThreeModeCoordinator {
          event: @escaping (ModeCaption, String, Double?) -> Void, status: @escaping (String) -> Void) {
         self.lookup = lookup; self.translate = translate; self.cancel = cancel
         self.selected = selected; self.event = event; self.status = status
+    }
+
+    func reduceSpeculation(memoryPressure: Bool) {
+        speculation?.cancel(); cancel(true)
+        speculativeCaption = nil; speculativeOutput = nil
+        if memoryPressure { lowCache.removeAll(); lowOrder.removeAll() }
+        if let current, committed != current {
+            event(current, memoryPressure ? "memory_pressure" : "thermal_reduced_speculation", nil)
+            startRecovery(current, reason: "speculation_absent")
+        }
     }
 
     func reset() {
@@ -148,6 +160,7 @@ final class ThreeModeCoordinator {
             event(caption, "source_correction", nil)
         }
         current = caption; committed = nil; recoveryStarted = false
+        cancel(false)
         confirmation?.cancel(); deadline?.cancel()
         // Never wait for model work before the independent memory probe.
         confirmation = Task { [weak self] in
@@ -164,7 +177,7 @@ final class ThreeModeCoordinator {
                 if self.speculation != nil && !self.speculativeFailed {
                     self.event(caption, "speculation_match_unfinished", nil)
                     // LL shares the original request. A hung request has a same-strategy deadline.
-                    let wait = self.system == .lowLatency ? max(0, 4 - (self.clock() - self.speculativeStarted)) : self.remainingWait()
+                    let wait = self.system == .lowLatency ? max(0, self.matchingLowLatencyDeadline - (self.clock() - self.speculativeStarted)) : self.remainingWait()
                     self.deadline = Task { [weak self] in
                         try? await Task.sleep(nanoseconds: UInt64(max(0, wait) * 1_000_000_000))
                         guard let self, !Task.isCancelled, self.current == caption, self.committed != caption else { return }
@@ -184,7 +197,7 @@ final class ThreeModeCoordinator {
         let elapsed = max(0, clock() - speculativeStarted)
         // Cold policy uses the measured build-58 observed service ceiling (654 ms),
         // rounded to 700 ms total, not a new 700 ms post-confirmation grace period.
-        guard defaultService.count >= 5, lowService.count >= 5 else { return max(0, 0.7 - elapsed) }
+        guard defaultService.count >= 5, lowService.count >= 5 else { return max(0, coldSpeculationCeiling - elapsed) }
         let ordinary = defaultService.sorted()[defaultService.count / 2]
         let recovery = lowService.sorted()[lowService.count / 2]
         return max(0, min(0.25, ordinary - elapsed, recovery))
@@ -210,7 +223,9 @@ final class ThreeModeCoordinator {
                 }
             }
         }
-        let missing = values.indices.filter { values[$0] == nil }
+        var uniqueKeys = Set<String>()
+        let allMissing = values.indices.filter { values[$0] == nil }
+        let missing = allMissing.filter { uniqueKeys.insert(caption.keys[$0]).inserted }
         if !missing.isEmpty {
             guard !Task.isCancelled else { return nil }
             event(caption, speculative ? "speculative_enqueue" : "recovery_enqueue", nil)
@@ -225,8 +240,10 @@ final class ThreeModeCoordinator {
             if strategy == .appleDefault { defaultService.append(duration); defaultService = Array(defaultService.suffix(32)) }
             else { lowService.append(duration); lowService = Array(lowService.suffix(32)) }
             for (position, index) in missing.enumerated() {
-                values[index] = result[position]; strategies[index] = strategy
-                origins[index] = speculative ? "speculation" : "recovery"
+                for duplicate in allMissing where caption.keys[duplicate] == caption.keys[index] {
+                    values[duplicate] = result[position]; strategies[duplicate] = strategy
+                    origins[duplicate] = speculative ? "speculation" : "recovery"
+                }
             }
         }
         guard values.allSatisfy({ $0 != nil }) else { return nil }
@@ -262,6 +279,10 @@ final class ThreeModeCoordinator {
                 lowCache[key] = output.values[i]
                 if lowOrder.count > 256 { lowCache.removeValue(forKey: lowOrder.removeFirst()) }
             }
+        }
+        for i in output.values.indices {
+            event(caption, "selected_origin_" + output.origins[i], nil)
+            if let strategy = output.strategies[i] { event(caption, "selected_strategy_" + strategy.rawValue, nil) }
         }
         event(caption, "selected_" + reason, nil)
         selected(caption, output, reason)

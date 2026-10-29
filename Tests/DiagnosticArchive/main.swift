@@ -454,6 +454,35 @@ import Foundation
         ])
         precondition(recoveredEnqueue.first?.status.contains("PiP buffer enqueued") == true,
                      "An actual later successful enqueue must remain visible")
+        // Mode telemetry survives ZIP/JSON export, preserves origins and rejects text injection.
+        let safeHash = String(repeating: "a", count: 64)
+        func modeEvent(_ reason: String, at: Double, duration: Double? = nil, caption: String? = nil) -> TranslationModeTrace {
+            TranslationModeTrace(mode: "lowLatency", testMode: "temporaryMemory", session: session, caption: caption ?? safeHash,
+                revision: 2, source: "pt", target: "en", fingerprint: safeHash, reason: reason,
+                monotonicTime: at, firstOCR: 1, durationMs: duration, thermal: 0)
+        }
+        let modeReport = TranslationModeReport(active: "lowLatency", pending: "legacy",
+            referenceSHA: String(repeating: "b", count: 40), migration: "explicit_low_latency",
+            events: [modeEvent("confirmed", at: 1.2), modeEvent("recovery_decision_source_mismatch", at: 1.25),
+                modeEvent("requested_lowLatency", at: 1.3), modeEvent("retained_session_start", at: 1.3),
+                modeEvent("recovery_service_ms", at: 1.5, duration: 200),
+                modeEvent("pip_enqueue_recovery_success", at: 1.6, duration: 600),
+                modeEvent("secret OCR text", at: 2), modeEvent("confirmed", at: 2, caption: "user text")],
+            distributions: ["malicious": dist], counters: ["malicious": 999]).sanitized()
+        precondition(modeReport.events.count == 6)
+        precondition(modeReport.distributions.keys.allSatisfy { !$0.contains("malicious") })
+        let confirmationDistribution = modeReport.distributions.first { $0.key.hasSuffix("confirmationToEnqueue") }!.value
+        precondition(abs(confirmationDistribution.mean - 400) < 0.001)
+        let decisionDistribution = modeReport.distributions.first { $0.key.hasSuffix("recoveryDecisionToEnqueue") }!.value
+        precondition(abs(decisionDistribution.mean - 350) < 0.001)
+        var modeSnapshot = snapshot
+        modeSnapshot.translationModes = modeReport
+        let encodedModes = try await writer.encode(modeSnapshot)
+        let decodedModes = try await writer.decode(encodedModes)
+        precondition(decodedModes.translationModes?.events.count == 6)
+        let modeZIP = try await writer.exportZIP(modeSnapshot)
+        let modeZIPData = try Data(contentsOf: modeZIP)
+        precondition(modeZIPData.range(of: Data("translation_modes.json".utf8)) != nil)
         print("Diagnostic percentile, privacy, correlation, compatibility and comparison passed")
     }
 }

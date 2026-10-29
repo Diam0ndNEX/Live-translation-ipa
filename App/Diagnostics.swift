@@ -352,6 +352,15 @@ final class Diagnostics: ObservableObject {
             "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical"
         ]
         guard allowed.contains(reason) else { return }
+        if modeActiveSystem == "legacy", let candidate {
+            if reason == "confirmed_model_submitted" {
+                legacyModeContexts[candidate]?.fresh = true
+                legacyModeEvent(candidate, reason: "requested_appleDefault")
+            }
+            if reason == "speculative_model_submitted" { legacyModeEvent(candidate, reason: "requested_appleDefault") }
+            if reason == "confirmed_model_completed" { legacyModeEvent(candidate, reason: "recovery_service_ms", duration: durationMs) }
+            if reason == "speculative_model_completed" { legacyModeEvent(candidate, reason: "speculative_service_ms", duration: durationMs) }
+        }
         appendStructured(stage: "runtime_state", outcome: reason, reason: reason,
                          durationMs: nil)
     }
@@ -547,6 +556,9 @@ final class Diagnostics: ObservableObject {
         let token = beginRecorder(); defer { endRecorder(token) }
         guard enabled, count > 0 else { return }
         memoryOutcomes[outcome, default: 0] += count
+        if modeActiveSystem == "legacy", outcome == .speculativeHit, let candidate {
+            legacyModeContexts[candidate]?.speculativeHit = true
+        }
         let finite = durationMs.isFinite && durationMs >= 0
         switch outcome {
         case .ramHit, .persistentHit, .legacyHit, .normalizedHit, .speculativeHit, .miss, .timeout, .compatibilityRejected, .databaseUnavailable:
@@ -568,6 +580,50 @@ final class Diagnostics: ObservableObject {
 
     func memoryOutcomesForUI(_ outcome: MemoryDiagnosticOutcome) -> Int { memoryOutcomes[outcome, default: 0] }
 
+    private struct LegacyModeContext {
+        let session: UUID
+        let source: String
+        let target: String
+        let fingerprint: String
+        let firstOCR: Double
+        var fresh = false
+        var speculativeHit = false
+        var mismatch = false
+    }
+    private var legacyModeContexts: [String: LegacyModeContext] = [:]
+    private var lastLegacySpeculation: String?
+
+    func registerLegacyModeCaption(session: UUID, caption: String, source: String, target: String,
+                                   fingerprint: String, firstOCR: Double, confirmed: Bool) {
+        guard enabled, modeActiveSystem == "legacy" else { return }
+        if !confirmed { lastLegacySpeculation = fingerprint }
+        if legacyModeContexts[caption] == nil {
+            if legacyModeContexts.count >= 128 { legacyModeContexts.removeAll() }
+            legacyModeContexts[caption] = LegacyModeContext(session: session, source: source, target: target,
+                fingerprint: fingerprint, firstOCR: firstOCR, mismatch: confirmed && lastLegacySpeculation != nil && lastLegacySpeculation != fingerprint)
+        }
+        if confirmed, let previous = lastLegacySpeculation {
+            legacyModeContexts[caption]?.mismatch = previous != fingerprint
+        }
+        legacyModeEvent(caption, reason: confirmed ? "confirmed" : "speculation_admitted")
+    }
+
+    private func legacyModeEvent(_ caption: String, reason: String, duration: Double? = nil) {
+        guard let context = legacyModeContexts[caption], modeActiveSystem == "legacy" else { return }
+        noteModeEvent(session: context.session, caption: caption, revision: 0, source: context.source,
+            target: context.target, fingerprint: context.fingerprint, reason: reason,
+            firstOCR: context.firstOCR, duration: duration)
+    }
+
+    func legacyModeEnqueued(_ caption: String, duration: Double) {
+        guard let context = legacyModeContexts[caption], modeActiveSystem == "legacy" else { return }
+        let reason: String
+        if context.fresh { reason = context.mismatch ? "pip_enqueue_legacy_recovery" : "pip_enqueue_confirmed_fresh" }
+        else if context.speculativeHit { reason = "pip_enqueue_speculation_match_ready" }
+        else { reason = "pip_enqueue_memory_hit" }
+        legacyModeEvent(caption, reason: reason, duration: duration)
+    }
+
     var modeActiveSystem = "legacy"
     var modePendingSystem = "legacy"
     var modeMigration = "persisted"
@@ -578,7 +634,7 @@ final class Diagnostics: ObservableObject {
         guard enabled else { return }
         // Caption identifiers are hashed by the producer, never OCR text.
         let safeCaption = SHA256.hash(data: Data(caption.utf8)).map { String(format: "%02x", $0) }.joined()
-        modeTrace.append(TranslationModeTrace(session: session, caption: safeCaption, revision: revision,
+        modeTrace.append(TranslationModeTrace(mode: modeActiveSystem, testMode: translationTestMode.rawValue, session: session, caption: safeCaption, revision: revision,
             source: source, target: target, fingerprint: fingerprint, reason: reason,
             monotonicTime: ProcessInfo.processInfo.systemUptime, firstOCR: firstOCR,
             durationMs: duration, thermal: ProcessInfo.processInfo.thermalState.rawValue))
@@ -846,8 +902,8 @@ final class Diagnostics: ObservableObject {
     }
 
     func reset() {
-        modeTrace.removeAll()
         persistSession()
+        modeTrace.removeAll(); legacyModeContexts.removeAll(); lastLegacySpeculation = nil
         diagnosticSessionID = UUID(); candidateIDs = [:]; frameIDs = [:]; unitIDs = [:]; structuredEvents = []
         legacyValidationSnapshot = [:]; legacyValidationPair = [:]
         eventTotals = [:]; intervalHistory = []; intervalStart = Date()
@@ -1696,6 +1752,15 @@ private struct DiagnosticsBody: View {
             ScrollView {
                 if visible {
                     VStack(spacing: 14) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            LabeledContent("Active system", value: engine.activeTranslationSystem.title)
+                            if engine.pendingTranslationSystem != engine.activeTranslationSystem {
+                                LabeledContent("Next capture", value: engine.pendingTranslationSystem.title)
+                            }
+                            Text(engine.modeAvailability).font(.footnote).foregroundStyle(.secondary)
+                            Text("Legacy reference: 1.7.2 (58), e94542ce. Apple default does not identify an effective model.")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }.card()
                         if collectionEnabled {
                         if detailed { detailedBody } else { simpleBody }
                         if detailed && !collectDetails {

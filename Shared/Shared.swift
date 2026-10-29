@@ -121,6 +121,7 @@ struct Config: Codable, Equatable {
     var detailCeiling: Double? = nil
     var confirmationBurst: Bool? = nil
     var appInterfaceVisible: Bool? = nil
+    var focusedCaptionOCR: Bool? = nil
 }
 
 /// Keeps the old memory context exactly unchanged unless a genuinely
