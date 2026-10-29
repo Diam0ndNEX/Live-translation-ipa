@@ -461,10 +461,6 @@ final class TranslatorEngine: ObservableObject {
            let duration {
             modeCoordinator.noteOverlappingRecovery(duration)
         }
-        if caption.session == modeSessionID, reason == "cancelled_call_returned",
-           let duration {
-            diag.noteModelState("speculative_stop_released", durationMs: duration, candidate: caption.caption)
-        }
         if caption.session == modeSessionID, reason == "hybrid_default_fallback" {
             modeAvailability = "Fast recovery unavailable; using Apple default for this caption"
         }
@@ -523,14 +519,15 @@ final class TranslatorEngine: ObservableObject {
             thermal != .serious && thermal != .critical &&
             SpeculationPolicy.credible(lines: packet.lines, threshold: num("speculationConfidence", 0.85))
         modeCoordinator.allowsReuse = memoryTestMode.allowsReuse && !bypassMemory
+        modeCoordinator.adaptiveHybrid = flag("adaptiveSpeculation", true)
         if confirmed, activeTranslationSystem != .legacy {
             let pair = source + ">" + caption.target + "|" + activeTranslationSystem.rawValue
             let needsCheck = modelReadiness.source != source || modelReadiness.target != caption.target ||
                 (modelReadiness.sessions != .complete && modelReadiness.sessions != .working)
             // isReady is a language-resource check, not a per-caption model warm-up.
             // Calling it twice during Hybrid inference can contend with actual requests.
-            if needsCheck, !backendActivity.executing,
-               pair != lastModePreparationPair || Date().timeIntervalSince(lastModePreparationAt) >= 5 {
+            if needsCheck && !backendActivity.executing &&
+                (pair != lastModePreparationPair || Date().timeIntervalSince(lastModePreparationAt) >= 5) {
                 lastModePreparationPair = pair
                 lastModePreparationAt = Date()
                 let session = modeSessionID, system = activeTranslationSystem
