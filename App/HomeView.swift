@@ -28,9 +28,17 @@ struct HomeView: View {
         if engine.waitingToDisplay { return "Holding for readability" }
         return engine.isTranslating ? "Translating…" : "Reading your screen"
     }
-    private var stateColor: Color { engine.captureAlive && !engine.paused ? .mint : .secondary }
+    private var captureColor: Color {
+        switch engine.captureStatus {
+        case .active: return .green
+        case .waiting, .connected: return .orange
+        case .lost, .timedOut: return .red
+        case .idle, .stopped: return .secondary
+        }
+    }
     private var packReady: Bool {
-        engine.sourceCode == "auto" ? engine.langStatus.values.contains(.installed) : engine.langStatus[engine.sourceCode] == .installed
+        let code = engine.sourceCode == "auto" ? engine.detectedLang : engine.sourceCode
+        return engine.langStatus[code] == .installed
     }
     private var previewRatio: CGFloat {
         let size = (WindowSize(rawValue: winSize) ?? .normal).size
@@ -98,7 +106,8 @@ struct HomeView: View {
                 Text("TRANSLATE").font(.caption2.bold()).tracking(1.5).foregroundStyle(.secondary)
                 Spacer()
                 Button { selectTab(1) } label: {
-                    Label(packReady ? "Offline ready" : "Get language packs", systemImage: packReady ? "checkmark.shield" : "arrow.down.circle")
+                    Label(engine.languageStatusChecking ? "Checking packs…" : (packReady ? "Offline ready" : "Language packs"),
+                          systemImage: engine.languageStatusChecking ? "arrow.triangle.2.circlepath" : (packReady ? "checkmark.shield" : "arrow.down.circle"))
                         .font(.caption.weight(.medium)).foregroundStyle(packReady ? Color.mint : Theme.accent.start)
                 }.buttonStyle(.plain)
             }
@@ -115,16 +124,27 @@ struct HomeView: View {
                 Label("Detected \(engine.detectedLang.uppercased())\(engine.lockedLang != nil ? " · locked" : "")", systemImage: "sparkle.magnifyingglass")
                     .font(.caption).foregroundStyle(.secondary)
             }
+            Text(engine.languageStatusChecking ? "Checking installed language assets…" : engine.languageSummary)
+                .font(.caption2).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }.card()
     }
 
     private var liveCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                HStack(spacing: 7) {
-                    Circle().fill(stateColor).frame(width: 7, height: 7)
-                    Text(state).font(.subheadline.weight(.medium))
-                }
+                HStack(spacing: 10) {
+                    if engine.captureStatus == .waiting || engine.captureStatus == .connected {
+                        ProgressView().tint(captureColor).controlSize(.small)
+                    } else {
+                        Image(systemName: engine.captureStatus.symbol).foregroundStyle(captureColor)
+                    }
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(engine.captureStatus.title).font(.subheadline.weight(.semibold)).foregroundStyle(captureColor)
+                        Text(engine.captureAlive ? state : "Use the broadcast button to start or restart")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }.padding(.vertical, 12).accessibilityElement(children: .combine)
                 Spacer()
                 Button { destination = .reader } label: {
                     Image(systemName: "arrow.up.left.and.arrow.down.right").frame(width: 44, height: 44)
@@ -152,7 +172,7 @@ struct HomeView: View {
 
     private var captureBar: some View {
         HStack(spacing: 14) {
-            BroadcastPicker(onTap: { if !engine.pipActive { engine.startPiP() } }).frame(width: 50, height: 50)
+            BroadcastPicker(onTap: { engine.captureRequested(); if !engine.pipActive { engine.startPiP() } }).frame(width: 50, height: 50)
                 .background(Theme.gradient, in: Circle())
                 .accessibilityLabel(engine.captureAlive ? "Open screen broadcast controls" : "Start screen capture")
             VStack(alignment: .leading, spacing: 3) {
@@ -197,7 +217,9 @@ struct HomeView: View {
                 Image(systemName: packReady ? "info.circle" : "arrow.down.circle.fill").foregroundStyle(.mint)
                 VStack(alignment: .leading, spacing: 5) {
                     Text(packReady ? "Ready for your next video" : "One download. Then offline.").font(.subheadline.bold())
-                    Text(packReady ? "Tap Broadcast, choose ScreenLingo Capture, then Start Broadcast. Open your video when the floating window is ready." : "Download your language pair in Languages. Translation stays on your phone.")
+                    Text(packReady ? "Tap Broadcast, choose ScreenLingo Capture, then Start Broadcast. Open your video when the floating window is ready." :
+                        (engine.languageStatusChecking ? "Verifying installed Apple Default and Low Latency packs for the selected language pair." :
+                        "Only download a supported, missing pack for the pair you need. Other languages do not require installation."))
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }.card()
@@ -234,16 +256,7 @@ struct HomeView: View {
     }
 
     private var warmupCard: some View {
-        HStack(spacing: 10) {
-            Image(systemName: engine.warmupStatus == "Ready" ?
-                "checkmark.circle.fill" : "arrow.triangle.2.circlepath.circle")
-                .foregroundStyle(engine.warmupStatus == "Ready" ? .green : .secondary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Translation model").font(.caption2).foregroundStyle(.secondary)
-                Text(engine.warmupStatus).font(.subheadline.weight(.medium))
-            }
-            Spacer()
-        }.accessibilityElement(children: .combine).card()
+        TranslationActivityView().card()
     }
 
     private var recentPairs: some View {

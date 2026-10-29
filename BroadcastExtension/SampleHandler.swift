@@ -15,6 +15,8 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var skipped = 0
     private var lastRun = Date.distantPast
     private var readStartedAt = 0.0
+    private var readStartedMonotonic = 0.0
+    private var candidateStartedMonotonic: Double?
     private var candidateStartedAt = 0.0
     private var lastPing = Date.distantPast
     private var candidateKey = ""
@@ -31,6 +33,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var lastUsefulText = Date()
     private var ocrSig: [UInt8] = []
     private let perf = OSSignposter(subsystem: "com.diam0ndnex.screenlingo", category: "capture")
+    private var captionFocus = CaptionFocus()
     private var tracker = SubtitleTracker()
     private let captureID = UUID().uuidString
     private var candidateID: String?
@@ -68,7 +71,12 @@ class SampleHandler: RPBroadcastSampleHandler {
         send(kind: "ping", lines: [])
     }
 
-    override func broadcastFinished() { conn?.cancel() }
+    override func broadcastFinished() {
+        recognitionLock.lock()
+        defer { recognitionLock.unlock() }
+        send(kind: "stopped", lines: [], closeConnection: true)
+        conn = nil
+    }
 
     /// The app sends settings back over the same link.
     private func listen() {
@@ -145,6 +153,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         // The lock also prevents overlapping callbacks from mutating confirmation state.
         lastRun = now
         readStartedAt = now.timeIntervalSince1970
+        readStartedMonotonic = ProcessInfo.processInfo.systemUptime
         autoreleasepool { recognize(pb, orientation, cfg, edge: plan.edge) }
     }
 
@@ -259,7 +268,12 @@ class SampleHandler: RPBroadcastSampleHandler {
 
         // Only read the chosen area, at reduced size: this is the big speed-up.
         let margin = 0.03
-        let y0 = max(0, cfg.y0 - margin), y1 = min(1, cfg.y1 + margin)
+        let broadY0 = max(0, cfg.y0 - margin), broadY1 = min(1, cfg.y1 + margin)
+        let focusEnabled = cfg.focusedCaptionOCR == true
+        let focus = focusEnabled ? captionFocus.scan(at: readStartedMonotonic, y0: broadY0, y1: broadY1,
+            context: "\(orientation.rawValue)|\(cfg.rot ?? 0)|\(cfg.rev ?? 0)|\(cfg.lang)|\(cfg.y0)|\(cfg.y1)") :
+            CaptionFocus.Scan(y0: broadY0, y1: broadY1, broad: true)
+        let y0 = focus.y0, y1 = focus.y1
         var edge = plannedEdge
         if freeMB() < 15 { edge = min(edge, 800) }          // memory getting tight
 
@@ -292,6 +306,9 @@ class SampleHandler: RPBroadcastSampleHandler {
         }
         // A successful contrast retry is a successful read too. Otherwise the
         // old empty streak could clear the caption after just one later miss.
+        if focusEnabled {
+            captionFocus.observe(bounds: lines.map { (center: $0.y, height: $0.h, confidence: $0.confidence ?? 0) })
+        }
         emptyReads.finish(foundText: !lines.isEmpty)
         if !lines.isEmpty {
             lastUsefulText = Date()
@@ -303,6 +320,11 @@ class SampleHandler: RPBroadcastSampleHandler {
         let heights = lines.map(\.h).sorted()
         feedback.textHeight = heights.isEmpty ? 0 : heights[min(heights.count-1, Int(Double(heights.count-1)*0.8))]
         let recognizedKey = lines.map(\.t).joined(separator: "\n")
+        // A new caption may extend beyond the old crop. Rediscover the whole
+        // configured area before admitting changed text to source confirmation.
+        if focusEnabled, captionFocus.requiresRediscovery(scan: focus, recognized: recognizedKey, previous: lastRecognizedKey) {
+            return
+        }
         if recognizedKey != lastRecognizedKey { lastChanged = Date(); lastRecognizedKey = recognizedKey }
 
         if lines.isEmpty {
@@ -316,13 +338,16 @@ class SampleHandler: RPBroadcastSampleHandler {
         // Stability: send once the same text was read N times in a row (skips half-faded text).
         let need = max(1, cfg.stability ?? 2)
         let key = lines.map(\.t).joined(separator: "\n")
-        if cfg.subtitleTracking == true || cfg.adaptiveConfirmation == true {
-            let decision = tracker.observe(lines, at: readStartedAt, required: need,
-                adaptive: cfg.adaptiveConfirmation ?? false, spatial: cfg.subtitleTracking ?? false,
-                deadline: cfg.confirmationDeadline ?? 0.6, minimumConfidence: cfg.confidence ?? 0.3)
+        if cfg.subtitleTracking == true || cfg.adaptiveConfirmation == true || cfg.strictCaptionIdentity == true {
+            let strict = cfg.strictCaptionIdentity == true
+            let decision = tracker.observe(lines, at: strict ? readStartedMonotonic : readStartedAt, required: need,
+                adaptive: cfg.adaptiveConfirmation ?? false, spatial: cfg.strictCaptionIdentity == true || (cfg.subtitleTracking ?? false),
+                deadline: cfg.confirmationDeadline ?? 0.6, minimumConfidence: cfg.confidence ?? 0.3,
+                strictSource: cfg.strictCaptionIdentity ?? false)
             candidateID = "\(captureID):\(cfg.rev ?? 0):\(decision.id)"
             confirmationReason = decision.reason
-            candidateStartedAt = decision.firstSeen
+            candidateStartedAt = strict ? readStartedAt - max(0, readStartedMonotonic - decision.firstSeen) : decision.firstSeen
+            candidateStartedMonotonic = strict ? decision.firstSeen : nil
             candidateCount = decision.ready || decision.duplicate ? 0 : 1
             guard !decision.duplicate else { return }
             if decision.ready {
@@ -355,7 +380,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     }
 
     // MARK: Send
-    private func send(kind: String, lines: [OCRLine], stable: Bool? = nil, revision: Int? = nil) {
+    private func send(kind: String, lines: [OCRLine], stable: Bool? = nil, revision: Int? = nil, closeConnection: Bool = false) {
         func encode(_ l: [OCRLine]) -> Data? {
             try? JSONEncoder().encode(Packet(kind: kind, version: AppVersion.version, frames: frames, lines: l,
                                              ocrMs: lastOcrMs, memFreeMB: freeMB(),
@@ -372,12 +397,17 @@ class SampleHandler: RPBroadcastSampleHandler {
                                              totalEmptyOCRPasses: totalEmptyOCRPasses,
                                              lastVisualChangeAt: lastVisualChangeAt == .distantPast ?
                                                 nil : lastVisualChangeAt.timeIntervalSince1970,
-                                             effectiveOCRIntervalMs: effectiveOCRIntervalMs))
+                                             effectiveOCRIntervalMs: effectiveOCRIntervalMs,
+                                             captureSessionID: captureID,
+                                             firstSeenMonotonic: kind == "ocr" && config.strictCaptionIdentity == true ? candidateStartedMonotonic : nil))
         }
         var data = encode(lines)
         if let d = data, d.count > 60000 { data = encode(Array(lines.prefix(30))) }
         guard let d = data else { return }
-        conn?.send(content: d, completion: .contentProcessed { _ in })
+        let connection = conn
+        connection?.send(content: d, completion: .contentProcessed { _ in
+            if closeConnection { connection?.cancel() }
+        })
     }
 }
 

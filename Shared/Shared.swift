@@ -2,12 +2,15 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.7.2"
-    static let build = 58
+    static let version = "1.9.0"
+    static let build = 71
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
-        ("1.7.2", "Separate reusable speculative-session ownership allows explicit obsolete-model preemption while protecting the warm confirmed session; cancelled sessions cannot be reused; exact growing captions can also share confirmed in-flight work; confirmed batches expose completed exact units to queued full-caption assembly and retry only unfinished units after incomplete batches. Complete exact RAM captions can bypass an occupied model lane without waiting for whole-caption repetition; shared complete-result assembly preserves speaker labels, protected words and glossary; saved-reuse-aware speculative backoff with recovery probes; recent fragments rejected before active-work cancellation; confirmed handoff priority at drain boundaries; explicit bypass/backoff accounting. Device performance validation pending."),
+        ("1.9.0", "Build 71: strategy-aware language availability and download decisions, clear partial Hybrid readiness, refreshed mode switch state, no false requests for already-installed packs."),
+        ("1.9.0", "Build 70: distinguish current sessions from historical model responses across app and mode switches; avoid claiming a model remains loaded; retry interrupted initial warm-up with bounded cooldown and clear skip reasons."),
+        ("1.9.0", "Three explicit translation systems built on tested 1.7.2: Legacy, opt-in Hybrid Recovery and Low Latency. Separate result selection, strategy-safe session cache, next-capture settings and correlated diagnostics. Device acceptance pending."),
+        ("1.9.0", "Separate reusable speculative-session ownership allows explicit obsolete-model preemption while protecting the warm confirmed session; cancelled sessions cannot be reused; exact growing captions can also share confirmed in-flight work; confirmed batches expose completed exact units to queued full-caption assembly and retry only unfinished units after incomplete batches. Complete exact RAM captions can bypass an occupied model lane without waiting for whole-caption repetition; shared complete-result assembly preserves speaker labels, protected words and glossary; saved-reuse-aware speculative backoff with recovery probes; recent fragments rejected before active-work cancellation; confirmed handoff priority at drain boundaries; explicit bypass/backoff accounting. Device performance validation pending."),
         ("1.7.1", "Process-only temporary-memory test toggle with speculation; independent normal RAM and saved history; exact assembled-caption reuse around obsolete model work; queue-owner and speculative-unit accounting; corrected bypass/miss labels and complete diagnostic allowlists."),
         ("1.7.0", "Normal-model performance: recover completed obsolete work, coalesce durable sentence writes, avoid redundant memory writes and reuse indexed lookup statements. Exclude own-app interface OCR and reset acquisition across app switches. Independent model timing samples and reproducible performance acceptance tooling."),
         ("1.5.0", "Restored speculative head starts and recovered exact completed work; stable localhost capture transport; successful OCR fallback resets; disposable warm-up and idle model cancellation; fewer duplicate database health queries; protected-name, photo-workspace and private-history fixes; median/mean/P90/P95 comparisons and continuity evidence. Retains selective legacy cleanup."),
@@ -86,6 +89,8 @@ struct Packet: Codable {
     var totalEmptyOCRPasses: Int? = nil
     var lastVisualChangeAt: Double? = nil
     var effectiveOCRIntervalMs: Double? = nil
+    var captureSessionID: String? = nil
+    var firstSeenMonotonic: Double? = nil
 }
 
 /// App → extension (sent back over the same localhost link)
@@ -119,6 +124,8 @@ struct Config: Codable, Equatable {
     var detailCeiling: Double? = nil
     var confirmationBurst: Bool? = nil
     var appInterfaceVisible: Bool? = nil
+    var focusedCaptionOCR: Bool? = nil
+    var strictCaptionIdentity: Bool? = nil
 }
 
 /// Keeps the old memory context exactly unchanged unless a genuinely

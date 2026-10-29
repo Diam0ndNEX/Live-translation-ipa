@@ -62,19 +62,25 @@ struct SubtitleTracker {
         }
     }
     mutating func observe(_ lines: [OCRLine], at now: Double, required: Int, adaptive: Bool, spatial: Bool,
-                          deadline: Double, minimumConfidence: Double) -> Decision {
+                          deadline: Double, minimumConfidence: Double, strictSource: Bool = false) -> Decision {
         let confidence = lines.map { $0.confidence ?? 0 }.min() ?? 0
-        let same = Self.sameText(lines, previous)
+        func sameSource(_ a: [OCRLine], _ b: [OCRLine]) -> Bool {
+            if !strictSource { return Self.sameText(a, b) }
+            return a.count == b.count && zip(a, b).allSatisfy {
+                ConfirmedSourceIdentity.normalize($0.t) == ConfirmedSourceIdentity.normalize($1.t)
+            }
+        }
+        let same = sameSource(lines, previous)
         let stablePosition = !spatial || Self.closePosition(lines, previous)
         let similar = lines.count == previous.count && zip(lines, previous).allSatisfy { TextSim.similar($0.t, $1.t, 0.94) }
         let priorConfidence = previous.map { $0.confidence ?? 0 }.min() ?? 0
         let continueConfirmation = reads > 0 && now - lastSeen <= 1.5 && stablePosition
-            && (same || (adaptive && similar && confidence >= 0.9 && priorConfidence >= 0.9))
+            && (same || (!strictSource && adaptive && similar && confidence >= 0.9 && priorConfidence >= 0.9))
         // Content changes always receive a new work identity, even if confirmation can reuse strong nearby evidence.
         if reads == 0 || !same || !stablePosition || now - lastSeen > 1.5 { sequence += 1 }
         if continueConfirmation { reads += 1 } else { reads = 1; first = now }
         previous = lines; lastSeen = now
-        let duplicate = Self.sameText(lines, sent) && (!spatial || Self.closePosition(lines, sent)) && now - lastSent < 3
+        let duplicate = sameSource(lines, sent) && (!spatial || Self.closePosition(lines, sent)) && now - lastSent < 3
         if duplicate { return Decision(id: sequence, ready: false, duplicate: true, firstSeen: first, reason: "unchanged subtitle") }
         let age = now - first
         // Immediate confirmation is opt-in and requires every line to be exceptionally clear.
@@ -128,6 +134,7 @@ extension Config {
             || paused != old.paused || stability != old.stability || confidence != old.confidence
             || correction != old.correction || boost != old.boost || adaptiveConfirmation != old.adaptiveConfirmation
             || subtitleTracking != old.subtitleTracking
+            || strictCaptionIdentity != old.strictCaptionIdentity || focusedCaptionOCR != old.focusedCaptionOCR
     }
 }
 

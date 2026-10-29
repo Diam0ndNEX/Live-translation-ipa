@@ -1,7 +1,7 @@
 name: Build ScreenLingo IPA
 on:
   push:
-    branches: [codex/screenlingo-v0.7.0, codex/screenlingo-v0.8.0, codex/screenlingo-v0.9.0, codex/screenlingo-v1.0.0, codex/screenlingo-v1.1.0, codex/screenlingo-v1.2.0, codex/screenlingo-v1.2.1, codex/screenlingo-v1.3.0, codex/screenlingo-v1.4.1, codex/screenlingo-v1.4.1-static-overlay, codex/screenlingo-v1.4.1-diagnostics, codex/screenlingo-v1.4.2, codex/screenlingo-v1.4.3-batch-memory, codex/screenlingo-v1.4.4-performance, codex/screenlingo-v1.4.5-latency, codex/screenlingo-v1.4.6-validation, codex/screenlingo-v1.4.7-intelligence, codex/screenlingo-v1.4.8-continuity, codex/screenlingo-v1.5.0-refinement, codex/screenlingo-v1.7.0-performance, codex/screenlingo-v1.7.1-testing, codex/screenlingo-v1.7.2-performance]
+    branches: [codex/screenlingo-v1.9.0-three-modes, codex/screenlingo-v0.7.0, codex/screenlingo-v0.8.0, codex/screenlingo-v0.9.0, codex/screenlingo-v1.0.0, codex/screenlingo-v1.1.0, codex/screenlingo-v1.2.0, codex/screenlingo-v1.2.1, codex/screenlingo-v1.3.0, codex/screenlingo-v1.4.1, codex/screenlingo-v1.4.1-static-overlay, codex/screenlingo-v1.4.1-diagnostics, codex/screenlingo-v1.4.2, codex/screenlingo-v1.4.3-batch-memory, codex/screenlingo-v1.4.4-performance, codex/screenlingo-v1.4.5-latency, codex/screenlingo-v1.4.6-validation, codex/screenlingo-v1.4.7-intelligence, codex/screenlingo-v1.4.8-continuity, codex/screenlingo-v1.5.0-refinement, codex/screenlingo-v1.7.0-performance, codex/screenlingo-v1.7.1-testing, codex/screenlingo-v1.7.2-performance]
   pull_request:
     branches: [codex/screenlingo-v1.3.0, codex/screenlingo-v1.4.0, codex/screenlingo-v1.4.1, codex/screenlingo-v1.4.2, codex/screenlingo-v1.4.3-batch-memory, codex/screenlingo-v1.4.4-performance, codex/screenlingo-v1.4.5-latency, codex/screenlingo-v1.4.6-validation, "codex/memory2-**"]
   workflow_dispatch:
@@ -22,13 +22,21 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: latest-stable
+          xcode-version: "26.6"
       - name: Check pipeline regressions
         run: |
           swiftc Shared/*.swift App/TextIntelligence.swift App/CaptionAssembly.swift App/MemoryWriter.swift App/PipelineSimulation.swift Tests/main.swift -o /tmp/pipeline-tests
           /tmp/pipeline-tests
+      - name: Verify three-mode coordinator and source contract
+        run: |
+          swiftc -parse-as-library Shared/TranslationSystem.swift Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/ThreeModes/main.swift -o /tmp/three-mode-tests
+          /tmp/three-mode-tests
+          python3 scripts/test_three_modes.py
+          python3 scripts/test_compare_three_modes.py
       - name: Verify performance acceptance gate
         run: python3 scripts/test_compare_performance.py
       - name: Verify Experimental Features controls

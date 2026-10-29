@@ -88,7 +88,7 @@ struct MemoryManagementView: View {
                 }
                 Text("Inventory is a snapshot from the last scan. Scan candidates still need compatible keys, unchanged cleanup, one sentence unit and an installed model. Skip reasons describe the latest scanned batch, not every pending record. Scanning resumes automatically after language, rule or database changes. Originals are preserved.")
                     .font(.footnote).foregroundStyle(.secondary)
-                LabeledContent("Translation model", value: engine.warmupStatus)
+                TranslationActivityView()
                 if let duration = engine.warmupLastDurationMs {
                     LabeledContent("Last model warm-up", value: "\(Int(duration)) ms")
                 }

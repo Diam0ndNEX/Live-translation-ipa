@@ -875,3 +875,22 @@ streamedOutputs[0] = "First."
 check(currentStreamCaption() == "Ana: First. Second.",
       "A full replacement can assemble in reading order once all of its required units complete")
 print("v1.7.2 streamed unit context mapping and complete-caption wakeup checks passed")
+
+// New-mode confirmation never treats punctuation, case or changed words as duplicates.
+for replacement in ["I have 10 cats!", "i have 10 cats.", "I have 20 cats.", "I do not have 10 cats."] {
+    var strictTracker = SubtitleTracker()
+    let line = OCRLine(t: "I have 10 cats.", x: 0.5, y: 0.2, h: 0.04, w: 0.4, confidence: 0.95)
+    _ = strictTracker.observe([line], at: 0, required: 2, adaptive: true, spatial: true,
+        deadline: 0.6, minimumConfidence: 0.3, strictSource: true)
+    let firstConfirmed = strictTracker.observe([line], at: 0.1, required: 2, adaptive: true, spatial: true,
+        deadline: 0.6, minimumConfidence: 0.3, strictSource: true)
+    check(firstConfirmed.ready, "Initial exact repeated source confirms")
+    var corrected = line; corrected.t = replacement
+    let change = strictTracker.observe([corrected], at: 0.2, required: 2, adaptive: true, spatial: true,
+        deadline: 0.6, minimumConfidence: 0.3, strictSource: true)
+    check(!change.ready && !change.duplicate, "Changed meaning cannot reuse confirmation or duplicate suppression")
+    let confirmedCorrection = strictTracker.observe([corrected], at: 0.3, required: 2, adaptive: true, spatial: true,
+        deadline: 0.6, minimumConfidence: 0.3, strictSource: true)
+    check(confirmedCorrection.ready && !confirmedCorrection.duplicate, "Genuine source correction remains displayable")
+}
+print("v1.9 strict source confirmation and meaningful correction checks passed")
