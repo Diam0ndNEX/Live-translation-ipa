@@ -108,7 +108,7 @@ final class ModeTranslationService {
             let destination = system == .hybridRecovery && strategy == .lowLatency ? confirmed : speculative
             guard !destination.busy, let session = warmupLane.session else {
                 warmupPolicy.finish(source: source, target: target, strategy: strategy, succeeded: false)
-                return nil
+                return completedStrategies > 0 ? completedStrategies : nil
             }
             destination.session?.cancel()
             destination.session = session; destination.key = warmupLane.key; destination.invalidated = false
