@@ -2077,6 +2077,9 @@ final class TranslatorEngine: ObservableObject {
                     savedRequests: savedRequests, readyAt: Date(), hybridPreview: true)
                 schedulePresentation(blocks.joined(separator: "\n"), result,
                     generation: workGeneration, context: workContext, timing: timing)
+                // The preview has fulfilled the old caption's bounded handoff.
+                // A newer confirmed caption must own the next model request.
+                if activeCandidatePresented, deferredConfirmedPacket != nil { return }
             } else { hybridStatus = hybridRunner.status }
         }
 
@@ -2508,6 +2511,10 @@ final class TranslatorEngine: ObservableObject {
         showing = true
         lastTextDate = Date()
         lastShowDate = Date()
+        // Every displayed tier must refresh self-reading protection before
+        // preview-specific early returns and final-only side effects.
+        renderedGrams = TextSim.grams(result).union(placeholderGrams)
+        sourceGrams = TextSim.grams(text)
         let presented = Date()
         let packet = timing.packet
         let sent = packet?.ts ?? timing.queuedAt.timeIntervalSince1970
@@ -2569,8 +2576,6 @@ final class TranslatorEngine: ObservableObject {
                 UIPasteboard.general.string = format == "original" ? text : (format == "bilingual" ? text + "\n" + result : result)
             }
         }
-        renderedGrams = TextSim.grams(result).union(placeholderGrams)
-        sourceGrams = TextSim.grams(text)
         // Only a successfully displayed, independently resolved source should
         // influence a future predictive model warm-up; never change Auto OCR.
         let sourceToRemember = sourceCode == "auto" ? detectedLang : sourceCode
