@@ -1,8 +1,66 @@
 import Foundation
 
+enum InitialWarmupSamples {
+    static func units(source: String) -> [String]? {
+        let base = Locale.Language(identifier: source).languageCode?.identifier ?? source
+        if base == "zh", source.contains("Hant") { return ["你好。", "我們需要弄清楚這裡發生了什麼。"] }
+        let samples: [String: [String]] = [
+            "en": ["Hello.", "We need to find out what happened here."],
+            "pt": ["Olá.", "Precisamos descobrir o que aconteceu aqui."],
+            "es": ["Hola.", "Tenemos que descubrir qué pasó aquí."],
+            "fr": ["Bonjour.", "Nous devons découvrir ce qui s’est passé ici."],
+            "de": ["Hallo.", "Wir müssen herausfinden, was hier passiert ist."],
+            "it": ["Ciao.", "Dobbiamo scoprire cosa è successo qui."],
+            "ja": ["こんにちは。", "ここで何が起きたのか調べなければなりません。"],
+            "ko": ["안녕하세요.", "여기서 무슨 일이 있었는지 알아봐야 합니다."],
+            "zh": ["你好。", "我们需要弄清楚这里发生了什么。"],
+            "ru": ["Привет.", "Нам нужно выяснить, что здесь произошло."],
+            "ar": ["مرحبًا.", "نحتاج إلى معرفة ما حدث هنا."],
+            "tr": ["Merhaba.", "Burada ne olduğunu öğrenmemiz gerekiyor."],
+            "hi": ["नमस्ते।", "हमें पता लगाना होगा कि यहाँ क्या हुआ।"],
+            "id": ["Halo.", "Kita perlu mencari tahu apa yang terjadi di sini."],
+            "nl": ["Hallo.", "We moeten uitzoeken wat hier is gebeurd."],
+            "pl": ["Cześć.", "Musimy dowiedzieć się, co się tutaj stało."],
+            "th": ["สวัสดี", "เราต้องหาว่าเกิดอะไรขึ้นที่นี่"],
+            "vi": ["Xin chào.", "Chúng ta cần tìm hiểu chuyện gì đã xảy ra ở đây."],
+            "uk": ["Привіт.", "Нам потрібно з'ясувати, що тут сталося."]
+        ]
+        return samples[base]
+    }
+}
+
+struct InitialWarmupPolicy {
+    private(set) var attempted: Set<String> = []
+    static func strategies(for system: TranslationSystem) -> [RequestedTranslationStrategy] {
+        switch system {
+        case .legacy: return [] // The verified Legacy pipeline owns its existing warm-up.
+        case .hybridRecovery: return [.appleDefault, .lowLatency]
+        case .lowLatency: return [.lowLatency]
+        }
+    }
+    mutating func claim(source: String, target: String, strategy: RequestedTranslationStrategy) -> Bool {
+        let key = source + ">" + target + "|" + strategy.rawValue
+        guard attempted.count < 64, !attempted.contains(key) else { return false }
+        attempted.insert(key)
+        return true
+    }
+}
+
+struct InitialWarmupEvent: Codable {
+    let id: UUID
+    let system: TranslationSystem
+    let testMode: String
+    let source: String
+    let target: String
+    let strategy: RequestedTranslationStrategy
+    let phase: String
+    let monotonicTime: Double
+    let durationMs: Double?
+}
+
 /// Backend lifetime is independent of whether a subtitle has already selected a result.
 struct TranslationBackendActivity: Equatable {
-    enum Kind: Int { case preparation, speculative, confirmed }
+    enum Kind: Int { case preparation, speculative, confirmed, warmup }
     enum Stage { case checkingLanguages, preparingSessions, waitingForSlot, running, cancelling }
     struct Job: Equatable {
         let id: UUID
@@ -52,6 +110,7 @@ struct TranslationBackendActivity: Equatable {
                 if job.stage == .cancelling { return 0 }
                 if job.kind == .confirmed { return 4 }
                 if job.kind == .speculative { return 3 }
+                if job.kind == .warmup { return 1 }
                 return 2
             }
             let lhs = priority($0), rhs = priority($1)
@@ -66,7 +125,7 @@ struct TranslationBackendActivity: Equatable {
         case .checkingLanguages: title = "Checking installed languages"
         case .preparingSessions: title = "Preparing translation sessions"
         case .waitingForSlot: title = "Waiting for translation resources"
-        case .running: title = job.kind == .speculative ? "Translating ahead" : "Translating confirmed text"
+        case .running: title = job.kind == .warmup ? "Running initial warm-up" : (job.kind == .speculative ? "Translating ahead" : "Translating confirmed text")
         case .cancelling: title = "Waiting for cancelled model work to return"
         }
         return TranslationActivity(title: title, detail: "\(job.source) → \(job.target) · requested \(strategy) · \(jobs.count) active operation\(jobs.count == 1 ? "" : "s")",

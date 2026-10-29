@@ -8,6 +8,9 @@ struct TranslationActivityView: View {
         let activity = engine.translationActivity
         VStack(alignment: .leading, spacing: 8) {
             Text(engine.activeTranslationSystem.title).font(.caption).foregroundStyle(.secondary)
+            if engine.activeTranslationSystem != .legacy, !engine.initialWarmupProgress.isEmpty {
+                Text(engine.initialWarmupProgress).font(.caption).foregroundStyle(.secondary)
+            }
             HStack(alignment: .top, spacing: 10) {
                 if activity.phase == .working {
                     ProgressView().controlSize(.small).accessibilityLabel("Translation work in progress")

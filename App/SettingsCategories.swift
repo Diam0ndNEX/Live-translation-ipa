@@ -39,6 +39,8 @@ struct TranslationSettings: View {
                 Text("Starts translating a promising first reading before OCR confirms it; shows results only after confirmation.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Toggle("Keep the translator warm", isOn: $keepWarm)
+                Text("Hybrid initially exercises Apple default and low latency; Low Latency exercises only low latency. Once per pair and strategy per app launch, with no periodic sample loop. Warm-up output is discarded and live capture takes priority.")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Toggle("Predict the language for warm-up", isOn: $predictiveWarmup)
                 Text("Prepares a recently confirmed source language when Automatic hasn't resolved one yet. Live translation always has priority.")
                     .font(.footnote).foregroundStyle(.secondary)

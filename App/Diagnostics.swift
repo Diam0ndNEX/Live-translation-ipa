@@ -629,6 +629,13 @@ final class Diagnostics: ObservableObject {
     var modePendingSystem = "legacy"
     var modeMigration = "persisted"
     private var modeTrace: [TranslationModeTrace] = []
+    private var initialWarmupTrace: [InitialWarmupEvent] = []
+
+    func noteInitialWarmup(_ observation: InitialWarmupEvent) {
+        guard enabled else { return }
+        initialWarmupTrace.append(observation)
+        if initialWarmupTrace.count > 512 { initialWarmupTrace.removeFirst(initialWarmupTrace.count - 512) }
+    }
 
     func noteModeEvent(session: UUID, caption: String, revision: Int, source: String, target: String,
                        fingerprint: String, reason: String, firstOCR: Double, duration: Double?, mode: String? = nil) {
@@ -696,7 +703,7 @@ final class Diagnostics: ObservableObject {
         counters["emptyOCRPasses"] = s.emptyOCRPasses
         var currentHealth = memoryHealth
         currentHealth.ramEntries = ramEntryCount?() ?? memoryHealth.ramEntries
-        return DiagnosticSessionExport(translationModes: TranslationModeReport(active: modeActiveSystem,
+        return DiagnosticSessionExport(translationModes: TranslationModeReport(warmups: initialWarmupTrace, active: modeActiveSystem,
             pending: modePendingSystem, referenceSHA: TranslationSystem.referenceSHA,
             migration: modeMigration, events: modeTrace, distributions: [:], counters: [:]).sanitized(), id: diagnosticSessionID, startedAt: started, endedAt: Date(),
             appVersion: AppVersion.full, systemVersion: UIDevice.current.systemVersion,
@@ -904,7 +911,7 @@ final class Diagnostics: ObservableObject {
 
     func reset() {
         persistSession()
-        modeTrace.removeAll(); legacyModeContexts.removeAll(); lastLegacySpeculation = nil
+        modeTrace.removeAll(); initialWarmupTrace.removeAll(); legacyModeContexts.removeAll(); lastLegacySpeculation = nil
         diagnosticSessionID = UUID(); candidateIDs = [:]; frameIDs = [:]; unitIDs = [:]; structuredEvents = []
         legacyValidationSnapshot = [:]; legacyValidationPair = [:]
         eventTotals = [:]; intervalHistory = []; intervalStart = Date()

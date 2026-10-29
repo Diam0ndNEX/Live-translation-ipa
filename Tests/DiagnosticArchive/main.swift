@@ -461,7 +461,11 @@ import Foundation
                 revision: 2, source: "pt", target: "en", fingerprint: safeHash, reason: reason,
                 monotonicTime: at, firstOCR: 1, durationMs: duration, thermal: 0)
         }
-        let modeReport = TranslationModeReport(active: "lowLatency", pending: "legacy",
+        let warmObservation = InitialWarmupEvent(id: session, system: .lowLatency, testMode: "temporaryMemory", source: "pt", target: "en",
+            strategy: .lowLatency, phase: "service_ms", monotonicTime: 1, durationMs: 543)
+        let injectedWarmObservation = InitialWarmupEvent(id: session, system: .lowLatency, testMode: "temporaryMemory", source: "secret OCR text", target: "en",
+            strategy: .lowLatency, phase: "pip_enqueue_memory_hit", monotonicTime: 1, durationMs: 543)
+        let modeReport = TranslationModeReport(warmups: [warmObservation, injectedWarmObservation], active: "lowLatency", pending: "legacy",
             referenceSHA: String(repeating: "b", count: 40), migration: "explicit_low_latency",
             events: [modeEvent("confirmed", at: 1.2), modeEvent("recovery_decision_source_mismatch", at: 1.25),
                 modeEvent("requested_lowLatency", at: 1.3), modeEvent("retained_session_start", at: 1.3),
@@ -470,6 +474,8 @@ import Foundation
                 modeEvent("secret OCR text", at: 2), modeEvent("confirmed", at: 2, caption: "user text")],
             distributions: ["malicious": dist], counters: ["malicious": 999]).sanitized()
         precondition(modeReport.events.count == 6)
+        precondition(modeReport.warmups?.count == 1)
+        precondition(modeReport.distributions["warmup_lowLatency_temporaryMemory_pt_en_lowLatency_service_ms"]?.mean == 543)
         precondition(modeReport.distributions.keys.allSatisfy { !$0.contains("malicious") })
         let confirmationDistribution = modeReport.distributions.first { $0.key.hasSuffix("confirmationToEnqueue") }!.value
         precondition(abs(confirmationDistribution.mean - 400) < 0.001)
@@ -480,6 +486,7 @@ import Foundation
         let encodedModes = try await writer.encode(modeSnapshot)
         let decodedModes = try await writer.decode(encodedModes)
         precondition(decodedModes.translationModes?.events.count == 6)
+        precondition(decodedModes.translationModes?.warmups?.count == 1)
         let modeZIP = try await writer.exportZIP(modeSnapshot)
         let modeZIPData = try Data(contentsOf: modeZIP)
         precondition(modeZIPData.range(of: Data("translation_modes.json".utf8)) != nil)

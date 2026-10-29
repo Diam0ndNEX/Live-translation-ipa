@@ -201,6 +201,9 @@ final class TranslatorEngine: ObservableObject {
     @Published private(set) var modelReadiness = TranslationReadiness()
     @Published private(set) var backendActivity = TranslationBackendActivity()
     @Published private(set) var currentRuntimeConditions = ""
+    @Published private(set) var initialWarmupProgress = ""
+    private var initialWarmupTask: Task<Void, Never>?
+    private var initialWarmupID = UUID()
 
     var displayedReadiness: TranslationReadiness {
         activeTranslationSystem == .legacy ? modelReadiness : backendActivity.liveReadiness(modelReadiness)
@@ -217,7 +220,7 @@ final class TranslatorEngine: ObservableObject {
         }
         return [captureStatus.title, thermal,
                 ProcessInfo.processInfo.isLowPowerModeEnabled ? "Low Power Mode on" : "Low Power Mode off",
-                activeTranslationSystem == .legacy ? (flag("keepWarm", true) ? "Idle warm-up enabled" : "Idle warm-up off") : "Session preparation only · no dummy warm-ups"].joined(separator: " · ")
+                activeTranslationSystem == .legacy ? (flag("keepWarm", true) ? "Idle warm-up enabled" : "Idle warm-up off") : (flag("keepWarm", true) ? "Initial warm-up enabled · no periodic samples" : "Initial warm-up off")].joined(separator: " · ")
     }
 
     var translationActivity: TranslationActivity {
@@ -324,7 +327,8 @@ final class TranslatorEngine: ObservableObject {
             Task { [weak self] in
                 guard let self else { return }
                 guard session == self.modeSessionID else { return }
-                await self.refreshModePreparation(source: source, target: target, system: selection.0)
+                if !self.captureAlive { await self.prewarm() }
+                else { await self.refreshModePreparation(source: source, target: target, system: selection.0) }
             }
         }
         if selection.0 == .legacy, !captureAlive, directSession == nil {
@@ -712,6 +716,26 @@ final class TranslatorEngine: ObservableObject {
         }
         modeService.event = { [weak self] caption, reason, ms in self?.noteModeEvent(caption, reason: reason, duration: ms) }
         modeService.activityChanged = { [weak self] activity in self?.backendActivity = activity }
+        modeService.warmupEvent = { [weak self] observation in
+            guard let self else { return }
+            self.diag.noteInitialWarmup(observation)
+            guard observation.system == self.activeTranslationSystem,
+                  !self.captureAlive, self.initialWarmupTask?.isCancelled == false,
+                  observation.source == self.modelReadiness.source, observation.target == self.targetCode else { return }
+            let strategy = observation.strategy == .lowLatency ? "Low latency" : "Apple default"
+            if observation.phase == "model_submitted" {
+                self.initialWarmupProgress = "Warming \(strategy) · \(observation.source) → \(observation.target)"
+                self.modelReadiness.beginExecution(label: "Initial warm-up · " + strategy)
+            } else if observation.phase == "model_completed" {
+                self.modelReadiness.finishExecution(success: true, milliseconds: observation.durationMs)
+                self.warmupLastDurationMs = observation.durationMs
+                self.initialWarmupProgress = "\(strategy) warm-up completed · output discarded"
+            } else if observation.phase == "model_batch_failed" || observation.phase == "model_timeout" {
+                self.initialWarmupProgress = "\(strategy) warm-up did not complete; live translation can retry normally"
+                self.modelReadiness.execution = self.modelReadiness.completedAt == nil ? .pending : .complete
+                self.modelReadiness.activeSince = nil
+            }
+        }
         modeService.status = { [weak self] message in self?.modeAvailability = message }
         server.onPacket = { [weak self] packet in self?.handle(packet) }
         server.start()
@@ -760,6 +784,11 @@ final class TranslatorEngine: ObservableObject {
         tickCount += 1
         let conditions = translationConditions
         if currentRuntimeConditions != conditions { currentRuntimeConditions = conditions }
+        if activeTranslationSystem != .legacy, initialWarmupTask != nil,
+           ProcessInfo.processInfo.isLowPowerModeEnabled || ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical {
+            interruptWarmupForLiveWork()
+            initialWarmupProgress = "Initial warm-up deferred by power or temperature conditions"
+        }
         captureReadiness.tick(at: ProcessInfo.processInfo.systemUptime)
         publishCaptureStatus()
         let alive = Date().timeIntervalSince(lastPacketDate) < 5
@@ -839,6 +868,7 @@ final class TranslatorEngine: ObservableObject {
         rotRev += 1
         syncConfig()
         diag.event(.language, "Source selection changed: \(sourceCode) → \(targetCode)")
+        if activeTranslationSystem != .legacy { Task { [weak self] in await self?.prewarm() } }
     }
 
     var unconsumedSpeculation: Int { ram.specKeys.count }
@@ -915,6 +945,10 @@ final class TranslatorEngine: ObservableObject {
 
     func powerPolicyChanged() {
         if !speculationAllowed { specQueued = nil }
+        if activeTranslationSystem != .legacy {
+            if !flag("keepWarm", true) || !runtimePolicy.allowsPrewarming { interruptWarmupForLiveWork() }
+            else if !captureAlive { Task { [weak self] in await self?.prewarm() } }
+        }
         syncConfig()
     }
 
@@ -1010,7 +1044,7 @@ final class TranslatorEngine: ObservableObject {
         modeSessionID = UUID(); modeLastIdentity = ""; modePlans.removeAll(); modeMemoryOrigins.removeAll()
         if modeDiagnosticEpochs.count >= 64 { modeDiagnosticEpochs.removeAll() }
         modeDiagnosticEpochs[modeSessionID] = diag.started
-        modeCoordinator.reset(); modeService.reset()
+        modeCoordinator.reset(); modeService.reset(preserveIdleSessions: true)
         contextRevision += 1
         generation += 1
         cancelDrain(preemptSpeculation: true)
@@ -1821,6 +1855,10 @@ final class TranslatorEngine: ObservableObject {
     /// the retained live session. Task cancellation alone may leave model work
     /// running; explicitly ask the iOS 26 session to stop synthetic work.
     private func interruptWarmupForLiveWork() {
+        initialWarmupTask?.cancel()
+        if initialWarmupTask != nil { initialWarmupProgress = "Warm-up yielded to live work or a changed setting" }
+        initialWarmupTask = nil; initialWarmupID = UUID()
+        modeService.cancelWarmup()
         guard let session = warmupSession else { return }
         warmupSuperseded = true
         if #available(iOS 26.0, *) { session.cancel() }
@@ -3453,8 +3491,48 @@ final class TranslatorEngine: ObservableObject {
                 modeAvailability = activeTranslationSystem == .lowLatency ? "Explicit low latency requires iOS 26.4 or later" : "Fast recovery needs iOS 26.4; Apple default fallback remains available"
                 return
             }
-            guard sourceCode != "auto", !captureAlive else { return }
-            await refreshModePreparation(source: sourceCode, target: targetCode, system: activeTranslationSystem)
+            guard !captureAlive, initialWarmupTask == nil, !Task.isCancelled else { return }
+            let code = sourceCode != "auto" ? sourceCode : SubtitlePerformancePolicy.predictiveSource(
+                selected: sourceCode, detected: detectedLang == "–" ? nil : detectedLang,
+                lastResolved: ud.string(forKey: "lastEffectiveSource"),
+                ageSeconds: Date().timeIntervalSince1970 - ud.double(forKey: "lastEffectiveSourceAt"), enabled: flag("predictiveWarmup", true))
+            guard let code, code != targetCode else {
+                initialWarmupProgress = "Waiting for a known source language before initial warm-up"
+                return
+            }
+            let destination = targetCode, system = activeTranslationSystem, context = modeSessionID
+            let id = UUID(); initialWarmupID = id
+            let task = Task { [weak self] in
+                guard let self else { return }
+                await self.refreshModePreparation(source: code, target: destination, system: system)
+                guard !Task.isCancelled, context == self.modeSessionID, !self.captureAlive,
+                      self.flag("keepWarm", true), self.runtimePolicy.allowsPrewarming, !self.paused,
+                      !ProcessInfo.processInfo.isLowPowerModeEnabled,
+                      ProcessInfo.processInfo.thermalState == .nominal || ProcessInfo.processInfo.thermalState == .fair,
+                      self.modelReadiness.languages == .complete else { return }
+                guard let samples = InitialWarmupSamples.units(source: code) else {
+                    self.initialWarmupProgress = "No initial sample for this language; live translation remains available"
+                    return
+                }
+                let deadline = Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 8_000_000_000)
+                    guard !Task.isCancelled, let self, self.initialWarmupID == id else { return }
+                    self.initialWarmupTask?.cancel(); self.modeService.cancelWarmup()
+                    self.initialWarmupProgress = "Initial warm-up budget reached; waiting for outstanding work to return"
+                }
+                self.initialWarmupProgress = "Initial warm-up · once per language pair and strategy"
+                let completed = await self.modeService.warmInitially(source: code, target: destination, system: system,
+                    testMode: self.memoryTestMode.rawValue, samples: samples)
+                deadline.cancel()
+                if !Task.isCancelled, context == self.modeSessionID, !self.captureAlive {
+                    if let completed {
+                        self.initialWarmupProgress = completed == 0 ? "No repeat warm-up: already attempted or launch budget reached" : "Initial warm-up finished · \(completed) strategy/strategies exercised"
+                    } else { self.initialWarmupProgress = "Warm-up incomplete or deferred; live translations can retry normally" }
+                }
+            }
+            initialWarmupTask = task
+            await task.value
+            if initialWarmupID == id { initialWarmupTask = nil }
             return
         }
         guard !Task.isCancelled, runtimePolicy.allowsPrewarming, flag("keepWarm", true), !paused,

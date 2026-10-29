@@ -180,12 +180,13 @@ struct TranslationModeTrace: Codable {
 }
 
 struct TranslationModeReport: Codable {
+    var warmups: [InitialWarmupEvent]? = nil
     var effectiveModelIdentity: String? = "unknown"
     var referenceVersion: String? = "1.7.2-58"
     var referenceSDK: String? = "iphoneos26.5"
     var coldSpeculationCeilingMs: Int? = 700
     var modelTimeoutMs: Int? = 4000
-    var schemaVersion = 1
+    var schemaVersion = 2
     let active: String
     let pending: String
     let referenceSHA: String
@@ -227,6 +228,15 @@ struct TranslationModeReport: Codable {
             $0.monotonicTime.isFinite && $0.firstOCR.isFinite && $0.revision >= 0 &&
             ($0.durationMs == nil || ($0.durationMs!.isFinite && $0.durationMs! >= 0)) && (0...3).contains($0.thermal)
         }
+        let warmupPhases: Set<String> = ["requested_appleDefault", "requested_lowLatency", "model_submitted", "model_completed",
+            "model_batch_completed", "model_batch_failed", "model_error", "model_timeout", "queue_ms", "service_ms",
+            "new_session_start", "retained_session_start", "unsupported_os", "unsupported_or_uninstalled_pair", "cancellation_requested", "cancelled_call_returned"]
+        let safeWarmups = Array((warmups ?? []).suffix(512)).filter {
+            $0.system != .legacy && ["normal", "temporaryMemory", "freshRequests"].contains($0.testMode) &&
+            code($0.source, limit: 32) && code($0.target, limit: 32) && warmupPhases.contains($0.phase) &&
+            $0.monotonicTime.isFinite && $0.monotonicTime >= 0 &&
+            ($0.durationMs == nil || ($0.durationMs!.isFinite && $0.durationMs! >= 0))
+        }
         var samples: [String: [Double]] = [:], counts: [String: Int] = [:]
         var confirmations: [String: Double] = [:], recoveries: [String: Double] = [:]
         var strategies: [String: String] = [:], residency: [String: String] = [:]
@@ -252,7 +262,12 @@ struct TranslationModeReport: Codable {
             }
         }
         let modes = ["legacy", "hybridRecovery", "lowLatency"]
-        return Self(active: modes.contains(active) ? active : "legacy", pending: modes.contains(pending) ? pending : "legacy",
+        for warmup in safeWarmups {
+            let cohort = "warmup_" + warmup.system.rawValue + "_" + warmup.testMode + "_" + warmup.source + "_" + warmup.target + "_" + warmup.strategy.rawValue
+            counts[cohort + "_" + warmup.phase, default: 0] += 1
+            if let ms = warmup.durationMs { samples[cohort + "_" + warmup.phase, default: []].append(ms) }
+        }
+        return Self(warmups: safeWarmups, active: modes.contains(active) ? active : "legacy", pending: modes.contains(pending) ? pending : "legacy",
             referenceSHA: referenceSHA.count == 40 && referenceSHA.allSatisfy { $0.isHexDigit } ? referenceSHA : "unknown",
             migration: ["persisted", "explicit_hybrid", "explicit_low_latency", "legacy_or_ambiguous", "unknown_value_legacy"].contains(migration) ? migration : "unknown",
             events: safe, distributions: samples.mapValues(DiagnosticDistribution.init), counters: counts)

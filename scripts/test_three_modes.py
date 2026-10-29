@@ -44,4 +44,11 @@ assert 'modeService.activityChanged' in engine
 assert 'backendActivity.liveReadiness(modelReadiness)' in engine
 assert 'let activity = backendActivity.activity' in activity
 assert 'heldByActualCall = true' in read('App/ModeTranslationService.swift')
+service = read('App/ModeTranslationService.swift')
+warm = service[service.index('    func warmInitially('):service.index('    func prepare(')]
+assert 'InitialWarmupPolicy.strategies(for: system)' in warm
+assert 'warmup: true' in warm
+assert all(token not in warm for token in ['queueMemory', 'history.append', 'modeCoordinator', 'lowCache'])
+assert 'warmup ? warmupLane' in service
+assert 'preserveIdleSessions: true' in engine
 print('Legacy algorithm equivalence, installed schema/identity, no preview/refinement, bounded cache and model routing source contracts passed')
