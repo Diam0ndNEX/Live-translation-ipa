@@ -288,7 +288,7 @@ final class TranslatorEngine: ObservableObject {
         let monotonicOrigin = CaptionClockOrigin.monotonic(firstSeen: packet.firstSeenMonotonic,
             wallFirstSeen: packet.firstSeenAt ?? packet.ts ?? Date().timeIntervalSince1970,
             wallNow: Date().timeIntervalSince1970, uptimeNow: ProcessInfo.processInfo.systemUptime)
-        let caption = ModeCaption(system: activeTranslationSystem, session: modeSessionID, caption: captionID, revision: modeRevision,
+        let caption = ModeCaption(system: activeTranslationSystem, thermal: ProcessInfo.processInfo.thermalState.rawValue, session: modeSessionID, caption: captionID, revision: modeRevision,
             source: source, target: targetCode, rules: memoryRuleToken, text: text,
             units: inputs, keys: keys, firstOCR: monotonicOrigin)
         let confirmed = packet.stable != false

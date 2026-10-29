@@ -219,6 +219,13 @@ final class Harness {
         precondition(pressure.selected.count == 1 && pressure.events.contains("memory_pressure"))
         pressure.coordinator.reset()
 
+        precondition(abs(SpeculationWaitPolicy.remaining(elapsed: 0.4, ordinary: [], recovery: [], coldCeiling: 0.7) - 0.3) < 0.0001)
+        precondition(SpeculationWaitPolicy.remaining(elapsed: 0.8, ordinary: [], recovery: [], coldCeiling: 0.7) == 0)
+        precondition(abs(SpeculationWaitPolicy.remaining(elapsed: 0.2, ordinary: [0.5, 0.5, 0.5, 0.5, 0.5], recovery: [0.1, 0.1, 0.1, 0.1, 0.1], coldCeiling: 0.7) - 0.1) < 0.0001)
+        precondition(SpeculationWaitPolicy.remaining(elapsed: 0.6, ordinary: [0.5, 0.5, 0.5, 0.5, 0.5], recovery: [0.1, 0.1, 0.1, 0.1, 0.1], coldCeiling: 0.7) == 0)
+        var thermalCaption = norm.caption(); thermalCaption.thermal = 1
+        precondition(thermalCaption.policyCohort != norm.caption().policyCohort)
+        precondition(norm.caption(source: "pt").policyCohort != norm.caption().policyCohort)
         precondition(CaptionClockOrigin.monotonic(firstSeen: 80, wallFirstSeen: 1000, wallNow: 5000, uptimeNow: 100) == 80,
             "Wall-clock changes cannot reset a supplied monotonic OCR origin")
         precondition(CaptionClockOrigin.monotonic(firstSeen: nil, wallFirstSeen: 995, wallNow: 1000, uptimeNow: 100) == 95)

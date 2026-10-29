@@ -48,6 +48,7 @@ enum ConfirmedSourceIdentity {
 
 struct ModeCaption: Equatable {
     var system: TranslationSystem? = nil
+    var thermal = 0
     let session: UUID
     let caption: String
     let revision: Int
@@ -59,6 +60,7 @@ struct ModeCaption: Equatable {
     let keys: [String]
     let firstOCR: Double
     var fingerprint: String { ConfirmedSourceIdentity.normalize(text) }
+    var policyCohort: String { "\(source)>\(target)|thermal\(thermal)" }
     func matches(_ other: Self) -> Bool {
         system == other.system && session == other.session && caption == other.caption && source == other.source &&
         target == other.target && rules == other.rules && fingerprint == other.fingerprint &&
@@ -102,8 +104,8 @@ final class ThreeModeCoordinator {
     private var recoveryStarted = false
     private var lowCache: [String: String] = [:]
     private var lowOrder: [String] = []
-    private var defaultService: [Double] = []
-    private var lowService: [Double] = []
+    private var defaultService: [String: [Double]] = [:]
+    private var lowService: [String: [Double]] = [:]
 
     init(lookup: @escaping Lookup, translate: @escaping Translate,
          cancel: @escaping (Bool) -> Void, selected: @escaping (ModeCaption, ModeOutput, String) -> Void,
@@ -130,6 +132,7 @@ final class ThreeModeCoordinator {
         // The speculative task clears its occupied slot only after completion.
         recoveryStarted = false
         lowCache.removeAll(); lowOrder.removeAll()
+        defaultService.removeAll(); lowService.removeAll()
     }
 
     func observe(_ caption: ModeCaption, confirmed: Bool, speculate: Bool) {
@@ -178,7 +181,7 @@ final class ThreeModeCoordinator {
                 if self.speculation != nil && !self.speculativeFailed {
                     self.event(caption, "speculation_match_unfinished", nil)
                     // LL shares the original request. A hung request has a same-strategy deadline.
-                    let wait = self.system == .lowLatency ? max(0, self.matchingLowLatencyDeadline - (self.clock() - self.speculativeStarted)) : self.remainingWait()
+                    let wait = self.system == .lowLatency ? max(0, self.matchingLowLatencyDeadline - (self.clock() - self.speculativeStarted)) : self.remainingWait(caption)
                     self.deadline = Task { [weak self] in
                         try? await Task.sleep(nanoseconds: UInt64(max(0, wait) * 1_000_000_000))
                         guard let self, !Task.isCancelled, self.current == caption, self.committed != caption else { return }
@@ -194,14 +197,10 @@ final class ThreeModeCoordinator {
         }
     }
 
-    private func remainingWait() -> Double {
-        let elapsed = max(0, clock() - speculativeStarted)
-        // Cold policy uses the measured build-58 observed service ceiling (654 ms),
-        // rounded to 700 ms total, not a new 700 ms post-confirmation grace period.
-        guard defaultService.count >= 5, lowService.count >= 5 else { return max(0, coldSpeculationCeiling - elapsed) }
-        let ordinary = defaultService.sorted()[defaultService.count / 2]
-        let recovery = lowService.sorted()[lowService.count / 2]
-        return max(0, min(0.25, ordinary - elapsed, recovery))
+    private func remainingWait(_ caption: ModeCaption) -> Double {
+        SpeculationWaitPolicy.remaining(elapsed: max(0, clock() - speculativeStarted),
+            ordinary: defaultService[caption.policyCohort, default: []],
+            recovery: lowService[caption.policyCohort, default: []], coldCeiling: coldSpeculationCeiling)
     }
 
     private func lookupValues(_ caption: ModeCaption) async -> [String?] {
@@ -238,8 +237,16 @@ final class ThreeModeCoordinator {
             }
             guard let result, result.count == missing.count else { return nil }
             let duration = clock() - began
-            if strategy == .appleDefault { defaultService.append(duration); defaultService = Array(defaultService.suffix(32)) }
-            else { lowService.append(duration); lowService = Array(lowService.suffix(32)) }
+            let cohort = caption.policyCohort
+            if strategy == .appleDefault {
+                if defaultService.count >= 64 && defaultService[cohort] == nil { defaultService.removeAll() }
+                defaultService[cohort, default: []].append(duration)
+                defaultService[cohort] = Array(defaultService[cohort, default: []].suffix(32))
+            } else {
+                if lowService.count >= 64 && lowService[cohort] == nil { lowService.removeAll() }
+                lowService[cohort, default: []].append(duration)
+                lowService[cohort] = Array(lowService[cohort, default: []].suffix(32))
+            }
             for (position, index) in missing.enumerated() {
                 for duplicate in allMissing where caption.keys[duplicate] == caption.keys[index] {
                     values[duplicate] = result[position]; strategies[duplicate] = strategy
@@ -323,5 +330,16 @@ enum CaptionClockOrigin {
     static func monotonic(firstSeen: Double?, wallFirstSeen: Double, wallNow: Double, uptimeNow: Double) -> Double {
         if let firstSeen, firstSeen.isFinite, firstSeen >= 0, firstSeen <= uptimeNow { return firstSeen }
         return max(0, uptimeNow - max(0, wallNow - wallFirstSeen))
+    }
+}
+
+/// Samples belong to one language pair and thermal cohort; missing evidence uses
+/// the documented total-age ceiling, never an unconditional confirmation delay.
+enum SpeculationWaitPolicy {
+    static func remaining(elapsed: Double, ordinary: [Double], recovery: [Double], coldCeiling: Double) -> Double {
+        guard ordinary.count >= 5, recovery.count >= 5 else { return max(0, coldCeiling - elapsed) }
+        let defaultMedian = ordinary.sorted()[ordinary.count / 2]
+        let recoveryMedian = recovery.sorted()[recovery.count / 2]
+        return max(0, min(0.25, defaultMedian - elapsed, recoveryMedian))
     }
 }
