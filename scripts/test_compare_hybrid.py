@@ -46,6 +46,10 @@ class HybridGateTests(unittest.TestCase):
         del self.new["counters"]["hybridRefinementsSuperseded"]
         self.assertFalse(assess(self.old, self.new, self.evidence)["accepted"])
 
+    def test_partial_memory_recovery_cannot_pass(self):
+        self.new["health"]["migrationStatus"] = "partial_recovery"
+        self.assertFalse(assess(self.old, self.new, self.evidence)["accepted"])
+
     def test_final_coverage_vetoes_speed(self):
         self.new['counters']['hybridRefinementsSuperseded'] = 1
         self.assertFalse(assess(self.old, self.new, self.evidence)['accepted'])

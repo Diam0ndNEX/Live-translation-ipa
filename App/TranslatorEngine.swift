@@ -2068,7 +2068,7 @@ final class TranslatorEngine: ObservableObject {
                 isCurrent: isCurrent)
             if !display { speculativeModelMilliseconds += preview.modelMilliseconds }
             guard isCurrent() else { return }
-            if !display { return }
+            if !display { trimCache(); return }
             if let result = preview.caption {
                 hybridStatus = "Fast preview · refining with high fidelity"
                 let timing = PresentationTiming(packet: currentPacket, firstSeen: currentTs,
@@ -2083,7 +2083,7 @@ final class TranslatorEngine: ObservableObject {
             } else { hybridStatus = hybridRunner.status }
         }
 
-        if hybridEnabled && !display { return }
+        if hybridEnabled && !display { trimCache(); return }
         var failed = false
         for (id, items) in pending {
             guard let src = srcLangs[id] else { continue }

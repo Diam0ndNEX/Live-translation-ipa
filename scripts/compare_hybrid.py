@@ -43,7 +43,9 @@ def assess(baseline, candidate, evidence=None):
     for key in ('integrity', 'migrationStatus', 'totalEntries', 'readyEntries', 'pendingWrites', 'failedWrites', 'conflicts'):
         if key not in candidate.get('health', {}) or key not in baseline.get('health', {}):
             issues.append(f'Incomplete memory evidence: {key}')
-    if candidate.get('health', {}).get('integrity') != 'ok': issues.append('Memory integrity is not verified')
+    for label, run in (('baseline', baseline), ('candidate', candidate)):
+        if run.get('health', {}).get('integrity') != 'ok' or run.get('health', {}).get('migrationStatus') != 'ready':
+            issues.append(f'{label}: memory integrity/migration readiness is not verified')
     for key in ('totalEntries', 'readyEntries'):
         if candidate.get('health', {}).get(key, -1) < baseline.get('health', {}).get(key, 0):
             issues.append(f'Saved-memory population decreased: {key}')
