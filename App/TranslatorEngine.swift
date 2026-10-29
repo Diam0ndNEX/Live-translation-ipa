@@ -3925,6 +3925,7 @@ final class TranslatorEngine: ObservableObject {
         await refreshStatus()
         if prepared, workContext == contextRevision, !paused, !manualMode {
             invalidatePending(); rotRev += 1; syncConfig()
+            if !captureAlive { Task { [weak self] in await self?.prewarm() } }
         }
     }
 
