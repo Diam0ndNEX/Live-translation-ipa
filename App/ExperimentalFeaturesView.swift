@@ -21,7 +21,6 @@ private struct ExperimentalOption: View {
 
 struct ExperimentalFeaturesView: View {
     @EnvironmentObject private var engine: TranslatorEngine
-    @AppStorage("lowLatencyTranslation") private var lowLatencyTranslation = false
     @AppStorage("incrementalBatchRecovery") private var incrementalBatchRecovery = false
     @AppStorage("directPiPBuffer") private var directPiPBuffer = false
     @AppStorage("subtitleAwareChangeDetection") private var subtitleAwareChangeDetection = false
@@ -47,20 +46,9 @@ struct ExperimentalFeaturesView: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Section {
-                if #available(iOS 26.4, *) {
-                    ExperimentalOption(
-                        title: "Low-latency translation models",
-                        explanation: "Tries faster, lower-power on-device models; wording may be less fluent. Keeps translations from different model strategies separate.",
-                        enabled: $lowLatencyTranslation)
-                } else {
-                    ExperimentalOption(
-                        title: "Low-latency translation models",
-                        explanation: "Requires iOS 26.4 or later. Normal model selection remains available.",
-                        enabled: $lowLatencyTranslation, available: false)
-                }
                 ExperimentalOption(
                     title: "Incremental translation recovery",
-                    explanation: "Retains completed speculative sentence results for exact temporary reuse, even when their batch is interrupted. Never displays incomplete captions.",
+                    explanation: "Also retains completed speculative sentences before a confirmed caption is waiting. Waiting captions already receive complete exact units automatically. Never displays incomplete captions.",
                     enabled: $incrementalBatchRecovery)
             } header: { Text("Translation experiments") }
 
@@ -124,14 +112,13 @@ struct ExperimentalFeaturesView: View {
             } header: { Text("Automatic optimizations") }
 
             ResetSection(keys: [
-                "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer",
+                "incrementalBatchRecovery", "directPiPBuffer",
                 "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
                 "adaptiveConfirmation", "confirmationDeadline", "continuousRotation"
             ])
         }
         .settingsPage("Experimental Features")
         .onChange(of: pipelineSignature) { _, _ in engine.pipelineSettingsChanged() }
-        .onChange(of: lowLatencyTranslation) { _, _ in engine.translationStrategyChanged() }
         .onChange(of: directPiPBuffer) { _, _ in engine.applyStyle() }
     }
 }

@@ -8,6 +8,8 @@ struct TranslationSettings: View {
     @AppStorage("keepWarm") private var keepWarm = true
     @AppStorage("predictiveWarmup") private var predictiveWarmup = true
     @AppStorage("remember") private var remember = true
+    @AppStorage("lowLatencyTranslation") private var lowLatencyTranslation = false
+    @AppStorage("hybridTranslation") private var hybridTranslation = false
     @AppStorage("selectiveSpeculation") private var selectiveSpeculation = true
     @AppStorage("adaptiveSpeculation") private var adaptiveSpeculation = true
     @AppStorage("speculationConfidence") private var speculationConfidence = 0.85
@@ -18,6 +20,33 @@ struct TranslationSettings: View {
 
     var body: some View {
         List {
+            Section {
+                if #available(iOS 26.4, *) {
+                    Picker("Translation model", selection: Binding(get: {
+                        hybridTranslation ? "hybrid" : (lowLatencyTranslation ? "low" : "high")
+                    }, set: { value in
+                        hybridTranslation = value == "hybrid"
+                        lowLatencyTranslation = value == "low"
+                        engine.translationStrategyChanged()
+                    })) {
+                        Text("High fidelity").tag("high")
+                        Text("Low latency").tag("low")
+                        Text("Hybrid · fast then refine").tag("hybrid")
+                    }
+                    Text("Hybrid combines low latency with Apple’s default translation strategy, matching the older normal route. It reuses compatible saved memory first. For new live subtitles, a fast preview appears before the Apple-default refinement. Only the default-strategy result enters its normal saved memory. Preview work pauses under power or thermal pressure.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    if hybridTranslation {
+                        LabeledContent("Hybrid activity", value: engine.hybridStatus)
+                        Button("Prepare fast language packs") { engine.download(engine.sourceCode) }
+                            .disabled(engine.sourceCode == "auto")
+                        Text("Choose a source language to prepare its fast packs. Live translation never starts a download. Apple may fall back to traditional models when Apple Intelligence is unavailable.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                } else {
+                    Text("System translation model. Hybrid model selection requires iOS 26.4 or later.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+            } header: { Text("Translation models") }
             Section {
                 Toggle("Translate ahead", isOn: $translateAhead)
                 Text("Starts translating a promising first reading before OCR confirms it; shows results only after confirmation.")
@@ -43,7 +72,7 @@ struct TranslationSettings: View {
                     }
                 }
                 Toggle("Adapt early translation to usefulness", isOn: $adaptiveSpeculation)
-                Text("Reduces speculative model work if many early results go unused, while keeping opportunities to recover.")
+                Text("Reduces speculative model work when early results go unused or consume too much confirmed-caption waiting time. Keeps recovery probes; confirmed subtitles are never throttled.")
                     .font(.footnote).foregroundStyle(.secondary)
             } header: { Text("Translation scheduling") }
 
@@ -56,7 +85,7 @@ struct TranslationSettings: View {
             } header: { Text("Reuse & memory") }
 
             ResetSection(keys: [
-                "translateAhead", "keepWarm", "predictiveWarmup", "remember",
+                "translateAhead", "keepWarm", "predictiveWarmup", "remember", "lowLatencyTranslation", "hybridTranslation",
                 "selectiveSpeculation", "adaptiveSpeculation", "speculationConfidence"
             ])
         }

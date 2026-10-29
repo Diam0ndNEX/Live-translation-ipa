@@ -68,7 +68,12 @@ class SampleHandler: RPBroadcastSampleHandler {
         send(kind: "ping", lines: [])
     }
 
-    override func broadcastFinished() { conn?.cancel() }
+    override func broadcastFinished() {
+        recognitionLock.lock()
+        defer { recognitionLock.unlock() }
+        send(kind: "stopped", lines: [], closeConnection: true)
+        conn = nil
+    }
 
     /// The app sends settings back over the same link.
     private func listen() {
@@ -355,7 +360,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     }
 
     // MARK: Send
-    private func send(kind: String, lines: [OCRLine], stable: Bool? = nil, revision: Int? = nil) {
+    private func send(kind: String, lines: [OCRLine], stable: Bool? = nil, revision: Int? = nil, closeConnection: Bool = false) {
         func encode(_ l: [OCRLine]) -> Data? {
             try? JSONEncoder().encode(Packet(kind: kind, version: AppVersion.version, frames: frames, lines: l,
                                              ocrMs: lastOcrMs, memFreeMB: freeMB(),
@@ -372,12 +377,16 @@ class SampleHandler: RPBroadcastSampleHandler {
                                              totalEmptyOCRPasses: totalEmptyOCRPasses,
                                              lastVisualChangeAt: lastVisualChangeAt == .distantPast ?
                                                 nil : lastVisualChangeAt.timeIntervalSince1970,
-                                             effectiveOCRIntervalMs: effectiveOCRIntervalMs))
+                                             effectiveOCRIntervalMs: effectiveOCRIntervalMs,
+                                             captureSessionID: captureID))
         }
         var data = encode(lines)
         if let d = data, d.count > 60000 { data = encode(Array(lines.prefix(30))) }
         guard let d = data else { return }
-        conn?.send(content: d, completion: .contentProcessed { _ in })
+        let connection = conn
+        connection?.send(content: d, completion: .contentProcessed { _ in
+            if closeConnection { connection?.cancel() }
+        })
     }
 }
 

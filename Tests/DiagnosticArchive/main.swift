@@ -260,18 +260,31 @@ import Foundation
                      "Current model and PiP experiment flags must survive redacted exports")
         let newModeSnapshot = DiagnosticSessionExport(
             id: session, startedAt: Date(), endedAt: Date(), appVersion: "1.7.1", systemVersion: "test",
-            settings: ["temporaryMemoryTest": "true", "translationTestMode": "temporaryMemory",
+            settings: ["hybridTranslation": "true", "temporaryMemoryTest": "true", "translationTestMode": "temporaryMemory",
                        "startingRAMEntries": "12", "suppressOwnInterface": "true", "glossary": "private"],
             health: MemoryDiagnosticHealth(), counters: ["completedConfirmedUnitsRetained": 3,
-                       "temporaryMemoryHits": 12, "bypassedLookups": 0, "lookupMisses": 0,
-                       "sharedConfirmedInFlightUnits": 2, "speculativeStopRequests": 3, "speculativeSessionsCreated": 4, "memoryAwareSpeculationSkipped": 11, "ramCaptionBypasses": 7, "uncachedUnits": 5, "sharedInFlightUnits": 2, "speculativeUnitsReused": 4],
-            distributions: ["speculativeStopReleaseMs": DiagnosticDistribution([2, 3]),
+                       "hybridLowBatches": 4, "hybridPreviewEnqueues": 3, "hybridFinalEnqueues": 2, "hybridRefinementsSuperseded": 1, "temporaryMemoryHits": 12, "bypassedLookups": 0, "lookupMisses": 0,
+                       "sharedConfirmedInFlightUnits": 2, "speculativeStopRequests": 3, "speculativeSessionsCreated": 4, "memoryAwareSpeculationSkipped": 11, "ramCaptionBypasses": 7, "savedUnitsPrefetched": 13, "savedCaptionBypasses": 6, "speculationBudgetSkipped": 8, "warmSessionTransfers": 10, "uncachedUnits": 5, "sharedInFlightUnits": 2, "speculativeUnitsReused": 4],
+            distributions: ["hybridFirstEnqueueMs": DiagnosticDistribution([100, 120]),
+                            "hybridFinalEnqueueMs": DiagnosticDistribution([300, 400]),
+                            "hybridLowModelMs": DiagnosticDistribution([40, 50]),
+                            "speculativeStopReleaseMs": DiagnosticDistribution([2, 3]),
                             "queueBehindSpeculationMs": DiagnosticDistribution([30, 40])],
             events: [StructuredDiagnosticEvent(id: UUID(), timestamp: Date(), sessionID: session,
                 candidateID: nil, stage: "runtime_state", outcome: "external_capture_period",
-                reasonCode: "external_capture_period", durationMs: nil, privacy: "metadataOnly")],
+                reasonCode: "external_capture_period", durationMs: nil, privacy: "metadataOnly"),
+                StructuredDiagnosticEvent(id: UUID(), timestamp: Date(), sessionID: session,
+                    candidateID: nil, stage: "runtime_state", outcome: "capture_stopped",
+                    reasonCode: "capture_stopped", durationMs: nil, privacy: "metadataOnly")],
             measurementBoundary: "OCR through PiP enqueue", textCapture: false)
         let newModeRoundtrip = try await writer.decode(try await writer.encode(newModeSnapshot))
+        precondition(newModeRoundtrip.settings["hybridTranslation"] == "true" &&
+                     newModeRoundtrip.counters["hybridLowBatches"] == 4 &&
+                     newModeRoundtrip.counters["hybridPreviewEnqueues"] == 3 &&
+                     newModeRoundtrip.counters["hybridRefinementsSuperseded"] == 1 &&
+                     newModeRoundtrip.distributions["hybridFirstEnqueueMs"]?.p50 == 100 &&
+                     newModeRoundtrip.distributions["hybridFinalEnqueueMs"]?.p50 == 300,
+                     "Hybrid first-result and final-quality evidence must survive privacy filtering separately")
         precondition(newModeRoundtrip.settings["translationTestMode"] == "temporaryMemory" &&
                      newModeRoundtrip.settings["startingRAMEntries"] == "12" &&
                      newModeRoundtrip.settings["suppressOwnInterface"] == "true" &&
@@ -281,6 +294,10 @@ import Foundation
                      newModeRoundtrip.counters["temporaryMemoryHits"] == 12 &&
                      newModeRoundtrip.counters["sharedInFlightUnits"] == 2 &&
                      newModeRoundtrip.counters["ramCaptionBypasses"] == 7 &&
+                     newModeRoundtrip.counters["savedUnitsPrefetched"] == 13 &&
+                     newModeRoundtrip.counters["savedCaptionBypasses"] == 6 &&
+                     newModeRoundtrip.counters["speculationBudgetSkipped"] == 8 &&
+                     newModeRoundtrip.counters["warmSessionTransfers"] == 10 &&
                      newModeRoundtrip.counters["memoryAwareSpeculationSkipped"] == 11 &&
                      newModeRoundtrip.counters["speculativeStopRequests"] == 3 &&
                      newModeRoundtrip.counters["sharedConfirmedInFlightUnits"] == 2 &&
@@ -288,6 +305,8 @@ import Foundation
                      newModeRoundtrip.distributions["speculativeStopReleaseMs"]?.count == 2 &&
                      newModeRoundtrip.distributions["queueBehindSpeculationMs"]?.count == 2,
                      "New timing and reuse fields must not disappear in archive filtering")
+        precondition(newModeRoundtrip.events.contains { $0.reasonCode == "capture_stopped" },
+                     "Explicit capture stop must remain readable through archive privacy filtering")
         precondition(newModeRoundtrip.events[0].reasonCode == "external_capture_period",
                      "Fixed app-visibility codes must remain readable, not redacted")
 

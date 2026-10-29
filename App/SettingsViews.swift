@@ -84,7 +84,7 @@ struct SettingsView: View {
     private var translateMatches: Bool {
         matches("Reading & OCR", "capture movie subtitles frames recognition tracking confirmation")
         || matches("Languages & text rules", "understanding glossary slang protect names source fixes automatic recovery")
-        || matches("Translation & memory", "translate ahead pretranslation warm up cache remember SQLite speculative model")
+        || matches("Translation & memory", "translate ahead pretranslation warm up cache remember SQLite speculative model high fidelity low latency hybrid fast preview refine language packs")
         || matches("Presets", "profiles saved configurations")
     }
     private var subtitleMatches: Bool {
@@ -99,7 +99,7 @@ struct SettingsView: View {
     }
     private var advancedMatches: Bool {
         matches("Performance & battery", "speed cool power thermal idle awake energy")
-        || matches("Experimental Features", "smart pipeline beta low latency lyrics incremental PiP advanced model rotation")
+        || matches("Experimental Features", "smart pipeline beta lyrics incremental PiP advanced rotation")
         || matches("Diagnostics & tests", "metrics benchmark export sessions simulator validation fresh translation")
     }
     private var supportMatches: Bool {
@@ -138,8 +138,8 @@ struct SettingsView: View {
                             SettingsNavRow(title: "Languages & text rules", detail: "Detection, corrections, glossary and protected names",
                                            symbol: "character.book.closed", destination: IntelligenceSettings())
                         }
-                        if matches("Translation & memory", "translate ahead pretranslation warm up cache remember SQLite speculative model") {
-                            SettingsNavRow(title: "Translation & memory", detail: "Translate ahead, model readiness and remembered text",
+                        if matches("Translation & memory", "translate ahead pretranslation warm up cache remember SQLite speculative model high fidelity low latency hybrid fast preview refine language packs") {
+                            SettingsNavRow(title: "Translation & memory", detail: "Translation models, fast previews and remembered text",
                                            symbol: "translate", destination: TranslationSettings())
                         }
                         if matches("Presets", "profiles saved configurations") {
@@ -188,7 +188,7 @@ struct SettingsView: View {
                             SettingsNavRow(title: "Performance & battery", detail: "Adaptive performance, heat and idle power",
                                            symbol: "bolt", destination: PerformanceSettings())
                         }
-                        if matches("Experimental Features", "smart pipeline beta low latency lyrics incremental PiP advanced model rotation") {
+                        if matches("Experimental Features", "smart pipeline beta lyrics incremental PiP advanced rotation") {
                             SettingsNavRow(title: "Experimental Features", detail: "Opt-in features that still need device testing",
                                            symbol: "flask", destination: ExperimentalFeaturesView())
                         }

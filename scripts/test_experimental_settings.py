@@ -30,7 +30,7 @@ for key, names in owners.items():
 
 expected = {
     "ExperimentalFeaturesView.swift": {
-        "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer",
+        "incrementalBatchRecovery", "directPiPBuffer",
         "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
         "adaptiveConfirmation", "confirmationDeadline", "continuousRotation",
     },
@@ -40,7 +40,7 @@ expected = {
         "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded",
     },
     "SettingsCategories.swift": {
-        "translateAhead", "keepWarm", "remember", "predictiveWarmup",
+        "translateAhead", "keepWarm", "remember", "predictiveWarmup", "lowLatencyTranslation", "hybridTranslation",
         "selectiveSpeculation", "adaptiveSpeculation", "speculationConfidence",
         "saveHistory", "historyRetentionDays", "historyCapacity",
         "diagSamples", "persistDiagnosticSessions", "freshTranslationTest", "temporaryMemoryTest",
@@ -75,10 +75,10 @@ assert 'NavigationLink { CaptionAppearanceSettings() }' not in home
 for key in ("lowLatencyTranslation", "incrementalBatchRecovery",
             "directPiPBuffer", "subtitleAwareChangeDetection", "preserveRelatedMovieGroups"):
     assert f'"{key}": false' in engine, f"New experiment {key} must remain off by default"
-assert 'if #available(iOS 26.4, *)' in extra
+assert 'if #available(iOS 26.4, *)' in sources['SettingsCategories.swift']
 assert "available: skipUnchanged" in extra
 assert "available: mode == TranslateMode.movie.rawValue" in extra
-assert '.onChange(of: lowLatencyTranslation) { _, _ in engine.translationStrategyChanged() }' in extra
+assert 'engine.translationStrategyChanged()' in sources['SettingsCategories.swift']
 assert '.onChange(of: pipelineSignature) { _, _ in engine.pipelineSettingsChanged() }' in extra
 assert '.onChange(of: directPiPBuffer) { _, _ in engine.applyStyle() }' in extra
 

@@ -875,3 +875,172 @@ streamedOutputs[0] = "First."
 check(currentStreamCaption() == "Ana: First. Second.",
       "A full replacement can assemble in reading order once all of its required units complete")
 print("v1.7.2 streamed unit context mapping and complete-caption wakeup checks passed")
+
+// v1.8.0: use observed blocking, independently of whether diagnostics are on.
+var blockingWindow = SpeculativeWorkWindow()
+for _ in 0..<8 {
+    let id = blockingWindow.begin()
+    blockingWindow.finish(id, discarded: true, modelMilliseconds: 300)
+    blockingWindow.recordBlocking(id, milliseconds: 200)
+}
+check(blockingWindow.blockingBudgetExceeded, "Repeated speculative blocking must activate the work budget before 24 discarded pipelines")
+check((0..<12).filter { _ in blockingWindow.allowsOpportunity(enabled: true) }.count == 4,
+      "A blocking scene retains bounded recovery probes instead of continuously occupying the model")
+check((0..<12).allSatisfy { _ in blockingWindow.allowsOpportunity(enabled: false) },
+      "The existing adaptive speculation opt-out must bypass the new work budget")
+for _ in 0..<32 {
+    let id = blockingWindow.begin()
+    blockingWindow.finish(id, discarded: false, modelMilliseconds: 250)
+    blockingWindow.reuse(id)
+}
+check(!blockingWindow.blockingBudgetExceeded && blockingWindow.allowsOpportunity(enabled: true),
+      "Useful new scenes must age harmful blocking out and restore speculation")
+var creditedWindow = SpeculativeWorkWindow()
+for _ in 0..<8 {
+    let id = creditedWindow.begin()
+    creditedWindow.finish(id, discarded: false, modelMilliseconds: 300)
+    creditedWindow.recordBlocking(id, milliseconds: 80)
+    creditedWindow.reuse(id)
+}
+check(!creditedWindow.blockingBudgetExceeded, "Useful speculative credit must prevent indiscriminate throttling")
+var coldWindow = SpeculativeWorkWindow()
+let oneColdID = coldWindow.begin()
+coldWindow.finish(oneColdID, discarded: true, modelMilliseconds: 1800)
+coldWindow.recordBlocking(oneColdID, milliseconds: 1500)
+coldWindow.recordBlocking(oneColdID, milliseconds: .nan)
+check(!coldWindow.blockingBudgetExceeded, "One cold start or invalid sample cannot activate a scene budget")
+
+var captureEvidence = CaptureReadiness()
+check(captureEvidence.state == .idle, "Launch must not claim that capture is active")
+captureEvidence.requested(at: 0)
+check(captureEvidence.state == .waiting, "Opening the broadcast picker is only a request")
+captureEvidence.receive(frames: 0, session: "first", stopped: false, at: 1)
+check(captureEvidence.state == .connected, "Connection acknowledgement is not video-frame evidence")
+captureEvidence.receive(frames: 1, session: "first", stopped: false, at: 2)
+check(captureEvidence.state == .active, "A received video frame establishes capture readiness without OCR text")
+captureEvidence.receive(frames: 2, session: "first", stopped: false, at: 6)
+captureEvidence.tick(at: 10)
+check(captureEvidence.state == .active, "No-text and paused heartbeats preserve actual capture status")
+captureEvidence.tick(at: 11)
+check(captureEvidence.state == .lost, "Missing transport heartbeats must clear the active state")
+captureEvidence.receive(frames: 0, session: "second", stopped: false, at: 12)
+check(captureEvidence.state == .connected, "A restarted extension must establish fresh frame evidence")
+captureEvidence.receive(frames: 3, session: "second", stopped: false, at: 13)
+captureEvidence.receive(frames: 50, session: "first", stopped: true, at: 14)
+check(captureEvidence.state == .active, "An obsolete extension cannot stop the replacement session")
+captureEvidence.receive(frames: 3, session: "second", stopped: true, at: 15)
+check(captureEvidence.state == .stopped, "An explicit stop clears readiness immediately")
+captureEvidence.requested(at: 20)
+captureEvidence.tick(at: 21)
+check(captureEvidence.state == .waiting, "A restart request must discard the old heartbeat deadline")
+captureEvidence.tick(at: 50)
+check(captureEvidence.state == .idle, "A cancelled broadcast picker cannot remain waiting indefinitely")
+captureEvidence.receive(frames: 1, session: nil, stopped: false, at: 51)
+check(captureEvidence.state == .active, "Older extensions without a session ID remain supported")
+
+await MainActor.run {
+    let owner = SpeculativeSessionOwner<TestModelHandle> { $0.cancellationCount += 1 }
+    let warmed = TestModelHandle()
+    let lease = owner.begin(key: "pt>en|default", make: { warmed })
+    precondition(owner.takeReusable(key: "pt>en|default") == nil, "An active session cannot transfer ownership")
+    owner.finish(lease, reusable: true)
+    precondition(owner.takeReusable(key: "de>en|default") == nil, "Warm transfer must preserve language/model identity")
+    let transferred = owner.takeReusable(key: "pt>en|default")
+    precondition(transferred === warmed)
+    precondition(owner.takeReusable(key: "pt>en|default") == nil, "A session must never remain owned by both lanes")
+    let next = owner.begin(key: "pt>en|default", make: { TestModelHandle() })
+    precondition(next.session !== transferred)
+    owner.cancelActive()
+    owner.finish(next, reusable: true)
+    precondition(owner.takeReusable(key: "pt>en|default") == nil, "Cancelled sessions cannot be transferred back as warm")
+    precondition(transferred?.cancellationCount == 0, "Cancelling the next lease must leave the transferred confirmed handle usable")
+}
+print("v1.8.0 blocking budget, capture readiness and sole-owner warm-session transfer checks passed")
+
+let normalPairIdentity = TranslationModelMemoryPolicy.sessionKey(source: "pt", target: "en", lowLatency: false)
+check(normalPairIdentity == "pt>en|default", "Availability producers and consumers share the exact retained-session identity")
+check(normalPairIdentity != TranslationModelMemoryPolicy.sessionKey(source: "pt", target: "en", lowLatency: true),
+      "Different available model strategies cannot borrow readiness or warm sessions")
+check(normalPairIdentity != TranslationModelMemoryPolicy.sessionKey(source: "pt", target: "de", lowLatency: false),
+      "A changed target cannot borrow readiness for the previous pair")
+print("v1.8.0 unified ephemeral model-pair identity checks passed")
+
+// Refused admission is not a persisted or pending write. The same confirmed
+// cache key must remain eligible once Remember/queue capacity allows a retry.
+let admissionBank = TranslationRAMBank()
+let admissionCaption = ExactCaptionResult(translated: "A complete caption.", sentences: 1,
+    persistenceKeys: ["confirmed-key"])
+admissionBank.values["confirmed-key"] = "A complete caption."
+admissionBank.retainCaption(key: "exact-caption", result: admissionCaption)
+var admissionAttempts = 0
+let rejectedAdmission = admissionBank.confirmPersistence("confirmed-key") {
+    admissionAttempts += 1
+    return false
+}
+check(!rejectedAdmission && !admissionBank.confirmedKeys.contains("confirmed-key"),
+      "Remember off or a full queue must not mark a rejected write as already handled")
+check(admissionBank.captionNeedsPersistence(admissionCaption),
+      "Whole-caption reuse must retain the need to retry rejected unit admissions")
+check(admissionBank.captions["exact-caption"]?.translated == "A complete caption.",
+      "A rejected write must never make a complete cached caption unavailable")
+let acceptedAdmission = admissionBank.confirmPersistence("confirmed-key") {
+    admissionAttempts += 1
+    return true
+}
+check(acceptedAdmission && !admissionBank.captionNeedsPersistence(admissionCaption),
+      "A later confirmed reuse can admit the same key when the writer accepts it")
+check(admissionBank.confirmPersistence("confirmed-key", enqueue: {
+    admissionAttempts += 1
+    return false
+}) && admissionAttempts == 2, "Already accepted keys avoid duplicate queue work")
+var savedAdmissionAttempts = 0
+check(admissionBank.confirmPersistence("already-saved", alreadySaved: true, enqueue: {
+    savedAdmissionAttempts += 1
+    return false
+}) && savedAdmissionAttempts == 0, "Proven saved hits do not create new writes")
+let isolatedAdmissionBank = TranslationRAMBank()
+check(isolatedAdmissionBank.captionNeedsPersistence(admissionCaption),
+      "One RAM bank's admission markers cannot suppress another bank's work")
+admissionBank.clear()
+check(admissionBank.confirmedKeys.isEmpty && admissionBank.captions.isEmpty,
+      "Explicit RAM reset clears admission metadata with its volatile captions")
+print("v1.8.0 confirmed write admission, retries and complete-caption availability checks passed")
+
+let hybridMemoryOwner = ProcessTranslationMemory()
+let hybridKey = PipelineSafety.cacheKey(source: "pt", target: "en", text: "Olá.", protectedWords: [], rules: "quality")
+hybridMemoryOwner.normal.values[hybridKey] = "Saved high-fidelity wording."
+hybridMemoryOwner.previews(for: .normal).insert(hybridKey, text: "Fast preview.", speculativeID: 9)
+check(hybridMemoryOwner.normal.values[hybridKey] == "Saved high-fidelity wording.",
+      "Fast previews cannot overwrite the high-fidelity RAM bank")
+check(hybridMemoryOwner.previews(for: .temporaryMemory).lookup(hybridKey) == nil,
+      "Temporary testing cannot borrow normal-mode low-latency previews")
+hybridMemoryOwner.previews(for: .temporaryMemory).insert(hybridKey, text: "Temporary preview.", speculativeID: nil)
+hybridMemoryOwner.normalPreviews.clear()
+check(hybridMemoryOwner.temporaryPreviews.lookup(hybridKey)?.text == "Temporary preview.",
+      "Normal preview cleanup cannot erase temporary test memory")
+let previewLRU = HybridPreviewCache(capacity: 2)
+previewLRU.insert("A", text: "First.", speculativeID: 1)
+previewLRU.insert("B", text: "Second.", speculativeID: 2)
+_ = previewLRU.lookup("A")
+previewLRU.insert("C", text: "Third.", speculativeID: 3)
+check(previewLRU.count == 2 && previewLRU.lookup("B") == nil && previewLRU.lookup("A")?.speculativeID == 1,
+      "Preview memory must be bounded and retain exact provenance on LRU reuse")
+previewLRU.insert("blank", text: " ", speculativeID: nil)
+check(previewLRU.lookup("blank") == nil, "Blank fast responses never seed preview memory")
+check(!TranslationModelMemoryPolicy.effectiveLowLatency(lowOnly: true, hybrid: true),
+      "A conflicting imported low-only flag cannot relabel hybrid quality memory as low-latency memory")
+check(TranslationModelMemoryPolicy.effectiveLowLatency(lowOnly: true, hybrid: false),
+      "Existing low-only selections remain supported")
+let hybridRules = TranslationModelMemoryPolicy.rulesContext(base: existingMemoryRules,
+    lowLatency: TranslationModelMemoryPolicy.effectiveLowLatency(lowOnly: true, hybrid: true))
+check(hybridRules == existingMemoryRules, "Hybrid quality output preserves compatible high-fidelity memory identity")
+check(HybridTranslationPolicy.mayRunPreview(enabled: true, manual: false, freshOnly: false, lowPower: false, thermalNominal: true),
+      "Hybrid mode can preview live nominal-load subtitles")
+for blocked in [
+    HybridTranslationPolicy.mayRunPreview(enabled: false, manual: false, freshOnly: false, lowPower: false, thermalNominal: true),
+    HybridTranslationPolicy.mayRunPreview(enabled: true, manual: true, freshOnly: false, lowPower: false, thermalNominal: true),
+    HybridTranslationPolicy.mayRunPreview(enabled: true, manual: false, freshOnly: true, lowPower: false, thermalNominal: true),
+    HybridTranslationPolicy.mayRunPreview(enabled: true, manual: false, freshOnly: false, lowPower: true, thermalNominal: true),
+    HybridTranslationPolicy.mayRunPreview(enabled: true, manual: false, freshOnly: false, lowPower: false, thermalNominal: false)
+] { check(!blocked, "Manual/fresh-only/power/thermal policy must preserve quality-only fallback") }
+print("Hybrid preview isolation, LRU, memory identity and admission policy checks passed")

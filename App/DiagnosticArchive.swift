@@ -133,9 +133,10 @@ struct DiagnosticIntervalBucket: Codable {
         "specPreemptionRequested", "specMatchingConfirmation",
         "specRetainedUnits", "completedConfirmedUnitsRetained", "temporaryMemoryHits",
         "uncachedUnits", "bypassedLookups", "temporaryMemoryMisses",
-        "speculativeStopRequests", "speculativeSessionsCreated", "memoryAwareSpeculationSkipped", "ramCaptionBypasses", "exactCaptionHits", "exactUnitsCoalesced", "sharedConfirmedInFlightUnits", "sharedInFlightUnits", "speculativeUnitsRetained",
+        "speculativeStopRequests", "speculativeSessionsCreated", "memoryAwareSpeculationSkipped", "ramCaptionBypasses", "savedUnitsPrefetched", "savedCaptionBypasses", "speculationBudgetSkipped", "warmSessionTransfers", "exactCaptionHits", "exactUnitsCoalesced", "sharedConfirmedInFlightUnits", "sharedInFlightUnits", "speculativeUnitsRetained",
         "speculativeUnitsReused", "speculativeUnitsEvictedUnused",
         "handoffDeferred", "slowTailEnqueues", "handoffReplayed", "handoffExpired", "enqueueFailed",
+        "hybridLowBatches", "hybridLowFailures", "hybridLowUnavailable", "hybridPreviewEnqueues", "hybridFinalEnqueues", "hybridPreviewCacheHits", "hybridRefinementsSuperseded",
         "actualModelBatches", "confirmedModelBatches", "speculativeModelBatches",
         "warmupModelBatches", "first30sModelBatches", "cancelledModelBatches",
         "legacyBatchEntries", "legacyBatchVerified", "legacyBatchSkipped",
@@ -203,6 +204,9 @@ actor DiagnosticExportWriter {
         ]
         let eventCodes: Set<String> = Set(MemoryDiagnosticOutcome.allCases.map { $0.rawValue })
             .union([
+                "hybrid_low_submitted", "hybrid_low_completed", "hybrid_low_failed", "hybrid_low_unavailable",
+                "hybrid_first_enqueued", "hybrid_final_enqueued", "hybrid_preview_enqueued",
+                "hybrid_preview_cache_hit", "hybrid_refinement_superseded",
                 "scheduling", "observed", "cache_hit", "computed", "accepted", "rejected_duplicate",
                 "rejected_recent_fragment", "rejected_empty", "rejected_revision",
                 "rejected_unstable", "rejected_low_confidence", "rejected_stale",
@@ -221,7 +225,7 @@ actor DiagnosticExportWriter {
                 "warmup_source_unresolved", "warmup_predicted_source", "warmup_preempted",
                 "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started", "legacy_idle_completed",
                 "legacy_idle_deferred", "app_interface_visible", "external_capture_period", "app_started", "capture_config_changed",
-                "capture_idle", "capture_live", "capture_paused", "capture_frozen"
+                "capture_idle", "capture_live", "capture_paused", "capture_frozen", "capture_stopped"
             ]).union(stageCodes)
         let safeEvents = snapshot.events.suffix(2400).map { event in
             StructuredDiagnosticEvent(id: event.id, timestamp: event.timestamp,
@@ -244,12 +248,12 @@ actor DiagnosticExportWriter {
             "skipUnchanged", "idleBackoff", "adaptiveConfirmation", "subtitleTracking",
             "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest",
             "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
-            "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer",
+            "lowLatencyTranslation", "hybridTranslation", "incrementalBatchRecovery", "directPiPBuffer",
             "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
             "deduplicateCopies", "contextualLanguage", "languageRecovery",
             "continuousRotation", "smartCool", "persistDiagnosticSessions",
             "diagSamples", "heartbeatInterval", "keepAwake", "suppressOwnInterface",
-            "temporaryMemoryTest", "translationTestMode", "startingRAMEntries"
+            "temporaryMemoryTest", "translationTestMode", "startingRAMEntries", "startingHybridPreviewEntries"
         ]
         let safeSettings = snapshot.settings.filter { pair in
             settingsKeys.contains(pair.key) && pair.value.utf8.count <= 48 &&
@@ -293,6 +297,7 @@ actor DiagnosticExportWriter {
         // nonfinite caller-supplied measurements. Reconstruct from bounded,
         // known timing statistics instead of copying potentially private labels.
         let allowedMetrics: Set<String> = [
+            "hybridFirstEnqueueMs", "hybridFinalEnqueueMs", "hybridLowModelMs",
             "memoryLookupMs", "memoryWriteMs", "ocrMs", "translationMs",
             "enqueueLatencyMs", "finalOCRMs", "transportMs", "confirmationMs",
             "deliveryFilteringMs", "queueMs", "processingMs", "displayHoldMs",
@@ -474,6 +479,15 @@ actor DiagnosticExportWriter {
             - Speculative model requests: \(metric("speculativeModelMs"))
             - PiP frame preparation: \(metric("renderingMs"))
 
+            ## Hybrid models (first result and final quality are separate)
+            - First visible result: \(metric("hybridFirstEnqueueMs"))
+            - High-fidelity final result: \(metric("hybridFinalEnqueueMs"))
+            - Low-latency model batches: \(count("hybridLowBatches"))
+            - Fast preview enqueues / final enqueues: \(count("hybridPreviewEnqueues")) / \(count("hybridFinalEnqueues"))
+            - Refinements superseded before final enqueue: \(count("hybridRefinementsSuperseded"))
+            Preview results never enter the ordinary final-latency distribution or
+            the high-fidelity translation memory. These counts are not subtitle coverage.
+
             ## Subtitle lifecycle (candidates, not sentences)
             - Confirmed packets: \(count("confirmedCandidatePackets"))
             - Successfully enqueued candidate frames: \(count("enqueuedCandidateFrames"))
@@ -505,7 +519,11 @@ actor DiagnosticExportWriter {
             - Cancelled model batches: \(count("cancelledModelBatches"))
             - Skipped unchanged frames: \(count("unchangedSkippedFrames"))
             - Speculation opportunities skipped with dominant saved reuse: \(count("memoryAwareSpeculationSkipped"))
-            - Complete captions assembled from RAM around a busy model lane: \(count("ramCaptionBypasses"))
+            - Complete captions assembled through exact RAM: \(count("ramCaptionBypasses"))
+            - Saved units prefetched around model work: \(count("savedUnitsPrefetched"))
+            - Saved captions delivered around model work: \(count("savedCaptionBypasses"))
+            - Speculation opportunities skipped by blocking budget: \(count("speculationBudgetSkipped"))
+            - Warm session ownership transfers: \(count("warmSessionTransfers"))
             - Exact assembled captions reused: \(count("exactCaptionHits"))
             - Exact confirmed in-flight units shared with replacement captions: \(count("sharedConfirmedInFlightUnits"))
             - Exact duplicate units coalesced: \(count("exactUnitsCoalesced"))
