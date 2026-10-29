@@ -54,6 +54,9 @@ assert 'preserveIdleSessions: true' in engine
 assert 'lastModePreparationPair' in engine and 'lastModePreparationAt' in engine
 assert 'modeCoordinator.adaptiveHybrid = flag("adaptiveSpeculation", true)' in engine
 assert 'hybrid_overlapped_recovery_ms' in engine
+assert 'lastModePreparationPair = ""' in function(engine, 'invalidatePending'), 'Capture changes must reset mode session readiness throttle'
+assert 'lastModePreparationAt = .distantPast' in function(engine, 'invalidatePending')
+assert '!backendActivity.executing' in engine, 'Avoid live inference contention during readiness checks'
 assert 'pip.isShowingIdenticalFrame' in engine
 assert 'pip_held_unchanged' in engine
 assert 'installedCheckTTL: Double = 30' in service

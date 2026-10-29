@@ -1156,6 +1156,10 @@ final class TranslatorEngine: ObservableObject {
         }
         modeWorkActivity = nil; modeActivityCaption = nil; modeActivitySelected = false
         preparationTicket = UUID()
+        // A new capture/mode context deserves a fresh session readiness check.
+        // The five-second retry throttle applies only within one unchanged context.
+        lastModePreparationPair = ""
+        lastModePreparationAt = .distantPast
         interruptWarmupForLiveWork()
         modeSessionID = UUID(); modeLastIdentity = ""; modePlans.removeAll(); modeMemoryOrigins.removeAll()
         if modeDiagnosticEpochs.count >= 64 { modeDiagnosticEpochs.removeAll() }
