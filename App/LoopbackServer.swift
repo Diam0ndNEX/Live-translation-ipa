@@ -79,7 +79,7 @@ final class LoopbackServer {
             guard let self, self.generation == ticket, self.peer === connection else { return }
             if let data, data.count <= 60_000,
                let packet = try? JSONDecoder().decode(Packet.self, from: data),
-               ["ping", "ocr", "clear"].contains(packet.kind), packet.lines.count <= 60 {
+               ["ping", "ocr", "clear", "stopped"].contains(packet.kind), packet.lines.count <= 60 {
                 Task(priority: .userInitiated) { @MainActor [weak self] in self?.onPacket?(packet) }
             }
             if error == nil { self.receive(on: connection, ticket: ticket) }

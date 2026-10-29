@@ -4,6 +4,7 @@ import SwiftUI
 /// information-architecture change, not a migration or a change of defaults.
 struct TranslationSettings: View {
     @EnvironmentObject private var engine: TranslatorEngine
+    @AppStorage("translationSystem") private var translationSystem = TranslationSystem.legacy.rawValue
     @AppStorage("translateAhead") private var translateAhead = true
     @AppStorage("keepWarm") private var keepWarm = true
     @AppStorage("predictiveWarmup") private var predictiveWarmup = true
@@ -18,6 +19,22 @@ struct TranslationSettings: View {
 
     var body: some View {
         List {
+            Section {
+                Picker("Translation system", selection: $translationSystem) {
+                    ForEach(TranslationSystem.allCases, id: \.rawValue) { system in
+                        Text(system.title).tag(system.rawValue)
+                    }
+                }
+                Text((TranslationSystem(rawValue: translationSystem) ?? .legacy).explanation)
+                    .font(.footnote).foregroundStyle(.secondary)
+                LabeledContent("Active system", value: engine.activeTranslationSystem.title)
+                if engine.activeTranslationSystem != engine.pendingTranslationSystem {
+                    LabeledContent("Next capture session", value: engine.pendingTranslationSystem.title)
+                    Text("Stop and restart capture to apply the selected system.").font(.footnote)
+                }
+                Text(engine.modeAvailability).font(.footnote).foregroundStyle(.secondary)
+            } header: { Text("Translation system") }
+
             Section {
                 Toggle("Translate ahead", isOn: $translateAhead)
                 Text("Starts translating a promising first reading before OCR confirms it; shows results only after confirmation.")
@@ -56,11 +73,12 @@ struct TranslationSettings: View {
             } header: { Text("Reuse & memory") }
 
             ResetSection(keys: [
-                "translateAhead", "keepWarm", "predictiveWarmup", "remember",
+                "translationSystem", "translateAhead", "keepWarm", "predictiveWarmup", "remember",
                 "selectiveSpeculation", "adaptiveSpeculation", "speculationConfidence"
             ])
         }
         .settingsPage("Translation & memory")
+        .onChange(of: translationSystem) { _, _ in engine.translationSystemChanged() }
         .onChange(of: translateAhead) { _, _ in engine.syncConfig() }
         .onChange(of: keepWarm) { _, _ in engine.powerPolicyChanged() }
         .onChange(of: policySignature) { _, _ in engine.pipelineSettingsChanged() }

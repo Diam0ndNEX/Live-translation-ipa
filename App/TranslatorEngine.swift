@@ -88,7 +88,7 @@ final class TranslatorEngine: ObservableObject {
         "frameRot", "dropNoise", "boost", "skipUnchanged", "subtitleAwareChangeDetection", "preserveRelatedMovieGroups", "cleanOCR", "slang", "speakerDetect", "highlightNames",
         "langLock", "neverTranslate", "sourceFixes", "glossary", "winSize", "theme", "textSize", "pipFont",
         "showOriginal", "autoClear", "clearHold", "minDisplay", "autoOpenPiP", "haptics", "speak", "speechRate",
-        "autoCopy", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember", "lowLatencyTranslation", "incrementalBatchRecovery", "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
+        "autoCopy", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember", "translationSystem", "lowLatencyTranslation", "incrementalBatchRecovery", "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
         "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode", "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "smartCool", "steadyCaptions", "languageRecovery", "deduplicateCopies", "continuousRotation", "contextualLanguage"
     ]
     /// App look & behaviour that presets do not touch.
@@ -103,7 +103,7 @@ final class TranslatorEngine: ObservableObject {
         "glossary": "", "winSize": "normal", "theme": "dark", "textSize": "auto", "pipFont": "standard",
         "showOriginal": false, "autoClear": true, "clearHold": 1.0, "minDisplay": 0.0, "autoOpenPiP": true,
         "haptics": false, "speak": false, "speechRate": 0.5, "autoCopy": false, "adaptive": true, "idleMinutes": 0,
-        "translateAhead": true, "keepWarm": true, "remember": true, "lowLatencyTranslation": false, "incrementalBatchRecovery": false,
+        "translateAhead": true, "keepWarm": true, "remember": true, "translationSystem": "legacy", "lowLatencyTranslation": false, "incrementalBatchRecovery": false,
         "adaptiveSpeculation": true, "protectConfirmedPresentation": true, "predictiveWarmup": true,
         "displayPolicy": "immediate", "pipWeight": "bold", "pipAlignment": "left", "pipLineSpacing": 0.0,
         "pipPadding": 24.0, "originalFraction": 0.27, "pipScale": 1.0, "speakerAccent": "blue", "heartbeatInterval": 1.0,
@@ -187,6 +187,161 @@ final class TranslatorEngine: ObservableObject {
     let diag = Diagnostics()
     let presets = PresetStore()
     let latency = LatencyMonitor()
+
+    @Published private(set) var activeTranslationSystem = TranslationSystem.legacy
+    @Published private(set) var pendingTranslationSystem = TranslationSystem.legacy
+    @Published private(set) var modeAvailability = ""
+    private var captureTransportID: String?
+    private var modeSessionID = UUID()
+    private var modeRevision = 0
+    private var modeLastIdentity = ""
+    private var modePlans: [String: ([[CaptionTranslationUnit]], Packet, ModeCaption)] = [:]
+    private let modeService = ModeTranslationService()
+    private lazy var modeCoordinator = ThreeModeCoordinator(
+        lookup: { [weak self] caption in await self?.lookupModeMemory(caption) ?? caption.keys.map { _ in nil } },
+        translate: { [weak self] caption, indices, strategy, speculative in
+            await self?.modeService.translate(caption, indices: indices, strategy: strategy, speculation: speculative)
+        },
+        cancel: { [weak self] speculative in self?.modeService.cancel(speculation: speculative) },
+        selected: { [weak self] caption, output, reason in self?.selectModeResult(caption, output: output, reason: reason) },
+        event: { [weak self] caption, reason, ms in self?.noteModeEvent(caption, reason: reason, duration: ms) },
+        status: { [weak self] message in self?.modeAvailability = message; self?.status = message })
+
+    func translationSystemChanged() {
+        pendingTranslationSystem = TranslationSystem.migrate(ud).0
+        diag.modePendingSystem = pendingTranslationSystem.rawValue
+        if !captureAlive { activateTranslationSystem() }
+    }
+
+    private func activateTranslationSystem() {
+        let selection = TranslationSystem.migrate(ud)
+        pendingTranslationSystem = selection.0
+        if activeTranslationSystem != selection.0 {
+            invalidatePending()
+            directSession = nil; directKey = ""; availCache.removeAll()
+        }
+        activeTranslationSystem = selection.0
+        modeCoordinator.system = selection.0
+        diag.modeActiveSystem = selection.0.rawValue
+        diag.modePendingSystem = selection.0.rawValue
+        diag.modeMigration = selection.1
+        modeAvailability = selection.0 == .legacy ? "Apple default; effective model identity unavailable" : "Checking installed low-latency languages"
+        if selection.0 != .legacy, sourceCode != "auto" {
+            let session = modeSessionID, source = sourceCode, target = targetCode
+            Task { [weak self] in
+                guard let self else { return }
+                let status = await self.modeService.prepare(source: source, target: target, system: selection.0)
+                guard session == self.modeSessionID, source == self.sourceCode, target == self.targetCode else { return }
+                self.modeAvailability = status
+            }
+        }
+    }
+
+    private func noteModeEvent(_ caption: ModeCaption, reason: String, duration: Double?) {
+        guard caption.session == modeSessionID else { return }
+        diag.noteModeEvent(session: caption.session, caption: caption.caption, revision: caption.revision,
+            source: caption.source, target: caption.target,
+            fingerprint: SHA256.hash(data: Data(caption.fingerprint.utf8)).map { String(format: "%02x", $0) }.joined(),
+            reason: reason, firstOCR: caption.firstOCR, duration: duration)
+    }
+
+    private func handleModeCaption(_ blocks: [String], packet: Packet) {
+        guard let choice = detectSource(blocks.joined(separator: "\n"), record: packet.stable != false),
+              choice.language.languageCode != Locale.Language(identifier: targetCode).languageCode else { return }
+        let source = choice.language.minimalIdentifier
+        let text = blocks.joined(separator: "\n")
+        let identity = "\(packet.candidateID ?? "manual")|\(source)|\(targetCode)|\(ConfirmedSourceIdentity.normalize(text))"
+        if identity != modeLastIdentity { modeRevision += 1; modeLastIdentity = identity }
+        var rows: [[CaptionTranslationUnit]] = []
+        var keys: [String] = [], inputs: [String] = []
+        for block in blocks {
+            let clean = cleanedSource(block, enabled: flag("cleanOCR", true), fixes: pairs("sourceFixes"))
+            let parts = preparedSourceUnits(clean, language: choice.language.languageCode?.identifier ?? source,
+                slang: flag("slang", true), speakers: flag("speakerDetect", true), protected: list("neverTranslate", lower: false))
+            var row: [CaptionTranslationUnit] = []
+            for part in parts {
+                row.append(CaptionTranslationUnit(label: part.label, sentences: part.sentences,
+                    out: part.sentences.map { _ in nil }, tokens: part.tokens))
+                for sentence in part.sentences {
+                    inputs.append(sentence)
+                    keys.append(PipelineSafety.cacheKey(source: source, target: targetCode, text: sentence,
+                        protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: memoryRuleToken))
+                }
+            }
+            rows.append(row)
+        }
+        guard !inputs.isEmpty else { return }
+        let captionID = packet.candidateID ?? "manual-\(modeRevision)"
+        let monotonicOrigin = ProcessInfo.processInfo.systemUptime - max(0, Date().timeIntervalSince1970 - (packet.firstSeenAt ?? packet.ts ?? Date().timeIntervalSince1970))
+        let caption = ModeCaption(session: modeSessionID, caption: captionID, revision: modeRevision,
+            source: source, target: targetCode, rules: memoryRuleToken, text: text,
+            units: inputs, keys: keys, firstOCR: monotonicOrigin)
+        let confirmed = packet.stable != false
+        if confirmed {
+            activeCandidateID = captionID; activeCandidateText = text
+            activeCandidateConfirmed = true; activeCandidatePresented = false
+            latestBlocks = blocks
+            modePlans = [captionID: (rows, packet, caption)]
+            detectedLang = source
+            noteModeEvent(caption, reason: "confirmed", duration: nil)
+        }
+        let thermal = ProcessInfo.processInfo.thermalState
+        let admitted = memoryTestMode.allowsSpeculation && flag("translateAhead", true) &&
+            thermal != .serious && thermal != .critical &&
+            SpeculationPolicy.credible(lines: packet.lines, threshold: num("speculationConfidence", 0.85))
+        modeCoordinator.allowsReuse = memoryTestMode.allowsReuse && !bypassMemory
+        modeCoordinator.observe(caption, confirmed: confirmed, speculate: admitted)
+    }
+
+    private func lookupModeMemory(_ caption: ModeCaption) async -> [String?] {
+        let bank = ram, context = contextRevision
+        var output: [String?] = []
+        for key in caption.keys {
+            guard context == contextRevision, caption.session == modeSessionID else { return caption.keys.map { _ in nil } }
+            if let hit = bank.values[key] { output.append(hit); continue }
+            if allowsPersistentTranslations, memoryReady, flag("remember", true), !flag("privateSession", false) {
+                let hit = await memoryStore.lookup(key: key)
+                guard context == contextRevision else { return caption.keys.map { _ in nil } }
+                output.append(hit.value)
+            } else { output.append(nil) }
+        }
+        return output
+    }
+
+    private func selectModeResult(_ caption: ModeCaption, output: ModeOutput, reason: String) {
+        guard caption.session == modeSessionID, let (template, packet, expected) = modePlans[caption.caption],
+              caption == expected, caption.source == (sourceCode == "auto" ? detectedLang : Locale.Language(identifier: sourceCode).minimalIdentifier),
+              caption.target == targetCode, caption.rules == memoryRuleToken else { return }
+        var rows = template, index = 0
+        for b in rows.indices { for u in rows[b].indices { for i in rows[b][u].out.indices {
+            guard index < output.values.count else { return }
+            rows[b][u].out[i] = output.values[index]; index += 1
+        } } }
+        guard let result = CaptionAssembly.complete(rows, glossary: pairs("glossary")), index == output.values.count else { return }
+        // LL values never enter the shared preferred namespace, even in RAM.
+        if memoryTestMode.allowsReuse {
+            for i in output.values.indices where output.strategies[i] == .appleDefault {
+                ram.values[caption.keys[i]] = output.values[i]; touchCache(caption.keys[i])
+                let confidence = sourceCode == "auto" ? (languageEvidence(caption.text, limit: 5).1.filter {
+                    SourceLanguageRouter.sameLanguage($0.key.rawValue, caption.source)
+                }.values.max() ?? 0) : 1
+                if TranslationUnitPlanning.mayRemember(caption.units[i], confirmed: true),
+                   MemoryRetentionPolicy.mayPersist(privateSession: flag("privateSession", false), selectedSource: sourceCode != "auto", confidence: confidence, confirmed: true) {
+                    queueMemory(caption.keys[i], output.values[i], independentlyConfirmed: true)
+                }
+            }
+            trimCache()
+        }
+        let now = Date()
+        let origin = now.timeIntervalSince1970 - max(0, ProcessInfo.processInfo.systemUptime - caption.firstOCR)
+        let timing = PresentationTiming(packet: packet, firstSeen: origin, queuedAt: now,
+            processingAt: now, processingMs: 0, savedRequests: output.origins.filter { $0 == "compatible_memory" }.count, readyAt: now)
+        show(caption.text, result, timing: timing)
+        if original == caption.text && translated == result {
+            noteModeEvent(caption, reason: "pip_enqueue_" + reason,
+                duration: max(0, ProcessInfo.processInfo.systemUptime - caption.firstOCR) * 1000)
+        } else { noteModeEvent(caption, reason: "display_failed", duration: nil) }
+    }
 
     private var contextRevision = 0
     private var generation = 0
@@ -365,6 +520,10 @@ final class TranslatorEngine: ObservableObject {
     }
 
     init() {
+        let migration = TranslationSystem.migrate(UserDefaults.standard)
+        activeTranslationSystem = migration.0; pendingTranslationSystem = migration.0
+        diag.modeActiveSystem = migration.0.rawValue; diag.modePendingSystem = migration.0.rawValue
+        diag.modeMigration = migration.1
         sourceCode = UserDefaults.standard.string(forKey: "source") ?? "auto"
         targetCode = UserDefaults.standard.string(forKey: "target") ?? "en"
         memoryTestMode = TranslationTestMode(freshRequests: flag("freshTranslationTest", false),
@@ -374,6 +533,9 @@ final class TranslatorEngine: ObservableObject {
             guard let self, self.memoryTestMode.allowsReuse else { return 0 }
             return self.ram.values.count
         }
+        modeCoordinator.system = activeTranslationSystem
+        modeService.event = { [weak self] caption, reason, ms in self?.noteModeEvent(caption, reason: reason, duration: ms) }
+        modeService.status = { [weak self] message in self?.modeAvailability = message }
         server.onPacket = { [weak self] packet in self?.handle(packet) }
         server.start()
         Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -415,6 +577,7 @@ final class TranslatorEngine: ObservableObject {
             status = "Capture stopped – iOS may have closed the capture extension. Tap the broadcast icon again (try Speed: Fast)."
             diag.log("Capture stopped")
             diag.noteRuntimeState("heartbeat_timeout")
+            if activeTranslationSystem != .legacy { invalidatePending() }
         }
         if captureAlive != alive { captureAlive = alive }
         if alive, let started = sessionStarted, int("sessionLimit", 0) > 0,
@@ -637,6 +800,8 @@ final class TranslatorEngine: ObservableObject {
     /// Invalidate suspended work before changing language, capture state, or settings.
     private func invalidatePending() {
         interruptWarmupForLiveWork()
+        modeSessionID = UUID(); modeLastIdentity = ""; modePlans.removeAll()
+        modeCoordinator.reset(); modeService.reset()
         contextRevision += 1
         generation += 1
         cancelDrain(preemptSpeculation: true)
@@ -837,6 +1002,17 @@ final class TranslatorEngine: ObservableObject {
     private func handle(_ incoming: Packet) {
         let p = incoming
         let now = Date()
+        if p.kind == "stopped" {
+            guard p.captureSessionID == nil || p.captureSessionID == captureTransportID else { return }
+            captureAlive = false; lastPacketDate = .distantPast
+            invalidatePending()
+            diag.noteRuntimeState("heartbeat_timeout")
+            return
+        }
+        if let transportID = p.captureSessionID, transportID != captureTransportID {
+            captureTransportID = transportID
+            if captureAlive { invalidatePending(); captureAlive = false }
+        }
         let wasAlive = captureAlive
         lastPacketDate = now
         if !captureAlive { captureAlive = true }
@@ -849,6 +1025,7 @@ final class TranslatorEngine: ObservableObject {
         }
 
         if !wasAlive {
+            activateTranslationSystem()
             interruptWarmupForLiveWork()
             startupWarmupTask?.cancel() // Live capture takes priority over idle prewarming.
             startupWarmupTask = nil
@@ -910,6 +1087,10 @@ final class TranslatorEngine: ObservableObject {
                 diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
                                           stage: "ocr_filtering", reason: "rejected_empty")
             }
+            return
+        }
+        if activeTranslationSystem != .legacy {
+            handleModeCaption(candidateTexts, packet: p)
             return
         }
         let candidateText = candidateTexts.map(TextSim.norm).joined(separator: "\n")
@@ -1299,6 +1480,14 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func enqueue(_ blocks: [String]) {
+        if activeTranslationSystem != .legacy {
+            guard !blocks.isEmpty else { return }
+            var packet = Packet(kind: "ocr", version: AppVersion.full, frames: frames, lines: [])
+            packet.candidateID = "manual-\(UUID().uuidString)"; packet.stable = true
+            packet.firstSeenAt = Date().timeIntervalSince1970
+            handleModeCaption(blocks, packet: packet)
+            return
+        }
         let joined = blocks.joined(separator: "\n")
         guard !blocks.isEmpty, joined != lastHandled else { return }
         if PipelineSafety.isDuplicate(blocks, previous: lastHandled.components(separatedBy: "\n")) { return }
@@ -1470,7 +1659,7 @@ final class TranslatorEngine: ObservableObject {
         // low-latency model was selected on a supported OS.
         if #available(iOS 26.4, *) {
             snapshot = TranslationModelMemoryPolicy.rulesContext(
-                base: snapshot, lowLatency: flag("lowLatencyTranslation", false))
+                base: snapshot, lowLatency: false)
         }
         if snapshot != rulesSnapshot {
             rulesSnapshot = snapshot
@@ -1517,10 +1706,10 @@ final class TranslatorEngine: ObservableObject {
         if target.minimalIdentifier == Locale.Language(identifier: targetCode).minimalIdentifier,
            src.minimalIdentifier == Locale.Language(identifier: sourceCode).minimalIdentifier,
            let s = langStatus[sourceCode] { return s }
-        let k = "\(src.minimalIdentifier)>\(target.minimalIdentifier)|\(flag("lowLatencyTranslation", false) ? "low" : "default")"
+        let k = "\(src.minimalIdentifier)>\(target.minimalIdentifier)|\((activeTranslationSystem == .lowLatency) ? "low" : "default")"
         if let c = availCache[k], Date().timeIntervalSince(c.0) < 60 { return c.1 }
         let availability: LanguageAvailability
-        if #available(iOS 26.4, *), flag("lowLatencyTranslation", false) {
+        if #available(iOS 26.4, *), (activeTranslationSystem == .lowLatency) {
             availability = LanguageAvailability(preferredStrategy: .lowLatency)
         } else {
             availability = LanguageAvailability()
@@ -2100,7 +2289,7 @@ final class TranslatorEngine: ObservableObject {
                                 installed: Bool, speculative: Bool = false,
                                 partial: (@MainActor (Int, String) -> Void)? = nil) async -> [String]? {
         if #available(iOS 26.0, *), installed {
-            let k = "\(source.minimalIdentifier)>\(targetCode)|\(flag("lowLatencyTranslation", false) ? "low" : "default")"
+            let k = "\(source.minimalIdentifier)>\(targetCode)|\((activeTranslationSystem == .lowLatency) ? "low" : "default")"
             guard !Task.isCancelled else { return nil }
             if diag.enabled { diag.s.sessionKind = "Direct session (iOS 26)" }
             if speculative {
@@ -2108,7 +2297,7 @@ final class TranslatorEngine: ObservableObject {
                 let diagnosticEpoch = diag.started
                 let lease = speculativeSessions.begin(key: k) {
                     diag.noteModelState("speculative_session_created")
-                    if #available(iOS 26.4, *), flag("lowLatencyTranslation", false) {
+                    if #available(iOS 26.4, *), (activeTranslationSystem == .lowLatency) {
                         return TranslationSession(installedSource: source, target: target, preferredStrategy: .lowLatency)
                     }
                     return TranslationSession(installedSource: source, target: target)
@@ -2126,7 +2315,7 @@ final class TranslatorEngine: ObservableObject {
             }
             if directSession == nil || directKey != k {
                 diag.noteModelState("model_session_created")
-                if #available(iOS 26.4, *), flag("lowLatencyTranslation", false) {
+                if #available(iOS 26.4, *), (activeTranslationSystem == .lowLatency) {
                     directSession = TranslationSession(installedSource: source, target: target, preferredStrategy: .lowLatency)
                 } else {
                     directSession = TranslationSession(installedSource: source, target: target)
@@ -2254,7 +2443,7 @@ final class TranslatorEngine: ObservableObject {
         clearTask = nil
         guard !frozen, (!paused || manualMode),
               CandidateValidity.isCurrent(timing.packet?.candidateID, active: activeCandidateID, enabled: flag("steadyCaptions", true), allowLegacy: true) else { return }
-        guard !PipelineSafety.isRecentFragment(text, of: original, age: Date().timeIntervalSince(lastShowDate)) else { return }
+        if activeTranslationSystem == .legacy, PipelineSafety.isRecentFragment(text, of: original, age: Date().timeIntervalSince(lastShowDate)) { return }
         let renderStart = Date()
         pip.style = pipStyle
         guard pip.render(original: text, translated: result, showOriginal: showOriginal,
@@ -2735,6 +2924,7 @@ final class TranslatorEngine: ObservableObject {
     }
 
     func startLegacyValidation(maxEntries: Int = IdleLegacyBatchPolicy.manualEntries) {
+        guard activeTranslationSystem == .legacy else { legacyIdleValidationStatus = "Available in Legacy"; return }
         guard idleValidationTask == nil else { return }
         refreshLegacyScanContext()
         if legacyValidationExhausted {
@@ -3004,6 +3194,13 @@ final class TranslatorEngine: ObservableObject {
 
     /// Loads the translation models before they're needed so the first real sentence isn't slow.
     func prewarm() async {
+        if activeTranslationSystem != .legacy {
+            guard sourceCode != "auto", !captureAlive else { return }
+            let session = modeSessionID, system = activeTranslationSystem
+            let result = await modeService.prepare(source: sourceCode, target: targetCode, system: system)
+            if session == modeSessionID { modeAvailability = result; warmupStatus = result }
+            return
+        }
         guard !Task.isCancelled, runtimePolicy.allowsPrewarming, flag("keepWarm", true), !paused,
               !legacyValidationBusy, !busy, !warming,
               queued == nil, !waitingToDisplay,
@@ -3038,7 +3235,7 @@ final class TranslatorEngine: ObservableObject {
         guard src.languageCode != target.languageCode,
               let word = Self.warmWords[src.languageCode?.identifier ?? code] else { return }
         // Avoid reloading the same model while a usable warm session exists.
-        let warmKey = "\(src.minimalIdentifier)>\(destination)|\(flag("lowLatencyTranslation", false) ? "low" : "default")"
+        let warmKey = "\(src.minimalIdentifier)>\(destination)|\((activeTranslationSystem == .lowLatency) ? "low" : "default")"
         guard directSession == nil || directKey != warmKey else {
             warmupStatus = "Ready"
             return
@@ -3056,7 +3253,7 @@ final class TranslatorEngine: ObservableObject {
         diag.noteModelState("warmup_started")
         if predicted { diag.noteModelState("warmup_predicted_source") }
         let session: TranslationSession
-        if #available(iOS 26.4, *), flag("lowLatencyTranslation", false) {
+        if #available(iOS 26.4, *), (activeTranslationSystem == .lowLatency) {
             session = TranslationSession(installedSource: src, target: target, preferredStrategy: .lowLatency)
         } else {
             session = TranslationSession(installedSource: src, target: target)
@@ -3119,7 +3316,7 @@ final class TranslatorEngine: ObservableObject {
                 if var c = legacyConfig, c.source == source, c.target == target {
                     c.invalidate(); legacyConfig = c
                 } else {
-                    if #available(iOS 26.4, *), flag("lowLatencyTranslation", false) {
+                    if #available(iOS 26.4, *), (activeTranslationSystem == .lowLatency) {
                         legacyConfig = .init(source: source, target: target, preferredStrategy: .lowLatency)
                     } else {
                         legacyConfig = .init(source: source, target: target)
@@ -3174,7 +3371,7 @@ final class TranslatorEngine: ObservableObject {
         let destination = targetCode
         let target = Locale.Language(identifier: destination)
         let av: LanguageAvailability
-        if #available(iOS 26.4, *), flag("lowLatencyTranslation", false) {
+        if #available(iOS 26.4, *), (activeTranslationSystem == .lowLatency) {
             av = LanguageAvailability(preferredStrategy: .lowLatency)
         } else {
             av = LanguageAvailability()
@@ -3197,6 +3394,11 @@ final class TranslatorEngine: ObservableObject {
     }
 
     func download(_ code: String) {
+        if pendingTranslationSystem != .legacy {
+            guard #available(iOS 26.4, *) else { downloadMessage = "Explicit low latency requires iOS 26.4"; return }
+            downloadConfig = .init(source: Locale.Language(identifier: code), target: Locale.Language(identifier: targetCode), preferredStrategy: .lowLatency)
+            return
+        }
         let src = Locale.Language(identifier: code)
         let tgt = Locale.Language(identifier: targetCode)
         if var c = downloadConfig, c.source == src, c.target == tgt {
@@ -3257,6 +3459,7 @@ final class TranslatorEngine: ObservableObject {
     func resetAllSettings() { resetKeys(Self.settingKeys) }
     /// Re-reads everything after settings were changed in bulk.
     func reloadSettings() {
+        translationSystemChanged()
         testModeSettingsChanged()
         suppressRecent = true
         sourceCode = ud.string(forKey: "source") ?? "auto"

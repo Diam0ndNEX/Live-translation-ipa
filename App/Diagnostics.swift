@@ -1,3 +1,4 @@
+import CryptoKit
 // Screen Translator – App – v0.11.0
 import SwiftUI
 import Charts
@@ -567,6 +568,23 @@ final class Diagnostics: ObservableObject {
 
     func memoryOutcomesForUI(_ outcome: MemoryDiagnosticOutcome) -> Int { memoryOutcomes[outcome, default: 0] }
 
+    var modeActiveSystem = "legacy"
+    var modePendingSystem = "legacy"
+    var modeMigration = "persisted"
+    private var modeTrace: [TranslationModeTrace] = []
+
+    func noteModeEvent(session: UUID, caption: String, revision: Int, source: String, target: String,
+                       fingerprint: String, reason: String, firstOCR: Double, duration: Double?) {
+        guard enabled else { return }
+        // Caption identifiers are hashed by the producer, never OCR text.
+        let safeCaption = SHA256.hash(data: Data(caption.utf8)).map { String(format: "%02x", $0) }.joined()
+        modeTrace.append(TranslationModeTrace(session: session, caption: safeCaption, revision: revision,
+            source: source, target: target, fingerprint: fingerprint, reason: reason,
+            monotonicTime: ProcessInfo.processInfo.systemUptime, firstOCR: firstOCR,
+            durationMs: duration, thermal: ProcessInfo.processInfo.thermalState.rawValue))
+        if modeTrace.count > 2400 { modeTrace.removeFirst(modeTrace.count - 2400) }
+    }
+
     func sessionSnapshot() -> DiagnosticSessionExport {
         // Explicit allowlist excludes glossary, protected names, source fixes, user text and paths.
         let keys = ["mode", "speed", "stability", "frameRot", "area", "adaptiveOCR", "remember", "privateSession", "diagnosticsEnabled", "detailedCollection",
@@ -621,7 +639,9 @@ final class Diagnostics: ObservableObject {
         counters["emptyOCRPasses"] = s.emptyOCRPasses
         var currentHealth = memoryHealth
         currentHealth.ramEntries = ramEntryCount?() ?? memoryHealth.ramEntries
-        return DiagnosticSessionExport(id: diagnosticSessionID, startedAt: started, endedAt: Date(),
+        return DiagnosticSessionExport(translationModes: TranslationModeReport(active: modeActiveSystem,
+            pending: modePendingSystem, referenceSHA: TranslationSystem.referenceSHA,
+            migration: modeMigration, events: modeTrace, distributions: [:], counters: [:]).sanitized(), id: diagnosticSessionID, startedAt: started, endedAt: Date(),
             appVersion: AppVersion.full, systemVersion: UIDevice.current.systemVersion,
             hardwareModel: Self.hardwareModelCode, settings: settings, health: currentHealth, counters: counters,
             distributions: ["memoryLookupMs": DiagnosticDistribution(lookupSamples), "memoryWriteMs": DiagnosticDistribution(writeSamples),
@@ -826,6 +846,7 @@ final class Diagnostics: ObservableObject {
     }
 
     func reset() {
+        modeTrace.removeAll()
         persistSession()
         diagnosticSessionID = UUID(); candidateIDs = [:]; frameIDs = [:]; unitIDs = [:]; structuredEvents = []
         legacyValidationSnapshot = [:]; legacyValidationPair = [:]
