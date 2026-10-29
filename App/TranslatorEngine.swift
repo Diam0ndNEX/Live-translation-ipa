@@ -2094,7 +2094,10 @@ final class TranslatorEngine: ObservableObject {
                     return TranslationSession(installedSource: source, target: target)
                 }
                 let result = await runBatch(lease.session, texts, speculative: true, partial: partial)
-                speculativeSessions.finish(lease, reusable: result != nil && !Task.isCancelled && workContext == contextRevision)
+                // A cancelled Swift task can still return a complete valid batch.
+                // Only explicit session cancellation (tracked by the lease),
+                // failure or context change prevents warm-session reuse.
+                speculativeSessions.finish(lease, reusable: result != nil && workContext == contextRevision)
                 if let requested = lease.cancellationRequestedAt, diag.started == diagnosticEpoch {
                     diag.noteModelState("speculative_stop_released",
                         durationMs: max(0, ProcessInfo.processInfo.systemUptime - requested) * 1000)
