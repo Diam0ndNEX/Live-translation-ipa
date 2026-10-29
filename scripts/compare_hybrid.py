@@ -23,6 +23,8 @@ def assess(baseline, candidate, evidence=None):
     for key in ('hybridLowBatches', 'confirmedModelBatches', 'hybridPreviewEnqueues'):
         if candidate.get('counters', {}).get(key, 0) < 1:
             issues.append(f'Both strategies/preview path not exercised: {key}')
+    if 'hybridRefinementsSuperseded' not in candidate.get('counters', {}):
+        issues.append('Missing high-fidelity refinement coverage evidence')
     if candidate.get('counters', {}).get('hybridRefinementsSuperseded', 0) > baseline['counters'].get('unpresentedConfirmed', 0):
         issues.append('High-fidelity refinement coverage worsened')
     factor = .75 if test_mode(candidate['settings']) == 'temporaryMemory' else .90

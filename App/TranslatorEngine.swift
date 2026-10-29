@@ -728,7 +728,7 @@ final class TranslatorEngine: ObservableObject {
 
     func clearOutput() {
         invalidatePending()
-        showing = false; original = ""; translated = ""
+        showing = false; original = ""; translated = ""; outputModelLabel = ""
         renderedGrams = placeholderGrams; sourceGrams = []
         pip.render(original: "", translated: "Listening…", showOriginal: false)
     }
@@ -1436,6 +1436,7 @@ final class TranslatorEngine: ObservableObject {
         lastHandled = ""
         original = ""
         translated = ""
+        outputModelLabel = ""
         renderedGrams = placeholderGrams
         pip.render(original: "", translated: "Listening…", showOriginal: false)
     }
@@ -1810,7 +1811,7 @@ final class TranslatorEngine: ObservableObject {
         if diag.enabled { diag.s.sentences += hits.count }
         diag.noteRAMCaptionBypass()
         let ready = ExactCaptionResult(translated: result, sentences: hits.count,
-            persistenceKeys: hits.filter { TranslationUnitPlanning.mayRemember($0.text, confirmed: true) }.map(\.key))
+            persistenceKeys: hits.filter { TranslationUnitPlanning.mayRemember($0.text, confirmed: true) }.map { $0.key })
         ram.retainCaption(key: identity, result: ready)
         return ready
     }
@@ -2285,8 +2286,8 @@ final class TranslatorEngine: ObservableObject {
                 } else { missing.append(item) }
             }
             if missing.isEmpty { continue }
-            let plan = TranslationBatchPlan(missing.map(\.text), contexts: missing.map(\.key))
-            modelUnitKeysInFlight = Set(missing.map(\.key))
+            let plan = TranslationBatchPlan(missing.map { $0.text }, contexts: missing.map { $0.key })
+            modelUnitKeysInFlight = Set(missing.map { $0.key })
             modelContextInFlight = contextRevision
             var submittedAt: Double?
             let translated = await hybridRunner.translate(plan.unique, source: source, target: target, isCurrent: isCurrent,

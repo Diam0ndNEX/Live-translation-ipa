@@ -15,7 +15,7 @@ class HybridGateTests(unittest.TestCase):
                     'distributions': {'enqueueLatencyMs': dict(count=100, **dict.fromkeys(STATISTICS, 600))}}
         self.new = copy.deepcopy(self.old)
         self.new['settings']['hybridTranslation'] = True
-        self.new['counters'].update(hybridLowBatches=30, confirmedModelBatches=30, hybridPreviewEnqueues=30)
+        self.new['counters'].update(hybridLowBatches=30, confirmedModelBatches=30, hybridPreviewEnqueues=30, hybridRefinementsSuperseded=0)
         self.new['distributions']['hybridFirstEnqueueMs'] = dict(count=100, **dict.fromkeys(STATISTICS, 450))
         self.new['distributions']['hybridFinalEnqueueMs'] = dict(count=100, **dict.fromkeys(STATISTICS, 600))
         self.evidence = dict.fromkeys(HYBRID_EVIDENCE, True)
@@ -41,6 +41,10 @@ class HybridGateTests(unittest.TestCase):
         self.assertFalse(assess(self.old, self.new)['accepted'])
         self.evidence['hybrid_preview_wording_acceptable'] = False
         self.assertFalse(assess(self.old, self.new, self.evidence)['accepted'])
+
+    def test_missing_final_coverage_is_not_assumed_zero(self):
+        del self.new["counters"]["hybridRefinementsSuperseded"]
+        self.assertFalse(assess(self.old, self.new, self.evidence)["accepted"])
 
     def test_final_coverage_vetoes_speed(self):
         self.new['counters']['hybridRefinementsSuperseded'] = 1

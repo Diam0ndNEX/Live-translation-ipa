@@ -28,6 +28,10 @@ struct HomeView: View {
         if engine.waitingToDisplay { return "Holding for readability" }
         return engine.isTranslating ? "Translating…" : "Reading your screen"
     }
+    private var liveStateDescription: String {
+        engine.captureAlive ? state + (engine.outputModelLabel.isEmpty ? "" : " · " + engine.outputModelLabel)
+            : "Use the broadcast button below to start or restart"
+    }
     private var captureColor: Color {
         switch engine.captureStatus {
         case .active: return .green
@@ -134,13 +138,13 @@ struct HomeView: View {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(engine.captureStatus.title).font(.subheadline.weight(.semibold))
                             .foregroundStyle(captureColor)
-                        Text(engine.captureAlive ? state + (engine.outputModelLabel.isEmpty ? "" : " · " + engine.outputModelLabel) : "Use the broadcast button below to start or restart")
+                        Text(liveStateDescription)
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 .padding(.vertical, 12)
                 .accessibilityElement(children: .combine)
-                .accessibilityLabel("\(engine.captureStatus.title). \(engine.captureAlive ? state : "Use the broadcast button to start or restart")")
+                .accessibilityLabel("\(engine.captureStatus.title). \(liveStateDescription)")
                 Spacer()
                 Button { destination = .reader } label: {
                     Image(systemName: "arrow.up.left.and.arrow.down.right").frame(width: 44, height: 44)
