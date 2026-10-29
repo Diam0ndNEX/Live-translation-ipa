@@ -2057,11 +2057,8 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func pairStatus(_ src: Locale.Language, _ target: Locale.Language) async -> LanguageAvailability.Status {
-        // Pipeline availability must use its own requested strategy, not Hybrid's aggregate UI status.
-        if activeTranslationSystem != .hybridRecovery,
-           target.minimalIdentifier == Locale.Language(identifier: targetCode).minimalIdentifier,
-           src.minimalIdentifier == Locale.Language(identifier: sourceCode).minimalIdentifier,
-           let s = langStatus[sourceCode] { return s }
+        // Never use presentation-layer aggregate status to admit a model request.
+        // The pending UI mode can differ from the currently active capture mode.
         let k = "\(src.minimalIdentifier)>\(target.minimalIdentifier)|\((activeTranslationSystem == .lowLatency) ? "low" : "default")"
         if let c = availCache[k], Date().timeIntervalSince(c.0) < 60 { return c.1 }
         let availability: LanguageAvailability
