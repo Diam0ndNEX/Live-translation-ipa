@@ -31,18 +31,63 @@ enum InitialWarmupSamples {
 
 struct InitialWarmupPolicy {
     private(set) var attempted: Set<String> = []
+    private(set) var completed: Set<String> = []
+    private var attempts: [String: Int] = [:]
+    private var retryAfter: [String: Date] = [:]
+    private(set) var totalAdmissions = 0
+    static let maxAttempts = 64
+    static let maxAttemptsPerPair = 3
+    static let retryCooldown: TimeInterval = 30
+
     static func strategies(for system: TranslationSystem) -> [RequestedTranslationStrategy] {
         switch system {
-        case .legacy: return [] // The verified Legacy pipeline owns its existing warm-up.
+        case .legacy: return []
         case .hybridRecovery: return [.appleDefault, .lowLatency]
         case .lowLatency: return [.lowLatency]
         }
     }
-    mutating func claim(source: String, target: String, strategy: RequestedTranslationStrategy) -> Bool {
-        let key = source + ">" + target + "|" + strategy.rawValue
-        guard attempted.count < 64, !attempted.contains(key) else { return false }
+
+    private static func key(source: String, target: String, strategy: RequestedTranslationStrategy) -> String {
+        source + ">" + target + "|" + strategy.rawValue
+    }
+
+    mutating func claim(source: String, target: String, strategy: RequestedTranslationStrategy,
+                        now: Date = Date()) -> Bool {
+        let key = Self.key(source: source, target: target, strategy: strategy)
+        guard !completed.contains(key),
+              totalAdmissions < Self.maxAttempts,
+              attempts[key, default: 0] < Self.maxAttemptsPerPair,
+              now >= (retryAfter[key] ?? .distantPast) else { return false }
+        attempts[key, default: 0] += 1
+        totalAdmissions += 1
         attempted.insert(key)
+        retryAfter[key] = now.addingTimeInterval(Self.retryCooldown)
         return true
+    }
+
+    mutating func finish(source: String, target: String, strategy: RequestedTranslationStrategy,
+                         succeeded: Bool, now: Date = Date()) {
+        let key = Self.key(source: source, target: target, strategy: strategy)
+        guard attempted.contains(key) else { return }
+        if succeeded {
+            completed.insert(key)
+            retryAfter.removeValue(forKey: key)
+        } else {
+            retryAfter[key] = now.addingTimeInterval(Self.retryCooldown)
+        }
+    }
+
+    func skippedReason(source: String, target: String, strategy: RequestedTranslationStrategy,
+                       now: Date = Date()) -> String {
+        let key = Self.key(source: source, target: target, strategy: strategy)
+        if completed.contains(key) { return "A previous model warm-up succeeded for this pair and strategy; no repeated request was made." }
+        if totalAdmissions >= Self.maxAttempts || attempts[key, default: 0] >= Self.maxAttemptsPerPair {
+            return "The initial warm-up attempt budget was reached; live translation remains available."
+        }
+        if let retry = retryAfter[key], now < retry {
+            return "An earlier warm-up was interrupted or failed. A bounded retry is allowed after the cooldown."
+        }
+        return "Initial warm-up was deferred by current model or power conditions."
     }
 }
 
@@ -207,7 +252,8 @@ struct TranslationReadiness: Equatable {
         else if languages == .blocked || sessions == .blocked || execution == .blocked { title = "Translator needs attention"; phase = .attention }
         else if languages == .working || sessions == .working { title = "Preparing translator"; phase = .working }
         else if sessions == .complete && execution == .complete { title = "Ready · model request verified"; phase = .ready }
-        else if sessions == .complete && execution == .idle { title = "Idle · previous model request recorded"; phase = .waiting }
+        else if execution == .idle { title = "Idle · previous model request recorded"; phase = .waiting }
+        else if sessions == .idle { title = "Session recheck pending"; phase = .waiting }
         else if sessions == .complete { title = "Configured · first model run pending"; phase = .waiting }
         else { title = "Waiting for preparation"; phase = .waiting }
         return TranslationActivity(title: title, detail: explanation, phase: phase, since: activeSince)
