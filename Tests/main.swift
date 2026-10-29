@@ -781,3 +781,45 @@ check(CaptionAssembly.complete([[CaptionTranslationUnit(label: nil, sentences: [
 check(CaptionAssembly.complete([], glossary: []) == nil && CaptionAssembly.complete([[]], glossary: []) == nil,
       "Empty assemblies cannot replace the current subtitle")
 print("v1.7.2 complete caption assembly checks passed")
+
+// Familiar-content throttling requires both low speculative usefulness AND
+// independently observed saved reuse; it must recover on a scene change.
+var familiarWindow = SpeculativeWorkWindow()
+for _ in 0..<24 {
+    let id = familiarWindow.begin()
+    familiarWindow.finish(id, discarded: true)
+    familiarWindow.recordConfirmedOutcome(saved: true)
+}
+let familiarProbes = (0..<12).map { _ in familiarWindow.allowsOpportunity(enabled: true) }
+check(familiarProbes.filter { $0 }.count == 4 && familiarProbes[2] && familiarProbes[5],
+      "Familiar low-yield scenes keep one speculative probe in three opportunities")
+check(familiarWindow.allowsOpportunity(enabled: false), "Disabling adaptive speculation bypasses saved-memory throttling")
+for _ in 0..<32 { familiarWindow.recordConfirmedOutcome(saved: false) }
+check(!familiarWindow.savedMemoryDominant, "Unfamiliar content ages saved-reuse evidence out of the bounded window")
+let unfamiliarProbes = (0..<12).map { _ in familiarWindow.allowsOpportunity(enabled: true) }
+check(unfamiliarProbes.filter { $0 }.count == 6,
+      "Misses/session/speculative reuse restore the previous unknown-content probe floor")
+for _ in 0..<32 {
+    let id = familiarWindow.begin()
+    familiarWindow.finish(id, discarded: false)
+    familiarWindow.reuse(id)
+    familiarWindow.recordConfirmedOutcome(saved: true)
+}
+check((0..<12).allSatisfy { _ in familiarWindow.allowsOpportunity(enabled: true) },
+      "Useful speculation stays enabled even when saved memory also helps")
+var sparseSavedWindow = SpeculativeWorkWindow()
+for _ in 0..<23 { sparseSavedWindow.recordConfirmedOutcome(saved: true) }
+check(!sparseSavedWindow.savedMemoryDominant, "Sparse saved-memory evidence cannot activate stronger backoff")
+check(SubtitleAcquisitionPolicy.rejectsDisplayedFragment(confirmed: true,
+    text: "the station", displayed: "We are going to the station tomorrow.", age: 0.5),
+    "An already displayed confirmed fragment must be rejected before active-work mutation")
+check(!SubtitleAcquisitionPolicy.rejectsDisplayedFragment(confirmed: false,
+    text: "the station", displayed: "We are going to the station tomorrow.", age: 0.5),
+    "Tentative sightings keep their existing speculation admission")
+check(!SubtitleAcquisitionPolicy.rejectsDisplayedFragment(confirmed: true,
+    text: "the station", displayed: "We are going to the station tomorrow.", age: 2.1),
+    "A later independent caption is not suppressed as a recent fragment")
+check(!SubtitleAcquisitionPolicy.rejectsDisplayedFragment(confirmed: true,
+    text: "Now we leave.", displayed: "We are going to the station tomorrow.", age: 0.5),
+    "Genuinely new confirmed dialogue remains eligible")
+print("v1.7.2 memory-aware speculation and fragment admission checks passed")

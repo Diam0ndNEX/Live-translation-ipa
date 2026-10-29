@@ -38,17 +38,18 @@ enum SubtitlePerformancePolicy {
     }
 
     /// Limit speculative model work when recent benefit is low. Never suppress
-    /// every request: alternate opportunities so the policy can recover.
+    /// every request: periodic opportunities let the policy recover.
     /// Ordinary confirmed subtitles are not gated by this function.
     static func allowSpeculation(attempts: Int, discarded: Int, hits: Int,
-                                 opportunity: Int, enabled: Bool) -> Bool {
+                                 opportunity: Int, enabled: Bool, savedMemoryDominant: Bool = false) -> Bool {
         guard enabled, attempts >= 24 else { return true }
         let lost = Double(max(0, discarded)) / Double(max(attempts, 1))
         let useful = Double(max(0, hits)) / Double(max(attempts, 1))
         guard lost >= 0.50, useful < 0.18 else { return true }
-        // Keep the 1.4.6 alternate-opportunity floor. More aggressive throttling
-        // can remove useful head starts and needs separate device evidence.
-        return opportunity.isMultiple(of: 2)
+        // Familiar content gets fewer probes only after independent confirmed
+        // reuse evidence. Unknown-content and temporary-bank behavior keep the
+        // existing alternate-opportunity floor. Never suppress all probes.
+        return opportunity.isMultiple(of: savedMemoryDominant ? 3 : 2)
     }
 
     /// Completed tentative output may seed RAM even after its caption was
@@ -107,6 +108,19 @@ struct SpeculativeWorkWindow {
     private var samples: [Sample] = []
     private var sequence: UInt64 = 0
     private var opportunities = 0
+    private var confirmedSavedOutcomes: [Bool] = []
+
+    var savedMemoryDominant: Bool {
+        confirmedSavedOutcomes.count >= 24 &&
+            confirmedSavedOutcomes.filter { $0 }.count * 4 >= confirmedSavedOutcomes.count * 3
+    }
+
+    /// Actual confirmed lookup outcomes, independent of diagnostics and model
+    /// completion. Misses/session/speculative hits age out a familiar scene.
+    mutating func recordConfirmedOutcome(saved: Bool) {
+        confirmedSavedOutcomes.append(saved)
+        if confirmedSavedOutcomes.count > 32 { confirmedSavedOutcomes.removeFirst() }
+    }
 
     mutating func begin() -> UInt64 {
         sequence &+= 1
@@ -126,7 +140,7 @@ struct SpeculativeWorkWindow {
         return SubtitlePerformancePolicy.allowSpeculation(attempts: completed.count,
             discarded: completed.filter { $0.discarded == true }.count,
             hits: completed.filter { $0.reused }.count,
-            opportunity: opportunities, enabled: enabled)
+            opportunity: opportunities, enabled: enabled, savedMemoryDominant: savedMemoryDominant)
     }
 }
 

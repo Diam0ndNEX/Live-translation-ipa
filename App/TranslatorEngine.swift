@@ -910,6 +910,17 @@ final class TranslatorEngine: ObservableObject {
         }
         let candidateText = candidateTexts.map(TextSim.norm).joined(separator: "\n")
         if p.stable != false && !replayed && diag.enabled { diag.s.confirmedCandidatePackets += 1 }
+        // Admission must precede generation changes, cancellation and continuity
+        // accounting. Rejected fragments never become active confirmed work.
+        if SubtitleAcquisitionPolicy.rejectsDisplayedFragment(confirmed: p.stable != false,
+            text: candidateTexts.joined(separator: "\n"), displayed: original,
+            age: Date().timeIntervalSince(lastShowDate)) {
+            if diag.detailedCollection {
+                diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
+                    stage: "duplicate_detection", reason: "rejected_recent_fragment")
+            }
+            return
+        }
         let equivalentActiveCaption = SubtitleAcquisitionPolicy.isSameUnpresentedCaption(
             activeConfirmed: activeCandidateConfirmed,
             activePresented: activeCandidatePresented,
@@ -996,6 +1007,7 @@ final class TranslatorEngine: ObservableObject {
             if speculationAllowed && flag("translateAhead", true) {
                 if !ram.speculationWindow.allowsOpportunity(enabled: flag("adaptiveSpeculation", true)) {
                     if diag.enabled { diag.s.adaptiveSpeculationSkipped += 1 }
+                    if ram.speculationWindow.savedMemoryDominant { diag.noteMemoryAwareSpeculationSkip() }
                     diag.notePipelineDecision(candidate: p.candidateID,
                         frameIndex: p.frames, stage: "stability",
                         reason: "adaptive_speculation_backoff")
@@ -1029,14 +1041,6 @@ final class TranslatorEngine: ObservableObject {
         }
 
         let texts = candidateTexts
-        guard !PipelineSafety.isRecentFragment(texts.joined(separator: "\n"), of: original,
-                                               age: Date().timeIntervalSince(lastShowDate)) else {
-            if diag.detailedCollection {
-                diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
-                    stage: "duplicate_detection", reason: "rejected_recent_fragment")
-            }
-            return
-        }
         latestBlocks = texts
         clearTask?.cancel()
         clearTask = nil
@@ -1400,6 +1404,7 @@ final class TranslatorEngine: ObservableObject {
         }
         while queued != nil || specQueued != nil {
             guard !Task.isCancelled else { return }
+            if deferredConfirmedPacket != nil, activeCandidatePresented, !waitingToDisplay { return }
             if let b = queued {
                 queued = nil
                 currentTs = queuedTs; currentPacket = queuedPacket; currentQueuedAt = queuedAt
@@ -1619,6 +1624,7 @@ final class TranslatorEngine: ObservableObject {
             touchCache(hit.key)
             let speculative = ram.specKeys.remove(hit.key) != nil
             let saved = ram.savedKeys.remove(hit.key) != nil
+            ram.speculationWindow.recordConfirmedOutcome(saved: saved && !speculative)
             if speculative {
                 diag.noteSpeculativeUnit("reused")
                 if let origin = ram.speculativeOrigins.removeValue(forKey: hit.key) { ram.speculationWindow.reuse(origin) }
@@ -1851,6 +1857,7 @@ final class TranslatorEngine: ObservableObject {
                             }
                             let savedFromRAM = ram.savedKeys.remove(key) != nil
                             let savedHit = diskHit || savedFromRAM
+                            ram.speculationWindow.recordConfirmedOutcome(saved: savedHit && !speculativeHit)
                             if !diskHit { diag.recordMemory(speculativeHit ? .speculativeHit : .ramHit,
                                                                   durationMs: (ProcessInfo.processInfo.systemUptime - lookupStart) * 1000,
                                                                   candidate: currentPacket?.candidateID,
@@ -1875,7 +1882,10 @@ final class TranslatorEngine: ObservableObject {
                         if display && memoryTestMode == .temporaryMemory {
                             diag.recordMemory(.temporaryMiss, candidate: workCandidate, unitKey: key)
                         }
-                        if display && diag.enabled { diag.s.cacheMisses += 1 }
+                        if display {
+                            ram.speculationWindow.recordConfirmedOutcome(saved: false)
+                            if diag.enabled { diag.s.cacheMisses += 1 }
+                        }
                         pending[id, default: []].append((bi, ui, si, s, key))
                     }
                 }

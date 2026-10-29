@@ -52,6 +52,13 @@ enum SubtitleAcquisitionPolicy {
             PipelineSafety.isDuplicate(incomingBlocks, previous: previousBlocks)
     }
 
+    /// Reject an already displayed fragment before it can mutate active work.
+    /// Tentative sightings retain their existing speculation behavior.
+    static func rejectsDisplayedFragment(confirmed: Bool, text: String,
+                                          displayed: String, age: TimeInterval) -> Bool {
+        confirmed && PipelineSafety.isRecentFragment(text, of: displayed, age: age)
+    }
+
     /// A tentative next subtitle must not erase a confirmed one that is still
     /// translating. Once the new subtitle is confirmed, ordinary freshness
     /// guards may supersede the older output.

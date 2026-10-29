@@ -1,4 +1,14 @@
-# ScreenLingo v1.7.1 · build 55
+# ScreenLingo v1.7.2 · build 56
+
+Complete exact RAM captions can bypass a busy model lane without needing prior
+whole-caption repetition. Saved-memory-dominant, low-yield scenes use bounded
+speculative backoff with periodic recovery probes. Recent confirmed fragments are
+rejected before they can cancel active work, and deferred confirmed captions take
+priority at safe drain boundaries. New counters separate RAM assembly bypasses and
+saved-memory-aware backoff. Normal-model device performance acceptance is pending.
+
+[1.7.2 changes, evidence and verification](docs/v1.7.2-performance.md).
+
 
 Adds an isolated **Temporary-memory test** toggle: RAM reuse and speculation stay
 available without reading/writing saved translations or inserting permanent history.

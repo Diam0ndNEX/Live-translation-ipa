@@ -264,7 +264,7 @@ import Foundation
                        "startingRAMEntries": "12", "suppressOwnInterface": "true", "glossary": "private"],
             health: MemoryDiagnosticHealth(), counters: ["completedConfirmedUnitsRetained": 3,
                        "temporaryMemoryHits": 12, "bypassedLookups": 0, "lookupMisses": 0,
-                       "ramCaptionBypasses": 7, "uncachedUnits": 5, "sharedInFlightUnits": 2, "speculativeUnitsReused": 4],
+                       "memoryAwareSpeculationSkipped": 11, "ramCaptionBypasses": 7, "uncachedUnits": 5, "sharedInFlightUnits": 2, "speculativeUnitsReused": 4],
             distributions: ["queueBehindSpeculationMs": DiagnosticDistribution([30, 40])],
             events: [StructuredDiagnosticEvent(id: UUID(), timestamp: Date(), sessionID: session,
                 candidateID: nil, stage: "runtime_state", outcome: "external_capture_period",
@@ -280,6 +280,7 @@ import Foundation
                      newModeRoundtrip.counters["temporaryMemoryHits"] == 12 &&
                      newModeRoundtrip.counters["sharedInFlightUnits"] == 2 &&
                      newModeRoundtrip.counters["ramCaptionBypasses"] == 7 &&
+                     newModeRoundtrip.counters["memoryAwareSpeculationSkipped"] == 11 &&
                      newModeRoundtrip.distributions["queueBehindSpeculationMs"]?.count == 2,
                      "New timing and reuse fields must not disappear in archive filtering")
         precondition(newModeRoundtrip.events[0].reasonCode == "external_capture_period",
