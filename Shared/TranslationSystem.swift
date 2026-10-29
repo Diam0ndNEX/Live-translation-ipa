@@ -14,7 +14,7 @@ enum TranslationSystem: String, CaseIterable, Codable {
     var explanation: String {
         switch self {
         case .legacy: return "Uses the established 1.7.2 pipeline and Apple default strategy."
-        case .hybridRecovery: return "Uses Apple default early, with fast recovery when confirmed text differs or early work is unavailable. Opt-in; device acceptance is pending."
+        case .hybridRecovery: return "Uses Apple Default ahead and Low Latency for confirmed recovery. Automatically reduces speculative work when it causes repeated waste or slow overlapping requests. Device acceptance pending."
         case .lowLatency: return "Uses low latency for both early and confirmed text. Wording may differ from Legacy. Requires iOS 26.4 and installed supported languages."
         }
     }
@@ -201,6 +201,7 @@ final class ThreeModeCoordinator {
     var clock: () -> Double = { ProcessInfo.processInfo.systemUptime }
     var system: TranslationSystem = .legacy
     var allowsReuse = true
+    var adaptiveHybrid = true
     var coldSpeculationCeiling = 0.7
     var matchingLowLatencyDeadline = 4.0
     private(set) var current: ModeCaption?
@@ -255,7 +256,7 @@ final class ThreeModeCoordinator {
         guard system != .legacy else { return }
         if !confirmed {
             guard speculate, speculation == nil, current == nil || committed == current else { return }
-            if system == .hybridRecovery && !hybridAdmission.admit() {
+            if system == .hybridRecovery && adaptiveHybrid && !hybridAdmission.admit() {
                 speculativeCaption = nil
                 speculativeOutput = nil
                 event(caption, "hybrid_speculation_throttled", nil)
@@ -322,7 +323,7 @@ final class ThreeModeCoordinator {
     }
 
     func noteOverlappingRecovery(_ milliseconds: Double) {
-        guard system == .hybridRecovery else { return }
+        guard system == .hybridRecovery, adaptiveHybrid else { return }
         hybridAdmission.overlappingRecovery(milliseconds: milliseconds)
     }
 
@@ -330,7 +331,7 @@ final class ThreeModeCoordinator {
         guard system == .hybridRecovery, let early = speculativeCaption,
               early.session == caption.session, scoredSpeculation != early else { return }
         scoredSpeculation = early
-        hybridAdmission.record(used: useful)
+        if adaptiveHybrid { hybridAdmission.record(used: useful) }
         event(caption, useful ? "hybrid_speculation_useful" : "hybrid_speculation_wasted", nil)
     }
 
