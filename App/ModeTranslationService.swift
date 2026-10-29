@@ -276,7 +276,11 @@ final class ModeTranslationService {
         guard !Task.isCancelled else { return nil }
         guard pairAvailability == .installed else {
             report("unsupported_or_uninstalled_pair", nil)
-            status?("Translation languages unavailable. Open Languages to install the selected pair.")
+            // Hybrid may still complete this caption through Apple Default.
+            // Missing optional fast assets must not display a fatal status.
+            if caption.system != .hybridRecovery || strategy != .lowLatency {
+                status?("Translation languages unavailable. Open Languages to install the selected pair.")
+            }
             return nil
         }
         // Availability suspended; recheck the lease before acquiring it.
