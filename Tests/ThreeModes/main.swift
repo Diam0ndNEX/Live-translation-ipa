@@ -89,6 +89,22 @@ final class Harness {
         for index in 0..<62 { precondition(warmupBudget.claim(source: "pair\(index)", target: "en", strategy: .lowLatency)) }
         precondition(warmupBudget.attempted.count == 64)
         precondition(!warmupBudget.claim(source: "another", target: "en", strategy: .lowLatency))
+        precondition(warmupBudget.totalAdmissions == 64)
+        var retryPolicy = InitialWarmupPolicy()
+        let attemptedAt = Date(timeIntervalSince1970: 100)
+        precondition(retryPolicy.claim(source: "pt", target: "en", strategy: .lowLatency, now: attemptedAt))
+        retryPolicy.finish(source: "pt", target: "en", strategy: .lowLatency, succeeded: false, now: attemptedAt)
+        precondition(!retryPolicy.claim(source: "pt", target: "en", strategy: .lowLatency, now: attemptedAt.addingTimeInterval(5)))
+        precondition(retryPolicy.skippedReason(source: "pt", target: "en", strategy: .lowLatency,
+                                              now: attemptedAt.addingTimeInterval(5)).contains("cooldown"))
+        precondition(retryPolicy.claim(source: "pt", target: "en", strategy: .lowLatency,
+                                       now: attemptedAt.addingTimeInterval(31)))
+        retryPolicy.finish(source: "pt", target: "en", strategy: .lowLatency, succeeded: true,
+                           now: attemptedAt.addingTimeInterval(31))
+        precondition(!retryPolicy.claim(source: "pt", target: "en", strategy: .lowLatency,
+                                        now: attemptedAt.addingTimeInterval(120)))
+        precondition(retryPolicy.skippedReason(source: "pt", target: "en", strategy: .lowLatency,
+                                              now: attemptedAt.addingTimeInterval(120)).contains("succeeded"))
         var evidence = TranslationReadiness(source: "pt", target: "en")
         precondition(evidence.activity.phase == .waiting)
         evidence.prepare(.checkingLanguages, now: readinessStart)
