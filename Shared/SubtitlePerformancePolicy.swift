@@ -104,11 +104,31 @@ struct SpeculativeWorkWindow {
         let id: UInt64
         var discarded: Bool?
         var reused = false
+        var modelMilliseconds = 0.0
+        var blockedMilliseconds = 0.0
     }
     private var samples: [Sample] = []
     private var sequence: UInt64 = 0
     private var opportunities = 0
     private var confirmedSavedOutcomes: [Bool] = []
+
+    /// Do not spend more than half of the measured model-time credit on
+    /// confirmed queue blocking. Require eight completed pipelines and four
+    /// harmful waits, so one cold start cannot shut off useful translation ahead.
+    var blockingBudgetExceeded: Bool {
+        let completed = samples.filter { $0.discarded != nil }
+        guard completed.count >= 8,
+              completed.filter({ $0.blockedMilliseconds >= 80 }).count >= 4 else { return false }
+        let debt = completed.reduce(0.0) { $0 + $1.blockedMilliseconds }
+        let credit = completed.filter { $0.reused }.reduce(0.0) { $0 + $1.modelMilliseconds }
+        return debt >= 640 && debt > credit * 0.5
+    }
+
+    mutating func recordBlocking(_ id: UInt64, milliseconds: Double) {
+        guard milliseconds.isFinite, milliseconds >= 0,
+              let index = samples.firstIndex(where: { $0.id == id }) else { return }
+        samples[index].blockedMilliseconds += min(5000, milliseconds)
+    }
 
     var savedMemoryDominant: Bool {
         confirmedSavedOutcomes.count >= 24 &&
@@ -128,14 +148,18 @@ struct SpeculativeWorkWindow {
         if samples.count > 32 { samples.removeFirst(samples.count - 32) }
         return sequence
     }
-    mutating func finish(_ id: UInt64, discarded: Bool) {
-        if let index = samples.firstIndex(where: { $0.id == id }) { samples[index].discarded = discarded }
+    mutating func finish(_ id: UInt64, discarded: Bool, modelMilliseconds: Double = 0) {
+        if let index = samples.firstIndex(where: { $0.id == id }) {
+            samples[index].discarded = discarded
+            if modelMilliseconds.isFinite { samples[index].modelMilliseconds = min(5000, max(0, modelMilliseconds)) }
+        }
     }
     mutating func reuse(_ id: UInt64) {
         if let index = samples.firstIndex(where: { $0.id == id }) { samples[index].reused = true }
     }
     mutating func allowsOpportunity(enabled: Bool) -> Bool {
         opportunities &+= 1
+        if enabled && blockingBudgetExceeded { return opportunities.isMultiple(of: 3) }
         let completed = samples.filter { $0.discarded != nil }
         return SubtitlePerformancePolicy.allowSpeculation(attempts: completed.count,
             discarded: completed.filter { $0.discarded == true }.count,

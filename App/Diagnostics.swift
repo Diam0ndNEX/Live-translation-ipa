@@ -244,6 +244,7 @@ final class Diagnostics: ObservableObject {
     private var sharedConfirmedModelUnits = 0
     private var memoryAwareSpeculationSkipped = 0
     private var ramCaptionBypasses = 0
+    private var schedulerFeatures: [String: Int] = [:]
     private var exactCaptionHits = 0
     private var exactUnitsCoalesced = 0
     private var speculativeUnitCounts: [String: Int] = [:]
@@ -347,7 +348,7 @@ final class Diagnostics: ObservableObject {
         let allowed: Set<String> = [
             "heartbeat_timeout", "capture_connected", "idle_auto_pause", "session_time_limit",
             "app_started", "app_interface_visible", "external_capture_period", "capture_config_changed", "capture_idle", "capture_live",
-            "capture_paused", "capture_frozen",
+            "capture_paused", "capture_frozen", "capture_stopped",
             "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical"
         ]
         guard allowed.contains(reason) else { return }
@@ -419,6 +420,10 @@ final class Diagnostics: ObservableObject {
     func noteMemoryAwareSpeculationSkip() {
         guard enabled else { return }
         memoryAwareSpeculationSkipped += 1
+    }
+    func noteSchedulerFeature(_ feature: String) {
+        guard enabled, ["savedUnitsPrefetched", "savedCaptionBypasses", "speculationBudgetSkipped", "warmSessionTransfers"].contains(feature) else { return }
+        schedulerFeatures[feature, default: 0] += 1
     }
     func noteRAMCaptionBypass() {
         guard enabled else { return }
@@ -838,6 +843,7 @@ final class Diagnostics: ObservableObject {
         lastRecordedThermalState = nil
         memoryOutcomes = [:]; lookupSamples = []; writeSamples = []
         modelTimingSamples = [:]; completedWorkRecoveredUnits = 0
+        schedulerFeatures.removeAll()
         sharedModelUnits = 0; sharedConfirmedModelUnits = 0; memoryAwareSpeculationSkipped = 0; ramCaptionBypasses = 0; exactCaptionHits = 0; exactUnitsCoalesced = 0
         speculativeUnitCounts = [:]; queueWaitSamples = [:]
         temporaryMemoryHits = 0; startingRAMEntries = ramEntryCount?() ?? 0
@@ -989,6 +995,10 @@ final class Diagnostics: ObservableObject {
             "temporaryMemoryHits": temporaryMemoryHits,
             "exactCaptionHits": exactCaptionHits,
             "ramCaptionBypasses": ramCaptionBypasses,
+            "savedUnitsPrefetched": schedulerFeatures["savedUnitsPrefetched", default: 0],
+            "savedCaptionBypasses": schedulerFeatures["savedCaptionBypasses", default: 0],
+            "speculationBudgetSkipped": schedulerFeatures["speculationBudgetSkipped", default: 0],
+            "warmSessionTransfers": schedulerFeatures["warmSessionTransfers", default: 0],
             "memoryAwareSpeculationSkipped": memoryAwareSpeculationSkipped,
             "sharedInFlightUnits": sharedModelUnits,
             "sharedConfirmedInFlightUnits": sharedConfirmedModelUnits,
@@ -1787,7 +1797,7 @@ private struct DiagnosticsBody: View {
                 Label("Test evidence", systemImage: "chart.xyaxis.line")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                Text("v1.5.0")
+                Text("v\(AppVersion.version)")
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
             }

@@ -169,6 +169,8 @@ final class TranslatorEngine: ObservableObject {
     @Published private(set) var legacyValidationElapsedSeconds = 0.0
     @Published private(set) var warmupLastDurationMs: Double?
     @Published var captureAlive = false
+    @Published private(set) var captureStatus = CaptureReadiness.State.idle
+    private var captureReadiness = CaptureReadiness()
     @Published var frames = 0
     @Published var ocrCount = 0
     @Published var extensionVersion = "–"
@@ -254,6 +256,9 @@ final class TranslatorEngine: ObservableObject {
     private var busy = false
     private var activeQueueOwner = ModelQueueOwner.scheduling
     private var queuedWaitOwner = ModelQueueOwner.scheduling
+    private let captionMemoryProbe = CaptionMemoryProbe()
+    private var currentSpeculationID: UInt64?
+    private var queuedSpeculationID: UInt64?
     private var modelUnitKeysInFlight = Set<String>()
     private var modelContextInFlight: Int?
     private var showing = false
@@ -408,13 +413,25 @@ final class TranslatorEngine: ObservableObject {
         } // Prepare a recent source pair before capture, when possible.
     }
 
+    func captureRequested() {
+        captureReadiness.requested(at: Date().timeIntervalSince1970)
+        publishCaptureStatus()
+    }
+
+    private func publishCaptureStatus() {
+        if captureStatus != captureReadiness.state { captureStatus = captureReadiness.state }
+    }
+
     private func tick() {
         tickCount += 1
+        captureReadiness.tick(at: Date().timeIntervalSince1970)
+        publishCaptureStatus()
         let alive = Date().timeIntervalSince(lastPacketDate) < 5
         if captureAlive && !alive {
             status = "Capture stopped – iOS may have closed the capture extension. Tap the broadcast icon again (try Speed: Fast)."
             diag.log("Capture stopped")
             diag.noteRuntimeState("heartbeat_timeout")
+            invalidatePending()
         }
         if captureAlive != alive { captureAlive = alive }
         if alive, let started = sessionStarted, int("sessionLimit", 0) > 0,
@@ -636,6 +653,7 @@ final class TranslatorEngine: ObservableObject {
 
     /// Invalidate suspended work before changing language, capture state, or settings.
     private func invalidatePending() {
+        captionMemoryProbe.cancel()
         interruptWarmupForLiveWork()
         contextRevision += 1
         generation += 1
@@ -838,6 +856,19 @@ final class TranslatorEngine: ObservableObject {
         let p = incoming
         let now = Date()
         let wasAlive = captureAlive
+        captureReadiness.receive(frames: p.frames, session: p.captureSessionID,
+            stopped: p.kind == "stopped", at: now.timeIntervalSince1970)
+        publishCaptureStatus()
+        if p.kind == "stopped" {
+            if captureStatus == .stopped {
+                captureAlive = false
+                lastPacketDate = .distantPast
+                invalidatePending()
+                status = "Capture stopped – tap the broadcast button to restart"
+                diag.noteRuntimeState("capture_stopped")
+            }
+            return
+        }
         lastPacketDate = now
         if !captureAlive { captureAlive = true }
         if frames != p.frames { frames = p.frames }
@@ -990,8 +1021,14 @@ final class TranslatorEngine: ObservableObject {
             cancelPresentation()
             queued = nil; specQueued = nil
             let shared = sharedInFlightUnits(candidateTexts)
-            if shared == 0 { cancelDrain(preemptSpeculation: confirmed) }
-            else if activeQueueOwner == .confirmed { diag.noteSharedModelUnits(shared, confirmed: true) }
+            // A confirmed caption first gets its memory-only route. Cancelling
+            // the speculative session here would discard its warm state before
+            // enqueue can discover that the replacement needs no model at all.
+            if shared == 0, !confirmed || activeQueueOwner != .speculative {
+                cancelDrain(preemptSpeculation: confirmed)
+            } else if shared > 0, activeQueueOwner == .confirmed {
+                diag.noteSharedModelUnits(shared, confirmed: true)
+            }
         } else if p.stable != false {
             if !activeCandidateConfirmed { activeCandidateConfirmedAt = now }
             activeCandidateConfirmed = true
@@ -1013,7 +1050,8 @@ final class TranslatorEngine: ObservableObject {
             if speculationAllowed && flag("translateAhead", true) {
                 if !ram.speculationWindow.allowsOpportunity(enabled: flag("adaptiveSpeculation", true)) {
                     if diag.enabled { diag.s.adaptiveSpeculationSkipped += 1 }
-                    if ram.speculationWindow.savedMemoryDominant { diag.noteMemoryAwareSpeculationSkip() }
+                    if ram.speculationWindow.blockingBudgetExceeded { diag.noteSchedulerFeature("speculationBudgetSkipped") }
+                    else if ram.speculationWindow.savedMemoryDominant { diag.noteMemoryAwareSpeculationSkip() }
                     diag.notePipelineDecision(candidate: p.candidateID,
                         frameIndex: p.frames, stage: "stability",
                         reason: "adaptive_speculation_backoff")
@@ -1303,13 +1341,21 @@ final class TranslatorEngine: ObservableObject {
         guard !blocks.isEmpty, joined != lastHandled else { return }
         if PipelineSafety.isDuplicate(blocks, previous: lastHandled.components(separatedBy: "\n")) { return }
         generation += 1
+        captionMemoryProbe.cancel()
         cancelPresentation()
         lastHandled = joined
         if queued != nil { diag.noteQueueReplacement() }
         queued = blocks
         queuedAt = Date()
         queuedWaitOwner = busy ? activeQueueOwner : .scheduling
+        queuedSpeculationID = activeQueueOwner == .speculative ? currentSpeculationID : nil
         if presentQueuedFromRAMIfComplete() { return }
+        if startQueuedSavedMemoryProbe(blocks) { return }
+        prioritizeQueuedModelWork(blocks)
+    }
+
+    private func prioritizeQueuedModelWork(_ blocks: [String]) {
+        let joined = blocks.joined(separator: "\n")
         if SubtitlePerformancePolicy.preemptSpeculation(activeText: currentSpeculativeText, confirmedText: joined) {
             // Different input cannot supply an exact whole-caption reuse result.
             // Cancellation unwinds the single drain before confirmed work starts.
@@ -1332,7 +1378,7 @@ final class TranslatorEngine: ObservableObject {
         // A complete exact RAM result needs no model lane. Never bypass OCR
         // confirmation, generation checks or the presentation policy.
         let cacheProbeStarted = Date()
-        if busy, !bypassMemory, memoryTestMode.allowsReuse,
+        if !bypassMemory, memoryTestMode.allowsReuse,
            let key = ExactCaptionIdentity.key(blocks: blocks, source: sourceCode,
                                               target: targetCode, rules: memoryRuleToken),
            let ready = cachedCaption(blocks, identity: key) {
@@ -1340,9 +1386,7 @@ final class TranslatorEngine: ObservableObject {
             if diag.enabled { diag.s.translations += 1; diag.s.chars += blocks.joined().count }
             translateMs = Date().timeIntervalSince(cacheProbeStarted) * 1000
             languageFailures = 0
-            diag.recordQueueWait(owner: queuedWaitOwner,
-                durationMs: max(0, cacheProbeStarted.timeIntervalSince(queuedAt) * 1000),
-                candidate: queuedPacket?.candidateID)
+            recordQueuedWait(at: cacheProbeStarted)
             status = "\(sourceCode) → \(targetCode) ✓"
             if memoryTestMode == .temporaryMemory { diag.noteTemporaryReuse(count: ready.sentences) }
             let now = Date()
@@ -1432,9 +1476,7 @@ final class TranslatorEngine: ObservableObject {
             if let b = queued {
                 queued = nil
                 currentTs = queuedTs; currentPacket = queuedPacket; currentQueuedAt = queuedAt
-                diag.recordQueueWait(owner: queuedWaitOwner,
-                    durationMs: max(0, Date().timeIntervalSince(queuedAt) * 1000),
-                    candidate: queuedPacket?.candidateID)
+                recordQueuedWait(at: Date())
                 activeQueueOwner = .confirmed
                 await process(b, display: true)
             } else if let sp = specQueued {
@@ -1612,6 +1654,70 @@ final class TranslatorEngine: ObservableObject {
         }
     }
 
+    private func exactCaptionPlan(_ blocks: [String], source: Locale.Language) -> [[CaptionTranslationUnit]] {
+        let fixes = pairs("sourceFixes")
+        let protected = list("neverTranslate", lower: false)
+        return blocks.map { raw in
+            let text = cleanedSource(raw, enabled: flag("cleanOCR", true), fixes: fixes)
+            return preparedSourceUnits(text, language: source.languageCode?.identifier ?? source.minimalIdentifier,
+                slang: flag("slang", true), speakers: flag("speakerDetect", true), protected: protected).map {
+                CaptionTranslationUnit(label: $0.label, sentences: $0.sentences,
+                    out: Array(repeating: nil, count: $0.sentences.count), tokens: $0.tokens)
+            }
+        }
+    }
+
+    private func exactCaptionKeys(_ plan: [[CaptionTranslationUnit]], source: String, rules: String) -> [String] {
+        plan.flatMap { row in row.flatMap { unit in unit.sentences.map { sentence in
+            PipelineSafety.cacheKey(source: source, target: targetCode, text: sentence,
+                protectedWords: unit.tokens.map { "\($0.0)=\($0.1)" }, rules: rules)
+        } } }
+    }
+
+    /// Read saved units while an unrelated model request unwinds. No model is
+    /// submitted by this route, and a miss immediately returns priority to live work.
+    private func startQueuedSavedMemoryProbe(_ blocks: [String]) -> Bool {
+        guard busy, sourceCode != "auto", allowsPersistentTranslations, memoryReady,
+              !bypassMemory, flag("remember", true), !flag("privateSession", false) else { return false }
+        let source = Locale.Language(identifier: sourceCode)
+        guard source.languageCode != Locale.Language(identifier: targetCode).languageCode else { return false }
+        let rules = memoryRuleToken
+        let keys = exactCaptionKeys(exactCaptionPlan(blocks, source: source), source: source.minimalIdentifier, rules: rules)
+            .filter { ram.values[$0] == nil }
+        let workGeneration = generation, workContext = contextRevision
+        let bank = ram
+        let epoch = diag.started
+        return captionMemoryProbe.start(keys: keys, isCurrent: { [weak self] in
+            guard let self else { return false }
+            return self.generation == workGeneration && self.contextRevision == workContext &&
+                self.ram === bank && self.memoryTestMode == .normal && self.queued != nil &&
+                !self.bypassMemory && self.memoryRuleToken == rules && self.flag("remember", true) &&
+                !self.flag("privateSession", false)
+        }, lookup: { [memoryStore] key in
+            await memoryStore.lookup(key: key).value
+        }, retain: { [weak self] key, value in
+            guard let self, bank.values[key] == nil else { return }
+            bank.values[key] = value
+            bank.savedKeys.insert(key)
+            self.touchCache(key)
+            if self.diag.started == epoch { self.diag.noteSchedulerFeature("savedUnitsPrefetched") }
+            if self.presentQueuedFromRAMIfComplete(), self.diag.started == epoch {
+                self.diag.noteSchedulerFeature("savedCaptionBypasses")
+            }
+            self.trimCache()
+        }, completed: { [weak self] in
+            guard let self, let blocks = self.queued else { return }
+            if !self.presentQueuedFromRAMIfComplete() { self.prioritizeQueuedModelWork(blocks) }
+        })
+    }
+
+    private func recordQueuedWait(at now: Date) {
+        let ms = max(0, now.timeIntervalSince(queuedAt) * 1000)
+        if let id = queuedSpeculationID { ram.speculationWindow.recordBlocking(id, milliseconds: ms) }
+        diag.recordQueueWait(owner: queuedWaitOwner, durationMs: ms, candidate: queuedPacket?.candidateID)
+        queuedSpeculationID = nil
+    }
+
     /// Synchronous and RAM-only: safe while the model lane is awaiting unrelated work.
     /// Probe every current unit before consuming provenance or confirming any result.
     private func cachedCaption(_ blocks: [String], identity: String) -> ExactCaptionResult? {
@@ -1624,30 +1730,22 @@ final class TranslatorEngine: ObservableObject {
         guard source.languageCode != Locale.Language(identifier: targetCode).languageCode else { return nil }
         let id = source.minimalIdentifier
         let rules = memoryRuleToken
-        let never = list("neverTranslate", lower: false)
-        let fixes = pairs("sourceFixes")
-        var units: [[CaptionTranslationUnit]] = []
+        var units = exactCaptionPlan(blocks, source: source)
         var hits: [(key: String, text: String, value: String, lookupMs: Double)] = []
-        for raw in blocks {
-            let text = cleanedSource(raw, enabled: flag("cleanOCR", true), fixes: fixes)
-            var row: [CaptionTranslationUnit] = []
-            for part in preparedSourceUnits(text, language: source.languageCode?.identifier ?? id,
-                    slang: flag("slang", true), speakers: flag("speakerDetect", true), protected: never) {
-                var values: [String?] = []
-                for sentence in part.sentences {
+        for bi in units.indices {
+            for ui in units[bi].indices {
+                let unit = units[bi][ui]
+                for (si, sentence) in unit.sentences.enumerated() {
                     let key = PipelineSafety.cacheKey(source: id, target: targetCode, text: sentence,
-                        protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: rules)
+                        protectedWords: unit.tokens.map { "\($0.0)=\($0.1)" }, rules: rules)
                     let lookupStarted = ProcessInfo.processInfo.systemUptime
                     guard let value = ram.values[key],
                           !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
                     hits.append((key, sentence, value,
                         (ProcessInfo.processInfo.systemUptime - lookupStarted) * 1000))
-                    values.append(value)
+                    units[bi][ui].out[si] = value
                 }
-                row.append(CaptionTranslationUnit(label: part.label, sentences: part.sentences,
-                                                  out: values, tokens: part.tokens))
             }
-            units.append(row)
         }
         guard let result = CaptionAssembly.complete(units, glossary: pairs("glossary")) else { return nil }
         // No suspension above: mode, rules, bank and candidate cannot change mid-probe.
@@ -1690,18 +1788,7 @@ final class TranslatorEngine: ObservableObject {
         let source = Locale.Language(identifier: sourceCode)
         let id = source.minimalIdentifier
         let rules = memoryRuleToken
-        let never = list("neverTranslate", lower: false)
-        var keys = Set<String>()
-        for raw in blocks {
-            let text = cleanedSource(raw, enabled: flag("cleanOCR", true), fixes: pairs("sourceFixes"))
-            for part in preparedSourceUnits(text, language: source.languageCode?.identifier ?? id,
-                    slang: flag("slang", true), speakers: flag("speakerDetect", true), protected: never) {
-                for sentence in part.sentences {
-                    keys.insert(PipelineSafety.cacheKey(source: id, target: targetCode, text: sentence,
-                        protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: rules))
-                }
-            }
-        }
+        let keys = Set(exactCaptionKeys(exactCaptionPlan(blocks, source: source), source: id, rules: rules))
         return ExactModelWorkPolicy.sharedUnits(inFlight: modelUnitKeysInFlight, required: keys,
             workContext: modelContextInFlight, currentContext: contextRevision, reuseAllowed: true)
     }
@@ -1719,12 +1806,18 @@ final class TranslatorEngine: ObservableObject {
         let rules = memoryRuleToken
         let destination = targetCode
         let speculativeStart = Date()
+        var speculativeModelMilliseconds = 0.0
         let diagnosticEpoch = diag.started
         let speculativeID: UInt64? = display ? nil : ram.speculationWindow.begin()
+        if !display { currentSpeculationID = speculativeID }
         if !display && diag.enabled { diag.s.specStarted += 1 }
         defer {
             let discarded = Task.isCancelled || workContext != contextRevision || workCandidate != activeCandidateID
-            if let speculativeID { workRAM.speculationWindow.finish(speculativeID, discarded: discarded) }
+            if let speculativeID {
+                workRAM.speculationWindow.finish(speculativeID, discarded: discarded,
+                    modelMilliseconds: speculativeModelMilliseconds)
+                if currentSpeculationID == speculativeID { currentSpeculationID = nil }
+            }
             if !display && diag.enabled && diag.started == diagnosticEpoch {
                 let ms = Date().timeIntervalSince(speculativeStart) * 1000
                 diag.s.specProcessingMs += ms
@@ -1953,8 +2046,7 @@ final class TranslatorEngine: ObservableObject {
                 diag.trace(workCandidate, stage: "freshTranslation",
                            detail: "Uncached units submitted to on-device translation")
             }
-            let streamPartials = installed && workMode.allowsReuse &&
-                (display || flag("incrementalBatchRecovery", false))
+            let streamPartials = installed && workMode.allowsReuse
             var completedParts: [Int: String] = [:]
             var partialHandler: (@MainActor (Int, String) -> Void)?
             if streamPartials {
@@ -1962,16 +2054,25 @@ final class TranslatorEngine: ObservableObject {
                 partialHandler = { [weak self] index, value in
                     guard index >= 0, index < exactKeys.count else { return }
                     completedParts[index] = value
-                    self?.retainCompletedModelUnit(key: exactKeys[index], value: value,
-                        context: workContext, rules: rules, destination: destination,
-                        mode: workMode, bank: workRAM, confirmed: display,
-                        speculativeID: speculativeID, epoch: diagnosticEpoch)
+                    guard let self else { return }
+                    // Waiting confirmed captions always receive complete exact
+                    // units. The optional experiment additionally retains them
+                    // before any confirmed replacement is waiting.
+                    guard display || self.queued != nil || self.flag("incrementalBatchRecovery", false) else { return }
+                    for (completedIndex, completedValue) in completedParts {
+                        self.retainCompletedModelUnit(key: exactKeys[completedIndex], value: completedValue,
+                            context: workContext, rules: rules, destination: destination,
+                            mode: workMode, bank: workRAM, confirmed: display,
+                            speculativeID: speculativeID, epoch: diagnosticEpoch)
+                    }
                 }
             }
             modelUnitKeysInFlight = Set(items.map { $0.key })
             modelContextInFlight = workContext
+            let modelStarted = ProcessInfo.processInfo.systemUptime
             let batch = await translateBatch(plan.unique, source: src, target: target, installed: installed,
                                              speculative: !display, partial: partialHandler)
+            if !display { speculativeModelMilliseconds += (ProcessInfo.processInfo.systemUptime - modelStarted) * 1000 }
             modelUnitKeysInFlight.removeAll()
             modelContextInFlight = nil
             if !isCurrent() {
@@ -2107,6 +2208,11 @@ final class TranslatorEngine: ObservableObject {
                 let workContext = contextRevision
                 let diagnosticEpoch = diag.started
                 let lease = speculativeSessions.begin(key: k) {
+                    if directKey == k, let prepared = directSession {
+                        directSession = nil
+                        diag.noteSchedulerFeature("warmSessionTransfers")
+                        return prepared
+                    }
                     diag.noteModelState("speculative_session_created")
                     if #available(iOS 26.4, *), flag("lowLatencyTranslation", false) {
                         return TranslationSession(installedSource: source, target: target, preferredStrategy: .lowLatency)
@@ -2118,6 +2224,12 @@ final class TranslatorEngine: ObservableObject {
                 // Only explicit session cancellation (tracked by the lease),
                 // failure or context change prevents warm-session reuse.
                 speculativeSessions.finish(lease, reusable: result != nil && workContext == contextRevision)
+                if workContext == contextRevision, directSession == nil,
+                   let reusable = speculativeSessions.takeReusable(key: k) {
+                    directSession = reusable
+                    directKey = k
+                    diag.noteSchedulerFeature("warmSessionTransfers")
+                }
                 if let requested = lease.cancellationRequestedAt, diag.started == diagnosticEpoch {
                     diag.noteModelState("speculative_stop_released",
                         durationMs: max(0, ProcessInfo.processInfo.systemUptime - requested) * 1000)

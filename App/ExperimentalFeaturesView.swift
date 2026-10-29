@@ -60,7 +60,7 @@ struct ExperimentalFeaturesView: View {
                 }
                 ExperimentalOption(
                     title: "Incremental translation recovery",
-                    explanation: "Retains completed speculative sentence results for exact temporary reuse, even when their batch is interrupted. Never displays incomplete captions.",
+                    explanation: "Also retains completed speculative sentences before a confirmed caption is waiting. Waiting captions already receive complete exact units automatically. Never displays incomplete captions.",
                     enabled: $incrementalBatchRecovery)
             } header: { Text("Translation experiments") }
 

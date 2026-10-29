@@ -133,7 +133,7 @@ struct DiagnosticIntervalBucket: Codable {
         "specPreemptionRequested", "specMatchingConfirmation",
         "specRetainedUnits", "completedConfirmedUnitsRetained", "temporaryMemoryHits",
         "uncachedUnits", "bypassedLookups", "temporaryMemoryMisses",
-        "speculativeStopRequests", "speculativeSessionsCreated", "memoryAwareSpeculationSkipped", "ramCaptionBypasses", "exactCaptionHits", "exactUnitsCoalesced", "sharedConfirmedInFlightUnits", "sharedInFlightUnits", "speculativeUnitsRetained",
+        "speculativeStopRequests", "speculativeSessionsCreated", "memoryAwareSpeculationSkipped", "ramCaptionBypasses", "savedUnitsPrefetched", "savedCaptionBypasses", "speculationBudgetSkipped", "warmSessionTransfers", "exactCaptionHits", "exactUnitsCoalesced", "sharedConfirmedInFlightUnits", "sharedInFlightUnits", "speculativeUnitsRetained",
         "speculativeUnitsReused", "speculativeUnitsEvictedUnused",
         "handoffDeferred", "slowTailEnqueues", "handoffReplayed", "handoffExpired", "enqueueFailed",
         "actualModelBatches", "confirmedModelBatches", "speculativeModelBatches",
@@ -505,7 +505,11 @@ actor DiagnosticExportWriter {
             - Cancelled model batches: \(count("cancelledModelBatches"))
             - Skipped unchanged frames: \(count("unchangedSkippedFrames"))
             - Speculation opportunities skipped with dominant saved reuse: \(count("memoryAwareSpeculationSkipped"))
-            - Complete captions assembled from RAM around a busy model lane: \(count("ramCaptionBypasses"))
+            - Complete captions assembled through exact RAM: \(count("ramCaptionBypasses"))
+            - Saved units prefetched around model work: \(count("savedUnitsPrefetched"))
+            - Saved captions delivered around model work: \(count("savedCaptionBypasses"))
+            - Speculation opportunities skipped by blocking budget: \(count("speculationBudgetSkipped"))
+            - Warm session ownership transfers: \(count("warmSessionTransfers"))
             - Exact assembled captions reused: \(count("exactCaptionHits"))
             - Exact confirmed in-flight units shared with replacement captions: \(count("sharedConfirmedInFlightUnits"))
             - Exact duplicate units coalesced: \(count("exactUnitsCoalesced"))

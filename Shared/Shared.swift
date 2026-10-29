@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.7.2"
-    static let build = 58
+    static let version = "1.8.0"
+    static let build = 59
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("1.8.0", "Memory-first subtitle scheduling: bounded saved-unit lookups bypass busy model work; exact RAM captions avoid idle scheduling delay; waiting confirmed captions receive completed speculative units; measured blocking budgets preserve recovery probes; warm session ownership transfers between serialized lanes; prominent frame-confirmed capture status with stop/lost/waiting states; strict paired normal/temporary performance acceptance. Device performance acceptance pending."),
         ("1.7.2", "Separate reusable speculative-session ownership allows explicit obsolete-model preemption while protecting the warm confirmed session; cancelled sessions cannot be reused; exact growing captions can also share confirmed in-flight work; confirmed batches expose completed exact units to queued full-caption assembly and retry only unfinished units after incomplete batches. Complete exact RAM captions can bypass an occupied model lane without waiting for whole-caption repetition; shared complete-result assembly preserves speaker labels, protected words and glossary; saved-reuse-aware speculative backoff with recovery probes; recent fragments rejected before active-work cancellation; confirmed handoff priority at drain boundaries; explicit bypass/backoff accounting. Device performance validation pending."),
         ("1.7.1", "Process-only temporary-memory test toggle with speculation; independent normal RAM and saved history; exact assembled-caption reuse around obsolete model work; queue-owner and speculative-unit accounting; corrected bypass/miss labels and complete diagnostic allowlists."),
         ("1.7.0", "Normal-model performance: recover completed obsolete work, coalesce durable sentence writes, avoid redundant memory writes and reuse indexed lookup statements. Exclude own-app interface OCR and reset acquisition across app switches. Independent model timing samples and reproducible performance acceptance tooling."),
@@ -55,7 +56,7 @@ struct OCRLine: Codable {
 
 /// Extension → app
 struct Packet: Codable {
-    var kind: String   // "ping" | "ocr" | "clear"
+    var kind: String   // "ping" | "ocr" | "clear" | "stopped"
     var version: String
     var frames: Int
     var lines: [OCRLine]
@@ -86,6 +87,7 @@ struct Packet: Codable {
     var totalEmptyOCRPasses: Int? = nil
     var lastVisualChangeAt: Double? = nil
     var effectiveOCRIntervalMs: Double? = nil
+    var captureSessionID: String? = nil
 }
 
 /// App → extension (sent back over the same localhost link)

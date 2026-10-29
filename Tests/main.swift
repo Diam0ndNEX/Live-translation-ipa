@@ -875,3 +875,82 @@ streamedOutputs[0] = "First."
 check(currentStreamCaption() == "Ana: First. Second.",
       "A full replacement can assemble in reading order once all of its required units complete")
 print("v1.7.2 streamed unit context mapping and complete-caption wakeup checks passed")
+
+// v1.8.0: use observed blocking, independently of whether diagnostics are on.
+var blockingWindow = SpeculativeWorkWindow()
+for _ in 0..<8 {
+    let id = blockingWindow.begin()
+    blockingWindow.finish(id, discarded: true, modelMilliseconds: 300)
+    blockingWindow.recordBlocking(id, milliseconds: 200)
+}
+check(blockingWindow.blockingBudgetExceeded, "Repeated speculative blocking must activate the work budget before 24 discarded pipelines")
+check((0..<12).filter { _ in blockingWindow.allowsOpportunity(enabled: true) }.count == 4,
+      "A blocking scene retains bounded recovery probes instead of continuously occupying the model")
+check((0..<12).allSatisfy { _ in blockingWindow.allowsOpportunity(enabled: false) },
+      "The existing adaptive speculation opt-out must bypass the new work budget")
+for _ in 0..<32 {
+    let id = blockingWindow.begin()
+    blockingWindow.finish(id, discarded: false, modelMilliseconds: 250)
+    blockingWindow.reuse(id)
+}
+check(!blockingWindow.blockingBudgetExceeded && blockingWindow.allowsOpportunity(enabled: true),
+      "Useful new scenes must age harmful blocking out and restore speculation")
+var creditedWindow = SpeculativeWorkWindow()
+for _ in 0..<8 {
+    let id = creditedWindow.begin()
+    creditedWindow.finish(id, discarded: false, modelMilliseconds: 300)
+    creditedWindow.recordBlocking(id, milliseconds: 80)
+    creditedWindow.reuse(id)
+}
+check(!creditedWindow.blockingBudgetExceeded, "Useful speculative credit must prevent indiscriminate throttling")
+var coldWindow = SpeculativeWorkWindow()
+let oneColdID = coldWindow.begin()
+coldWindow.finish(oneColdID, discarded: true, modelMilliseconds: 1800)
+coldWindow.recordBlocking(oneColdID, milliseconds: 1500)
+coldWindow.recordBlocking(oneColdID, milliseconds: .nan)
+check(!coldWindow.blockingBudgetExceeded, "One cold start or invalid sample cannot activate a scene budget")
+
+var captureEvidence = CaptureReadiness()
+check(captureEvidence.state == .idle, "Launch must not claim that capture is active")
+captureEvidence.requested(at: 0)
+check(captureEvidence.state == .waiting, "Opening the broadcast picker is only a request")
+captureEvidence.receive(frames: 0, session: "first", stopped: false, at: 1)
+check(captureEvidence.state == .connected, "Connection acknowledgement is not video-frame evidence")
+captureEvidence.receive(frames: 1, session: "first", stopped: false, at: 2)
+check(captureEvidence.state == .active, "A received video frame establishes capture readiness without OCR text")
+captureEvidence.receive(frames: 2, session: "first", stopped: false, at: 6)
+captureEvidence.tick(at: 10)
+check(captureEvidence.state == .active, "No-text and paused heartbeats preserve actual capture status")
+captureEvidence.tick(at: 11)
+check(captureEvidence.state == .lost, "Missing transport heartbeats must clear the active state")
+captureEvidence.receive(frames: 0, session: "second", stopped: false, at: 12)
+check(captureEvidence.state == .connected, "A restarted extension must establish fresh frame evidence")
+captureEvidence.receive(frames: 3, session: "second", stopped: false, at: 13)
+captureEvidence.receive(frames: 50, session: "first", stopped: true, at: 14)
+check(captureEvidence.state == .active, "An obsolete extension cannot stop the replacement session")
+captureEvidence.receive(frames: 3, session: "second", stopped: true, at: 15)
+check(captureEvidence.state == .stopped, "An explicit stop clears readiness immediately")
+captureEvidence.requested(at: 20)
+captureEvidence.tick(at: 50)
+check(captureEvidence.state == .idle, "A cancelled broadcast picker cannot remain waiting indefinitely")
+captureEvidence.receive(frames: 1, session: nil, stopped: false, at: 51)
+check(captureEvidence.state == .active, "Older extensions without a session ID remain supported")
+
+await MainActor.run {
+    let owner = SpeculativeSessionOwner<TestModelHandle> { $0.cancellationCount += 1 }
+    let warmed = TestModelHandle()
+    let lease = owner.begin(key: "pt>en|default", make: { warmed })
+    precondition(owner.takeReusable(key: "pt>en|default") == nil, "An active session cannot transfer ownership")
+    owner.finish(lease, reusable: true)
+    precondition(owner.takeReusable(key: "de>en|default") == nil, "Warm transfer must preserve language/model identity")
+    let transferred = owner.takeReusable(key: "pt>en|default")
+    precondition(transferred === warmed)
+    precondition(owner.takeReusable(key: "pt>en|default") == nil, "A session must never remain owned by both lanes")
+    let next = owner.begin(key: "pt>en|default", make: { TestModelHandle() })
+    precondition(next.session !== transferred)
+    owner.cancelActive()
+    owner.finish(next, reusable: true)
+    precondition(owner.takeReusable(key: "pt>en|default") == nil, "Cancelled sessions cannot be transferred back as warm")
+    precondition(transferred?.cancellationCount == 0, "Cancelling the next lease must leave the transferred confirmed handle usable")
+}
+print("v1.8.0 blocking budget, capture readiness and sole-owner warm-session transfer checks passed")

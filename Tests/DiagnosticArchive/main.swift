@@ -264,7 +264,7 @@ import Foundation
                        "startingRAMEntries": "12", "suppressOwnInterface": "true", "glossary": "private"],
             health: MemoryDiagnosticHealth(), counters: ["completedConfirmedUnitsRetained": 3,
                        "temporaryMemoryHits": 12, "bypassedLookups": 0, "lookupMisses": 0,
-                       "sharedConfirmedInFlightUnits": 2, "speculativeStopRequests": 3, "speculativeSessionsCreated": 4, "memoryAwareSpeculationSkipped": 11, "ramCaptionBypasses": 7, "uncachedUnits": 5, "sharedInFlightUnits": 2, "speculativeUnitsReused": 4],
+                       "sharedConfirmedInFlightUnits": 2, "speculativeStopRequests": 3, "speculativeSessionsCreated": 4, "memoryAwareSpeculationSkipped": 11, "ramCaptionBypasses": 7, "savedUnitsPrefetched": 13, "savedCaptionBypasses": 6, "speculationBudgetSkipped": 8, "warmSessionTransfers": 10, "uncachedUnits": 5, "sharedInFlightUnits": 2, "speculativeUnitsReused": 4],
             distributions: ["speculativeStopReleaseMs": DiagnosticDistribution([2, 3]),
                             "queueBehindSpeculationMs": DiagnosticDistribution([30, 40])],
             events: [StructuredDiagnosticEvent(id: UUID(), timestamp: Date(), sessionID: session,
@@ -281,6 +281,10 @@ import Foundation
                      newModeRoundtrip.counters["temporaryMemoryHits"] == 12 &&
                      newModeRoundtrip.counters["sharedInFlightUnits"] == 2 &&
                      newModeRoundtrip.counters["ramCaptionBypasses"] == 7 &&
+                     newModeRoundtrip.counters["savedUnitsPrefetched"] == 13 &&
+                     newModeRoundtrip.counters["savedCaptionBypasses"] == 6 &&
+                     newModeRoundtrip.counters["speculationBudgetSkipped"] == 8 &&
+                     newModeRoundtrip.counters["warmSessionTransfers"] == 10 &&
                      newModeRoundtrip.counters["memoryAwareSpeculationSkipped"] == 11 &&
                      newModeRoundtrip.counters["speculativeStopRequests"] == 3 &&
                      newModeRoundtrip.counters["sharedConfirmedInFlightUnits"] == 2 &&

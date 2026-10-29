@@ -54,6 +54,15 @@ final class SpeculativeSessionOwner<Session: AnyObject> {
         }
     }
 
+    /// Transfer sole ownership back to the confirmed lane. The session cannot
+    /// remain in both slots: a later speculative cancellation must not poison
+    /// a handle still advertised as ready for confirmed work.
+    func takeReusable(key: String) -> Session? {
+        guard active == nil, let idle, idle.key == key else { return nil }
+        self.idle = nil
+        return idle.session
+    }
+
     /// Context changes discard idle state and prevent late completions from
     /// restoring a previous language/model session into the reusable slot.
     func reset() {

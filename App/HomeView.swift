@@ -28,7 +28,14 @@ struct HomeView: View {
         if engine.waitingToDisplay { return "Holding for readability" }
         return engine.isTranslating ? "Translating…" : "Reading your screen"
     }
-    private var stateColor: Color { engine.captureAlive && !engine.paused ? .mint : .secondary }
+    private var captureColor: Color {
+        switch engine.captureStatus {
+        case .active: return .green
+        case .waiting, .connected: return .orange
+        case .lost: return .red
+        case .idle, .stopped: return .secondary
+        }
+    }
     private var packReady: Bool {
         engine.sourceCode == "auto" ? engine.langStatus.values.contains(.installed) : engine.langStatus[engine.sourceCode] == .installed
     }
@@ -121,10 +128,19 @@ struct HomeView: View {
     private var liveCard: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                HStack(spacing: 7) {
-                    Circle().fill(stateColor).frame(width: 7, height: 7)
-                    Text(state).font(.subheadline.weight(.medium))
+                HStack(spacing: 10) {
+                    Image(systemName: engine.captureStatus.symbol)
+                        .font(.title3.weight(.semibold)).foregroundStyle(captureColor)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(engine.captureStatus.title).font(.subheadline.weight(.semibold))
+                            .foregroundStyle(captureColor)
+                        Text(engine.captureAlive ? state : "Use the broadcast button below to start or restart")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
+                .padding(.vertical, 12)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("\(engine.captureStatus.title). \(engine.captureAlive ? state : "Use the broadcast button to start or restart")")
                 Spacer()
                 Button { destination = .reader } label: {
                     Image(systemName: "arrow.up.left.and.arrow.down.right").frame(width: 44, height: 44)
@@ -152,11 +168,11 @@ struct HomeView: View {
 
     private var captureBar: some View {
         HStack(spacing: 14) {
-            BroadcastPicker(onTap: { if !engine.pipActive { engine.startPiP() } }).frame(width: 50, height: 50)
+            BroadcastPicker(onTap: { engine.captureRequested(); if !engine.pipActive { engine.startPiP() } }).frame(width: 50, height: 50)
                 .background(Theme.gradient, in: Circle())
                 .accessibilityLabel(engine.captureAlive ? "Open screen broadcast controls" : "Start screen capture")
             VStack(alignment: .leading, spacing: 3) {
-                Text(engine.captureAlive ? "Screen capture connected" : "Start live translation").font(.subheadline.bold())
+                Text(engine.captureAlive ? "Broadcast controls" : "Start live translation").font(.subheadline.bold())
                 Text(engine.captureAlive ? "Switch to your video or app" : "Tap the broadcast button to begin").font(.caption).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
