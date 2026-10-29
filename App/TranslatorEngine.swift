@@ -3842,6 +3842,10 @@ final class TranslatorEngine: ObservableObject {
         var lowResults: [String: LanguageAssetState] = [:]
         var overallResults: [String: LanguageAvailability.Status] = [:]
         languageStatusChecking = true
+        // The previous mode's aggregate result is not valid for the new strategy.
+        langStatus = [:]
+        defaultLangStatus = [:]
+        lowLatencyLangStatus = [:]
         var seen = Set<String>()
         let active = sourceCode == "auto" ? (detectedLang == "–" ? [] : [detectedLang]) : [sourceCode]
         let codes = (active + languages.map(\.code)).filter { seen.insert($0).inserted }
