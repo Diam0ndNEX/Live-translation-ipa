@@ -15,6 +15,8 @@ final class ModeTranslationService {
         var cancellationAt: Double?
         var activityID: UUID?
         var requestedStrategy: RequestedTranslationStrategy?
+        var createdAt: Double?
+        var completedCalls = 0
     }
     private var hostedIsSpeculative = false
     private var hostedTask: Task<[String]?, Never>?
@@ -28,6 +30,10 @@ final class ModeTranslationService {
     private let warmupLane = Lane()
     private var warmupPolicy = InitialWarmupPolicy()
     private var recentlyInstalled: [String: Double] = [:]
+    /// Logical lane occupancy, not a claim of physical model residency.
+    var mayAdmitHybridSpeculation: Bool {
+        !speculative.busy && !confirmed.busy && !warmupLane.busy && hostedTask == nil
+    }
     private let installedCheckTTL: Double = 30
     var warmupEvent: ((InitialWarmupEvent) -> Void)?
     var modelRequestCompleted: ((String, String, RequestedTranslationStrategy, Double) -> Void)?
@@ -77,7 +83,10 @@ final class ModeTranslationService {
             if #available(iOS 26.0, *) { lane.session?.cancel() }
             lane.invalidated = true
             if let id = lane.activityID { activity.advance(id, to: .cancelling) }
-            if !lane.busy { lane.session = nil; lane.key = "" }
+            if !lane.busy {
+                lane.session = nil; lane.key = ""
+                lane.createdAt = nil; lane.completedCalls = 0
+            }
         }
     }
 
@@ -114,7 +123,10 @@ final class ModeTranslationService {
             }
             destination.session?.cancel()
             destination.session = session; destination.key = warmupLane.key; destination.invalidated = false
+            destination.createdAt = warmupLane.createdAt
+            destination.completedCalls = warmupLane.completedCalls
             warmupLane.session = nil; warmupLane.key = ""
+            warmupLane.createdAt = nil; warmupLane.completedCalls = 0
             warmupPolicy.finish(source: source, target: target, strategy: strategy, succeeded: true)
             completedStrategies += 1
         }
@@ -196,6 +208,8 @@ final class ModeTranslationService {
             lane.session = TranslationSession(installedSource: source, target: target, preferredStrategy: .lowLatency)
         } else { lane.session = TranslationSession(installedSource: source, target: target) }
         lane.key = key; lane.invalidated = false
+        lane.createdAt = ProcessInfo.processInfo.systemUptime
+        lane.completedCalls = 0
     }
 
     func translate(_ caption: ModeCaption, indices: [Int], strategy: RequestedTranslationStrategy,
@@ -248,9 +262,14 @@ final class ModeTranslationService {
         let enqueued = ProcessInfo.processInfo.systemUptime
         // One current confirmed waiter; superseded tasks exit without taking a slot.
         while lane.busy {
-            if speculation || Task.isCancelled || ProcessInfo.processInfo.systemUptime - enqueued >= 4 { return nil }
+            if speculation || Task.isCancelled || ProcessInfo.processInfo.systemUptime - enqueued >= 4 {
+                report("backend_lane_admission_rejected", nil)
+                report("backend_lane_wait_ms", (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)
+                return nil
+            }
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
+        report("backend_lane_wait_ms", (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)
         guard !Task.isCancelled else { return nil }
         let source = Locale.Language(identifier: caption.source), target = Locale.Language(identifier: caption.target)
         activity.advance(activityID, to: .checkingLanguages)
@@ -299,6 +318,9 @@ final class ModeTranslationService {
         report("requested_" + strategy.rawValue, nil)
         report(speculation ? "speculative_model_submitted" : "confirmed_model_submitted", nil)
         report(warm ? "retained_session_start" : "new_session_start", nil)
+        if warm, let createdAt = lane.createdAt {
+            report("backend_session_age_ms", (ProcessInfo.processInfo.systemUptime - createdAt) * 1000)
+        }
         report(speculation ? "speculative_queue_ms" : "recovery_queue_ms",
                (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)
         let dispatched = ProcessInfo.processInfo.systemUptime
@@ -347,7 +369,13 @@ final class ModeTranslationService {
                         }
                         lane.busy = false; lane.caption = nil; lane.cancellationAt = nil
                         lane.activityID = nil
-                        if lane.invalidated || output == nil { lane.session = nil; lane.key = "" }
+                        if lane.invalidated || output == nil {
+                            lane.session = nil; lane.key = ""
+                            lane.createdAt = nil; lane.completedCalls = 0
+                        } else {
+                            lane.completedCalls += 1
+                            report("backend_session_reuse_count", Double(lane.completedCalls))
+                        }
                     }
                     self.activity.end(activityID)
                     finish(lane.invalidated ? nil : output)
