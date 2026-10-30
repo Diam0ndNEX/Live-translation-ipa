@@ -106,11 +106,14 @@ class SampleHandler: RPBroadcastSampleHandler {
             enabled: cfg.adaptiveOCR ?? false, cool: cfg.smartCool ?? false,
             pressure: cfg.pressure ?? false, feedback: feedback, ceiling: cfg.detailCeiling ?? 2400)
         recognitionReason = plan.reason
-        let idleFactor = SubtitleAcquisitionPolicy.idleMultiplier(movie: cfg.movieMode ?? false,
+        // Preference comes from the selected preset or the user's overrides,
+        // never from the built-in Movie/Game/Comic category.
+        let rapidText = cfg.rapidTextTracking ?? cfg.movieMode ?? false
+        let idleFactor = SubtitleAcquisitionPolicy.idleMultiplier(rapidTextTracking: rapidText,
             enabled: cfg.idleBackoff ?? true, secondsSinceText: now.timeIntervalSince(lastUsefulText))
         let interval = SubtitlePerformancePolicy.confirmationInterval(
             planned: plan.interval * idleFactor, pending: candidateCount > 0,
-            movie: cfg.movieMode ?? false,
+            rapidTextTracking: rapidText,
             pressure: cfg.confirmationBurst == false || (cfg.pressure ?? false) || (cfg.smartCool ?? false) ||
                 ProcessInfo.processInfo.isLowPowerModeEnabled ||
                 ProcessInfo.processInfo.thermalState != .nominal,
@@ -138,7 +141,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             if changed { visualChanges += 1; lastVisualChangeAt = now }
             if (cfg.skipUnchanged ?? true), candidateCount == 0,
                comparable, now.timeIntervalSince(lastRun) <
-                    SubtitleAcquisitionPolicy.maximumUnchangedDelay(movie: cfg.movieMode ?? false),
+                    SubtitleAcquisitionPolicy.maximumUnchangedDelay(rapidTextTracking: rapidText),
                !changed {
                 skipped += 1; unchangedSkipped += 1
                 return
