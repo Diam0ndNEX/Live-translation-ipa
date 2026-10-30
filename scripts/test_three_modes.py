@@ -13,8 +13,17 @@ def function(source, name):
     end = source.find('\n    private func ', start + 1)
     return source[start:end if end != -1 else len(source)]
 engine = read('App/TranslatorEngine.swift')
-for name in ['process', 'drain', 'speculate', 'cachedCaption', 'extractTexts', 'selectBlocks']:
+for name in ['process', 'drain', 'speculate', 'cachedCaption']:
     assert function(engine, name) == function(old('App/TranslatorEngine.swift'), name), name + ' Legacy policy changed'
+# Recognition settings are no longer hard-coded to the built-in Movie category.
+# Normalize only these intentional capability routing changes; all of the
+# original Legacy extraction and active-text selection logic must stay intact.
+reference_engine = old('App/TranslatorEngine.swift')
+old_extract = function(reference_engine, 'extractTexts').replace('area.range(mode: mode)', 'area.range()')
+assert function(engine, 'extractTexts') == old_extract, 'Legacy extraction changed beyond preset-independent area routing'
+old_select = function(reference_engine, 'selectBlocks').replace('if mode == .movie {', 'if flag("activeTextFocus", true) {')
+assert function(engine, 'selectBlocks') == old_select, 'Legacy text selection changed beyond preset-independent focus routing'
+assert 'if mode == .movie' not in engine, 'Recognition cannot be locked to the Movie category'
 assert function(read('App/TranslationMemoryStore.swift'), 'createSchema') == function(old('App/TranslationMemoryStore.swift'), 'createSchema')
 assert function(read('App/TranslationMemoryStore.swift'), 'upgradeSchemaV2') == function(old('App/TranslationMemoryStore.swift'), 'upgradeSchemaV2')
 assert old('App/TranslationMemoryStore.swift', 'origin/codex/screenlingo-v1.8.0-performance') == old('App/TranslationMemoryStore.swift')
