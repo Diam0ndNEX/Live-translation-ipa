@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""Static routing regressions paired with the Swift three-mode and iOS CI suites."""
+from pathlib import Path
+
+root = Path(__file__).resolve().parents[1]
+engine = (root / "App/TranslatorEngine.swift").read_text()
+diagnostics = (root / "App/Diagnostics.swift").read_text()
+coordinator = (root / "Shared/TranslationSystem.swift").read_text()
+archive = (root / "App/DiagnosticArchive.swift").read_text()
+tests = (root / "Tests/ThreeModes/main.swift").read_text()
+
+def section(source: str, start: str, end: str) -> str:
+    assert source.count(start) == 1, f"Missing or duplicated start: {start}"
+    position = source.index(start)
+    finish = source.find(end, position + len(start))
+    assert finish != -1, f"Missing end: {end}"
+    return source[position:finish]
+
+selection = section(engine, "private func selectModeResult(", "private var contextRevision")
+assert "diag.recordModeSelection(" in selection
+assert selection.index("if presented {") < selection.index("diag.recordModeSelection(")
+assert "diag.s.translations += 1" in selection
+assert "diag.recordMemory(" in selection
+assert "queueMemory(" in selection
+
+mode_event = section(engine, "private func noteModeEvent(", "private func handleModeCaption(")
+assert 'reason == "model_batch_completed"' in mode_event
+assert "diag.recordModeModel(ms: duration" in mode_event
+assert "translateMs = duration" in mode_event
+assert 'reason == "speculative_model_submitted"' in mode_event
+assert "noteSpeculativeModelSubmitted(caption)" in mode_event
+
+model = section(diagnostics, "func recordModeModel(", "func recordLatency(")
+assert "add(\\.translate, ms)" in model
+assert "recordModeSelection(" in model
+assert "event(.translation," in model
+assert "guard enabled" in model
+assert "No" not in model
+
+settings = section(engine, "func diagnosticsSettingsChanged()", "Own-app visibility is observable")
+assert "modeDiagnosticEpochs[modeSessionID] = diag.started" in settings
+assert "func resetDiagnostics()" in settings
+ui = section(diagnostics, "private struct DiagnosticsBody: View", "// MARK: Simple")
+assert "engine.resetDiagnostics()" in ui
+assert "engine.diagnosticsSettingsChanged()" in ui
+assert "v1.5.0" not in ui
+assert "AppVersion.full" not in ui or "AppVersion.full" in diagnostics
+assert "Measured model processing:" in diagnostics
+assert "No measurements in this range" in diagnostics
+assert 'engine.activeTranslationSystem == .legacy' in diagnostics
+
+ownership = section(coordinator, "func shouldStartModel(", "func noteOverlappingRecovery(")
+assert "speculativeEligible" in ownership
+assert "return true" in ownership
+assert "current.matches(caption) && committed != current" not in ownership
+assert "noteSpeculativeModelSubmitted(" in ownership
+assert "speculativeModelSubmitted" in coordinator
+assert "if adaptiveHybrid && speculativeModelSubmitted" in coordinator
+assert "speculation_superseded_before_confirmation" in archive
+assert "backend_stale_request_dropped" in archive
+assert "The upcoming subtitle." in tests
+assert "Predicted B" in tests and "Confirmed C" in tests
+assert "Previous displayed text must not invalidate" in tests
+
+version = (root / "Shared/Shared.swift").read_text()
+project = (root / "project.yml").read_text()
+assert 'static let version = "1.9.3"' in version
+assert "static let build = 74" in version
+assert project.count('"1.9.3"') == 3 and project.count('"74"') == 3
+
+print("v1.9.3 predictive ownership and all-mode Diagnostics routing contract passed")
