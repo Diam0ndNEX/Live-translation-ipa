@@ -199,6 +199,7 @@ struct TranslationModeReport: Codable {
         "speculative_model_submitted", "confirmed_model_submitted", "model_batch_failed", "model_batch_completed", "speculative_model_completed", "confirmed_model_completed",
         "cancellation_requested", "cancelled_call_returned",
         "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
+        "hybrid_speculation_unexecuted",
         "hybrid_speculation_backend_busy",
         "strategy_cache_hit_appleDefault", "strategy_cache_hit_lowLatency",
         "strategy_cache_populated_appleDefault", "strategy_cache_populated_lowLatency",
@@ -281,6 +282,7 @@ struct TranslationModeReport: Codable {
         // metadata reasons and numeric samples can reach the exported report.
         let sessionReasons = [
             "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
+        "hybrid_speculation_unexecuted",
             "hybrid_speculation_backend_busy",
             "strategy_cache_hit_appleDefault", "strategy_cache_hit_lowLatency",
             "strategy_cache_populated_appleDefault", "strategy_cache_populated_lowLatency",
