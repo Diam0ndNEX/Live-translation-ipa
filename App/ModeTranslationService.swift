@@ -16,6 +16,7 @@ final class ModeTranslationService {
         var activityID: UUID?
         var requestedStrategy: RequestedTranslationStrategy?
         var createdAt: Double?
+        var lastFinishedAt: Double?
         var completedCalls = 0
     }
     private var hostedIsSpeculative = false
@@ -86,6 +87,7 @@ final class ModeTranslationService {
             if !lane.busy {
                 lane.session = nil; lane.key = ""
                 lane.createdAt = nil; lane.completedCalls = 0
+                lane.lastFinishedAt = nil
             }
         }
     }
@@ -125,8 +127,10 @@ final class ModeTranslationService {
             destination.session = session; destination.key = warmupLane.key; destination.invalidated = false
             destination.createdAt = warmupLane.createdAt
             destination.completedCalls = warmupLane.completedCalls
+            destination.lastFinishedAt = warmupLane.lastFinishedAt
             warmupLane.session = nil; warmupLane.key = ""
             warmupLane.createdAt = nil; warmupLane.completedCalls = 0
+            warmupLane.lastFinishedAt = nil
             warmupPolicy.finish(source: source, target: target, strategy: strategy, succeeded: true)
             completedStrategies += 1
         }
@@ -209,6 +213,7 @@ final class ModeTranslationService {
         } else { lane.session = TranslationSession(installedSource: source, target: target) }
         lane.key = key; lane.invalidated = false
         lane.createdAt = ProcessInfo.processInfo.systemUptime
+        lane.lastFinishedAt = nil
         lane.completedCalls = 0
     }
 
@@ -355,7 +360,8 @@ final class ModeTranslationService {
                         report("model_error", nil)
                     }
                     timeout.cancel()
-                    let serviceMs = (ProcessInfo.processInfo.systemUptime - start) * 1000
+                    let finishedAt = ProcessInfo.processInfo.systemUptime
+                    let serviceMs = (finishedAt - start) * 1000
                     report(output == nil ? "model_batch_failed" : "model_batch_completed", serviceMs)
                     if output != nil {
                         // Warm-up completion is accounted for by warmupEvent.
@@ -366,8 +372,16 @@ final class ModeTranslationService {
                         report(speculation ? "speculative_model_completed" : "confirmed_model_completed", serviceMs)
                     }
                     report(speculation ? "speculative_service_ms" : "recovery_service_ms", serviceMs)
-                    if competingDefault { report("hybrid_overlapped_recovery_ms", serviceMs) }
+                    if competingDefault {
+                        report("hybrid_overlapped_recovery_ms", serviceMs)
+                        // Service time includes non-overlapping work; this second
+                        // metric measures simultaneous lane occupancy only.
+                        let overlapEnd = speculative.busy ? finishedAt : (speculative.lastFinishedAt ?? dispatched)
+                        let overlapMs = max(0, min(finishedAt, overlapEnd) - dispatched) * 1000
+                        report("hybrid_simultaneous_model_overlap_ms", overlapMs)
+                    }
                     if lane.ticket == ticket {
+                        lane.lastFinishedAt = finishedAt
                         if let cancelled = lane.cancellationAt {
                             report("cancelled_call_returned", (ProcessInfo.processInfo.systemUptime - cancelled) * 1000)
                         }
@@ -376,6 +390,7 @@ final class ModeTranslationService {
                         if lane.invalidated || output == nil {
                             lane.session = nil; lane.key = ""
                             lane.createdAt = nil; lane.completedCalls = 0
+                lane.lastFinishedAt = nil
                         } else {
                             lane.completedCalls += 1
                             report("backend_session_reuse_count", Double(lane.completedCalls))
