@@ -18,6 +18,9 @@ def section(source: str, start: str, end: str) -> str:
 
 selection = section(engine, "private func selectModeResult(", "private var contextRevision")
 assert "diag.recordModeSelection(" in selection
+assert "processingMs: modelProcessing" in selection
+assert 'output.origins.contains("recovery")' in selection
+assert 'output.origins.contains("speculation")' in selection
 assert selection.index("if presented {") < selection.index("diag.recordModeSelection(")
 assert "diag.s.translations += 1" in selection
 assert "diag.recordMemory(" in selection
@@ -26,6 +29,7 @@ assert "queueMemory(" in selection
 mode_event = section(engine, "private func noteModeEvent(", "private func handleModeCaption(")
 assert 'reason == "model_batch_completed"' in mode_event
 assert "diag.recordModeModel(ms: duration" in mode_event
+assert "modeModelTimings[key] = timing" in mode_event
 assert "translateMs = duration" in mode_event
 assert 'reason == "speculative_model_submitted"' in mode_event
 assert "noteSpeculativeModelSubmitted(caption)" in mode_event
