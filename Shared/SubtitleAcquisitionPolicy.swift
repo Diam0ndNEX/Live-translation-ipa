@@ -34,7 +34,7 @@ enum SubtitleAcquisitionPolicy {
         rapidTextTracking ? 0.55 : 1.5
     }
 
-    /// A new subtitle should wake Movie OCR promptly after quiet scenes.
+    /// Rapid-text tracking should wake OCR promptly after quiet scenes.
     static func idleMultiplier(rapidTextTracking: Bool, enabled: Bool, secondsSinceText: TimeInterval) -> Double {
         guard enabled, secondsSinceText > 8 else { return 1.0 }
         return rapidTextTracking ? 1.15 : 2.5
