@@ -642,8 +642,12 @@ final class Diagnostics: ObservableObject {
         let counter = "initial_warmup_\(strategy)_\(observation.phase)"
         modeEventCounts[counter, default: 0] += 1
         if observation.phase == "model_submitted" {
+            // A real model request is the common denominator across all three modes.
+            // Do not count a policy claim or a skipped preparation as an attempt.
+            noteModelState("warmup_started")
             noteModelState("warmup_model_submitted")
         } else if observation.phase == "model_completed" {
+            noteModelState("warmup_succeeded")
             noteModelState("warmup_model_completed", durationMs: observation.durationMs)
         } else if observation.phase == "model_batch_failed" || observation.phase == "model_timeout" {
             noteModelState("warmup_failed", durationMs: observation.durationMs)
