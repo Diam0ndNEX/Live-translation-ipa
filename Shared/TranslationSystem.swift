@@ -368,6 +368,19 @@ final class ThreeModeCoordinator {
         }
     }
 
+    /// Only work which has not yet entered Apple's model may be abandoned.
+    /// Calls already executing must return normally to preserve their sessions.
+    /// Preview requests can begin before confirmation assigns current.
+    func shouldStartModel(_ caption: ModeCaption, speculative: Bool) -> Bool {
+        guard system != .legacy else { return false }
+        if speculative {
+            guard speculativeCaption == caption else { return false }
+            guard let current else { return true }
+            return current.matches(caption) && committed != current
+        }
+        return current == caption && committed != caption
+    }
+
     func noteOverlappingRecovery(_ milliseconds: Double) {
         guard system == .hybridRecovery, adaptiveHybrid else { return }
         hybridAdmission.overlappingRecovery(milliseconds: milliseconds)
@@ -419,7 +432,8 @@ final class ThreeModeCoordinator {
             event(caption, speculative ? "speculative_enqueue" : "recovery_enqueue", nil)
             let began = clock()
             var result = await translate(caption, missing, strategy, speculative)
-            if result == nil, !speculative, !Task.isCancelled {
+            if result == nil, !speculative, !Task.isCancelled,
+               shouldStartModel(caption, speculative: false) {
                 event(caption, "same_strategy_retry", nil)
                 result = await translate(caption, missing, strategy, false)
             }
