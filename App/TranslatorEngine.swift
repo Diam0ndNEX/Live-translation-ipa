@@ -819,6 +819,9 @@ final class TranslatorEngine: ObservableObject {
         }
         modeDiagnosticEpochs[modeSessionID] = diag.started
         modeCoordinator.system = activeTranslationSystem
+        modeCoordinator.hybridSpeculationPermitted = { [weak self] in
+            self?.modeService.mayAdmitHybridSpeculation ?? false
+        }
         modeService.hostedDefault = { [weak self] texts, source, target, speculative in
             await self?.translateLegacy(texts, source: source, target: target, speculative: speculative)
         }
