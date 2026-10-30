@@ -6,6 +6,7 @@ root = Path(__file__).resolve().parents[1]
 engine = (root / "App/TranslatorEngine.swift").read_text()
 diagnostics = (root / "App/Diagnostics.swift").read_text()
 coordinator = (root / "Shared/TranslationSystem.swift").read_text()
+backend = (root / "App/ModeTranslationService.swift").read_text()
 archive = (root / "App/DiagnosticArchive.swift").read_text()
 tests = (root / "Tests/ThreeModes/main.swift").read_text()
 
@@ -33,6 +34,11 @@ assert "modeModelTimings[key] = timing" in mode_event
 assert "translateMs = duration" in mode_event
 assert 'reason == "speculative_model_submitted"' in mode_event
 assert "noteSpeculativeModelSubmitted(caption)" in mode_event
+
+# Only waiting confirmed work receives the shorter lane handoff interval.
+lane_wait = section(backend, "while lane.busy {", 'report("backend_lane_wait_ms", (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)')
+assert "if speculation || Task.isCancelled" in lane_wait
+assert "Task.sleep(nanoseconds: 5_000_000)" in lane_wait
 
 warmup = section(diagnostics, "func noteInitialWarmup(", "func noteModeEvent(")
 assert 'observation.phase == "model_submitted"' in warmup
