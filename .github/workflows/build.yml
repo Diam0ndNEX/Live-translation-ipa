@@ -3,7 +3,7 @@ on:
   push:
     branches: [codex/screenlingo-v1.9.2-hybrid-reliability, codex/screenlingo-v1.9.1-hybrid-performance, codex/screenlingo-v1.9.0-three-modes, codex/screenlingo-v0.7.0, codex/screenlingo-v0.8.0, codex/screenlingo-v0.9.0, codex/screenlingo-v1.0.0, codex/screenlingo-v1.1.0, codex/screenlingo-v1.2.0, codex/screenlingo-v1.2.1, codex/screenlingo-v1.3.0, codex/screenlingo-v1.4.1, codex/screenlingo-v1.4.1-static-overlay, codex/screenlingo-v1.4.1-diagnostics, codex/screenlingo-v1.4.2, codex/screenlingo-v1.4.3-batch-memory, codex/screenlingo-v1.4.4-performance, codex/screenlingo-v1.4.5-latency, codex/screenlingo-v1.4.6-validation, codex/screenlingo-v1.4.7-intelligence, codex/screenlingo-v1.4.8-continuity, codex/screenlingo-v1.5.0-refinement, codex/screenlingo-v1.7.0-performance, codex/screenlingo-v1.7.1-testing, codex/screenlingo-v1.7.2-performance]
   pull_request:
-    branches: [codex/screenlingo-v1.9.1-hybrid-performance, codex/screenlingo-v1.3.0, codex/screenlingo-v1.4.0, codex/screenlingo-v1.4.1, codex/screenlingo-v1.4.2, codex/screenlingo-v1.4.3-batch-memory, codex/screenlingo-v1.4.4-performance, codex/screenlingo-v1.4.5-latency, codex/screenlingo-v1.4.6-validation, "codex/memory2-**"]
+    branches: [codex/screenlingo-v1.3.0, codex/screenlingo-v1.4.0, codex/screenlingo-v1.4.1, codex/screenlingo-v1.4.2, codex/screenlingo-v1.4.3-batch-memory, codex/screenlingo-v1.4.4-performance, codex/screenlingo-v1.4.5-latency, codex/screenlingo-v1.4.6-validation, "codex/memory2-**"]
   workflow_dispatch:
     inputs:
       interface_preview:
