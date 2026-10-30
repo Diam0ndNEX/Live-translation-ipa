@@ -412,10 +412,10 @@ final class Harness {
         precondition(!admission.coordinator.shouldStartModel(preview, speculative: true))
         precondition(!admission.coordinator.shouldStartModel(accepted, speculative: false))
         precondition(admission.coordinator.shouldStartModel(superseding, speculative: false))
-        for i in admission.calls.indices { admission.reply(i, nil) }
-        await admission.settle()
         admission.coordinator.reset()
         precondition(!admission.coordinator.shouldStartModel(superseding, speculative: false))
+        for i in admission.calls.indices { admission.reply(i, nil) }
+        await admission.settle()
 
         // A stale unsuccessful recovery must not re-enter the model lane for
         // its same-strategy retry or consume time ahead of the current caption.
