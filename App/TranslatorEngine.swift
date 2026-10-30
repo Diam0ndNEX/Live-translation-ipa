@@ -584,15 +584,16 @@ final class TranslatorEngine: ObservableObject {
             for i in output.values.indices {
                 let origin = output.origins[i]
                 if origin == "speculation" { diag.s.specHits += 1; diag.recordMemory(.speculativeHit, candidate: caption.caption) }
-                else if origin == "compatible_memory" || origin == "session_low_latency" {
-                    let provenance = origin == "session_low_latency" ? "ram" : (modeMemoryOrigins[caption.keys[i]] ?? "ram")
+                else if origin == "compatible_memory" || origin == "session_low_latency" || origin == "session_apple_default" {
+                    let provenance = origin.hasPrefix("session_") ? "ram" : (modeMemoryOrigins[caption.keys[i]] ?? "ram")
                     let saved = ["persistent", "legacy", "normalized", "saved_ram"].contains(provenance)
                     if saved { diag.s.savedHits += 1 } else { diag.s.cacheHits += 1 }
                     let outcome: MemoryDiagnosticOutcome = provenance == "persistent" ? .persistentHit : (provenance == "legacy" ? .legacyHit : (provenance == "normalized" ? .normalizedHit : .ramHit))
                     diag.recordMemory(outcome, candidate: caption.caption)
                 } else { diag.s.cacheMisses += 1; diag.recordMemory(.miss, candidate: caption.caption) }
                 if memoryTestMode == .temporaryMemory {
-                    if origin == "speculation" || origin == "compatible_memory" || origin == "session_low_latency" { diag.noteTemporaryReuse() }
+                    if origin == "speculation" || origin == "compatible_memory" ||
+                       origin == "session_low_latency" || origin == "session_apple_default" { diag.noteTemporaryReuse() }
                     else { diag.recordMemory(.temporaryMiss, candidate: caption.caption) }
                 }
             }
@@ -819,6 +820,12 @@ final class TranslatorEngine: ObservableObject {
         }
         modeDiagnosticEpochs[modeSessionID] = diag.started
         modeCoordinator.system = activeTranslationSystem
+        modeCoordinator.hybridSpeculationPermitted = { [weak self] in
+            self?.modeService.mayAdmitHybridSpeculation ?? false
+        }
+        modeService.mayStartModel = { [weak self] caption, speculative in
+            self?.modeCoordinator.shouldStartModel(caption, speculative: speculative) ?? false
+        }
         modeService.hostedDefault = { [weak self] texts, source, target, speculative in
             await self?.translateLegacy(texts, source: source, target: target, speculative: speculative)
         }
@@ -1455,12 +1462,14 @@ final class TranslatorEngine: ObservableObject {
             }
             return
         }
+        // Both Legacy and new modes must count accepted confirmed packets.
+        // Do this before dispatch, without counting a local replay twice.
+        if p.stable != false && !replayed && diag.enabled { diag.s.confirmedCandidatePackets += 1 }
         if activeTranslationSystem != .legacy {
             handleModeCaption(candidateTexts, packet: p)
             return
         }
         let candidateText = candidateTexts.map(TextSim.norm).joined(separator: "\n")
-        if p.stable != false && !replayed && diag.enabled { diag.s.confirmedCandidatePackets += 1 }
         // Admission must precede generation changes, cancellation and continuity
         // accounting. Rejected fragments never become active confirmed work.
         if SubtitleAcquisitionPolicy.rejectsDisplayedFragment(confirmed: p.stable != false,

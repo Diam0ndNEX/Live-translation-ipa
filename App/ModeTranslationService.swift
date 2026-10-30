@@ -15,6 +15,9 @@ final class ModeTranslationService {
         var cancellationAt: Double?
         var activityID: UUID?
         var requestedStrategy: RequestedTranslationStrategy?
+        var createdAt: Double?
+        var lastFinishedAt: Double?
+        var completedCalls = 0
     }
     private var hostedIsSpeculative = false
     private var hostedTask: Task<[String]?, Never>?
@@ -28,6 +31,10 @@ final class ModeTranslationService {
     private let warmupLane = Lane()
     private var warmupPolicy = InitialWarmupPolicy()
     private var recentlyInstalled: [String: Double] = [:]
+    /// Logical lane occupancy, not a claim of physical model residency.
+    var mayAdmitHybridSpeculation: Bool {
+        !speculative.busy && !confirmed.busy && !warmupLane.busy && hostedTask == nil
+    }
     private let installedCheckTTL: Double = 30
     var warmupEvent: ((InitialWarmupEvent) -> Void)?
     var modelRequestCompleted: ((String, String, RequestedTranslationStrategy, Double) -> Void)?
@@ -35,6 +42,8 @@ final class ModeTranslationService {
     var event: ((ModeCaption, String, Double?) -> Void)?
     var status: ((String) -> Void)?
     var hostedDefault: (([String], Locale.Language, Locale.Language, Bool) async -> [String]?)?
+    /// Checks only not-yet-submitted requests. Already-running calls must drain.
+    var mayStartModel: ((ModeCaption, Bool) -> Bool)?
 
     func cancel(speculation: Bool) {
         let lane = speculation ? speculative : confirmed
@@ -77,7 +86,11 @@ final class ModeTranslationService {
             if #available(iOS 26.0, *) { lane.session?.cancel() }
             lane.invalidated = true
             if let id = lane.activityID { activity.advance(id, to: .cancelling) }
-            if !lane.busy { lane.session = nil; lane.key = "" }
+            if !lane.busy {
+                lane.session = nil; lane.key = ""
+                lane.createdAt = nil; lane.completedCalls = 0
+                lane.lastFinishedAt = nil
+            }
         }
     }
 
@@ -114,7 +127,12 @@ final class ModeTranslationService {
             }
             destination.session?.cancel()
             destination.session = session; destination.key = warmupLane.key; destination.invalidated = false
+            destination.createdAt = warmupLane.createdAt
+            destination.completedCalls = warmupLane.completedCalls
+            destination.lastFinishedAt = warmupLane.lastFinishedAt
             warmupLane.session = nil; warmupLane.key = ""
+            warmupLane.createdAt = nil; warmupLane.completedCalls = 0
+            warmupLane.lastFinishedAt = nil
             warmupPolicy.finish(source: source, target: target, strategy: strategy, succeeded: true)
             completedStrategies += 1
         }
@@ -196,6 +214,9 @@ final class ModeTranslationService {
             lane.session = TranslationSession(installedSource: source, target: target, preferredStrategy: .lowLatency)
         } else { lane.session = TranslationSession(installedSource: source, target: target) }
         lane.key = key; lane.invalidated = false
+        lane.createdAt = ProcessInfo.processInfo.systemUptime
+        lane.lastFinishedAt = nil
+        lane.completedCalls = 0
     }
 
     func translate(_ caption: ModeCaption, indices: [Int], strategy: RequestedTranslationStrategy,
@@ -212,6 +233,13 @@ final class ModeTranslationService {
             source: caption.source, target: caption.target, strategy: strategy, stage: .waitingForSlot)
         var heldByActualCall = false
         defer { if !heldByActualCall { activity.end(activityID) } }
+        func eligibleToStart() -> Bool {
+            warmup || mayStartModel?(caption, speculation) != false
+        }
+        guard eligibleToStart() else {
+            report("backend_stale_request_dropped", nil)
+            return nil
+        }
         if strategy == .lowLatency {
             guard #available(iOS 26.4, *) else {
                 status?("Explicit low latency requires iOS 26.4 or later. Select Legacy or Hybrid Recovery to use Apple default.")
@@ -248,10 +276,23 @@ final class ModeTranslationService {
         let enqueued = ProcessInfo.processInfo.systemUptime
         // One current confirmed waiter; superseded tasks exit without taking a slot.
         while lane.busy {
-            if speculation || Task.isCancelled || ProcessInfo.processInfo.systemUptime - enqueued >= 4 { return nil }
+            guard eligibleToStart() else {
+                report("backend_stale_request_dropped", nil)
+                report("backend_lane_wait_ms", (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)
+                return nil
+            }
+            if speculation || Task.isCancelled || ProcessInfo.processInfo.systemUptime - enqueued >= 4 {
+                report("backend_lane_admission_rejected", nil)
+                report("backend_lane_wait_ms", (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)
+                return nil
+            }
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
-        guard !Task.isCancelled else { return nil }
+        report("backend_lane_wait_ms", (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)
+        guard !Task.isCancelled, eligibleToStart() else {
+            report("backend_stale_request_dropped", nil)
+            return nil
+        }
         let source = Locale.Language(identifier: caption.source), target = Locale.Language(identifier: caption.target)
         activity.advance(activityID, to: .checkingLanguages)
         let languageCheckStart = ProcessInfo.processInfo.systemUptime
@@ -273,7 +314,10 @@ final class ModeTranslationService {
             }
         }
         report("backend_availability_ms", (ProcessInfo.processInfo.systemUptime - languageCheckStart) * 1000)
-        guard !Task.isCancelled else { return nil }
+        guard !Task.isCancelled, eligibleToStart() else {
+            report("backend_stale_request_dropped", nil)
+            return nil
+        }
         guard pairAvailability == .installed else {
             report("unsupported_or_uninstalled_pair", nil)
             // Hybrid may still complete this caption through Apple Default.
@@ -284,7 +328,10 @@ final class ModeTranslationService {
             return nil
         }
         // Availability suspended; recheck the lease before acquiring it.
-        guard !lane.busy else { return nil }
+        guard !lane.busy, eligibleToStart() else {
+            report("backend_stale_request_dropped", nil)
+            return nil
+        }
         let warm = lane.session != nil && !lane.invalidated && lane.key == "\(caption.source)>\(caption.target)|\(strategy.rawValue)"
         let competingDefault = caption.system == .hybridRecovery && !speculation && strategy == .lowLatency &&
             speculative.busy && speculative.requestedStrategy == .appleDefault
@@ -299,6 +346,9 @@ final class ModeTranslationService {
         report("requested_" + strategy.rawValue, nil)
         report(speculation ? "speculative_model_submitted" : "confirmed_model_submitted", nil)
         report(warm ? "retained_session_start" : "new_session_start", nil)
+        if warm, let createdAt = lane.createdAt {
+            report("backend_session_age_ms", (ProcessInfo.processInfo.systemUptime - createdAt) * 1000)
+        }
         report(speculation ? "speculative_queue_ms" : "recovery_queue_ms",
                (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)
         let dispatched = ProcessInfo.processInfo.systemUptime
@@ -333,21 +383,42 @@ final class ModeTranslationService {
                         report("model_error", nil)
                     }
                     timeout.cancel()
-                    let serviceMs = (ProcessInfo.processInfo.systemUptime - start) * 1000
+                    let finishedAt = ProcessInfo.processInfo.systemUptime
+                    let serviceMs = (finishedAt - start) * 1000
                     report(output == nil ? "model_batch_failed" : "model_batch_completed", serviceMs)
                     if output != nil {
-                        self.modelRequestCompleted?(caption.source, caption.target, strategy, serviceMs)
+                        // Warm-up completion is accounted for by warmupEvent.
+                        // Do not also count it as a live model request.
+                        if !warmup {
+                            self.modelRequestCompleted?(caption.source, caption.target, strategy, serviceMs)
+                        }
                         report(speculation ? "speculative_model_completed" : "confirmed_model_completed", serviceMs)
                     }
                     report(speculation ? "speculative_service_ms" : "recovery_service_ms", serviceMs)
-                    if competingDefault { report("hybrid_overlapped_recovery_ms", serviceMs) }
+                    if competingDefault {
+                        report("hybrid_overlapped_recovery_ms", serviceMs)
+                        // Service time includes non-overlapping work; this second
+                        // metric measures simultaneous lane occupancy only.
+                        let overlapEnd = speculative.busy ? finishedAt : (speculative.lastFinishedAt ?? dispatched)
+                        let overlapMs = max(0, min(finishedAt, overlapEnd) - dispatched) * 1000
+                        report("hybrid_simultaneous_model_overlap_ms", overlapMs)
+                    }
                     if lane.ticket == ticket {
+                        lane.lastFinishedAt = finishedAt
                         if let cancelled = lane.cancellationAt {
                             report("cancelled_call_returned", (ProcessInfo.processInfo.systemUptime - cancelled) * 1000)
                         }
                         lane.busy = false; lane.caption = nil; lane.cancellationAt = nil
                         lane.activityID = nil
-                        if lane.invalidated || output == nil { lane.session = nil; lane.key = "" }
+                        if lane.invalidated || output == nil {
+                            lane.session = nil; lane.key = ""
+                            lane.createdAt = nil; lane.completedCalls = 0
+                            // Preserve the last physical return time so an
+                            // overlapped recovery can measure its actual span.
+                        } else {
+                            lane.completedCalls += 1
+                            report("backend_session_reuse_count", Double(lane.completedCalls))
+                        }
                     }
                     self.activity.end(activityID)
                     finish(lane.invalidated ? nil : output)

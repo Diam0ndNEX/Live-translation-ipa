@@ -481,6 +481,23 @@ import Foundation
         precondition(abs(confirmationDistribution.mean - 400) < 0.001)
         let decisionDistribution = modeReport.distributions.first { $0.key.hasSuffix("recoveryDecisionToEnqueue") }!.value
         precondition(abs(decisionDistribution.mean - 350) < 0.001)
+        // v1.9.2 timing and cache events must survive the strict privacy
+        // sanitizer rather than silently disappearing from the ZIP.
+        let revisedModeReport = TranslationModeReport(warmups: nil, active: "lowLatency", pending: "hybridRecovery",
+            referenceSHA: String(repeating: "b", count: 40), migration: "persisted",
+            events: [modeEvent("hybrid_speculation_backend_busy", at: 2.1),
+                     modeEvent("backend_lane_wait_ms", at: 2.2, duration: 42),
+                     modeEvent("strategy_cache_hit_appleDefault", at: 2.3),
+                     modeEvent("selected_origin_session_apple_default", at: 2.4)],
+            distributions: ["backend_lane_wait_ms": dist, "unsafe_user_content": dist],
+            counters: ["hybrid_speculation_backend_busy": 2, "backend_lane_wait_ms": 3,
+                       "strategy_cache_hit_appleDefault": 1, "unsafe_user_content": 999]).sanitized()
+        precondition(revisedModeReport.events.count == 4)
+        precondition(revisedModeReport.counters["session_hybrid_speculation_backend_busy"] == 2)
+        precondition(revisedModeReport.counters["session_strategy_cache_hit_appleDefault"] == 1)
+        precondition(revisedModeReport.distributions["session_backend_lane_wait_ms"] != nil)
+        precondition(revisedModeReport.distributions.keys.allSatisfy { !$0.contains("unsafe") })
+
         var modeSnapshot = snapshot
         modeSnapshot.translationModes = modeReport
         let encodedModes = try await writer.encode(modeSnapshot)

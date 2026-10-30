@@ -87,14 +87,26 @@ final class Harness {
         noFastPack.coordinator.reset()
         var governor = HybridAdmissionPolicy()
         for _ in 0..<3 { precondition(governor.admit()); governor.record(used: false) }
-        for _ in 0..<5 { precondition(!governor.admit()) }
+        for _ in 0..<8 { precondition(!governor.admit()) }
         precondition(governor.admit())
         governor.record(used: true)
         precondition(governor.admit())
         governor.overlappingRecovery(milliseconds: 700)
-        for _ in 0..<5 { precondition(!governor.admit()) }
+        for _ in 0..<12 { precondition(!governor.admit()) }
         governor.overlappingRecovery(milliseconds: 42)
         precondition(governor.admit())
+        var distinctBackoff = HybridAdmissionPolicy()
+        for _ in 0..<3 { distinctBackoff.record(used: false) }
+        precondition(!distinctBackoff.admit(identity: "caption-A"))
+        for _ in 0..<20 { precondition(!distinctBackoff.admit(identity: "caption-A")) }
+        precondition(distinctBackoff.rejected == 1)
+        for i in 0..<7 { precondition(!distinctBackoff.admit(identity: "caption-\(i)")) }
+        precondition(distinctBackoff.rejected == 8)
+        precondition(distinctBackoff.admit(identity: "next-caption"))
+        distinctBackoff.overlappingRecovery(milliseconds: 700)
+        precondition(!distinctBackoff.admit(identity: "slow-caption"))
+        distinctBackoff.record(used: true)
+        precondition(distinctBackoff.admit(identity: "after-useful"))
         let readinessStart = Date(timeIntervalSince1970: 100)
         precondition(InitialWarmupPolicy.strategies(for: .legacy).isEmpty)
         for source in ["en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh-Hans", "zh-Hant", "ar", "tr", "hi", "id", "nl", "pl", "th", "vi", "uk"] {
@@ -291,6 +303,140 @@ final class Harness {
             stop.coordinator.reset(); stop.reply(0, ["Must not display"]); await stop.settle()
             precondition(stop.selected.isEmpty)
         }
+        // Physical backend occupancy must prevent new Hybrid-only speculative
+        // requests. It must not prevent confirmed Low Latency recovery.
+        let busyAdmission = Harness()
+        busyAdmission.coordinator.system = .hybridRecovery
+        var physicalBusy = true
+        busyAdmission.coordinator.hybridSpeculationPermitted = { !physicalBusy }
+        busyAdmission.coordinator.observe(busyAdmission.caption("Blocked preview"), confirmed: false, speculate: true)
+        await busyAdmission.settle()
+        precondition(busyAdmission.calls.isEmpty)
+        precondition(busyAdmission.events.contains("hybrid_speculation_backend_busy"))
+        busyAdmission.coordinator.observe(busyAdmission.caption("Confirmed without preview"), confirmed: true, speculate: true)
+        await busyAdmission.settle()
+        precondition(busyAdmission.calls.count == 1 && busyAdmission.calls[0].strategy == .lowLatency)
+        busyAdmission.reply(0, ["Confirmed while speculative backend busy"])
+        await busyAdmission.settle()
+        physicalBusy = false
+        busyAdmission.coordinator.observe(busyAdmission.caption("Idle preview", id: "idle"), confirmed: false, speculate: true)
+        await busyAdmission.settle()
+        precondition(busyAdmission.calls.count == 2 && busyAdmission.calls[1].strategy == .appleDefault)
+        busyAdmission.reply(1, ["Idle speculative result"])
+        await busyAdmission.settle()
+        busyAdmission.coordinator.reset()
+
+        // An obsolete completed Hybrid recovery cannot present stale text, but
+        // its exact-key result remains available for a later matching caption.
+        let obsoleteCache = Harness()
+        obsoleteCache.coordinator.system = .hybridRecovery
+        let firstObsolete = obsoleteCache.caption("Old phrase", revision: 1, id: "old")
+        obsoleteCache.coordinator.observe(firstObsolete, confirmed: true, speculate: false)
+        await obsoleteCache.settle()
+        let changedObsolete = obsoleteCache.caption("New phrase", revision: 2, id: "new")
+        obsoleteCache.coordinator.observe(changedObsolete, confirmed: true, speculate: false)
+        await obsoleteCache.settle()
+        precondition(obsoleteCache.calls.count == 2)
+        obsoleteCache.reply(0, ["Cached old phrase"])
+        await obsoleteCache.settle()
+        precondition(obsoleteCache.selected.isEmpty)
+        let repeatedObsolete = obsoleteCache.caption("Old phrase", revision: 3, id: "again")
+        obsoleteCache.coordinator.observe(repeatedObsolete, confirmed: true, speculate: false)
+        await obsoleteCache.settle()
+        precondition(obsoleteCache.calls.count == 2)
+        precondition(obsoleteCache.selected.count == 1)
+        precondition(obsoleteCache.selected[0].1.origins == ["session_low_latency"])
+        precondition(obsoleteCache.selected[0].1.values == ["Cached old phrase"])
+        obsoleteCache.reply(1, ["Stale other phrase"])
+        await obsoleteCache.settle()
+        precondition(obsoleteCache.selected.count == 1)
+        obsoleteCache.coordinator.reset()
+
+        // Successful obsolete Apple-default output is stored separately from
+        // Low Latency and can be promoted only for an identical cache key.
+        let defaultCache = Harness()
+        defaultCache.coordinator.system = .hybridRecovery
+        defaultCache.coordinator.observe(defaultCache.caption("Preview phrase", id: "preview"), confirmed: false, speculate: true)
+        await defaultCache.settle()
+        defaultCache.coordinator.observe(defaultCache.caption("Changed phrase", revision: 2, id: "changed"), confirmed: true, speculate: false)
+        await defaultCache.settle()
+        precondition(defaultCache.calls.count == 2)
+        defaultCache.reply(0, ["Apple-default cached"])
+        await defaultCache.settle()
+        defaultCache.reply(1, ["Confirmed current"])
+        await defaultCache.settle()
+        defaultCache.coordinator.observe(defaultCache.caption("Preview phrase", revision: 3, id: "repeated"),
+                                          confirmed: false, speculate: true)
+        await defaultCache.settle()
+        precondition(defaultCache.calls.count == 2)
+        defaultCache.coordinator.observe(defaultCache.caption("Preview phrase", revision: 3, id: "repeated"),
+                                          confirmed: true, speculate: true)
+        await defaultCache.settle()
+        precondition(defaultCache.selected.count == 2)
+        precondition(defaultCache.selected[1].1.values == ["Apple-default cached"])
+        precondition(defaultCache.selected[1].1.origins == ["session_apple_default"])
+        defaultCache.coordinator.reset()
+
+        // Fresh mode bypasses all ephemeral translation caches.
+        let freshCache = Harness()
+        freshCache.coordinator.system = .hybridRecovery
+        freshCache.coordinator.observe(freshCache.caption(id: "first"), confirmed: true, speculate: false)
+        await freshCache.settle()
+        freshCache.reply(0, ["First result"])
+        await freshCache.settle()
+        freshCache.coordinator.allowsReuse = false
+        freshCache.coordinator.observe(freshCache.caption(id: "second"), confirmed: true, speculate: false)
+        await freshCache.settle()
+        precondition(freshCache.calls.count == 2)
+        freshCache.reply(1, ["Different fresh result"])
+        await freshCache.settle()
+        precondition(freshCache.selected.count == 2)
+        freshCache.coordinator.reset()
+
+        // Backend request ownership allows an early preview before confirmation
+        // but refuses stale, selected and reset requests before model admission.
+        let admission = Harness()
+        admission.coordinator.system = .hybridRecovery
+        let preview = admission.caption("Early line", id: "preview")
+        admission.coordinator.observe(preview, confirmed: false, speculate: true)
+        await admission.settle()
+        precondition(admission.coordinator.shouldStartModel(preview, speculative: true))
+        precondition(!admission.coordinator.shouldStartModel(preview, speculative: false))
+        let accepted = admission.caption("Early line", id: "preview")
+        admission.coordinator.observe(accepted, confirmed: true, speculate: true)
+        await admission.settle()
+        precondition(admission.coordinator.shouldStartModel(accepted, speculative: false))
+        let superseding = admission.caption("Correct line", revision: 2, id: "corrected")
+        admission.coordinator.observe(superseding, confirmed: true, speculate: false)
+        await admission.settle()
+        precondition(!admission.coordinator.shouldStartModel(preview, speculative: true))
+        precondition(!admission.coordinator.shouldStartModel(accepted, speculative: false))
+        precondition(admission.coordinator.shouldStartModel(superseding, speculative: false))
+        admission.coordinator.reset()
+        precondition(!admission.coordinator.shouldStartModel(superseding, speculative: false))
+        for i in admission.calls.indices { admission.reply(i, nil) }
+        await admission.settle()
+
+        // A stale unsuccessful recovery must not re-enter the model lane for
+        // its same-strategy retry or consume time ahead of the current caption.
+        let staleRetry = Harness()
+        staleRetry.coordinator.system = .hybridRecovery
+        let staleFirst = staleRetry.caption("First request", id: "first")
+        staleRetry.coordinator.observe(staleFirst, confirmed: true, speculate: false)
+        await staleRetry.settle()
+        precondition(staleRetry.calls.count == 1)
+        let liveSecond = staleRetry.caption("Second request", revision: 2, id: "second")
+        staleRetry.coordinator.observe(liveSecond, confirmed: true, speculate: false)
+        await staleRetry.settle()
+        precondition(staleRetry.calls.count == 2)
+        staleRetry.reply(0, nil)
+        await staleRetry.settle()
+        precondition(staleRetry.calls.count == 2, "Stale requests must not retry or fall back")
+        staleRetry.reply(1, ["Current caption"])
+        await staleRetry.settle()
+        precondition(staleRetry.selected.count == 1 && staleRetry.selected[0].1.values == ["Current caption"])
+        staleRetry.coordinator.reset()
+
         // Failed LL requests have a bounded same-strategy retry and no default refinement.
         let fail = Harness(); fail.coordinator.system = .lowLatency
         fail.coordinator.observe(fail.caption(), confirmed: true, speculate: false); await fail.settle()

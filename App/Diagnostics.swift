@@ -638,6 +638,21 @@ final class Diagnostics: ObservableObject {
         guard enabled else { return }
         initialWarmupTrace.append(observation)
         if initialWarmupTrace.count > 512 { initialWarmupTrace.removeFirst(initialWarmupTrace.count - 512) }
+        let strategy = observation.strategy.rawValue
+        let counter = "initial_warmup_\(strategy)_\(observation.phase)"
+        modeEventCounts[counter, default: 0] += 1
+        if observation.phase == "model_submitted" {
+            noteModelState("warmup_model_submitted")
+        } else if observation.phase == "model_completed" {
+            noteModelState("warmup_model_completed", durationMs: observation.durationMs)
+        } else if observation.phase == "model_batch_failed" || observation.phase == "model_timeout" {
+            noteModelState("warmup_failed", durationMs: observation.durationMs)
+        }
+        if let duration = observation.durationMs, duration.isFinite, duration >= 0 {
+            let metric = "initial_warmup_\(strategy)_\(observation.phase)_ms"
+            modeTimingSamples[metric, default: []].append(duration)
+            if modeTimingSamples[metric, default: []].count > 1200 { modeTimingSamples[metric]?.removeFirst() }
+        }
     }
 
     func noteModeEvent(session: UUID, caption: String, revision: Int, source: String, target: String,
@@ -657,6 +672,7 @@ final class Diagnostics: ObservableObject {
            (reason.hasPrefix("recovery_decision_") || reason.hasPrefix("pip_enqueue_") ||
             reason == "pip_held_unchanged" || reason == "confirmed" ||
             reason == "hybrid_cross_strategy_overlap" || reason == "hybrid_speculation_throttled" ||
+            reason == "hybrid_speculation_backend_busy" || reason == "backend_lane_admission_rejected" ||
             reason == "speculative_model_completed" || reason == "confirmed_model_completed") {
             openingModeTrace.append(entry)
         }
@@ -752,7 +768,13 @@ final class Diagnostics: ObservableObject {
                 "modeTaskDispatchMs": DiagnosticDistribution(modeTimingSamples["backend_task_dispatch_ms", default: []]),
                 "modeSpeculativeQueueMs": DiagnosticDistribution(modeTimingSamples["speculative_queue_ms", default: []]),
                 "modeRecoveryQueueMs": DiagnosticDistribution(modeTimingSamples["recovery_queue_ms", default: []]),
+                "modeBackendLaneWaitMs": DiagnosticDistribution(modeTimingSamples["backend_lane_wait_ms", default: []]),
+                "modeSessionAgeMs": DiagnosticDistribution(modeTimingSamples["backend_session_age_ms", default: []]),
+                "modeSessionCompletedCalls": DiagnosticDistribution(modeTimingSamples["backend_session_reuse_count", default: []]),
+                "hybridDefaultWarmupMs": DiagnosticDistribution(modeTimingSamples["initial_warmup_appleDefault_model_completed_ms", default: []]),
+                "hybridLowLatencyWarmupMs": DiagnosticDistribution(modeTimingSamples["initial_warmup_lowLatency_model_completed_ms", default: []]),
                 "hybridOverlappedRecoveryMs": DiagnosticDistribution(modeTimingSamples["hybrid_overlapped_recovery_ms", default: []]),
+                "hybridMeasuredOverlapMs": DiagnosticDistribution(modeTimingSamples["hybrid_simultaneous_model_overlap_ms", default: []]),
                 "modeCancellationReleaseMs": DiagnosticDistribution(modeTimingSamples["cancelled_call_returned", default: []])],
             events: exportEventWindow(),
             intervals: diagnosticIntervals(at: Date()),

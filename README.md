@@ -1,3 +1,9 @@
+# ScreenLingo v1.9.2 · build 73
+
+The v1.9.2 performance and reliability update targets cross-strategy contention in Hybrid Recovery, long-tail recovery delays, and lost exact-key reuse after a superseded model request. It adds backend occupancy-aware speculative admission, bounded contention backoff, per-strategy ephemeral result caches, and improved diagnostics for warm-up and session lifecycle. Legacy and explicit Low Latency remain selectable and unmodified. On-device latency, quality, battery and thermals require follow-up device validation.
+
+[Complete v1.9.2 specification](docs/v1.9.2-specification.md) · [v1.9.1 baseline and safety notes](docs/v1.9.1-hybrid-performance.md)
+
 # ScreenLingo v1.7.2 · build 58
 
 Speculative requests own a separate reusable session: obsolete work receives an

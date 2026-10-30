@@ -158,11 +158,19 @@ struct HybridAdmissionPolicy {
     private(set) var consecutiveWaste = 0
     private(set) var skipped = 0
     private(set) var rejected = 0
+    private var lastRejectedIdentity: String?
 
-    mutating func admit() -> Bool {
-        guard skipped > 0 else { return true }
+    /// A repeated OCR packet must not exhaust a backoff intended to cover
+    /// distinct subtitle candidates. Identity contains metadata, never text.
+    mutating func admit(identity: String? = nil) -> Bool {
+        if let identity, identity == lastRejectedIdentity { return false }
+        guard skipped > 0 else {
+            lastRejectedIdentity = nil
+            return true
+        }
         skipped -= 1
         rejected += 1
+        lastRejectedIdentity = identity
         return false
     }
 
@@ -170,18 +178,19 @@ struct HybridAdmissionPolicy {
         if used {
             consecutiveWaste = 0
             skipped = 0
+            lastRejectedIdentity = nil
             return
         }
         consecutiveWaste += 1
         if consecutiveWaste >= 3 {
-            skipped = max(skipped, 5)
+            skipped = max(skipped, 8)
             consecutiveWaste = 0
         }
     }
 
     mutating func overlappingRecovery(milliseconds: Double) {
         guard milliseconds.isFinite, milliseconds >= 350 else { return }
-        skipped = max(skipped, 5)
+        skipped = max(skipped, 12)
         consecutiveWaste = 0
     }
 }
@@ -203,6 +212,7 @@ final class ThreeModeCoordinator {
     var allowsReuse = true
     var adaptiveHybrid = true
     var fastRecoveryInstalled = true
+    var hybridSpeculationPermitted: () -> Bool = { true }
     var coldSpeculationCeiling = 0.7
     var matchingLowLatencyDeadline = 4.0
     private(set) var current: ModeCaption?
@@ -220,6 +230,8 @@ final class ThreeModeCoordinator {
     private var scoredSpeculation: ModeCaption?
     private var lowCache: [String: String] = [:]
     private var lowOrder: [String] = []
+    private var defaultCache: [String: String] = [:]
+    private var defaultOrder: [String] = []
     private var defaultService: [String: [Double]] = [:]
     private var lowService: [String: [Double]] = [:]
 
@@ -233,7 +245,10 @@ final class ThreeModeCoordinator {
     func reduceSpeculation(memoryPressure: Bool) {
         speculation?.cancel(); cancel(true)
         speculativeCaption = nil; speculativeOutput = nil
-        if memoryPressure { lowCache.removeAll(); lowOrder.removeAll() }
+        if memoryPressure {
+            lowCache.removeAll(); lowOrder.removeAll()
+            defaultCache.removeAll(); defaultOrder.removeAll()
+        }
         if let current, committed != current {
             event(current, memoryPressure ? "memory_pressure" : "thermal_reduced_speculation", nil)
             if memoryProbePending != current { startRecovery(current, reason: "speculation_absent") }
@@ -250,6 +265,7 @@ final class ThreeModeCoordinator {
         hybridAdmission = HybridAdmissionPolicy()
         scoredSpeculation = nil
         lowCache.removeAll(); lowOrder.removeAll()
+        defaultCache.removeAll(); defaultOrder.removeAll()
         defaultService.removeAll(); lowService.removeAll()
     }
 
@@ -257,7 +273,14 @@ final class ThreeModeCoordinator {
         guard system != .legacy else { return }
         if !confirmed {
             guard speculate, speculation == nil, current == nil || committed == current else { return }
-            if system == .hybridRecovery && adaptiveHybrid && !hybridAdmission.admit() {
+            if system == .hybridRecovery && !hybridSpeculationPermitted() {
+                speculativeCaption = nil
+                speculativeOutput = nil
+                event(caption, "hybrid_speculation_backend_busy", nil)
+                return
+            }
+            if system == .hybridRecovery && adaptiveHybrid &&
+                !hybridAdmission.admit(identity: "\(caption.session.uuidString)|\(caption.caption)|\(caption.revision)") {
                 speculativeCaption = nil
                 speculativeOutput = nil
                 event(caption, "hybrid_speculation_throttled", nil)
@@ -345,6 +368,19 @@ final class ThreeModeCoordinator {
         }
     }
 
+    /// Only work which has not yet entered Apple's model may be abandoned.
+    /// Calls already executing must return normally to preserve their sessions.
+    /// Preview requests can begin before confirmation assigns current.
+    func shouldStartModel(_ caption: ModeCaption, speculative: Bool) -> Bool {
+        guard system != .legacy else { return false }
+        if speculative {
+            guard speculativeCaption == caption else { return false }
+            guard let current else { return true }
+            return current.matches(caption) && committed != current
+        }
+        return current == caption && committed != caption
+    }
+
     func noteOverlappingRecovery(_ milliseconds: Double) {
         guard system == .hybridRecovery, adaptiveHybrid else { return }
         hybridAdmission.overlappingRecovery(milliseconds: milliseconds)
@@ -379,8 +415,12 @@ final class ThreeModeCoordinator {
         var strategies: [RequestedTranslationStrategy?] = values.map { _ in nil }
         if allowsReuse {
             for i in values.indices where values[i] == nil {
-                if let cached = lowCache[caption.keys[i]], strategy == .lowLatency {
-                    values[i] = cached; origins[i] = "session_low_latency"; strategies[i] = .lowLatency
+                let cached = strategy == .lowLatency ? lowCache[caption.keys[i]] : defaultCache[caption.keys[i]]
+                if let cached {
+                    values[i] = cached
+                    origins[i] = strategy == .lowLatency ? "session_low_latency" : "session_apple_default"
+                    strategies[i] = strategy
+                    event(caption, "strategy_cache_hit_" + strategy.rawValue, nil)
                 }
             }
         }
@@ -392,11 +432,21 @@ final class ThreeModeCoordinator {
             event(caption, speculative ? "speculative_enqueue" : "recovery_enqueue", nil)
             let began = clock()
             var result = await translate(caption, missing, strategy, speculative)
-            if result == nil, !speculative, !Task.isCancelled {
+            if result == nil, !speculative, !Task.isCancelled,
+               shouldStartModel(caption, speculative: false) {
                 event(caption, "same_strategy_retry", nil)
                 result = await translate(caption, missing, strategy, false)
             }
-            guard !Task.isCancelled, let result, result.count == missing.count else { return nil }
+            guard !Task.isCancelled, let result, result.count == missing.count,
+                  result.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else { return nil }
+            // An obsolete Hybrid model result has no display authority, but its
+            // exact-key translation is safe to reuse in this capture session.
+            if allowsReuse {
+                for (position, index) in missing.enumerated() {
+                    cacheCompleted(result[position], for: caption.keys[index], strategy: strategy)
+                }
+                event(caption, "strategy_cache_populated_" + strategy.rawValue, nil)
+            }
             let duration = clock() - began
             let cohort = caption.policyCohort
             if strategy == .appleDefault {
@@ -418,6 +468,18 @@ final class ThreeModeCoordinator {
         guard values.allSatisfy({ $0 != nil }) else { return nil }
         let output = ModeOutput(values: values.compactMap { $0 }, strategies: strategies, origins: origins)
         return output.complete ? output : nil
+    }
+
+    private func cacheCompleted(_ value: String, for key: String, strategy: RequestedTranslationStrategy) {
+        if strategy == .lowLatency {
+            if lowCache[key] == nil { lowOrder.append(key) }
+            lowCache[key] = value
+            if lowOrder.count > 256 { lowCache.removeValue(forKey: lowOrder.removeFirst()) }
+        } else {
+            if defaultCache[key] == nil { defaultOrder.append(key) }
+            defaultCache[key] = value
+            if defaultOrder.count > 256 { defaultCache.removeValue(forKey: defaultOrder.removeFirst()) }
+        }
     }
 
     private func startRecovery(_ caption: ModeCaption, reason: String) {
@@ -456,17 +518,22 @@ final class ThreeModeCoordinator {
     }
 
     private func commit(_ caption: ModeCaption, _ output: ModeOutput, _ proposedReason: String) {
-        let memoryOnly = output.origins.allSatisfy { $0 == "compatible_memory" || $0 == "session_low_latency" }
+        let memoryOnly = output.origins.allSatisfy {
+            $0 == "compatible_memory" || $0 == "session_low_latency" || $0 == "session_apple_default"
+        }
         let reason = memoryOnly ? "memory_hit" : proposedReason
         guard current == caption, committed != caption, output.complete else { event(caption, "stale_rejected", nil); return }
         committed = caption; deadline?.cancel()
-        scoreSpeculation(for: caption, useful: output.origins.contains("speculation"))
+        let matchedPreview = proposedReason == "speculation_match_ready" ||
+            proposedReason == "speculation_match_in_flight"
+        let previewUseful = output.origins.contains("speculation") ||
+            (matchedPreview && output.origins.contains("session_apple_default"))
+        scoreSpeculation(for: caption, useful: previewUseful)
         if allowsReuse {
-            for i in output.values.indices where output.strategies[i] == .lowLatency {
-                let key = caption.keys[i]
-                if lowCache[key] == nil { lowOrder.append(key) }
-                lowCache[key] = output.values[i]
-                if lowOrder.count > 256 { lowCache.removeValue(forKey: lowOrder.removeFirst()) }
+            for i in output.values.indices {
+                if let strategy = output.strategies[i] {
+                    cacheCompleted(output.values[i], for: caption.keys[i], strategy: strategy)
+                }
             }
         }
         for i in output.values.indices {
