@@ -427,6 +427,25 @@ final class TranslatorEngine: ObservableObject {
 
     private func noteModeEvent(_ caption: ModeCaption, reason: String, duration: Double?) {
         if caption.session == modeSessionID {
+            if reason == "speculative_model_submitted" {
+                modeCoordinator.noteSpeculativeModelSubmitted(caption)
+            }
+            // Keep the regular Diagnostics translation counters current for
+            // both new modes. Legacy records these in its original scheduler.
+            if diag.enabled {
+                switch reason {
+                case "speculation_admitted": diag.s.specStarted += 1
+                case "speculation_ready": diag.s.specCompleted += 1
+                case "speculation_failed": diag.s.specDiscarded += 1
+                case "speculative_model_submitted": diag.s.specModelRequests += 1
+                case "hybrid_speculation_throttled":
+                    diag.s.specSkipped += 1
+                    diag.s.adaptiveSpeculationSkipped += 1
+                case "hybrid_speculation_backend_busy": diag.s.specSkipped += 1
+                case "recovery_failed_missing": diag.s.failures += 1
+                default: break
+                }
+            }
             if reason == "confirmed" || reason == "speculation_admitted" {
                 modeActivityCaption = caption; modeActivitySelected = false
             }
@@ -454,6 +473,11 @@ final class TranslatorEngine: ObservableObject {
             }
         }
         guard modeDiagnosticEpochs[caption.session] == diag.started else { return }
+        if caption.session == modeSessionID, reason == "model_batch_completed",
+           let duration, duration.isFinite, duration >= 0 {
+            translateMs = duration
+            diag.recordModeModel(ms: duration, system: caption.system ?? activeTranslationSystem)
+        }
         if ["speculative_model_submitted", "confirmed_model_submitted", "model_batch_failed", "model_batch_completed", "speculative_model_completed", "confirmed_model_completed"].contains(reason) {
             diag.noteModelState(reason, durationMs: duration, candidate: caption.caption)
         }
@@ -620,6 +644,7 @@ final class TranslatorEngine: ObservableObject {
         status = "\(caption.source) → \(caption.target) ✓"
         let presented = show(caption.text, result, timing: timing)
         if presented {
+            diag.recordModeSelection(sentences: output.values.count, source: caption.source, target: caption.target)
             noteModeEvent(caption, reason: lastShowReusedFrame ? "pip_held_unchanged" : "pip_enqueue_" + reason,
                 duration: max(0, ProcessInfo.processInfo.systemUptime - caption.firstOCR) * 1000)
         } else { noteModeEvent(caption, reason: "display_failed", duration: nil) }
