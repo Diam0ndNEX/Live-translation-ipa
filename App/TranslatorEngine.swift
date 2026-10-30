@@ -1085,6 +1085,7 @@ final class TranslatorEngine: ObservableObject {
 
     func diagnosticsSettingsChanged() {
         diag.collectionChanged()
+        modeModelTimings.removeAll()
         // Collection reset starts a new diagnostic epoch without stopping
         // capture. Continue accepting current-mode events in that new cohort.
         modeDiagnosticEpochs[modeSessionID] = diag.started
