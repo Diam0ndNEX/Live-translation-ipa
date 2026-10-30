@@ -45,15 +45,19 @@ final class PresetStore: ObservableObject {
     static let builtIns: [Preset] = [
         Preset(id: UUID(uuidString: "11111111-0000-0000-0000-000000000004")!, name: "Lyrics", symbol: "music.note", colorIndex: 1,
                settings: ["mode": "movie", "area": "full", "speed": "balanced", "stability": 2,
+                          "rapidTextTracking": true, "joinAdjacentText": true, "activeTextFocus": true,
                           "clearHold": 2.0, "minDisplay": 0.0, "showOriginal": true], builtIn: true),
         Preset(id: UUID(uuidString: "11111111-0000-0000-0000-000000000001")!, name: "Movie", symbol: "film", colorIndex: 0,
                settings: ["mode": "movie", "area": "smart", "speed": "balanced", "stability": 2,
+                          "rapidTextTracking": true, "joinAdjacentText": true, "activeTextFocus": true,
                           "clearHold": 1.0, "minDisplay": 0.0], builtIn: true),
         Preset(id: UUID(uuidString: "11111111-0000-0000-0000-000000000002")!, name: "Game", symbol: "gamecontroller", colorIndex: 4,
                settings: ["mode": "game", "area": "full", "speed": "fast", "stability": 1,
+                          "rapidTextTracking": false, "joinAdjacentText": false, "activeTextFocus": false,
                           "clearHold": 0.5, "minDisplay": 0.0], builtIn: true),
         Preset(id: UUID(uuidString: "11111111-0000-0000-0000-000000000003")!, name: "Comic", symbol: "book", colorIndex: 3,
                settings: ["mode": "comic", "area": "full", "speed": "sharp", "stability": 2,
+                          "rapidTextTracking": false, "joinAdjacentText": false, "activeTextFocus": false,
                           "clearHold": 3.0, "minDisplay": 1.5], builtIn: true)
     ]
 
@@ -94,11 +98,13 @@ final class PresetStore: ObservableObject {
     }
 
     func matches(_ p: Preset) -> Bool {
+        let legacyOptions = PresetRecognitionPolicy.legacyDefaults(
+            for: p.settings["mode"] as? String ?? ud.string(forKey: "mode") ?? "movie")
         for k in TranslatorEngine.presetKeys {
             if p.builtIn && p.settings[k] == nil { continue }
             if (k == "source" || k == "target") && p.settings[k] == nil { continue }
             let cur = ud.object(forKey: k) ?? TranslatorEngine.defaults[k]
-            let want = p.settings[k] ?? TranslatorEngine.defaults[k]
+            let want = p.settings[k] ?? legacyOptions[k] ?? TranslatorEngine.defaults[k]
             if !Self.same(cur, want) { return false }
         }
         return true
@@ -119,10 +125,16 @@ final class PresetStore: ObservableObject {
 
     // MARK: Actions
     func apply(_ p: Preset) {
+        // Old custom profiles predate these switches. Preserve their exact
+        // prior Movie/Game/Comic behavior on import or reapplication.
+        let legacyOptions = PresetRecognitionPolicy.legacyDefaults(
+            for: p.settings["mode"] as? String ?? ud.string(forKey: "mode") ?? "movie")
         for k in TranslatorEngine.presetKeys {
             let isLanguage = (k == "source" || k == "target")
             if let v = p.settings[k] {
                 ud.set(v, forKey: k)
+            } else if let inherited = legacyOptions[k] {
+                ud.set(inherited, forKey: k)
             } else if !p.builtIn && !isLanguage {
                 ud.removeObject(forKey: k)
             }
