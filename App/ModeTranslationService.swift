@@ -358,7 +358,11 @@ final class ModeTranslationService {
                     let serviceMs = (ProcessInfo.processInfo.systemUptime - start) * 1000
                     report(output == nil ? "model_batch_failed" : "model_batch_completed", serviceMs)
                     if output != nil {
-                        self.modelRequestCompleted?(caption.source, caption.target, strategy, serviceMs)
+                        // Warm-up completion is accounted for by warmupEvent.
+                        // Do not also count it as a live model request.
+                        if !warmup {
+                            self.modelRequestCompleted?(caption.source, caption.target, strategy, serviceMs)
+                        }
                         report(speculation ? "speculative_model_completed" : "confirmed_model_completed", serviceMs)
                     }
                     report(speculation ? "speculative_service_ms" : "recovery_service_ms", serviceMs)
