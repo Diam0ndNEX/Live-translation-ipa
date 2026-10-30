@@ -780,7 +780,7 @@ final class Diagnostics: ObservableObject {
             intervals: diagnosticIntervals(at: Date()),
             oneSecondIntervals: detailedCollection ? recentIntervals(at: Date(), period: 1) : nil,
             fiveSecondIntervals: diagnosticIntervals(at: Date(), period: 5),
-            measurementBoundary: "First OCR sighting to PiP sample-buffer enqueue; physical display unmeasured. Distributions use the latest bounded samples within this session, not all-time aggregates. Stages can overlap.",
+            measurementBoundary: "First OCR sighting to PiP sample-buffer enqueue; physical display unmeasured. translationMs measures Legacy pipeline processing or completed Hybrid/Low Latency backend model inference, not memory-only selection. Latest bounded samples; stages can overlap.",
             textCapture: false)
     }
 
@@ -2770,7 +2770,9 @@ private struct DiagnosticsBody: View {
                 StatTile(title: "Source used", value: s.sourceUsed == "–" ? "–" : s.sourceUsed.uppercased(), icon: "sparkle.magnifyingglass")
                 StatTile(title: "Locked to", value: s.lockedLang == "–" ? "none" : s.lockedLang.uppercased(), tint: Color.purple, icon: "lock")
                 StatTile(title: "Language pack", value: pair, tint: pair == "Needs pack" ? Color.orange : Color.green, icon: "arrow.down.circle")
-                StatTile(title: "Engine", value: s.sessionKind == "–" ? "–" : (s.sessionKind.contains("iOS 26") ? "Direct" : "Hosted"), icon: "cpu")
+                StatTile(title: "Engine", value: engine.activeTranslationSystem == .legacy
+                         ? (s.sessionKind == "–" ? "Default" : (s.sessionKind.contains("iOS 26") ? "Direct" : "Hosted"))
+                         : engine.activeTranslationSystem.title, icon: "cpu")
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text(engine.sourceCode == "auto" ? "Source: Automatic" : "Source: \(engine.sourceCode.uppercased()) selected")
