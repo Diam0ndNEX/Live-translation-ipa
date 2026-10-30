@@ -279,7 +279,9 @@ struct TranslationActivity: Equatable {
         case "speculative_model_submitted": title = "Translating ahead"; detail = "Preparing a result while OCR confirms the source"
         case "speculation_ready": title = "Early translation prepared"; detail = "Waiting for the source to be confirmed"; phase = .ready
         case "speculation_failed": title = "Waiting for confirmed text"; detail = "Early work failed; confirmed text can still be translated"; phase = .waiting
-        case "speculation_match_unfinished": title = "Finishing matching early translation"; detail = "Sharing the existing request; no duplicate translation"
+        case "speculation_match_unfinished": title = "Finishing matching early translation"; detail = "Checking the matching result before launching recovery"
+        case "hybrid_hedged_recovery": title = "Racing confirmed recovery"; detail = "Keeping the Apple Default request alive while Low Latency translates confirmed text"
+        case "hybrid_obsolete_speculation_draining": title = "Recovering corrected text"; detail = "Ignoring earlier text while preserving its warmed translation session"
         case "recovery_enqueue": title = "Waiting for confirmed translation resources"; detail = "Confirmed work is queued; model execution has not started yet"
         case "confirmed_model_submitted": title = "Translating confirmed text"; detail = "Working on the current confirmed source"
         case "same_strategy_retry": title = "Retrying translation"; detail = "The requested strategy is unchanged"

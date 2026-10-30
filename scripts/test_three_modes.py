@@ -65,6 +65,13 @@ assert 'backend_task_dispatch_ms' in service
 assert 'hybrid_cross_strategy_overlap' in service
 assert 'model_batch_completed", serviceMs' in service
 assert 'HybridAdmissionPolicy' in core
+assert 'hybrid_hedged_recovery' in core
+assert 'hybrid_obsolete_speculation_draining' in core
+assert 'hybrid_losing_request_draining' in core
+assert 'if system != .hybridRecovery {' in core
+assert 'self.committed != caption' in core
+assert 'sortedDefault' in core and 'recoveryMedian * 0.75' in core
+assert 'hybrid_hedged_recovery' in read('App/DiagnosticArchive.swift')
 assert 'modeAvailabilityCheckMs' in read('App/Diagnostics.swift')
 assert 'exportModeEventWindow()' in read('App/Diagnostics.swift')
 assert 'backend_installed_cache_hit' in service

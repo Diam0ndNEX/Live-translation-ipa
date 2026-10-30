@@ -200,6 +200,8 @@ struct TranslationModeReport: Codable {
         "cancellation_requested", "cancelled_call_returned",
         "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
         "hybrid_cross_strategy_overlap", "hybrid_overlapped_recovery_ms",
+        "hybrid_preserve_confirmed_session", "hybrid_hedged_recovery",
+        "hybrid_obsolete_speculation_draining", "hybrid_losing_request_draining",
         "hybrid_no_fast_pack_fallback",
         "backend_availability_ms", "backend_task_dispatch_ms", "backend_installed_cache_hit",
         "pip_held_unchanged",
