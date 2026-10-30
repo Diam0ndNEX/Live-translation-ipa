@@ -15,6 +15,9 @@ sources = {
 home = sources["SettingsViews.swift"]
 extra = sources["ExperimentalFeaturesView.swift"]
 engine = (root / "App" / "TranslatorEngine.swift").read_text()
+presets = (root / "App" / "Presets.swift").read_text()
+recognition_policy = (root / "Shared" / "SubtitlePerformancePolicy.swift").read_text()
+extension = (root / "BroadcastExtension" / "SampleHandler.swift").read_text()
 
 # Every editable option has one owner page. The Experimental page only
 # observes whether Skip unchanged frames is enabled.
@@ -58,6 +61,20 @@ for file, keys in expected.items():
         assert owners.get(key) == [file], f"{key} should be on {file}: {owners.get(key)}"
         assert f'"{key}"' in engine, f"Setting {key} is missing from engine backup/reset"
         assert sources[file].count(f'"{key}"') >= 2, f"{key} missing from page reset keys"
+
+# All presets must expose the same capabilities. Names are metadata,
+# never permission checks in the actual capture pipeline.
+assert "if mode == .movie" not in engine
+assert "OCRGrouping.makeBlocks(lines, joinAdjacentText:" in engine
+assert 'if flag("activeTextFocus", true)' in engine
+assert 'rapidTextTracking: flag("rapidTextTracking", true)' in engine
+assert "cfg.rapidTextTracking ?? cfg.movieMode ?? false" in extension
+assert 'legacyDefaults(for: "movie")' not in extension
+for key in ("rapidTextTracking", "joinAdjacentText", "activeTextFocus"):
+    assert presets.count(f'"{key}": true') >= 2, f"Movie and Lyrics presets must enable {key}"
+    assert presets.count(f'"{key}": false') >= 2, f"Game and Comic presets must disable {key}"
+    assert f'static let {key} = "{key}"' in recognition_policy
+assert "legacyOptions[k]" in presets, "Older imported custom presets must retain their behavior"
 
 nav = [
     "ReadingSettings()", "IntelligenceSettings()", "TranslationSettings()",
