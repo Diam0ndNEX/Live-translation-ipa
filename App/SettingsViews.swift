@@ -260,16 +260,29 @@ struct ReadingSettings: View {
     @AppStorage("activeTextFocus") private var activeTextFocus = true
     @State private var showAreaEditor = false
 
+    // Manual content-style selection only applies recommended switch values.
+    // Applying a saved custom preset writes UserDefaults directly, so the
+    // preset's explicit overrides are never replaced by this picker.
+    private var contentStyleSelection: Binding<String> {
+        Binding(get: { mode }, set: { value in
+            mode = value
+            let recommended = PresetRecognitionPolicy.legacyDefaults(for: value)
+            rapidTextTracking = recommended[PresetRecognitionPolicy.rapidTextTracking] ?? true
+            joinAdjacentText = recommended[PresetRecognitionPolicy.joinAdjacentText] ?? true
+            activeTextFocus = recommended[PresetRecognitionPolicy.activeTextFocus] ?? true
+        })
+    }
+
     private var key: String { "\(mode)|\(area)|\(customY0)|\(customY1)|\(speed)|\(stability)|\(boost)|\(skipUnchanged)|\(confidence)|\(correction)" }
     private var recognitionPolicy: String { "\(adaptiveOCR)|\(subtitleTracking)|\(deduplicateCopies)|\(rapidTextTracking)|\(joinAdjacentText)|\(activeTextFocus)" }
 
     var body: some View {
         List {
             Section("What to read") {
-                Picker("Preset category", selection: $mode) {
+                Picker("Content style defaults", selection: contentStyleSelection) {
                     ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) }
                 }
-                Text("Category is a label for existing presets; recognition features below work in every category.")
+                Text("Selecting a style sets recommended recognition switches. Adjust them below or save any combination as your own preset.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Picker("OCR area", selection: $area) {
                     ForEach(OCRArea.allCases) { Text($0.title).tag($0.rawValue) }
