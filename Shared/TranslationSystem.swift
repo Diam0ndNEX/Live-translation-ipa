@@ -158,11 +158,19 @@ struct HybridAdmissionPolicy {
     private(set) var consecutiveWaste = 0
     private(set) var skipped = 0
     private(set) var rejected = 0
+    private var lastRejectedIdentity: String?
 
-    mutating func admit() -> Bool {
-        guard skipped > 0 else { return true }
+    /// A repeated OCR packet must not exhaust a backoff intended to cover
+    /// distinct subtitle candidates. Identity contains metadata, never text.
+    mutating func admit(identity: String? = nil) -> Bool {
+        if let identity, identity == lastRejectedIdentity { return false }
+        guard skipped > 0 else {
+            lastRejectedIdentity = nil
+            return true
+        }
         skipped -= 1
         rejected += 1
+        lastRejectedIdentity = identity
         return false
     }
 
@@ -170,6 +178,7 @@ struct HybridAdmissionPolicy {
         if used {
             consecutiveWaste = 0
             skipped = 0
+            lastRejectedIdentity = nil
             return
         }
         consecutiveWaste += 1
@@ -270,7 +279,8 @@ final class ThreeModeCoordinator {
                 event(caption, "hybrid_speculation_backend_busy", nil)
                 return
             }
-            if system == .hybridRecovery && adaptiveHybrid && !hybridAdmission.admit() {
+            if system == .hybridRecovery && adaptiveHybrid &&
+                !hybridAdmission.admit(identity: "\(caption.session.uuidString)|\(caption.caption)|\(caption.revision)") {
                 speculativeCaption = nil
                 speculativeOutput = nil
                 event(caption, "hybrid_speculation_throttled", nil)
