@@ -36,9 +36,9 @@ enum SubtitlePerformancePolicy {
     /// A second independent frame can be read sooner without reducing the
     /// configured number of reads, detail, confidence or correction. Only a
     /// pending Movie confirmation may borrow this short burst; pressure wins.
-    static func confirmationInterval(planned: Double, pending: Bool, movie: Bool,
+    static func confirmationInterval(planned: Double, pending: Bool, rapidTextTracking: Bool,
                                      pressure: Bool, processingMs: Double) -> Double {
-        guard pending, movie, !pressure, processingMs.isFinite, processingMs > 0 else { return planned }
+        guard pending, rapidTextTracking, !pressure, processingMs.isFinite, processingMs > 0 else { return planned }
         // Use the last real OCR service time as the lower bound so the next
         // independent confirmation frame can start promptly without overlap.
         // A 100 ms nominal floor avoids high-frequency OCR under unusually
