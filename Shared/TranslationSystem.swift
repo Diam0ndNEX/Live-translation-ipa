@@ -500,7 +500,11 @@ final class ThreeModeCoordinator {
         let reason = memoryOnly ? "memory_hit" : proposedReason
         guard current == caption, committed != caption, output.complete else { event(caption, "stale_rejected", nil); return }
         committed = caption; deadline?.cancel()
-        scoreSpeculation(for: caption, useful: output.origins.contains("speculation"))
+        let matchedPreview = proposedReason == "speculation_match_ready" ||
+            proposedReason == "speculation_match_in_flight"
+        let previewUseful = output.origins.contains("speculation") ||
+            (matchedPreview && output.origins.contains("session_apple_default"))
+        scoreSpeculation(for: caption, useful: previewUseful)
         if allowsReuse {
             for i in output.values.indices {
                 if let strategy = output.strategies[i] {
