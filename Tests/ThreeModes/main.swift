@@ -393,6 +393,68 @@ final class Harness {
         precondition(freshCache.selected.count == 2)
         freshCache.coordinator.reset()
 
+        // Regression: an early subtitle B MUST be eligible while the previous
+        // confirmed subtitle A is still on screen. v1.9.2 rejected this
+        // ordinary transition and effectively disabled both predictive modes.
+        for system in [TranslationSystem.hybridRecovery, .lowLatency] {
+            let nextSubtitle = Harness()
+            nextSubtitle.coordinator.system = system
+            let previous = nextSubtitle.caption("Previously shown subtitle.", revision: 1, id: "A")
+            nextSubtitle.coordinator.observe(previous, confirmed: true, speculate: false)
+            await nextSubtitle.settle()
+            precondition(nextSubtitle.calls.count == 1)
+            nextSubtitle.reply(0, ["Previous translated subtitle"])
+            await nextSubtitle.settle()
+            precondition(nextSubtitle.selected.count == 1)
+            let next = nextSubtitle.caption("The upcoming subtitle.", revision: 2, id: "B")
+            nextSubtitle.coordinator.observe(next, confirmed: false, speculate: true)
+            await nextSubtitle.settle()
+            precondition(nextSubtitle.coordinator.shouldStartModel(next, speculative: true),
+                         "Previous displayed text must not invalidate the next early OCR prediction")
+            precondition(nextSubtitle.calls.count == 2)
+            precondition(nextSubtitle.calls[1].strategy ==
+                         (system == .hybridRecovery ? .appleDefault : .lowLatency))
+            nextSubtitle.coordinator.noteSpeculativeModelSubmitted(next)
+            nextSubtitle.coordinator.observe(next, confirmed: true, speculate: true)
+            await nextSubtitle.settle()
+            precondition(nextSubtitle.calls.count == 2, "A matching in-flight prediction is reused")
+            nextSubtitle.reply(1, ["Upcoming translation"])
+            await nextSubtitle.settle()
+            precondition(nextSubtitle.selected.count == 2 &&
+                         nextSubtitle.selected[1].1.values == ["Upcoming translation"])
+            precondition(!nextSubtitle.coordinator.shouldStartModel(next, speculative: true),
+                         "Committed captions must not restart speculative inference")
+            nextSubtitle.coordinator.reset()
+
+            // If the next confirmation is C instead of predicted B, a B
+            // request that has not started must be dropped, not displayed.
+            let replaced = Harness()
+            replaced.coordinator.system = system
+            let old = replaced.caption("Already displayed", id: "old")
+            replaced.coordinator.observe(old, confirmed: true, speculate: false)
+            await replaced.settle()
+            replaced.reply(0, ["Old translation"])
+            await replaced.settle()
+            let predicted = replaced.caption("Predicted B", revision: 2, id: "predicted")
+            replaced.coordinator.observe(predicted, confirmed: false, speculate: true)
+            await replaced.settle()
+            precondition(replaced.coordinator.shouldStartModel(predicted, speculative: true))
+            let actual = replaced.caption("Confirmed C", revision: 3, id: "actual")
+            replaced.coordinator.observe(actual, confirmed: true, speculate: false)
+            await replaced.settle()
+            precondition(!replaced.coordinator.shouldStartModel(predicted, speculative: true))
+            precondition(replaced.coordinator.shouldStartModel(actual, speculative: false))
+            precondition(replaced.events.contains("speculation_superseded_before_confirmation"))
+            replaced.reply(1, ["Stale predicted result"])
+            await replaced.settle()
+            precondition(replaced.selected.count == 1)
+            replaced.reply(2, ["Confirmed C result"])
+            await replaced.settle()
+            precondition(replaced.selected.count == 2 &&
+                         replaced.selected[1].1.values == ["Confirmed C result"])
+            replaced.coordinator.reset()
+        }
+
         // Backend request ownership allows an early preview before confirmation
         // but refuses stale, selected and reset requests before model admission.
         let admission = Harness()
