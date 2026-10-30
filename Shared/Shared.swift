@@ -3,11 +3,11 @@ import Foundation
 
 enum AppVersion {
     static let version = "1.9.4"
-    static let build = 75
+    static let build = 76
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
-        ("1.9.4", "Faster nominal subtitle confirmation bursts, idle Legacy exact-RAM caption reuse, deduplicated three-mode memory/normalization work, safe speculative ownership across resets, shorter confirmed lane handoff polling, and corrected warm-up/ZIP diagnostics. Real-device performance remains to be validated."),
+        ("1.9.4", "Build 76: make rapid-text OCR, adjacent-fragment joining and active-text focus independent of Movie/Game/Comic presets, with custom preset switches and safe migration. Retains faster confirmation, exact-memory reuse, improved model handoff, and corrected diagnostics. Device speed still requires verification."),
         ("1.9.3", "Restore next-caption speculation in Hybrid/Low Latency, prevent false adaptive backoff, and unify live Diagnostics timing, counts, reset, reports and traces."),
         ("1.9.2", "Hybrid contention guard, adaptive backoff, exact-key session reuse across stale model completions, warm-up/session lifecycle metrics and regression tests."),
         ("1.9.1", "Hybrid scheduling: adaptive speculative admission with bounded recovery waits, avoids repeated session-readiness checks while translating, 30-second installed-language status cache, strategy overlap/dispatch metrics, safe identical-PiP hold reuse, and comparable full-session diagnostics. Real-device speed and quality acceptance pending."),
