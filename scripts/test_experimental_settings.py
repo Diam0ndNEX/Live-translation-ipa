@@ -16,14 +16,14 @@ home = sources["SettingsViews.swift"]
 extra = sources["ExperimentalFeaturesView.swift"]
 engine = (root / "App" / "TranslatorEngine.swift").read_text()
 
-# Every editable option has one owner page, except these two read-only
-# prerequisites which the Experimental page only observes to disable controls.
+# Every editable option has one owner page. The Experimental page only
+# observes whether Skip unchanged frames is enabled.
 owners = {}
 for name, source in sources.items():
     for key in re.findall(r'@AppStorage\("([^"]+)"\)', source):
         owners.setdefault(key, []).append(name)
 for key, names in owners.items():
-    if key in {"mode", "skipUnchanged"}:
+    if key == "skipUnchanged":
         assert sorted(names) == ["ExperimentalFeaturesView.swift", "SettingsViews.swift"]
     else:
         assert len(names) == 1, f"{key} duplicated across Settings: {names}"
@@ -36,6 +36,7 @@ expected = {
     },
     "SettingsViews.swift": {
         "adaptiveOCR", "subtitleTracking", "deduplicateCopies",
+        "rapidTextTracking", "joinAdjacentText", "activeTextFocus",
         "contextualLanguage", "languageRecovery", "smartCool", "keepAwake",
         "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded",
     },
@@ -77,7 +78,11 @@ for key in ("incrementalBatchRecovery",
     assert f'"{key}": false' in engine, f"New experiment {key} must remain off by default"
 assert 'Picker("Translation system"' in sources['SettingsCategories.swift']
 assert "available: skipUnchanged" in extra
-assert "available: mode == TranslateMode.movie.rawValue" in extra
+assert "available: mode == TranslateMode.movie.rawValue" not in extra
+assert '@AppStorage("mode")' not in extra
+assert 'enabled: $preserveRelatedMovieGroups)' in extra
+assert "PresetRecognitionPolicy.migrate(UserDefaults.standard)" in engine
+assert 'movieMode: flag("rapidTextTracking", true)' in engine
 assert '@AppStorage("lowLatencyTranslation")' not in extra
 assert '.onChange(of: pipelineSignature) { _, _ in engine.pipelineSettingsChanged() }' in extra
 assert '.onChange(of: directPiPBuffer) { _, _ in engine.applyStyle() }' in extra
