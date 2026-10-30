@@ -221,6 +221,7 @@ final class ThreeModeCoordinator {
     private var confirmation: Task<Void, Never>?
     private var deadline: Task<Void, Never>?
     private var speculation: Task<Void, Never>?
+    private var speculationTicket = UUID()
     private var speculativeCaption: ModeCaption?
     private var speculativeOutput: ModeOutput?
     private var speculativeStarted = 0.0
@@ -261,6 +262,11 @@ final class ThreeModeCoordinator {
     func reset() {
         confirmation?.cancel(); deadline?.cancel(); speculation?.cancel()
         cancel(true); cancel(false)
+        // Old asynchronous responses may arrive after a reset. Release the
+        // logical slot for the next capture while keeping the real backend
+        // lane occupied until Apple's request actually returns.
+        speculationTicket = UUID()
+        speculation = nil
         confirmation = nil; deadline = nil
         current = nil; committed = nil; memoryProbePending = nil; speculativeCaption = nil; speculativeOutput = nil
         speculativeEligible = false; speculativeModelSubmitted = false
@@ -296,9 +302,14 @@ final class ThreeModeCoordinator {
             speculativeStarted = clock()
             event(caption, "speculation_admitted", nil)
             let strategy: RequestedTranslationStrategy = system == .lowLatency ? .lowLatency : .appleDefault
+            let ticket = UUID()
+            speculationTicket = ticket
             speculation = Task { [weak self] in
                 guard let self else { return }
                 let output = await self.resolve(caption, strategy: strategy, speculative: true)
+                // An older cancelled task must not erase the next capture's
+                // active speculation slot or publish an obsolete response.
+                guard self.speculationTicket == ticket else { return }
                 self.speculation = nil
                 guard self.speculativeCaption == caption else { return }
                 self.speculativeOutput = output

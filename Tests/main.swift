@@ -37,13 +37,13 @@ print("Pipeline regression checks passed")
 
 let firstHalf = OCRLine(t: "Olá meu amigo", x: 0.30, y: 0.20, h: 0.03, w: 0.30)
 let secondHalf = OCRLine(t: "como você está?", x: 0.62, y: 0.201, h: 0.03, w: 0.30)
-let subtitle = OCRGrouping.makeBlocks([secondHalf, firstHalf], movie: true)
+let subtitle = OCRGrouping.makeBlocks([secondHalf, firstHalf], joinAdjacentText: true)
 check(subtitle.count == 1 && subtitle[0].map(\.t) == ["Olá meu amigo", "como você está?"], "Same-row subtitle pieces must read left to right")
-check(OCRGrouping.makeBlocks([secondHalf, firstHalf], movie: false).count == 2, "Separate same-row comic bubbles must remain independent")
+check(OCRGrouping.makeBlocks([secondHalf, firstHalf], joinAdjacentText: false).count == 2, "Separate same-row comic bubbles must remain independent")
 let nextRow = OCRLine(t: "Uma segunda linha", x: 0.32, y: 0.16, h: 0.03, w: 0.32)
-check(OCRGrouping.makeBlocks([nextRow, firstHalf], movie: true).count == 1, "Stacked subtitle lines preserve sentence context")
+check(OCRGrouping.makeBlocks([nextRow, firstHalf], joinAdjacentText: true).count == 1, "Stacked subtitle lines preserve sentence context")
 let distantRow = OCRLine(t: "Outro diálogo", x: 0.3, y: 0.05, h: 0.03, w: 0.3)
-check(OCRGrouping.makeBlocks([distantRow, firstHalf], movie: true).count == 2, "Distant text must not bridge dialogue regions")
+check(OCRGrouping.makeBlocks([distantRow, firstHalf], joinAdjacentText: true).count == 2, "Distant text must not bridge dialogue regions")
 // Shadow OCR sometimes reports the same subtitle twice at effectively the
 // same screen coordinates. This must not multiply translation units.
 let shadowA = OCRLine(t: "Olá, amigo!", x: 0.45, y: 0.21, h: 0.035, w: 0.25, confidence: 0.65)
@@ -52,11 +52,11 @@ let distantRepeat = OCRLine(t: "Olá, amigo!", x: 0.45, y: 0.08, h: 0.035, w: 0.
 let deduplicated = OCRGrouping.removeNearbyDuplicates([shadowA, shadowB, distantRepeat])
 check(deduplicated.count == 2, "Only spatially coincident OCR copies may be suppressed")
 check(deduplicated.first?.confidence == 0.94, "Keep the higher-confidence OCR observation")
-check(OCRGrouping.makeBlocks([shadowA, shadowB], movie: true).flatMap { $0 }.count == 1,
+check(OCRGrouping.makeBlocks([shadowA, shadowB], joinAdjacentText: true).flatMap { $0 }.count == 1,
       "Movie mode removes near-duplicate subtitle shadows")
-check(OCRGrouping.makeBlocks([shadowA, shadowB], movie: false).flatMap { $0 }.count == 2,
+check(OCRGrouping.makeBlocks([shadowA, shadowB], joinAdjacentText: false).flatMap { $0 }.count == 2,
       "Comic mode must preserve independently observed text")
-check(OCRGrouping.makeBlocks([shadowA, distantRepeat], movie: true).flatMap { $0 }.count == 2,
+check(OCRGrouping.makeBlocks([shadowA, distantRepeat], joinAdjacentText: true).flatMap { $0 }.count == 2,
       "Distant repeated dialogue is not a near-duplicate")
 print("OCR grouping checks passed")
 
@@ -79,13 +79,13 @@ check(!SubtitleAcquisitionPolicy.changed(previous: quietSignature, current: quie
       "Unchanged frames may be skipped within a bounded deadline")
 check(SubtitleAcquisitionPolicy.changed(previous: [], current: quietSignature),
       "The first sampled frame must always be recognized")
-check(SubtitleAcquisitionPolicy.maximumUnchangedDelay(movie: true) < 0.6,
+check(SubtitleAcquisitionPolicy.maximumUnchangedDelay(rapidTextTracking: true) < 0.6,
       "Movie subtitles must not wait up to two seconds for an OCR retry")
-check(SubtitleAcquisitionPolicy.idleMultiplier(movie: true, enabled: true, secondsSinceText: 10) < 1.3,
+check(SubtitleAcquisitionPolicy.idleMultiplier(rapidTextTracking: true, enabled: true, secondsSinceText: 10) < 1.3,
       "Movie capture should not slow down 2.5x after a quiet scene")
-check(SubtitleAcquisitionPolicy.idleMultiplier(movie: false, enabled: true, secondsSinceText: 10) == 2.5,
+check(SubtitleAcquisitionPolicy.idleMultiplier(rapidTextTracking: false, enabled: true, secondsSinceText: 10) == 2.5,
       "Other reading modes retain the previous power-saving policy")
-check(SubtitleAcquisitionPolicy.idleMultiplier(movie: true, enabled: false, secondsSinceText: 10) == 1,
+check(SubtitleAcquisitionPolicy.idleMultiplier(rapidTextTracking: true, enabled: false, secondsSinceText: 10) == 1,
       "Disabling idle backoff must always mean no idle slow-down")
 check(!SubtitleAcquisitionPolicy.shouldSupersedeActive(activeConfirmed: true, activePresented: false, incomingConfirmed: false),
       "A tentative subtitle cannot cancel a confirmed translation")
@@ -95,27 +95,59 @@ check(SubtitleAcquisitionPolicy.shouldSupersedeActive(activeConfirmed: false, ac
       "Early OCR may update other unconfirmed candidates")
 check(SubtitleAcquisitionPolicy.shouldSupersedeActive(activeConfirmed: true, activePresented: true, incomingConfirmed: false),
       "The next early subtitle may translate ahead once the previous one was presented")
+// Built-in profiles differ only in settings; custom profiles can select
+// precisely the same recognition behavior regardless of category.
+let movieFeatures = PresetRecognitionPolicy.legacyDefaults(for: "movie")
+let gameFeatures = PresetRecognitionPolicy.legacyDefaults(for: "game")
+let comicFeatures = PresetRecognitionPolicy.legacyDefaults(for: "comic")
+check(movieFeatures[PresetRecognitionPolicy.rapidTextTracking] == true &&
+      movieFeatures[PresetRecognitionPolicy.joinAdjacentText] == true &&
+      movieFeatures[PresetRecognitionPolicy.activeTextFocus] == true,
+      "Movie defaults should enable subtitle-oriented capabilities")
+check(gameFeatures.values.allSatisfy { !$0 } && comicFeatures.values.allSatisfy { !$0 },
+      "Game and Comic default to separate text regions, but can opt into all subtitle features")
+let legacyProfileDefaults = UserDefaults(suiteName: "ScreenLingoTests.RecognitionMigration.\(UUID().uuidString)")!
+legacyProfileDefaults.set("game", forKey: "mode")
+PresetRecognitionPolicy.migrate(legacyProfileDefaults)
+check(legacyProfileDefaults.bool(forKey: PresetRecognitionPolicy.rapidTextTracking) == false,
+      "Existing game profiles must preserve conservative OCR scheduling on migration")
+legacyProfileDefaults.set(true, forKey: PresetRecognitionPolicy.rapidTextTracking)
+PresetRecognitionPolicy.migrate(legacyProfileDefaults)
+check(legacyProfileDefaults.bool(forKey: PresetRecognitionPolicy.rapidTextTracking),
+      "Migration must never overwrite an explicit custom-mode feature choice")
+check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.22, pending: true,
+    rapidTextTracking: true, pressure: false, processingMs: 60) == 0.10,
+    "The same rapid confirmation feature works in any preset category")
+check(OCRGrouping.makeBlocks([secondHalf, firstHalf], joinAdjacentText: true).count == 1,
+      "The same text joining feature works in any preset category")
+
 print("Subtitle acquisition and confirmed-caption continuity checks passed")
 
 // Cadence removes only redundant waiting: accuracy, pass count and resolution are unchanged.
 check(CaptureCadence.remaining(startedAt: 10, now: 10.242, interval: 0.22) == 0, "An OCR pass longer than its interval must not incur a second interval")
 check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.22, pending: true,
-    movie: true, pressure: false, processingMs: 134) == 0.134,
+    rapidTextTracking: true, pressure: false, processingMs: 134) == 0.134,
     "Pending subtitle confirmation removes idle spacing while retaining another independent frame")
 check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.22, pending: false,
-    movie: true, pressure: false, processingMs: 134) == 0.22,
+    rapidTextTracking: true, pressure: false, processingMs: 134) == 0.22,
     "A settled caption must not continuously burst OCR")
 check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.4, pending: true,
-    movie: true, pressure: true, processingMs: 134) == 0.4,
+    rapidTextTracking: true, pressure: true, processingMs: 134) == 0.4,
     "Thermal, power and Cool pressure must retain their full cadence")
+check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.22, pending: true,
+    rapidTextTracking: true, pressure: false, processingMs: 60) == 0.10,
+    "Nominal Movie confirmation may use the 100ms safety floor when the OCR engine is fast")
+check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.22, pending: true,
+    rapidTextTracking: true, pressure: true, processingMs: 60) == 0.22,
+    "Pressure must disable the faster confirmation burst")
 check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.12, pending: true,
-    movie: true, pressure: false, processingMs: 250) == 0.12,
+    rapidTextTracking: true, pressure: false, processingMs: 250) == 0.12,
     "A confirmation burst must never delay an already faster cadence")
 check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.4, pending: true,
-    movie: false, pressure: false, processingMs: 134) == 0.4,
+    rapidTextTracking: false, pressure: false, processingMs: 134) == 0.4,
     "Non-Movie modes retain their existing scheduling")
 check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.22, pending: true,
-    movie: true, pressure: false, processingMs: .nan) == 0.22,
+    rapidTextTracking: true, pressure: false, processingMs: .nan) == 0.22,
     "Invalid timing evidence must preserve configured scheduling")
 check(abs(SubtitlePerformancePolicy.confirmedHandoffDelay(age: 0.1) - 0.35) < 0.000001,
     "Early confirmed handoff retains an absolute 450ms deadline")
@@ -379,6 +411,29 @@ var privateOptions=simulationOptions;privateOptions["privateSession"]="true"
 let privateSimulation=PipelineSimulation.run(options:privateOptions,input:SimulationInput())
 check(privateSimulation.steps.contains { $0.title == "History, persistent memory & feedback" && $0.state == "session only" }, "Simulator explains private retention without writing history or memory")
 check(PipelineSimulation.optionGroups.flatMap { $0.1 }.contains("contextualLanguage"), "Source-context control is represented in the simulator")
+var customComicOptions = simulationOptions
+customComicOptions["mode"] = "comic"
+customComicOptions["rapidTextTracking"] = "true"
+customComicOptions["joinAdjacentText"] = "true"
+customComicOptions["activeTextFocus"] = "true"
+let rapidComicSimulation = PipelineSimulation.run(options: customComicOptions, input: SimulationInput())
+check(rapidComicSimulation.steps.contains {
+    $0.title == "Local delivery & source filtering" &&
+    $0.detail.contains("Adjacent joining: on; active-text focus: on")
+}, "A Comic custom preset must use subtitle grouping and focus when explicitly enabled")
+customComicOptions["rapidTextTracking"] = "false"
+customComicOptions["joinAdjacentText"] = "false"
+customComicOptions["activeTextFocus"] = "false"
+let separateComicSimulation = PipelineSimulation.run(options: customComicOptions, input: SimulationInput())
+check(separateComicSimulation.steps.contains {
+    $0.title == "Local delivery & source filtering" &&
+    $0.detail.contains("Adjacent joining: off; active-text focus: off")
+}, "Independent switches must override the preset category in the simulator")
+let rapidConfirmation = rapidComicSimulation.steps.first { $0.title == "Candidate identity & confirmation" }?.duration ?? .infinity
+let separateConfirmation = separateComicSimulation.steps.first { $0.title == "Candidate identity & confirmation" }?.duration ?? -.infinity
+check(rapidConfirmation < separateConfirmation,
+      "Rapid text confirmation must be available to Comic or any custom preset")
+
 print("Bounded rotation, context recovery and in-app simulation regression checks passed")
 
 let limitedPlan = AdaptiveRecognition.plan(baseEdge: 550, interval: 0.3, enabled: true, cool: true, pressure: true, feedback: hardFeedback, ceiling: 550)

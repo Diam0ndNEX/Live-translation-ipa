@@ -62,7 +62,7 @@ struct SimulationResult {
 /// Pure decision simulation. Durations and recognition quality are input assumptions, never predictions of device speed or correctness.
 enum PipelineSimulation {
     static let optionGroups: [(String, [String])] = [
-        ("Capture & recognition", ["mode","area","customY0","customY1","speed","frameRot","continuousRotation","stability","minTextH","boost","skipUnchanged","ocrConfidence","ocrCorrection","idleBackoff","adaptiveOCR","adaptiveConfirmation","subtitleTracking","confirmationDeadline"]),
+        ("Capture & recognition", ["mode","area","customY0","customY1","speed","frameRot","continuousRotation","stability","minTextH","boost","skipUnchanged","ocrConfidence","ocrCorrection","idleBackoff","rapidTextTracking","joinAdjacentText","activeTextFocus","adaptiveOCR","adaptiveConfirmation","subtitleTracking","confirmationDeadline"]),
         ("Language & understanding", ["source","target","langLock","contextualLanguage","languageRecovery","cleanOCR","slang","speakerDetect","neverTranslate","sourceFixes","glossary","dropNoise","ignoreList","deduplicateCopies"]),
         ("Translation & memory", ["translateAhead","selectiveSpeculation","adaptiveSpeculation","speculationConfidence","keepWarm","predictiveWarmup","remember","memoryRAMCapacity","memorySoftLimit","freshTranslationTest","temporaryMemoryTest","privateSession"]),
         ("Scheduling & PiP", ["steadyCaptions","protectConfirmedPresentation","displayPolicy","minDisplay","autoClear","clearHold","winSize","theme","textSize","pipFont","showOriginal","highlightNames","pipWeight","pipAlignment","pipLineSpacing","pipPadding","originalFraction","pipScale","speakerAccent","heartbeatInterval","autoOpenPiP"]),
@@ -87,6 +87,10 @@ enum PipelineSimulation {
         func add(_ title: String, _ lane: String, _ state: String, _ detail: String, _ keys: [String], _ start: Double = 0, _ duration: Double = 0) {
             r.steps.append(SimulationStep(id: r.steps.count, title: title, lane: lane, state: state, detail: detail, settings: keys, start: start, duration: duration))
         }
+        let inherited = PresetRecognitionPolicy.legacyDefaults(for: o["mode"] ?? "movie")
+        let rapidText = b("rapidTextTracking", inherited[PresetRecognitionPolicy.rapidTextTracking] ?? true)
+        let joinText = b("joinAdjacentText", inherited[PresetRecognitionPolicy.joinAdjacentText] ?? true)
+        let focusText = b("activeTextFocus", inherited[PresetRecognitionPolicy.activeTextFocus] ?? true)
         let speed = o["speed"] ?? "balanced"
         var edge = speed == "fast" ? 1000.0 : (speed == "sharp" ? 2000 : 1400)
         var baseInterval = speed == "fast" ? 0.12 : (speed == "sharp" ? 0.4 : 0.22)
@@ -124,7 +128,7 @@ enum PipelineSimulation {
         lines = lines.filter { range.contains($0.y) && $0.h >= n("minTextH",0) }
         add("Crop & workload plan", "ReplayKit extension", "\(Int(plan.edge)) px · \(Int(plan.interval*1000)) ms", "\(plan.reason). Crop y=\(String(format:"%.2f",range.lowerBound))…\(String(format:"%.2f",range.upperBound)); \(lines.count) boxes retained. Resolution is a ceiling; native image detail is not invented.", ["area","customY0","customY1","minTextH","speed","adaptiveOCR","adaptive","coolMode","smartCool","idleBackoff"])
         if b("skipUnchanged",true), s.unchangedSeconds > 0, s.motion <= 1.5 {
-            add("Unchanged-frame gate", "ReplayKit extension", "defer", "A matching signature can defer a pass up to \(SubtitleAcquisitionPolicy.maximumUnchangedDelay(movie: (o["mode"] ?? "movie") == "movie")) seconds; pending confirmation still gets fresh reads. This run shows the next eligible pass.", ["skipUnchanged"])
+            add("Unchanged-frame gate", "ReplayKit extension", "defer", "A matching signature can defer a pass up to \(SubtitleAcquisitionPolicy.maximumUnchangedDelay(rapidTextTracking: rapidText)) seconds; pending confirmation still gets fresh reads. This run shows the next eligible pass.", ["skipUnchanged"])
         }
         let readMs = max(0,s.ocrMs)
         let floor = max(0.1,min(0.95,n("ocrConfidence",0.3)))
@@ -135,9 +139,9 @@ enum PipelineSimulation {
         let required = max(1, min(3,Int(n("stability",2))))
         let pendingInterval = SubtitlePerformancePolicy.confirmationInterval(
             planned: plan.interval * SubtitleAcquisitionPolicy.idleMultiplier(
-                movie: (o["mode"] ?? "movie") == "movie", enabled: b("idleBackoff",true),
+                rapidTextTracking: rapidText, enabled: b("idleBackoff",true),
                 secondsSinceText: s.unchangedSeconds),
-            pending: true, movie: (o["mode"] ?? "movie") == "movie",
+            pending: true, rapidTextTracking: rapidText,
             pressure: cool || s.lowPower || s.thermal != "nominal", processingMs: readMs)
         let cadenceMs = max(pendingInterval*1000,readMs)
         var confirmationMs = 0.0, confirmed = false, reason = "fixed read count"
@@ -152,8 +156,8 @@ enum PipelineSimulation {
         if !confirmed { return r }
         let delivery = max(0,s.transferMs)
         let confirmedAt = confirmationMs + readMs + delivery
-        add("Local delivery & source filtering", "Main app", "accepted", "Localhost UDP; own-output filtering remains in the real pipeline. Noise/ignore rules apply to the sample; Movie selects dominant connected groups, while Game/Comic retain separate regions. Group ranking here is illustrative for the sample geometry.", ["mode","dropNoise","ignoreList","deduplicateCopies"],confirmationMs+readMs,delivery)
-        var blocks = OCRGrouping.makeBlocks(lines, movie: (o["mode"] ?? "movie") == "movie")
+        add("Local delivery & source filtering", "Main app", "accepted", "Localhost UDP; own-output filtering remains in the real pipeline. Adjacent joining: \(joinText ? "on" : "off"); active-text focus: \(focusText ? "on" : "off") regardless of preset category. Group ranking is only illustrative in this simulator.", ["joinAdjacentText","activeTextFocus","dropNoise","ignoreList","deduplicateCopies"],confirmationMs+readMs,delivery)
+        var blocks = OCRGrouping.makeBlocks(lines, joinAdjacentText: joinText)
         if b("deduplicateCopies",true) { var regions = SubtitleRegions(); blocks = regions.deduplicated(blocks) }
         var text = blocks.map { $0.map(\.t).joined(separator:" ") }.joined(separator:"\n")
         if b("cleanOCR",true) { text = TextIntel.cleanOCR(text) }

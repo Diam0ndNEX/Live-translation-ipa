@@ -286,7 +286,10 @@ final class ModeTranslationService {
                 report("backend_lane_wait_ms", (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)
                 return nil
             }
-            try? await Task.sleep(nanoseconds: 20_000_000)
+            // Confirmed requests are latency critical. A shorter bounded poll reduces
+            // the handoff gap after the previous actual Apple call releases this lane.
+            // Speculation never waits here; it is rejected by the guard above.
+            try? await Task.sleep(nanoseconds: 5_000_000)
         }
         report("backend_lane_wait_ms", (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)
         guard !Task.isCancelled, eligibleToStart() else {

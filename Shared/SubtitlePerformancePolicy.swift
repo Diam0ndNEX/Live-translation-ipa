@@ -1,5 +1,30 @@
 import Foundation
 
+/// Recognition behavior is a set of independently selectable capabilities.
+/// The legacy "mode" is used only to migrate preferences that predate these
+/// switches; running OCR never branches on a preset's name or category.
+enum PresetRecognitionPolicy {
+    static let rapidTextTracking = "rapidTextTracking"
+    static let joinAdjacentText = "joinAdjacentText"
+    static let activeTextFocus = "activeTextFocus"
+
+    static func legacyDefaults(for mode: String) -> [String: Bool] {
+        let subtitleStyle = mode == "movie"
+        return [
+            rapidTextTracking: subtitleStyle,
+            joinAdjacentText: subtitleStyle,
+            activeTextFocus: subtitleStyle
+        ]
+    }
+
+    static func migrate(_ defaults: UserDefaults) {
+        let inherited = legacyDefaults(for: defaults.string(forKey: "mode") ?? "movie")
+        for (key, value) in inherited where defaults.object(forKey: key) == nil {
+            defaults.set(value, forKey: key)
+        }
+    }
+}
+
 /// Pure, bounded decisions for performance-sensitive subtitle acquisition.
 /// The counters are session-local metadata; no recognized text is persisted.
 enum SubtitlePerformancePolicy {
@@ -10,11 +35,15 @@ enum SubtitlePerformancePolicy {
 
     /// A second independent frame can be read sooner without reducing the
     /// configured number of reads, detail, confidence or correction. Only a
-    /// pending Movie confirmation may borrow this short burst; pressure wins.
-    static func confirmationInterval(planned: Double, pending: Bool, movie: Bool,
+    /// pending rapid-text confirmation may borrow this short burst; pressure wins.
+    static func confirmationInterval(planned: Double, pending: Bool, rapidTextTracking: Bool,
                                      pressure: Bool, processingMs: Double) -> Double {
-        guard pending, movie, !pressure, processingMs.isFinite, processingMs > 0 else { return planned }
-        return min(planned, max(0.12, processingMs / 1000))
+        guard pending, rapidTextTracking, !pressure, processingMs.isFinite, processingMs > 0 else { return planned }
+        // Use the last real OCR service time as the lower bound so the next
+        // independent confirmation frame can start promptly without overlap.
+        // A 100 ms nominal floor avoids high-frequency OCR under unusually
+        // cheap frames; pressure and non-Movie scheduling remain untouched.
+        return min(planned, max(0.10, processingMs / 1000))
     }
 
     /// One non-renewable grace period for an unpresented confirmed caption.

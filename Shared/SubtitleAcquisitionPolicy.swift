@@ -30,14 +30,14 @@ enum SubtitleAcquisitionPolicy {
 
     /// Never allow the unchanged-image optimization to defer recognition for seconds
     /// while new dialogue could have appeared in only a small part of the image.
-    static func maximumUnchangedDelay(movie: Bool) -> TimeInterval {
-        movie ? 0.55 : 1.5
+    static func maximumUnchangedDelay(rapidTextTracking: Bool) -> TimeInterval {
+        rapidTextTracking ? 0.55 : 1.5
     }
 
-    /// A new subtitle should wake Movie OCR promptly after quiet scenes.
-    static func idleMultiplier(movie: Bool, enabled: Bool, secondsSinceText: TimeInterval) -> Double {
+    /// Rapid-text tracking should wake OCR promptly after quiet scenes.
+    static func idleMultiplier(rapidTextTracking: Bool, enabled: Bool, secondsSinceText: TimeInterval) -> Double {
         guard enabled, secondsSinceText > 8 else { return 1.0 }
-        return movie ? 1.15 : 2.5
+        return rapidTextTracking ? 1.15 : 2.5
     }
 
     /// OCR sometimes changes punctuation or one harmless character while the

@@ -23,7 +23,7 @@ enum OCRArea: String, CaseIterable, Identifiable {
         case .top: "Top half"; case .middle: "Middle band"; case .custom: "Custom…"
         }
     }
-    func range(mode: TranslateMode) -> ClosedRange<Double> {   // y: 0 = bottom, 1 = top
+    func range() -> ClosedRange<Double> {   // y: 0 = bottom, 1 = top
         switch self {
         case .smart: return 0...1
         case .full: return 0...1
@@ -85,7 +85,7 @@ final class TranslatorEngine: ObservableObject {
     /// Everything a preset remembers.
     static let presetKeys = [
         "source", "target", "mode", "area", "customY0", "customY1", "speed", "stability", "minTextH", "ignoreList",
-        "frameRot", "dropNoise", "boost", "skipUnchanged", "subtitleAwareChangeDetection", "preserveRelatedMovieGroups", "cleanOCR", "slang", "speakerDetect", "highlightNames",
+        "frameRot", "dropNoise", "boost", "skipUnchanged", "subtitleAwareChangeDetection", "preserveRelatedMovieGroups", "rapidTextTracking", "joinAdjacentText", "activeTextFocus", "cleanOCR", "slang", "speakerDetect", "highlightNames",
         "langLock", "neverTranslate", "sourceFixes", "glossary", "winSize", "theme", "textSize", "pipFont",
         "showOriginal", "autoClear", "clearHold", "minDisplay", "autoOpenPiP", "haptics", "speak", "speechRate",
         "autoCopy", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember", "translationSystem", "lowLatencyTranslation", "incrementalBatchRecovery", "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
@@ -98,7 +98,7 @@ final class TranslatorEngine: ObservableObject {
         "suppressOwnInterface": true, "memoryRAMCapacity": 3000, "memorySoftLimit": 100000, "persistDiagnosticSessions": false, "directPiPBuffer": false,
         "source": "auto", "target": "en", "mode": "movie", "area": "smart", "customY0": 0.0, "customY1": 0.5,
         "speed": "balanced", "stability": 2, "minTextH": 0.0, "ignoreList": "", "frameRot": "auto",
-        "dropNoise": true, "boost": 1, "skipUnchanged": true, "subtitleAwareChangeDetection": false, "preserveRelatedMovieGroups": false, "cleanOCR": true, "slang": true,
+        "dropNoise": true, "boost": 1, "skipUnchanged": true, "subtitleAwareChangeDetection": false, "preserveRelatedMovieGroups": false, "rapidTextTracking": true, "joinAdjacentText": true, "activeTextFocus": true, "cleanOCR": true, "slang": true,
         "speakerDetect": true, "highlightNames": true, "langLock": true, "neverTranslate": "", "sourceFixes": "",
         "glossary": "", "winSize": "normal", "theme": "dark", "textSize": "auto", "pipFont": "standard",
         "showOriginal": false, "autoClear": true, "clearHold": 1.0, "minDisplay": 0.0, "autoOpenPiP": true,
@@ -523,10 +523,19 @@ final class TranslatorEngine: ObservableObject {
         if identity != modeLastIdentity { modeRevision += 1; modeLastIdentity = identity }
         var rows: [[CaptionTranslationUnit]] = []
         var keys: [String] = [], inputs: [String] = []
+        // The same settings apply to every block in one OCR packet. Read and
+        // normalize them once rather than repeatedly parsing preferences.
+        let cleaningEnabled = flag("cleanOCR", true)
+        let sourceFixes = pairs("sourceFixes")
+        let slangEnabled = flag("slang", true)
+        let speakersEnabled = flag("speakerDetect", true)
+        let protectedWords = list("neverTranslate", lower: false)
+        let languageCode = choice.language.languageCode?.identifier ?? source
+        let rulesToken = memoryRuleToken
         for block in blocks {
-            let clean = cleanedSource(block, enabled: flag("cleanOCR", true), fixes: pairs("sourceFixes"))
-            let parts = preparedSourceUnits(clean, language: choice.language.languageCode?.identifier ?? source,
-                slang: flag("slang", true), speakers: flag("speakerDetect", true), protected: list("neverTranslate", lower: false))
+            let clean = cleanedSource(block, enabled: cleaningEnabled, fixes: sourceFixes)
+            let parts = preparedSourceUnits(clean, language: languageCode,
+                slang: slangEnabled, speakers: speakersEnabled, protected: protectedWords)
             var row: [CaptionTranslationUnit] = []
             for part in parts {
                 row.append(CaptionTranslationUnit(label: part.label, sentences: part.sentences,
@@ -534,7 +543,7 @@ final class TranslatorEngine: ObservableObject {
                 for sentence in part.sentences {
                     inputs.append(sentence)
                     keys.append(PipelineSafety.cacheKey(source: source, target: targetCode, text: sentence,
-                        protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: memoryRuleToken))
+                        protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: rulesToken))
                 }
             }
             rows.append(row)
@@ -545,7 +554,7 @@ final class TranslatorEngine: ObservableObject {
             wallFirstSeen: packet.firstSeenAt ?? packet.ts ?? Date().timeIntervalSince1970,
             wallNow: Date().timeIntervalSince1970, uptimeNow: ProcessInfo.processInfo.systemUptime)
         let caption = ModeCaption(system: activeTranslationSystem, thermal: ProcessInfo.processInfo.thermalState.rawValue, session: modeSessionID, caption: captionID, revision: modeRevision,
-            source: source, target: targetCode, rules: memoryRuleToken, text: text,
+            source: source, target: targetCode, rules: rulesToken, text: text,
             units: inputs, keys: keys, firstOCR: monotonicOrigin)
         let confirmed = packet.stable != false
         if confirmed, let current = modeCoordinator.current, current.matches(caption), current.revision == caption.revision { return }
@@ -589,26 +598,56 @@ final class TranslatorEngine: ObservableObject {
 
     private func lookupModeMemory(_ caption: ModeCaption) async -> [String?] {
         let bank = ram, context = contextRevision
+        let canReadPersistent = allowsPersistentTranslations && memoryReady &&
+            flag("remember", true) && !flag("privateSession", false)
         var output: [String?] = []
+        output.reserveCapacity(caption.keys.count)
+        // Repeated subtitle units share one identity. Never perform duplicate
+        // SQLite reads for identical keys within a caption; preserve order.
+        var resolved: [String: String] = [:]
+        var missing: Set<String> = []
         for key in caption.keys {
-            guard context == contextRevision, caption.session == modeSessionID else { return caption.keys.map { _ in nil } }
+            guard context == contextRevision, caption.session == modeSessionID else {
+                return caption.keys.map { _ in nil }
+            }
+            if let earlier = resolved[key] {
+                output.append(earlier)
+                continue
+            }
+            if missing.contains(key) {
+                output.append(nil)
+                continue
+            }
             if let hit = bank.values[key] {
                 if modeMemoryOrigins.count >= 3000 { modeMemoryOrigins.removeAll() }
-                modeMemoryOrigins[key] = bank.savedKeys.contains(key) ? "saved_ram" : "ram"
-                noteModeEvent(caption, reason: bank.savedKeys.contains(key) ? "memory_saved_ram_hit" : "memory_session_hit", duration: nil)
-                output.append(hit); continue
+                let saved = bank.savedKeys.contains(key)
+                modeMemoryOrigins[key] = saved ? "saved_ram" : "ram"
+                noteModeEvent(caption, reason: saved ? "memory_saved_ram_hit" : "memory_session_hit", duration: nil)
+                resolved[key] = hit
+                output.append(hit)
+                continue
             }
-            if allowsPersistentTranslations, memoryReady, flag("remember", true), !flag("privateSession", false) {
+            if canReadPersistent {
                 let hit = await memoryStore.lookup(key: key)
-                guard context == contextRevision else { return caption.keys.map { _ in nil } }
-                if hit.value != nil {
+                guard context == contextRevision, caption.session == modeSessionID else {
+                    return caption.keys.map { _ in nil }
+                }
+                if let value = hit.value {
                     if modeMemoryOrigins.count >= 3000 { modeMemoryOrigins.removeAll() }
                     modeMemoryOrigins[key] = hit.outcome == "normalized_hit" ? "normalized" : hit.origin
-                    let origin = hit.origin == "legacy" ? "memory_legacy_hit" : (hit.origin == "normalized" ? "memory_normalized_hit" : "memory_persistent_hit")
+                    let origin = hit.origin == "legacy" ? "memory_legacy_hit" :
+                        (hit.origin == "normalized" ? "memory_normalized_hit" : "memory_persistent_hit")
                     noteModeEvent(caption, reason: origin, duration: hit.durationMs)
+                    resolved[key] = value
+                    output.append(value)
+                } else {
+                    missing.insert(key)
+                    output.append(nil)
                 }
-                output.append(hit.value)
-            } else { output.append(nil) }
+            } else {
+                missing.insert(key)
+                output.append(nil)
+            }
         }
         return output
     }
@@ -846,7 +885,6 @@ final class TranslatorEngine: ObservableObject {
             return from.isEmpty ? nil : (from, to)
         }
     }
-    private var mode: TranslateMode { TranslateMode(rawValue: ud.string(forKey: "mode") ?? "") ?? .movie }
     private var area: OCRArea { OCRArea(rawValue: ud.string(forKey: "area") ?? "") ?? .smart }
     private var windowSize: WindowSize { WindowSize(rawValue: ud.string(forKey: "winSize") ?? "") ?? .normal }
     private var speed: SpeedPreset { SpeedPreset(rawValue: ud.string(forKey: "speed") ?? "") ?? .balanced }
@@ -861,6 +899,7 @@ final class TranslatorEngine: ObservableObject {
     }
 
     init() {
+        PresetRecognitionPolicy.migrate(UserDefaults.standard)
         let migration = TranslationSystem.migrate(UserDefaults.standard)
         activeTranslationSystem = migration.0; pendingTranslationSystem = migration.0
         diag.modeActiveSystem = migration.0.rawValue; diag.modePendingSystem = migration.0.rawValue
@@ -1149,7 +1188,7 @@ final class TranslatorEngine: ObservableObject {
 
     /// Sends OCR area, source-language hint, speed and rotation to the extension.
     func syncConfig() {
-        let r = area.range(mode: mode)
+        let r = area.range()
         var maxEdge = speed.maxEdge, interval = speed.interval
         if flag("adaptive", true) {
             switch ProcessInfo.processInfo.thermalState {
@@ -1170,7 +1209,8 @@ final class TranslatorEngine: ObservableObject {
                            subtitleAwareChangeDetection: flag("subtitleAwareChangeDetection", false),
                            speculate: speculationAllowed && flag("translateAhead", true), confidence: num("ocrConfidence", 0.3),
                            correction: flag("ocrCorrection", true), idleBackoff: flag("idleBackoff", true),
-                           movieMode: mode == .movie,
+                           movieMode: flag("rapidTextTracking", true),
+                           rapidTextTracking: flag("rapidTextTracking", true),
                            captureDiagnostics: diag.enabled,
                            adaptiveOCR: speed == .automatic || (speed == .balanced && flag("adaptiveOCR", true)),
                            adaptiveConfirmation: flag("adaptiveConfirmation", false), subtitleTracking: flag("subtitleTracking", true),
@@ -1697,7 +1737,7 @@ final class TranslatorEngine: ObservableObject {
     /// Turns raw OCR lines into the text blocks worth translating (area, rules, own window, blocks, noise…).
     /// `count` is false for early sightings so the statistics are not counted twice.
     private func extractTexts(_ lines: [OCRLine], count: Bool) -> [String] {
-        let range = area.range(mode: mode)
+        let range = area.range()
         let minH = num("minTextH", 0)
         let ignore = list("ignoreList", lower: true)
         var cand: [OCRLine] = []
@@ -1795,7 +1835,7 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func makeBlocks(_ lines: [OCRLine]) -> [[OCRLine]] {
-        OCRGrouping.makeBlocks(lines, movie: mode == .movie)
+        OCRGrouping.makeBlocks(lines, joinAdjacentText: flag("joinAdjacentText", true))
     }
 
     private func blockHeight(_ b: [OCRLine]) -> Double {
@@ -1806,12 +1846,12 @@ final class TranslatorEngine: ObservableObject {
         blockHeight(b) * Double(b.reduce(0) { $0 + $1.t.count }).squareRoot()
     }
 
-    /// Movie mode keeps the dominant block(s); other modes keep everything that isn't tiny.
+    /// Optional active-text prioritization works with every preset category.
     private func selectBlocks(_ blocks: [[OCRLine]], diagnosticCount: Bool) -> [[OCRLine]] {
         guard !blocks.isEmpty else { return [] }
         let maxH = blocks.map { blockHeight($0) }.max() ?? 0
         var kept = blocks
-        if mode == .movie {
+        if flag("activeTextFocus", true) {
             let beforeHeightFilter = kept.count
             // Tiny dialogue must not be excluded because a persistent label uses a larger font.
             kept = blocks.filter { blockHeight($0) >= max(0.006, maxH * 0.20) }
@@ -1979,7 +2019,12 @@ final class TranslatorEngine: ObservableObject {
         // A complete exact RAM result needs no model lane. Never bypass OCR
         // confirmation, generation checks or the presentation policy.
         let cacheProbeStarted = Date()
-        if busy, !bypassMemory, memoryTestMode.allowsReuse,
+        // Exact confirmed text with an explicitly selected source language can
+        // use the complete RAM caption even when the model lane is idle.
+        // Previously this shortcut was restricted to a busy lane, forcing an
+        // unnecessary full processing pass for the same reusable result.
+        // Automatic source selection still runs through language detection.
+        if sourceCode != "auto", !bypassMemory, memoryTestMode.allowsReuse,
            let key = ExactCaptionIdentity.key(blocks: blocks, source: sourceCode,
                                               target: targetCode, rules: memoryRuleToken),
            let ready = cachedCaption(blocks, identity: key) {
@@ -2341,11 +2386,16 @@ final class TranslatorEngine: ObservableObject {
         let id = source.minimalIdentifier
         let rules = memoryRuleToken
         let never = list("neverTranslate", lower: false)
+        let fixes = pairs("sourceFixes")
+        let cleaningEnabled = flag("cleanOCR", true)
+        let slangEnabled = flag("slang", true)
+        let speakersEnabled = flag("speakerDetect", true)
+        let languageCode = source.languageCode?.identifier ?? id
         var keys = Set<String>()
         for raw in blocks {
-            let text = cleanedSource(raw, enabled: flag("cleanOCR", true), fixes: pairs("sourceFixes"))
-            for part in preparedSourceUnits(text, language: source.languageCode?.identifier ?? id,
-                    slang: flag("slang", true), speakers: flag("speakerDetect", true), protected: never) {
+            let text = cleanedSource(raw, enabled: cleaningEnabled, fixes: fixes)
+            for part in preparedSourceUnits(text, language: languageCode,
+                    slang: slangEnabled, speakers: speakersEnabled, protected: never) {
                 for sentence in part.sentences {
                     keys.insert(PipelineSafety.cacheKey(source: id, target: targetCode, text: sentence,
                         protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: rules))

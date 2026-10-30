@@ -15,7 +15,7 @@ enum OCRGrouping {
         return rows.flatMap { $0.sorted { $0.x < $1.x } }
     }
 
-    /// Remove near-coincident OCR shadow copies only in subtitle mode. Deliberately
+    /// Remove near-coincident OCR shadow copies only in adjacent-text grouping is enabled. Deliberately
     /// retain matching text at distant coordinates: it may be legitimate dialogue.
     /// Bucketing by exact normalized text avoids comparing unrelated observations.
     static func removeNearbyDuplicates(_ lines: [OCRLine]) -> [OCRLine] {
@@ -45,11 +45,11 @@ enum OCRGrouping {
     }
 
     /// Clusters lines that belong together (similar size, stacked closely, overlapping horizontally).
-    static func makeBlocks(_ lines: [OCRLine], movie: Bool) -> [[OCRLine]] {
+    static func makeBlocks(_ lines: [OCRLine], joinAdjacentText: Bool) -> [[OCRLine]] {
         // Use the same canonical row-based ordering everywhere. Sorting raw OCR
         // observations independently here used to disagree with readingOrder() when
         // several boxes occupied one visual line.
-        let ordered = readingOrder(movie ? removeNearbyDuplicates(lines) : lines)
+        let ordered = readingOrder(joinAdjacentText ? removeNearbyDuplicates(lines) : lines)
 
         var blocks: [[OCRLine]] = []
         for line in ordered {
@@ -88,11 +88,11 @@ enum OCRGrouping {
                     // or an OCR line from the floating PiP overlay. Do not bridge them
                     // merely because their text boxes overlap a little.
                     && !(lineWidth > 0.62 && previousWidth > 0.62 && centerDistance > 0.035)
-                // Movie subtitles can be returned as multiple side-by-side OCR boxes
+                // Adjacent subtitle text can be returned as multiple side-by-side OCR boxes
                 // on one visual row. Claude's working implementation joined these
-                // when their box edges were close; keeping them separate lets Movie
+                // when their box edges were close; keeping them separate lets a caption-focused preset
                 // mode rank a fragment and discard the rest of the actual sentence.
-                // Keep the stricter vertical-only rule for comic/game bubbles, where
+                // Keep the stricter vertical-only rule when this capability is off, where
                 // adjacent same-row boxes may belong to different speakers.
                 // Vision can split one long subtitle into adjacent boxes whose
                 // vertical centers differ slightly (for example, a long left box and
@@ -100,10 +100,10 @@ enum OCRGrouping {
                 // the smaller box height, rather than requiring nearly identical
                 // center y values; otherwise the last words become a separate block.
                 let verticalOverlap = (previous.h + line.h) / 2 - abs(verticalGap)
-                let sameMovieRow = movie
+                let sameCaptionRow = joinAdjacentText
                     && verticalOverlap >= min(previous.h, line.h) * 0.45
                     && horizontalGap < 0.06
-                guard sizeRatio > 0.45, (stacked || sameMovieRow) else { continue }
+                guard sizeRatio > 0.45, (stacked || sameCaptionRow) else { continue }
 
                 let score = (overlap / min(lineWidth, previousWidth))
                     - abs(edgeGap) / lineHeight * 0.15

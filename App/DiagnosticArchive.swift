@@ -700,7 +700,7 @@ actor DiagnosticExportWriter {
             """.utf8)
 
         let names = [
-            "manifest.json", "summary.md", "session.json", "intervals.csv",
+            "manifest.json", "summary.md", "session.json", "translation_modes.json", "intervals.csv",
             "seconds_1.csv", "seconds_5.csv",
             "metrics.csv", "events.csv", "findings.json", "README.txt"
         ]

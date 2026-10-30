@@ -6,6 +6,7 @@ root = Path(__file__).resolve().parents[1]
 engine = (root / "App/TranslatorEngine.swift").read_text()
 diagnostics = (root / "App/Diagnostics.swift").read_text()
 coordinator = (root / "Shared/TranslationSystem.swift").read_text()
+backend = (root / "App/ModeTranslationService.swift").read_text()
 archive = (root / "App/DiagnosticArchive.swift").read_text()
 tests = (root / "Tests/ThreeModes/main.swift").read_text()
 
@@ -33,6 +34,41 @@ assert "modeModelTimings[key] = timing" in mode_event
 assert "translateMs = duration" in mode_event
 assert 'reason == "speculative_model_submitted"' in mode_event
 assert "noteSpeculativeModelSubmitted(caption)" in mode_event
+
+# Only waiting confirmed work receives the shorter lane handoff interval.
+lane_wait = section(backend, "while lane.busy {", "guard !Task.isCancelled, eligibleToStart() else {")
+assert "if speculation || Task.isCancelled" in lane_wait
+assert "Task.sleep(nanoseconds: 5_000_000)" in lane_wait
+
+warmup = section(diagnostics, "func noteInitialWarmup(", "func noteModeEvent(")
+assert 'observation.phase == "model_submitted"' in warmup
+assert 'noteModelState("warmup_started")' in warmup
+assert 'noteModelState("warmup_model_submitted")' in warmup
+assert 'observation.phase == "model_completed"' in warmup
+assert 'noteModelState("warmup_succeeded")' in warmup
+assert 'noteModelState("warmup_model_completed", durationMs: observation.durationMs)' in warmup
+assert warmup.index('noteModelState("warmup_started")') < warmup.index('noteModelState("warmup_model_submitted")')
+
+# Mode memory probes must never repeat a SQLite lookup for an identical
+# sentence key in the same caption.
+lookup = section(engine, "private func lookupModeMemory(", "private func selectModeResult(")
+assert "var resolved: [String: String]" in lookup
+assert "var missing: Set<String>" in lookup
+assert lookup.index("if let earlier = resolved[key]") < lookup.index("await memoryStore.lookup(key: key)")
+assert "if missing.contains(key)" in lookup
+assert "caption.session == modeSessionID" in lookup
+
+# Legacy's complete confirmed RAM caption must work on idle and busy model
+# lanes, while auto-language detection cannot bypass its own routing.
+fast_ram = section(engine, "private func presentQueuedFromRAMIfComplete()", "private func handleClear()")
+assert 'if sourceCode != "auto", !bypassMemory, memoryTestMode.allowsReuse' in fast_ram
+assert "ExactCaptionIdentity.key" in fast_ram
+assert "schedulePresentation(joined, ready.translated" in fast_ram
+
+coordinator_reset = section(coordinator, "func reset() {", "func observe(")
+assert "speculationTicket = UUID()" in coordinator_reset
+assert "speculation = nil" in coordinator_reset
+assert "guard self.speculationTicket == ticket" in coordinator
 
 model = section(diagnostics, "func recordModeModel(", "func recordLatency(")
 assert "add(\\.translate, ms)" in model
@@ -68,8 +104,8 @@ assert "Previous displayed text must not invalidate" in tests
 
 version = (root / "Shared/Shared.swift").read_text()
 project = (root / "project.yml").read_text()
-assert 'static let version = "1.9.3"' in version
-assert "static let build = 74" in version
-assert project.count('"1.9.3"') == 3 and project.count('"74"') == 3
+assert 'static let version = "1.9.4"' in version
+assert "static let build = 76" in version
+assert project.count('"1.9.4"') == 3 and project.count('"76"') == 3
 
-print("v1.9.3 predictive ownership and all-mode Diagnostics routing contract passed")
+print("v1.9.4 predictive ownership and all-mode Diagnostics routing contract passed")

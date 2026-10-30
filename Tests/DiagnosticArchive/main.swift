@@ -331,7 +331,7 @@ import Foundation
         let exportedZipData = try Data(contentsOf: exportedZIP)
         precondition(exportedZipData.range(of: Data("intervals.csv".utf8)) != nil,
                      "New ZIP bundles must contain the full-session interval CSV")
-        for filename in ["manifest.json", "summary.md", "session.json",
+        for filename in ["manifest.json", "summary.md", "session.json", "translation_modes.json",
                          "intervals.csv", "seconds_1.csv", "seconds_5.csv",
                          "metrics.csv", "events.csv",
                          "findings.json", "README.txt"] {

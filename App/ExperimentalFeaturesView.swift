@@ -31,7 +31,6 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("confirmationDeadline") private var confirmationDeadline = 0.6
     @AppStorage("continuousRotation") private var continuousRotation = false
     @AppStorage("skipUnchanged") private var skipUnchanged = true
-    @AppStorage("mode") private var mode = TranslateMode.movie.rawValue
 
     private var pipelineSignature: String {
         "\(incrementalBatchRecovery)|\(subtitleAwareChangeDetection)|\(preserveRelatedMovieGroups)|\(adaptiveConfirmation)|\(confirmationDeadline)|\(continuousRotation)"
@@ -65,14 +64,9 @@ struct ExperimentalFeaturesView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 ExperimentalOption(
-                    title: "Multiple nearby lyric groups",
-                    explanation: "Keeps extra aligned lyric or dialogue rows in Movie mode. May sometimes include unrelated text.",
-                    enabled: $preserveRelatedMovieGroups,
-                    available: mode == TranslateMode.movie.rawValue)
-                if mode != TranslateMode.movie.rawValue {
-                    Text("Available in Movie mode under Reading & OCR.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
+                    title: "Multiple nearby text groups",
+                    explanation: "When active-text focus is enabled, keeps additional nearby aligned lyric or dialogue rows in any preset. May sometimes include unrelated text.",
+                    enabled: $preserveRelatedMovieGroups)
             } header: { Text("Recognition & lyrics experiments") }
 
             Section {
