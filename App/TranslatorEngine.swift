@@ -523,10 +523,19 @@ final class TranslatorEngine: ObservableObject {
         if identity != modeLastIdentity { modeRevision += 1; modeLastIdentity = identity }
         var rows: [[CaptionTranslationUnit]] = []
         var keys: [String] = [], inputs: [String] = []
+        // The same settings apply to every block in one OCR packet. Read and
+        // normalize them once rather than repeatedly parsing preferences.
+        let cleaningEnabled = flag("cleanOCR", true)
+        let sourceFixes = pairs("sourceFixes")
+        let slangEnabled = flag("slang", true)
+        let speakersEnabled = flag("speakerDetect", true)
+        let protectedWords = list("neverTranslate", lower: false)
+        let languageCode = choice.language.languageCode?.identifier ?? source
+        let rulesToken = memoryRuleToken
         for block in blocks {
-            let clean = cleanedSource(block, enabled: flag("cleanOCR", true), fixes: pairs("sourceFixes"))
-            let parts = preparedSourceUnits(clean, language: choice.language.languageCode?.identifier ?? source,
-                slang: flag("slang", true), speakers: flag("speakerDetect", true), protected: list("neverTranslate", lower: false))
+            let clean = cleanedSource(block, enabled: cleaningEnabled, fixes: sourceFixes)
+            let parts = preparedSourceUnits(clean, language: languageCode,
+                slang: slangEnabled, speakers: speakersEnabled, protected: protectedWords)
             var row: [CaptionTranslationUnit] = []
             for part in parts {
                 row.append(CaptionTranslationUnit(label: part.label, sentences: part.sentences,
@@ -534,7 +543,7 @@ final class TranslatorEngine: ObservableObject {
                 for sentence in part.sentences {
                     inputs.append(sentence)
                     keys.append(PipelineSafety.cacheKey(source: source, target: targetCode, text: sentence,
-                        protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: memoryRuleToken))
+                        protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: rulesToken))
                 }
             }
             rows.append(row)
@@ -545,7 +554,7 @@ final class TranslatorEngine: ObservableObject {
             wallFirstSeen: packet.firstSeenAt ?? packet.ts ?? Date().timeIntervalSince1970,
             wallNow: Date().timeIntervalSince1970, uptimeNow: ProcessInfo.processInfo.systemUptime)
         let caption = ModeCaption(system: activeTranslationSystem, thermal: ProcessInfo.processInfo.thermalState.rawValue, session: modeSessionID, caption: captionID, revision: modeRevision,
-            source: source, target: targetCode, rules: memoryRuleToken, text: text,
+            source: source, target: targetCode, rules: rulesToken, text: text,
             units: inputs, keys: keys, firstOCR: monotonicOrigin)
         let confirmed = packet.stable != false
         if confirmed, let current = modeCoordinator.current, current.matches(caption), current.revision == caption.revision { return }
@@ -589,26 +598,56 @@ final class TranslatorEngine: ObservableObject {
 
     private func lookupModeMemory(_ caption: ModeCaption) async -> [String?] {
         let bank = ram, context = contextRevision
+        let canReadPersistent = allowsPersistentTranslations && memoryReady &&
+            flag("remember", true) && !flag("privateSession", false)
         var output: [String?] = []
+        output.reserveCapacity(caption.keys.count)
+        // Repeated subtitle units share one identity. Never perform duplicate
+        // SQLite reads for identical keys within a caption; preserve order.
+        var resolved: [String: String] = [:]
+        var missing: Set<String> = []
         for key in caption.keys {
-            guard context == contextRevision, caption.session == modeSessionID else { return caption.keys.map { _ in nil } }
+            guard context == contextRevision, caption.session == modeSessionID else {
+                return caption.keys.map { _ in nil }
+            }
+            if let earlier = resolved[key] {
+                output.append(earlier)
+                continue
+            }
+            if missing.contains(key) {
+                output.append(nil)
+                continue
+            }
             if let hit = bank.values[key] {
                 if modeMemoryOrigins.count >= 3000 { modeMemoryOrigins.removeAll() }
-                modeMemoryOrigins[key] = bank.savedKeys.contains(key) ? "saved_ram" : "ram"
-                noteModeEvent(caption, reason: bank.savedKeys.contains(key) ? "memory_saved_ram_hit" : "memory_session_hit", duration: nil)
-                output.append(hit); continue
+                let saved = bank.savedKeys.contains(key)
+                modeMemoryOrigins[key] = saved ? "saved_ram" : "ram"
+                noteModeEvent(caption, reason: saved ? "memory_saved_ram_hit" : "memory_session_hit", duration: nil)
+                resolved[key] = hit
+                output.append(hit)
+                continue
             }
-            if allowsPersistentTranslations, memoryReady, flag("remember", true), !flag("privateSession", false) {
+            if canReadPersistent {
                 let hit = await memoryStore.lookup(key: key)
-                guard context == contextRevision else { return caption.keys.map { _ in nil } }
-                if hit.value != nil {
+                guard context == contextRevision, caption.session == modeSessionID else {
+                    return caption.keys.map { _ in nil }
+                }
+                if let value = hit.value {
                     if modeMemoryOrigins.count >= 3000 { modeMemoryOrigins.removeAll() }
                     modeMemoryOrigins[key] = hit.outcome == "normalized_hit" ? "normalized" : hit.origin
-                    let origin = hit.origin == "legacy" ? "memory_legacy_hit" : (hit.origin == "normalized" ? "memory_normalized_hit" : "memory_persistent_hit")
+                    let origin = hit.origin == "legacy" ? "memory_legacy_hit" :
+                        (hit.origin == "normalized" ? "memory_normalized_hit" : "memory_persistent_hit")
                     noteModeEvent(caption, reason: origin, duration: hit.durationMs)
+                    resolved[key] = value
+                    output.append(value)
+                } else {
+                    missing.insert(key)
+                    output.append(nil)
                 }
-                output.append(hit.value)
-            } else { output.append(nil) }
+            } else {
+                missing.insert(key)
+                output.append(nil)
+            }
         }
         return output
     }
