@@ -1,5 +1,30 @@
 import Foundation
 
+/// Recognition behavior is a set of independently selectable capabilities.
+/// The legacy "mode" is used only to migrate preferences that predate these
+/// switches; running OCR never branches on a preset's name or category.
+enum PresetRecognitionPolicy {
+    static let rapidTextTracking = "rapidTextTracking"
+    static let joinAdjacentText = "joinAdjacentText"
+    static let activeTextFocus = "activeTextFocus"
+
+    static func legacyDefaults(for mode: String) -> [String: Bool] {
+        let subtitleStyle = mode == "movie"
+        return [
+            rapidTextTracking: subtitleStyle,
+            joinAdjacentText: subtitleStyle,
+            activeTextFocus: subtitleStyle
+        ]
+    }
+
+    static func migrate(_ defaults: UserDefaults) {
+        let inherited = legacyDefaults(for: defaults.string(forKey: "mode") ?? "movie")
+        for (key, value) in inherited where defaults.object(forKey: key) == nil {
+            defaults.set(value, forKey: key)
+        }
+    }
+}
+
 /// Pure, bounded decisions for performance-sensitive subtitle acquisition.
 /// The counters are session-local metadata; no recognized text is persisted.
 enum SubtitlePerformancePolicy {
