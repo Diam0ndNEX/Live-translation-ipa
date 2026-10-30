@@ -85,6 +85,25 @@ final class Harness {
         await noFastPack.settle()
         precondition(noFastPack.selected.count == 1)
         noFastPack.coordinator.reset()
+        // Reset during an in-flight Apple call must not let its late response
+        // clear the speculative owner of the next capture session.
+        let resetRace = Harness()
+        resetRace.coordinator.system = .lowLatency
+        resetRace.coordinator.observe(resetRace.caption(id: "obsolete"), confirmed: false, speculate: true)
+        await resetRace.settle()
+        precondition(resetRace.calls.count == 1)
+        resetRace.coordinator.reset()
+        resetRace.coordinator.observe(resetRace.caption(id: "new-session"), confirmed: false, speculate: true)
+        await resetRace.settle()
+        precondition(resetRace.calls.count == 2)
+        resetRace.reply(0, ["Abandoned response"])
+        await resetRace.settle()
+        resetRace.coordinator.observe(resetRace.caption(id: "third-subtitle"), confirmed: false, speculate: true)
+        await resetRace.settle()
+        precondition(resetRace.calls.count == 2, "Stale task cleared the current speculation owner")
+        resetRace.reply(1, ["Valid new-session response"])
+        await resetRace.settle()
+        resetRace.coordinator.reset()
         var governor = HybridAdmissionPolicy()
         for _ in 0..<3 { precondition(governor.admit()); governor.record(used: false) }
         for _ in 0..<8 { precondition(!governor.admit()) }
