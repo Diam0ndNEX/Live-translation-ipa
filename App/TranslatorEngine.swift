@@ -1053,6 +1053,20 @@ final class TranslatorEngine: ObservableObject {
 
     func diagnosticsSettingsChanged() {
         diag.collectionChanged()
+        // Collection reset starts a new diagnostic epoch without stopping
+        // capture. Continue accepting current-mode events in that new cohort.
+        modeDiagnosticEpochs[modeSessionID] = diag.started
+        if diag.enabled {
+            diag.s.lockedLang = lockedLang ?? "–"
+            diag.s.rotation = effectiveRot
+            diag.s.orderVote = orderVote
+            diag.s.calibrated = calibrated && !rotationBudget.exhausted
+        }
+    }
+
+    func resetDiagnostics() {
+        diag.reset()
+        modeDiagnosticEpochs[modeSessionID] = diag.started
         if diag.enabled {
             diag.s.lockedLang = lockedLang ?? "–"
             diag.s.rotation = effectiveRot
