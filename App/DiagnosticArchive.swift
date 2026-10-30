@@ -207,7 +207,7 @@ struct TranslationModeReport: Codable {
         "hybrid_obsolete_speculation_draining", "hybrid_losing_request_draining",
         "hybrid_no_fast_pack_fallback",
         "backend_availability_ms", "backend_task_dispatch_ms", "backend_installed_cache_hit",
-        "backend_lane_wait_ms", "backend_lane_admission_rejected",
+        "backend_lane_wait_ms", "backend_lane_admission_rejected", "backend_stale_request_dropped",
         "backend_session_age_ms", "backend_session_reuse_count",
         "pip_held_unchanged",
         "memory_saved_ram_hit", "memory_session_hit", "memory_legacy_hit", "memory_normalized_hit", "memory_persistent_hit",
@@ -243,7 +243,9 @@ struct TranslationModeReport: Codable {
         }
         let warmupPhases: Set<String> = ["requested_appleDefault", "requested_lowLatency", "model_submitted", "model_completed",
             "model_batch_completed", "model_batch_failed", "model_error", "model_timeout", "queue_ms", "service_ms",
-            "new_session_start", "retained_session_start", "unsupported_os", "unsupported_or_uninstalled_pair", "cancellation_requested", "cancelled_call_returned"]
+            "new_session_start", "retained_session_start", "unsupported_os", "unsupported_or_uninstalled_pair",
+            "backend_lane_wait_ms", "backend_lane_admission_rejected", "backend_session_age_ms", "backend_session_reuse_count",
+            "cancellation_requested", "cancelled_call_returned"]
         let safeWarmups = Array((warmups ?? []).suffix(512)).filter {
             $0.system != .legacy && ["normal", "temporaryMemory", "freshRequests"].contains($0.testMode) &&
             code($0.source, limit: 32) && code($0.target, limit: 32) && warmupPhases.contains($0.phase) &&
@@ -285,7 +287,7 @@ struct TranslationModeReport: Codable {
         "hybrid_no_fast_pack_fallback",
             "pip_held_unchanged", "backend_availability_ms", "backend_task_dispatch_ms",
             "backend_installed_cache_hit", "backend_lane_wait_ms", "backend_lane_admission_rejected",
-            "backend_session_age_ms", "backend_session_reuse_count",
+            "backend_stale_request_dropped", "backend_session_age_ms", "backend_session_reuse_count",
             "speculative_queue_ms", "recovery_queue_ms", "model_batch_completed",
             "cancelled_call_returned"
         ]
