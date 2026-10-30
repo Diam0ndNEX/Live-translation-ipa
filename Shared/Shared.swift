@@ -116,6 +116,7 @@ struct Config: Codable, Equatable {
     var correction: Bool? = nil
     var idleBackoff: Bool? = nil
     var movieMode: Bool? = nil
+    var rapidTextTracking: Bool? = nil  // independent of preset name; movieMode is a backwards-compatible alias
     var captureDiagnostics: Bool? = nil
     var adaptiveOCR: Bool? = nil
     var adaptiveConfirmation: Bool? = nil
