@@ -2018,7 +2018,12 @@ final class TranslatorEngine: ObservableObject {
         // A complete exact RAM result needs no model lane. Never bypass OCR
         // confirmation, generation checks or the presentation policy.
         let cacheProbeStarted = Date()
-        if busy, !bypassMemory, memoryTestMode.allowsReuse,
+        // Exact confirmed text with an explicitly selected source language can
+        // use the complete RAM caption even when the model lane is idle.
+        // Previously this shortcut was restricted to a busy lane, forcing an
+        // unnecessary full processing pass for the same reusable result.
+        // Automatic source selection still runs through language detection.
+        if sourceCode != "auto", !bypassMemory, memoryTestMode.allowsReuse,
            let key = ExactCaptionIdentity.key(blocks: blocks, source: sourceCode,
                                               target: targetCode, rules: memoryRuleToken),
            let ready = cachedCaption(blocks, identity: key) {
@@ -2380,11 +2385,16 @@ final class TranslatorEngine: ObservableObject {
         let id = source.minimalIdentifier
         let rules = memoryRuleToken
         let never = list("neverTranslate", lower: false)
+        let fixes = pairs("sourceFixes")
+        let cleaningEnabled = flag("cleanOCR", true)
+        let slangEnabled = flag("slang", true)
+        let speakersEnabled = flag("speakerDetect", true)
+        let languageCode = source.languageCode?.identifier ?? id
         var keys = Set<String>()
         for raw in blocks {
-            let text = cleanedSource(raw, enabled: flag("cleanOCR", true), fixes: pairs("sourceFixes"))
-            for part in preparedSourceUnits(text, language: source.languageCode?.identifier ?? id,
-                    slang: flag("slang", true), speakers: flag("speakerDetect", true), protected: never) {
+            let text = cleanedSource(raw, enabled: cleaningEnabled, fixes: fixes)
+            for part in preparedSourceUnits(text, language: languageCode,
+                    slang: slangEnabled, speakers: speakersEnabled, protected: never) {
                 for sentence in part.sentences {
                     keys.insert(PipelineSafety.cacheKey(source: id, target: targetCode, text: sentence,
                         protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: rules))
