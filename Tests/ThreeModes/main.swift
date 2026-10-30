@@ -95,6 +95,18 @@ final class Harness {
         for _ in 0..<12 { precondition(!governor.admit()) }
         governor.overlappingRecovery(milliseconds: 42)
         precondition(governor.admit())
+        var distinctBackoff = HybridAdmissionPolicy()
+        for _ in 0..<3 { distinctBackoff.record(used: false) }
+        precondition(!distinctBackoff.admit(identity: "caption-A"))
+        for _ in 0..<20 { precondition(!distinctBackoff.admit(identity: "caption-A")) }
+        precondition(distinctBackoff.rejected == 1)
+        for i in 0..<7 { precondition(!distinctBackoff.admit(identity: "caption-\(i)")) }
+        precondition(distinctBackoff.rejected == 8)
+        precondition(distinctBackoff.admit(identity: "next-caption"))
+        distinctBackoff.overlappingRecovery(milliseconds: 700)
+        precondition(!distinctBackoff.admit(identity: "slow-caption"))
+        distinctBackoff.record(used: true)
+        precondition(distinctBackoff.admit(identity: "after-useful"))
         let readinessStart = Date(timeIntervalSince1970: 100)
         precondition(InitialWarmupPolicy.strategies(for: .legacy).isEmpty)
         for source in ["en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh-Hans", "zh-Hant", "ar", "tr", "hi", "id", "nl", "pl", "th", "vi", "uk"] {
