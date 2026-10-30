@@ -15,7 +15,7 @@ enum OCRGrouping {
         return rows.flatMap { $0.sorted { $0.x < $1.x } }
     }
 
-    /// Remove near-coincident OCR shadow copies only in subtitle mode. Deliberately
+    /// Remove near-coincident OCR shadow copies only in adjacent-text grouping is enabled. Deliberately
     /// retain matching text at distant coordinates: it may be legitimate dialogue.
     /// Bucketing by exact normalized text avoids comparing unrelated observations.
     static func removeNearbyDuplicates(_ lines: [OCRLine]) -> [OCRLine] {
@@ -100,10 +100,10 @@ enum OCRGrouping {
                 // the smaller box height, rather than requiring nearly identical
                 // center y values; otherwise the last words become a separate block.
                 let verticalOverlap = (previous.h + line.h) / 2 - abs(verticalGap)
-                let sameMovieRow = joinAdjacentText
+                let sameCaptionRow = joinAdjacentText
                     && verticalOverlap >= min(previous.h, line.h) * 0.45
                     && horizontalGap < 0.06
-                guard sizeRatio > 0.45, (stacked || sameMovieRow) else { continue }
+                guard sizeRatio > 0.45, (stacked || sameCaptionRow) else { continue }
 
                 let score = (overlap / min(lineWidth, previousWidth))
                     - abs(edgeGap) / lineHeight * 0.15
