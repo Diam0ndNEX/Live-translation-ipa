@@ -255,17 +255,22 @@ struct ReadingSettings: View {
     @AppStorage("adaptiveOCR") private var adaptiveOCR = true
     @AppStorage("subtitleTracking") private var subtitleTracking = true
     @AppStorage("deduplicateCopies") private var deduplicateCopies = true
+    @AppStorage("rapidTextTracking") private var rapidTextTracking = true
+    @AppStorage("joinAdjacentText") private var joinAdjacentText = true
+    @AppStorage("activeTextFocus") private var activeTextFocus = true
     @State private var showAreaEditor = false
 
     private var key: String { "\(mode)|\(area)|\(customY0)|\(customY1)|\(speed)|\(stability)|\(boost)|\(skipUnchanged)|\(confidence)|\(correction)" }
-    private var recognitionPolicy: String { "\(adaptiveOCR)|\(subtitleTracking)|\(deduplicateCopies)" }
+    private var recognitionPolicy: String { "\(adaptiveOCR)|\(subtitleTracking)|\(deduplicateCopies)|\(rapidTextTracking)|\(joinAdjacentText)|\(activeTextFocus)" }
 
     var body: some View {
         List {
             Section("What to read") {
-                Picker("Mode", selection: $mode) {
+                Picker("Preset category", selection: $mode) {
                     ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) }
                 }
+                Text("Category is a label for existing presets; recognition features below work in every category.")
+                    .font(.footnote).foregroundStyle(.secondary)
                 Picker("OCR area", selection: $area) {
                     ForEach(OCRArea.allCases) { Text($0.title).tag($0.rawValue) }
                 }
@@ -338,9 +343,21 @@ struct ReadingSettings: View {
                 Text("Removes shadow or overlapping copies of the same subtitle, but preserves genuine repeated lyrics.")
                     .font(.footnote).foregroundStyle(.secondary)
             } header: { Text("Recognition intelligence") }
+            Section {
+                Toggle("React quickly to changing text", isOn: $rapidTextTracking)
+                Text("Short confirmation intervals and responsive idle/change detection when OCR is fast. Power and thermal safeguards remain active.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Toggle("Join neighboring text fragments", isOn: $joinAdjacentText)
+                Text("Merges adjacent words or subtitle boxes on the same line; turn off for distinct speech bubbles.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                Toggle("Prioritize the active text group", isOn: $activeTextFocus)
+                Text("Tracks the most relevant evolving text group instead of treating every text box equally. Enable for moving subtitles or lyric layouts.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            } header: { Text("Text behavior · every preset") }
             ResetSection(keys: ["mode", "area", "customY0", "customY1", "frameRot", "speed", "stability",
                                 "minTextH", "ignoreList", "dropNoise", "boost", "skipUnchanged", "ocrConfidence", "ocrCorrection",
-                                "adaptiveOCR", "subtitleTracking", "deduplicateCopies"])
+                                "adaptiveOCR", "subtitleTracking", "deduplicateCopies",
+                                "rapidTextTracking", "joinAdjacentText", "activeTextFocus"])
         }
         .settingsPage("Reading & OCR")
         .sheet(isPresented: $showAreaEditor) { CaptureAreaEditor().environmentObject(engine) }
