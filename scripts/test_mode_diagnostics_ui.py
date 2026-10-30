@@ -36,7 +36,7 @@ assert 'reason == "speculative_model_submitted"' in mode_event
 assert "noteSpeculativeModelSubmitted(caption)" in mode_event
 
 # Only waiting confirmed work receives the shorter lane handoff interval.
-lane_wait = section(backend, "while lane.busy {", 'report("backend_lane_wait_ms", (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)')
+lane_wait = section(backend, "while lane.busy {", "guard !Task.isCancelled, eligibleToStart() else {")
 assert "if speculation || Task.isCancelled" in lane_wait
 assert "Task.sleep(nanoseconds: 5_000_000)" in lane_wait
 
