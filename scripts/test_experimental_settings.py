@@ -75,6 +75,12 @@ for key in ("rapidTextTracking", "joinAdjacentText", "activeTextFocus"):
     assert presets.count(f'"{key}": false') >= 2, f"Game and Comic presets must disable {key}"
     assert f'static let {key} = "{key}"' in recognition_policy
 assert "legacyOptions[k]" in presets, "Older imported custom presets must retain their behavior"
+assert 'Picker("Content style defaults", selection: contentStyleSelection)' in home
+assert "private var contentStyleSelection: Binding<String>" in home
+assert "recommended[PresetRecognitionPolicy.rapidTextTracking]" in home
+assert "recommended[PresetRecognitionPolicy.joinAdjacentText]" in home
+assert "recommended[PresetRecognitionPolicy.activeTextFocus]" in home
+
 
 nav = [
     "ReadingSettings()", "IntelligenceSettings()", "TranslationSettings()",
