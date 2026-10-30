@@ -393,6 +393,50 @@ final class Harness {
         precondition(freshCache.selected.count == 2)
         freshCache.coordinator.reset()
 
+        // Backend request ownership allows an early preview before confirmation
+        // but refuses stale, selected and reset requests before model admission.
+        let admission = Harness()
+        admission.coordinator.system = .hybridRecovery
+        let preview = admission.caption("Early line", id: "preview")
+        admission.coordinator.observe(preview, confirmed: false, speculate: true)
+        await admission.settle()
+        precondition(admission.coordinator.shouldStartModel(preview, speculative: true))
+        precondition(!admission.coordinator.shouldStartModel(preview, speculative: false))
+        let accepted = admission.caption("Early line", id: "preview")
+        admission.coordinator.observe(accepted, confirmed: true, speculate: true)
+        await admission.settle()
+        precondition(admission.coordinator.shouldStartModel(accepted, speculative: false))
+        let superseding = admission.caption("Correct line", revision: 2, id: "corrected")
+        admission.coordinator.observe(superseding, confirmed: true, speculate: false)
+        await admission.settle()
+        precondition(!admission.coordinator.shouldStartModel(preview, speculative: true))
+        precondition(!admission.coordinator.shouldStartModel(accepted, speculative: false))
+        precondition(admission.coordinator.shouldStartModel(superseding, speculative: false))
+        for i in admission.calls.indices { admission.reply(i, nil) }
+        await admission.settle()
+        admission.coordinator.reset()
+        precondition(!admission.coordinator.shouldStartModel(superseding, speculative: false))
+
+        // A stale unsuccessful recovery must not re-enter the model lane for
+        // its same-strategy retry or consume time ahead of the current caption.
+        let staleRetry = Harness()
+        staleRetry.coordinator.system = .hybridRecovery
+        let staleFirst = staleRetry.caption("First request", id: "first")
+        staleRetry.coordinator.observe(staleFirst, confirmed: true, speculate: false)
+        await staleRetry.settle()
+        precondition(staleRetry.calls.count == 1)
+        let liveSecond = staleRetry.caption("Second request", revision: 2, id: "second")
+        staleRetry.coordinator.observe(liveSecond, confirmed: true, speculate: false)
+        await staleRetry.settle()
+        precondition(staleRetry.calls.count == 2)
+        staleRetry.reply(0, nil)
+        await staleRetry.settle()
+        precondition(staleRetry.calls.count == 2, "Stale requests must not retry or fall back")
+        staleRetry.reply(1, ["Current caption"])
+        await staleRetry.settle()
+        precondition(staleRetry.selected.count == 1 && staleRetry.selected[0].1.values == ["Current caption"])
+        staleRetry.coordinator.reset()
+
         // Failed LL requests have a bounded same-strategy retry and no default refinement.
         let fail = Harness(); fail.coordinator.system = .lowLatency
         fail.coordinator.observe(fail.caption(), confirmed: true, speculate: false); await fail.settle()
