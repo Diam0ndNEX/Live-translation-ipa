@@ -1918,12 +1918,17 @@ private struct DiagnosticsBody: View {
             .sheet(isPresented: $showSimulator) { NavigationStack { PipelineSimulatorView().environmentObject(engine) } }
             .onAppear { visible = true }
             .onDisappear { visible = false }
+            .onChange(of: collectionEnabled) { _, _ in engine.diagnosticsSettingsChanged() }
+            .onChange(of: collectDetails) { _, _ in engine.diagnosticsSettingsChanged() }
             .confirmationDialog("Delete saved diagnostic sessions? Translation memory and history are preserved.", isPresented: $confirmDeleteSessions, titleVisibility: .visible) {
                 Button("Delete saved sessions", role: .destructive) { Task { await diag.deleteSessions() } }
             }
             .confirmationDialog("Clear all graphs, counters and the timeline?", isPresented: $confirmReset,
                                 titleVisibility: .visible) {
-                Button("Reset diagnostics", role: .destructive) { diag.reset(); engine.toast("Diagnostics reset") }
+                Button("Reset diagnostics", role: .destructive) {
+                    engine.resetDiagnostics()
+                    engine.toast("Diagnostics reset")
+                }
             }
         }
     }
@@ -1998,7 +2003,13 @@ private struct DiagnosticsBody: View {
             LabeledContent("Successful PiP candidate enqueues", value: "\(stats.enqueuedCandidateFrames)")
             LabeledContent("Confirmed but superseded before enqueue", value: "\(stats.supersededUnpresentedConfirmed)")
             LabeledContent("Speculative pipelines discarded", value: "\(stats.specDiscarded)")
-            LabeledContent("Superseded units retained in RAM", value: "\(stats.specRetainedUnits)")
+            if engine.activeTranslationSystem == .legacy {
+                LabeledContent("Superseded units retained in RAM", value: "\(stats.specRetainedUnits)")
+            } else {
+                LabeledContent("Speculative model requests", value: "\(stats.specModelRequests)")
+                Text("Strategy-specific session-cache reuse appears in memory counts; Legacy retained-unit accounting does not apply.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             LabeledContent("Pre-translated sentence hits", value: "\(stats.specHits)")
             if model.n > 0 {
                 Text("Measured model processing: median \(Int(model.p50)) ms · mean \(Int(model.avg)) ms · P95 \(Int(model.p95)) ms (\(model.n) batches).")
@@ -2635,9 +2646,14 @@ private struct DiagnosticsBody: View {
             Text(s.languageContextUsed ? "Recent source context assisted this ambiguous reading" : "Source evidence uses the current reading").font(.caption).foregroundStyle(.secondary)
             Text("\(s.recognitionReason) · \(s.confirmationReason)").font(.caption).foregroundStyle(.secondary)
             Text("Cache sentences · session \(s.cacheHits) · saved \(s.savedHits) · pre-translated \(s.specHits)").font(.footnote)
-            Text("Speculative jobs · started \(s.specStarted) · completed \(s.specCompleted) · discarded \(s.specDiscarded) · declined \(s.specSkipped)").font(.footnote)
-            Text("Spec throttled \(s.adaptiveSpeculationSkipped) · confirmed handoffs \(s.confirmedHandoffDeferred) · slow tails \(s.slowTailEnqueues)").font(.footnote)
-            Text("Discarded work: \(Int(s.specDiscardedMs)) ms. Unconsumed cached results: \(engine.unconsumedSpeculation). Completed results may still be reused later.").font(.caption).foregroundStyle(.secondary)
+            Text("Speculative jobs · admitted \(s.specStarted) · ready \(s.specCompleted) · failed \(s.specDiscarded) · declined \(s.specSkipped)").font(.footnote)
+            if engine.activeTranslationSystem == .legacy {
+                Text("Spec throttled \(s.adaptiveSpeculationSkipped) · confirmed handoffs \(s.confirmedHandoffDeferred) · slow tails \(s.slowTailEnqueues)").font(.footnote)
+                Text("Discarded work: \(Int(s.specDiscardedMs)) ms · unconsumed cached results: \(engine.unconsumedSpeculation).").font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("Actual speculative model requests: \(s.specModelRequests) · Hybrid admission throttles: \(s.adaptiveSpeculationSkipped) · slow enqueues: \(s.slowTailEnqueues)").font(.footnote)
+                Text("New-mode predictions and confirmed recoveries have separate model lanes. A cache-only result is not counted as model execution. Captions may reuse completed obsolete work.").font(.caption).foregroundStyle(.secondary)
+            }
             Text("Skipped frames · unchanged \(s.unchangedSkipped) · cadence \(s.cadenceSkipped) · paused \(s.pausedSkipped)").font(.caption)
             Text("Recorder self-time · simple \(String(format: "%.1f", diag.recorderCosts.simpleMs)) ms · detailed \(String(format: "%.1f", diag.recorderCosts.detailedMs)) ms. Excludes chart drawing and model work; these are different workloads.").font(.caption).foregroundStyle(.secondary)
         }.card()
