@@ -1,3 +1,9 @@
+# ScreenLingo v1.9.3 · build 74
+
+Restores legitimate next-caption speculative model requests in Hybrid and Low Latency while preserving v1.9.2's stale-request rejection and backend contention protection. Repairs live Diagnostics timing and selection events, mode-aware speculation counters, collection/reset boundaries and clearer sample-empty states across the UI. No measured device-speed claims until the same-content three-mode tests are repeated.
+
+[Specification and acceptance](docs/v1.9.3-specification.md)
+
 # ScreenLingo v1.9.2 · build 73
 
 The v1.9.2 performance and reliability update targets cross-strategy contention in Hybrid Recovery, long-tail recovery delays, and lost exact-key reuse after a superseded model request. It adds backend occupancy-aware speculative admission, bounded contention backoff, per-strategy ephemeral result caches, and improved diagnostics for warm-up and session lifecycle. Legacy and explicit Low Latency remain selectable and unmodified. On-device latency, quality, battery and thermals require follow-up device validation.
