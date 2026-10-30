@@ -108,6 +108,12 @@ check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.22, pending: fal
 check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.4, pending: true,
     movie: true, pressure: true, processingMs: 134) == 0.4,
     "Thermal, power and Cool pressure must retain their full cadence")
+check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.22, pending: true,
+    movie: true, pressure: false, processingMs: 60) == 0.10,
+    "Nominal Movie confirmation may use the 100ms safety floor when the OCR engine is fast")
+check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.22, pending: true,
+    movie: true, pressure: true, processingMs: 60) == 0.22,
+    "Pressure must disable the faster confirmation burst")
 check(SubtitlePerformancePolicy.confirmationInterval(planned: 0.12, pending: true,
     movie: true, pressure: false, processingMs: 250) == 0.12,
     "A confirmation burst must never delay an already faster cadence")
