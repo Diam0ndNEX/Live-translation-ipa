@@ -35,7 +35,7 @@ enum SubtitlePerformancePolicy {
 
     /// A second independent frame can be read sooner without reducing the
     /// configured number of reads, detail, confidence or correction. Only a
-    /// pending Movie confirmation may borrow this short burst; pressure wins.
+    /// pending rapid-text confirmation may borrow this short burst; pressure wins.
     static func confirmationInterval(planned: Double, pending: Bool, rapidTextTracking: Bool,
                                      pressure: Bool, processingMs: Double) -> Double {
         guard pending, rapidTextTracking, !pressure, processingMs.isFinite, processingMs > 0 else { return planned }
