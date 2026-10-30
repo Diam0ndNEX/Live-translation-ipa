@@ -23,7 +23,7 @@ enum OCRArea: String, CaseIterable, Identifiable {
         case .top: "Top half"; case .middle: "Middle band"; case .custom: "Custom…"
         }
     }
-    func range(mode: TranslateMode) -> ClosedRange<Double> {   // y: 0 = bottom, 1 = top
+    func range() -> ClosedRange<Double> {   // y: 0 = bottom, 1 = top
         switch self {
         case .smart: return 0...1
         case .full: return 0...1
@@ -85,7 +85,7 @@ final class TranslatorEngine: ObservableObject {
     /// Everything a preset remembers.
     static let presetKeys = [
         "source", "target", "mode", "area", "customY0", "customY1", "speed", "stability", "minTextH", "ignoreList",
-        "frameRot", "dropNoise", "boost", "skipUnchanged", "subtitleAwareChangeDetection", "preserveRelatedMovieGroups", "cleanOCR", "slang", "speakerDetect", "highlightNames",
+        "frameRot", "dropNoise", "boost", "skipUnchanged", "subtitleAwareChangeDetection", "preserveRelatedMovieGroups", "rapidTextTracking", "joinAdjacentText", "activeTextFocus", "cleanOCR", "slang", "speakerDetect", "highlightNames",
         "langLock", "neverTranslate", "sourceFixes", "glossary", "winSize", "theme", "textSize", "pipFont",
         "showOriginal", "autoClear", "clearHold", "minDisplay", "autoOpenPiP", "haptics", "speak", "speechRate",
         "autoCopy", "adaptive", "idleMinutes", "translateAhead", "keepWarm", "remember", "translationSystem", "lowLatencyTranslation", "incrementalBatchRecovery", "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
@@ -98,7 +98,7 @@ final class TranslatorEngine: ObservableObject {
         "suppressOwnInterface": true, "memoryRAMCapacity": 3000, "memorySoftLimit": 100000, "persistDiagnosticSessions": false, "directPiPBuffer": false,
         "source": "auto", "target": "en", "mode": "movie", "area": "smart", "customY0": 0.0, "customY1": 0.5,
         "speed": "balanced", "stability": 2, "minTextH": 0.0, "ignoreList": "", "frameRot": "auto",
-        "dropNoise": true, "boost": 1, "skipUnchanged": true, "subtitleAwareChangeDetection": false, "preserveRelatedMovieGroups": false, "cleanOCR": true, "slang": true,
+        "dropNoise": true, "boost": 1, "skipUnchanged": true, "subtitleAwareChangeDetection": false, "preserveRelatedMovieGroups": false, "rapidTextTracking": true, "joinAdjacentText": true, "activeTextFocus": true, "cleanOCR": true, "slang": true,
         "speakerDetect": true, "highlightNames": true, "langLock": true, "neverTranslate": "", "sourceFixes": "",
         "glossary": "", "winSize": "normal", "theme": "dark", "textSize": "auto", "pipFont": "standard",
         "showOriginal": false, "autoClear": true, "clearHold": 1.0, "minDisplay": 0.0, "autoOpenPiP": true,
@@ -900,6 +900,7 @@ final class TranslatorEngine: ObservableObject {
     }
 
     init() {
+        PresetRecognitionPolicy.migrate(UserDefaults.standard)
         let migration = TranslationSystem.migrate(UserDefaults.standard)
         activeTranslationSystem = migration.0; pendingTranslationSystem = migration.0
         diag.modeActiveSystem = migration.0.rawValue; diag.modePendingSystem = migration.0.rawValue
@@ -1188,7 +1189,7 @@ final class TranslatorEngine: ObservableObject {
 
     /// Sends OCR area, source-language hint, speed and rotation to the extension.
     func syncConfig() {
-        let r = area.range(mode: mode)
+        let r = area.range()
         var maxEdge = speed.maxEdge, interval = speed.interval
         if flag("adaptive", true) {
             switch ProcessInfo.processInfo.thermalState {
@@ -1209,7 +1210,8 @@ final class TranslatorEngine: ObservableObject {
                            subtitleAwareChangeDetection: flag("subtitleAwareChangeDetection", false),
                            speculate: speculationAllowed && flag("translateAhead", true), confidence: num("ocrConfidence", 0.3),
                            correction: flag("ocrCorrection", true), idleBackoff: flag("idleBackoff", true),
-                           movieMode: mode == .movie,
+                           movieMode: flag("rapidTextTracking", true),
+                           rapidTextTracking: flag("rapidTextTracking", true),
                            captureDiagnostics: diag.enabled,
                            adaptiveOCR: speed == .automatic || (speed == .balanced && flag("adaptiveOCR", true)),
                            adaptiveConfirmation: flag("adaptiveConfirmation", false), subtitleTracking: flag("subtitleTracking", true),
@@ -1736,7 +1738,7 @@ final class TranslatorEngine: ObservableObject {
     /// Turns raw OCR lines into the text blocks worth translating (area, rules, own window, blocks, noise…).
     /// `count` is false for early sightings so the statistics are not counted twice.
     private func extractTexts(_ lines: [OCRLine], count: Bool) -> [String] {
-        let range = area.range(mode: mode)
+        let range = area.range()
         let minH = num("minTextH", 0)
         let ignore = list("ignoreList", lower: true)
         var cand: [OCRLine] = []
@@ -1834,7 +1836,7 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func makeBlocks(_ lines: [OCRLine]) -> [[OCRLine]] {
-        OCRGrouping.makeBlocks(lines, movie: mode == .movie)
+        OCRGrouping.makeBlocks(lines, joinAdjacentText: flag("joinAdjacentText", true))
     }
 
     private func blockHeight(_ b: [OCRLine]) -> Double {
@@ -1845,12 +1847,12 @@ final class TranslatorEngine: ObservableObject {
         blockHeight(b) * Double(b.reduce(0) { $0 + $1.t.count }).squareRoot()
     }
 
-    /// Movie mode keeps the dominant block(s); other modes keep everything that isn't tiny.
+    /// Optional active-text prioritization works with every preset category.
     private func selectBlocks(_ blocks: [[OCRLine]], diagnosticCount: Bool) -> [[OCRLine]] {
         guard !blocks.isEmpty else { return [] }
         let maxH = blocks.map { blockHeight($0) }.max() ?? 0
         var kept = blocks
-        if mode == .movie {
+        if flag("activeTextFocus", true) {
             let beforeHeightFilter = kept.count
             // Tiny dialogue must not be excluded because a persistent label uses a larger font.
             kept = blocks.filter { blockHeight($0) >= max(0.006, maxH * 0.20) }
