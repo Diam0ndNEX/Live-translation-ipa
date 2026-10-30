@@ -1458,12 +1458,14 @@ final class TranslatorEngine: ObservableObject {
             }
             return
         }
+        // Both Legacy and new modes must count accepted confirmed packets.
+        // Do this before dispatch, without counting a local replay twice.
+        if p.stable != false && !replayed && diag.enabled { diag.s.confirmedCandidatePackets += 1 }
         if activeTranslationSystem != .legacy {
             handleModeCaption(candidateTexts, packet: p)
             return
         }
         let candidateText = candidateTexts.map(TextSim.norm).joined(separator: "\n")
-        if p.stable != false && !replayed && diag.enabled { diag.s.confirmedCandidatePackets += 1 }
         // Admission must precede generation changes, cancellation and continuity
         // accounting. Rejected fragments never become active confirmed work.
         if SubtitleAcquisitionPolicy.rejectsDisplayedFragment(confirmed: p.stable != false,
