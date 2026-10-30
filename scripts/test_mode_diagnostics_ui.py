@@ -49,6 +49,27 @@ assert 'noteModelState("warmup_succeeded")' in warmup
 assert 'noteModelState("warmup_model_completed", durationMs: observation.durationMs)' in warmup
 assert warmup.index('noteModelState("warmup_started")') < warmup.index('noteModelState("warmup_model_submitted")')
 
+# Mode memory probes must never repeat a SQLite lookup for an identical
+# sentence key in the same caption.
+lookup = section(engine, "private func lookupModeMemory(", "private func selectModeResult(")
+assert "var resolved: [String: String]" in lookup
+assert "var missing: Set<String>" in lookup
+assert lookup.index("if let earlier = resolved[key]") < lookup.index("await memoryStore.lookup(key: key)")
+assert "if missing.contains(key)" in lookup
+assert "caption.session == modeSessionID" in lookup
+
+# Legacy's complete confirmed RAM caption must work on idle and busy model
+# lanes, while auto-language detection cannot bypass its own routing.
+fast_ram = section(engine, "private func presentQueuedFromRAMIfComplete()", "private func handleClear()")
+assert 'if sourceCode != "auto", !bypassMemory, memoryTestMode.allowsReuse' in fast_ram
+assert "ExactCaptionIdentity.key" in fast_ram
+assert "schedulePresentation(joined, ready.translated" in fast_ram
+
+coordinator_reset = section(coordinator, "func reset() {", "func observe(")
+assert "speculationTicket = UUID()" in coordinator_reset
+assert "speculation = nil" in coordinator_reset
+assert "guard self.speculationTicket == ticket" in coordinator
+
 model = section(diagnostics, "func recordModeModel(", "func recordLatency(")
 assert "add(\\.translate, ms)" in model
 assert "recordModeSelection(" in model
