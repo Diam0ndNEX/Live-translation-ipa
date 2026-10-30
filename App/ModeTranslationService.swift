@@ -390,7 +390,8 @@ final class ModeTranslationService {
                         if lane.invalidated || output == nil {
                             lane.session = nil; lane.key = ""
                             lane.createdAt = nil; lane.completedCalls = 0
-                lane.lastFinishedAt = nil
+                            // Preserve the last physical return time so an
+                            // overlapped recovery can measure its actual span.
                         } else {
                             lane.completedCalls += 1
                             report("backend_session_reuse_count", Double(lane.completedCalls))
