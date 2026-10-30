@@ -823,6 +823,9 @@ final class TranslatorEngine: ObservableObject {
         modeCoordinator.hybridSpeculationPermitted = { [weak self] in
             self?.modeService.mayAdmitHybridSpeculation ?? false
         }
+        modeService.mayStartModel = { [weak self] caption, speculative in
+            self?.modeCoordinator.shouldStartModel(caption, speculative: speculative) ?? false
+        }
         modeService.hostedDefault = { [weak self] texts, source, target, speculative in
             await self?.translateLegacy(texts, source: source, target: target, speculative: speculative)
         }
