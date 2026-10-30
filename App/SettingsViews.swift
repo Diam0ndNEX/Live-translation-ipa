@@ -717,6 +717,7 @@ struct PrivacySettings: View {
 
 /// Collection is independent of which diagnostics page happens to be visible.
 struct DiagnosticsCollectionControls: View {
+    @EnvironmentObject var engine: TranslatorEngine
     @AppStorage("diagnosticsEnabled") private var enabled = true
     @AppStorage("detailedCollection") private var detailed = false
     var body: some View {
@@ -728,5 +729,7 @@ struct DiagnosticsCollectionControls: View {
             Text("Changing collection starts a fresh diagnostic session. Detailed collection requires Simple diagnostics.")
                 .font(.caption).foregroundStyle(.secondary)
         }
+        .onChange(of: enabled) { _, _ in engine.diagnosticsSettingsChanged() }
+        .onChange(of: detailed) { _, _ in engine.diagnosticsSettingsChanged() }
     }
 }
