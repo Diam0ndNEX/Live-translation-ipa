@@ -199,15 +199,21 @@ struct TranslationModeReport: Codable {
         "speculative_model_submitted", "confirmed_model_submitted", "model_batch_failed", "model_batch_completed", "speculative_model_completed", "confirmed_model_completed",
         "cancellation_requested", "cancelled_call_returned",
         "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
+        "hybrid_speculation_backend_busy",
+        "strategy_cache_hit_appleDefault", "strategy_cache_hit_lowLatency",
+        "strategy_cache_populated_appleDefault", "strategy_cache_populated_lowLatency",
         "hybrid_cross_strategy_overlap", "hybrid_overlapped_recovery_ms",
         "hybrid_preserve_confirmed_session", "hybrid_hedged_recovery",
         "hybrid_obsolete_speculation_draining", "hybrid_losing_request_draining",
         "hybrid_no_fast_pack_fallback",
         "backend_availability_ms", "backend_task_dispatch_ms", "backend_installed_cache_hit",
+        "backend_lane_wait_ms", "backend_lane_admission_rejected",
+        "backend_session_age_ms", "backend_session_reuse_count",
         "pip_held_unchanged",
         "memory_saved_ram_hit", "memory_session_hit", "memory_legacy_hit", "memory_normalized_hit", "memory_persistent_hit",
         "pip_enqueue_legacy_recovery", "pip_enqueue_confirmed_fresh",
-        "selected_origin_compatible_memory", "selected_origin_speculation", "selected_origin_recovery", "selected_origin_session_low_latency",
+        "selected_origin_compatible_memory", "selected_origin_speculation", "selected_origin_recovery",
+        "selected_origin_session_low_latency", "selected_origin_session_apple_default",
         "selected_strategy_appleDefault", "selected_strategy_lowLatency", "memory_pressure", "thermal_reduced_speculation",
         "speculation_admitted", "speculation_failed", "speculation_ready", "superseded_missing",
         "source_correction", "speculation_match_unfinished", "memory_lookup_start", "memory_lookup_end",
@@ -272,10 +278,14 @@ struct TranslationModeReport: Codable {
         // metadata reasons and numeric samples can reach the exported report.
         let sessionReasons = [
             "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
+            "hybrid_speculation_backend_busy",
+            "strategy_cache_hit_appleDefault", "strategy_cache_hit_lowLatency",
+            "strategy_cache_populated_appleDefault", "strategy_cache_populated_lowLatency",
             "hybrid_cross_strategy_overlap", "hybrid_overlapped_recovery_ms",
         "hybrid_no_fast_pack_fallback",
             "pip_held_unchanged", "backend_availability_ms", "backend_task_dispatch_ms",
-            "backend_installed_cache_hit",
+            "backend_installed_cache_hit", "backend_lane_wait_ms", "backend_lane_admission_rejected",
+            "backend_session_age_ms", "backend_session_reuse_count",
             "speculative_queue_ms", "recovery_queue_ms", "model_batch_completed",
             "cancelled_call_returned"
         ]
@@ -441,6 +451,10 @@ actor DiagnosticExportWriter {
             "enqueueLatencyMs", "finalOCRMs", "transportMs", "confirmationMs",
             "deliveryFilteringMs", "queueMs", "processingMs", "displayHoldMs",
             "renderingMs", "speculativeModelMs", "confirmedModelMs", "modelBatchMs",
+            "modeAvailabilityCheckMs", "modeTaskDispatchMs", "modeSpeculativeQueueMs", "modeRecoveryQueueMs",
+            "modeBackendLaneWaitMs", "modeSessionAgeMs", "modeSessionCompletedCalls",
+            "hybridDefaultWarmupMs", "hybridLowLatencyWarmupMs",
+            "hybridOverlappedRecoveryMs", "modeCancellationReleaseMs",
             "speculativeStopReleaseMs", "queueBehindSpeculationMs", "queueBehindConfirmedMs", "queueSchedulingMs"
         ]
         let safeMetrics = snapshot.distributions.filter { key, value in
