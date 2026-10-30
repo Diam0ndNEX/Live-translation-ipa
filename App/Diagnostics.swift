@@ -774,6 +774,7 @@ final class Diagnostics: ObservableObject {
                 "hybridDefaultWarmupMs": DiagnosticDistribution(modeTimingSamples["initial_warmup_appleDefault_model_completed_ms", default: []]),
                 "hybridLowLatencyWarmupMs": DiagnosticDistribution(modeTimingSamples["initial_warmup_lowLatency_model_completed_ms", default: []]),
                 "hybridOverlappedRecoveryMs": DiagnosticDistribution(modeTimingSamples["hybrid_overlapped_recovery_ms", default: []]),
+                "hybridMeasuredOverlapMs": DiagnosticDistribution(modeTimingSamples["hybrid_simultaneous_model_overlap_ms", default: []]),
                 "modeCancellationReleaseMs": DiagnosticDistribution(modeTimingSamples["cancelled_call_returned", default: []])],
             events: exportEventWindow(),
             intervals: diagnosticIntervals(at: Date()),
