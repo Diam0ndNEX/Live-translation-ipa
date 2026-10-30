@@ -408,6 +408,10 @@ final class ThreeModeCoordinator {
         guard system == .hybridRecovery, let early = speculativeCaption,
               early.session == caption.session, scoredSpeculation != early else { return }
         scoredSpeculation = early
+        if !speculativeModelSubmitted && !useful {
+            event(caption, "hybrid_speculation_unexecuted", nil)
+            return
+        }
         if adaptiveHybrid && speculativeModelSubmitted {
             hybridAdmission.record(used: useful)
         }
