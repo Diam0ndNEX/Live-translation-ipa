@@ -14,7 +14,11 @@ enum SubtitlePerformancePolicy {
     static func confirmationInterval(planned: Double, pending: Bool, movie: Bool,
                                      pressure: Bool, processingMs: Double) -> Double {
         guard pending, movie, !pressure, processingMs.isFinite, processingMs > 0 else { return planned }
-        return min(planned, max(0.12, processingMs / 1000))
+        // Use the last real OCR service time as the lower bound so the next
+        // independent confirmation frame can start promptly without overlap.
+        // A 100 ms nominal floor avoids high-frequency OCR under unusually
+        // cheap frames; pressure and non-Movie scheduling remain untouched.
+        return min(planned, max(0.10, processingMs / 1000))
     }
 
     /// One non-renewable grace period for an unpresented confirmed caption.
