@@ -2358,7 +2358,8 @@ private struct DiagnosticsBody: View {
                 arrow
                 node("Filter", "line.3.horizontal.decrease", "\(diag.s.blocksKept)/\(diag.s.blocksIn)", Color.green)
                 arrow
-                node("Translate", "character.bubble", t.n > 0 ? "\(Int(t.avg)) ms" : "–", level(t.avg, t.n, 400, 800))
+                node(engine.activeTranslationSystem == .legacy ? "Translate" : "Model", "character.bubble",
+                     t.n > 0 ? "\(Int(t.avg)) ms" : "–", level(t.avg, t.n, 400, 800))
                 arrow
                 node("Show", "rectangle.on.rectangle", engine.pipActive ? (d.n > 0 ? "\(Int(d.avg)) ms" : "–") : "closed", showColor)
             }
@@ -2426,12 +2427,16 @@ private struct DiagnosticsBody: View {
         let markers = Array(diag.events.filter { important.contains($0.kind) && $0.time >= rangeStart }.suffix(6))
         return VStack(spacing: 14) {
             LineCard(title: "Reading the screen", samples: slice(diag.ocr), color: Color.green, unit: "ms", rule: 300, markers: markers)
-            LineCard(title: "Translating", samples: slice(diag.translate), color: Color.cyan, unit: "ms", markers: markers)
+            LineCard(title: engine.activeTranslationSystem == .legacy ? "Translating" : "Completed model inference", samples: slice(diag.translate), color: Color.cyan, unit: "ms", markers: markers)
             LineCard(title: "First sighting → frame enqueue", samples: slice(diag.latency), color: Color.orange, unit: "ms", rule: 1500, markers: markers)
             LineCard(title: "Transfer extension → app", samples: slice(diag.transport), color: Color.purple, unit: "ms")
             LineCard(title: "Frames per second", samples: slice(diag.fps), color: Color.teal, unit: "fps")
             HistogramCard(title: "How long reading takes", values: slice(diag.ocr).map { $0.v }, color: Color.green)
             HistogramCard(title: "How long the total delay is", values: slice(diag.latency).map { $0.v }, color: Color.orange)
+            if engine.activeTranslationSystem != .legacy {
+                Text("Model-inference timings include successful backend requests even if an obsolete result was not displayed. Memory-only translations add no model sample. Total delay ends at PiP buffer enqueue.")
+                    .font(.caption).foregroundStyle(.secondary).card()
+            }
             PairedTimingCard(samples: diag.pipeline.filter { $0.date >= rangeStart })
             granularityCard
         }
@@ -2487,7 +2492,8 @@ private struct DiagnosticsBody: View {
         return VStack(alignment: .leading, spacing: 10) {
             Text("Session timeline").font(.subheadline.weight(.semibold))
             if spans.isEmpty {
-                Text("Collecting data…").font(.caption).foregroundStyle(.secondary)
+                Text("No state timeline spans in this range. Capture and Detailed collection are required.")
+                    .font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 90)
             } else {
                 Chart {
@@ -2827,7 +2833,9 @@ private struct DiagnosticsBody: View {
                 Text(thermalName).font(.subheadline.weight(.bold)).foregroundStyle(thermalColor)
             }
             if data.count < 2 {
-                Text("Collecting data…").font(.caption).foregroundStyle(.secondary)
+                Text(data.isEmpty ? "No thermal samples in this range. Detailed collection is required." :
+                     "One thermal sample recorded. The second sample will establish a trend.")
+                    .font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 80)
             } else {
                 Chart(data) { s in
