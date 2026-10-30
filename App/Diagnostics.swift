@@ -960,6 +960,21 @@ final class Diagnostics: ObservableObject {
               detail: UserDefaults.standard.bool(forKey: "diagIncludeText") && !UserDefaults.standard.bool(forKey: "privateSession") ? String(preview.prefix(90)) : nil)
     }
 
+    /// Completed inference, not the elapsed time for a memory-only caption.
+    /// This feeds the same live timing series as the Legacy pipeline.
+    func recordModeModel(ms: Double, system: TranslationSystem) {
+        guard enabled, ms.isFinite, ms >= 0 else { return }
+        add(\.translate, ms)
+        event(.translation, "Model completed in \(Int(ms)) ms · \(system.title)")
+    }
+
+    /// An actual selected caption can be entirely memory-served; never create
+    /// a fictitious model-duration sample for those translations.
+    func recordModeSelection(sentences: Int, source: String, target: String) {
+        guard enabled else { return }
+        event(.translation, "Translated \(sentences) sentence\(sentences == 1 ? "" : "s") \(source) → \(target)")
+    }
+
     func recordLatency(ms: Double) { add(\.latency, ms) }
 
     func recordPipeline(_ stages: LatencyBreakdown) {
@@ -1571,7 +1586,10 @@ private struct LineCard: View {
                 }
             }
             if samples.count < 2 {
-                Text("Collecting data…").font(.caption).foregroundStyle(.secondary)
+                Text(samples.isEmpty
+                     ? "No measurements in this range. Detailed collection records measured work, not synthetic values."
+                     : "One measurement: \(fmt(sm.last)) \(unit). Another sample is needed for a trend.")
+                    .font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 90)
             } else {
                 Chart {
@@ -1643,7 +1661,9 @@ private struct HistogramCard: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.subheadline.weight(.semibold))
             if bins.isEmpty {
-                Text("Collecting data…").font(.caption).foregroundStyle(.secondary)
+                Text(values.isEmpty ? "No timing measurements in this range." :
+                     "\(values.count) timing samples; at least three are needed for a histogram.")
+                    .font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 70)
             } else {
                 Chart(bins) { b in
@@ -1714,7 +1734,8 @@ private struct MultiSpeedChart: View {
     let delay: [Sample]
     var body: some View {
         if ocr.count + translate.count + delay.count < 3 {
-            Text("Collecting data…").font(.caption).foregroundStyle(.secondary)
+            Text("Not enough measured timing samples. Memory-only translations do not have model-duration samples.")
+                .font(.caption).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, minHeight: 120)
         } else {
             Chart {
@@ -1944,7 +1965,7 @@ private struct DiagnosticsBody: View {
                 Label("Test evidence", systemImage: "chart.xyaxis.line")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                Text("v1.5.0")
+                Text(AppVersion.full)
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
@@ -1980,7 +2001,16 @@ private struct DiagnosticsBody: View {
             LabeledContent("Superseded units retained in RAM", value: "\(stats.specRetainedUnits)")
             LabeledContent("Pre-translated sentence hits", value: "\(stats.specHits)")
             if model.n > 0 {
-                Text("Model processing: median \(Int(model.p50)) ms · mean \(Int(model.avg)) ms · P95 \(Int(model.p95)) ms.")
+                Text("Measured model processing: median \(Int(model.p50)) ms · mean \(Int(model.avg)) ms · P95 \(Int(model.p95)) ms (\(model.n) batches).")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if !collectDetails {
+                Text("Model timing charts require Detailed collection. Translation counters remain active in Simple mode.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if stats.translations > 0 {
+                Text("Translations selected, but no model timings recorded. The captions may have come from memory.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("No model timing samples yet. Start capture and translate text to collect measurements.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Text("Candidates, sentence hits and model requests count different events. A lower delay with more lost confirmed candidates is not necessarily an improvement.")
