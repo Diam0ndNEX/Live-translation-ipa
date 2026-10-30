@@ -73,6 +73,28 @@ final class Harness {
         readiness.requested(at: 12); readiness.tick(at: 42)
         precondition(readiness.state == .timedOut)
 
+        let noFastPack = Harness()
+        noFastPack.coordinator.system = .hybridRecovery
+        noFastPack.coordinator.fastRecoveryInstalled = false
+        noFastPack.coordinator.observe(noFastPack.caption(id: "only-default"), confirmed: true, speculate: false)
+        await noFastPack.settle()
+        precondition(noFastPack.calls.count == 1)
+        precondition(noFastPack.calls[0].strategy == .appleDefault)
+        precondition(noFastPack.events.contains("hybrid_no_fast_pack_fallback"))
+        noFastPack.reply(0, ["Default fallback works"])
+        await noFastPack.settle()
+        precondition(noFastPack.selected.count == 1)
+        noFastPack.coordinator.reset()
+        var governor = HybridAdmissionPolicy()
+        for _ in 0..<3 { precondition(governor.admit()); governor.record(used: false) }
+        for _ in 0..<5 { precondition(!governor.admit()) }
+        precondition(governor.admit())
+        governor.record(used: true)
+        precondition(governor.admit())
+        governor.overlappingRecovery(milliseconds: 700)
+        for _ in 0..<5 { precondition(!governor.admit()) }
+        governor.overlappingRecovery(milliseconds: 42)
+        precondition(governor.admit())
         let readinessStart = Date(timeIntervalSince1970: 100)
         precondition(InitialWarmupPolicy.strategies(for: .legacy).isEmpty)
         for source in ["en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh-Hans", "zh-Hant", "ar", "tr", "hi", "id", "nl", "pl", "th", "vi", "uk"] {
@@ -301,15 +323,51 @@ final class Harness {
         precondition(preferredRace.selected[0].2 == "memory_hit" && preferredRace.calls.count == 1)
         preferredRace.coordinator.reset()
 
-        // Cold Hybrid deadline permits recovery without waiting for stale cancellation.
+        // Hybrid hedges matching inference without destroying its warmed Default session.
         let deadline = Harness(); deadline.coordinator.system = .hybridRecovery
         deadline.coordinator.coldSpeculationCeiling = 0
         deadline.coordinator.observe(deadline.caption(), confirmed: false, speculate: true); await deadline.settle()
         deadline.coordinator.observe(deadline.caption(), confirmed: true, speculate: true); await deadline.settle()
         precondition(deadline.calls.count == 2 && deadline.calls[1].strategy == .lowLatency)
-        deadline.reply(0, ["Default wins selection"]); deadline.reply(1, ["Late recovery"])
-        await deadline.settle(); precondition(deadline.selected.count == 1)
+        precondition(deadline.cancellations.isEmpty)
+        deadline.reply(0, ["Default wins selection"]); await deadline.settle()
+        precondition(deadline.selected.count == 1 && deadline.selected[0].1.values == ["Default wins selection"])
+        precondition(deadline.events.contains("hybrid_hedged_recovery") && deadline.cancellations.isEmpty)
+        deadline.reply(1, ["Late recovery"]); await deadline.settle()
+        precondition(deadline.selected.count == 1)
         deadline.coordinator.reset()
+
+        // A confirmed LL result wins first, while the Default call drains safely.
+        let recoveryWins = Harness(); recoveryWins.coordinator.system = .hybridRecovery
+        recoveryWins.coordinator.coldSpeculationCeiling = 0
+        recoveryWins.coordinator.observe(recoveryWins.caption(), confirmed: false, speculate: true)
+        await recoveryWins.settle()
+        recoveryWins.coordinator.observe(recoveryWins.caption(), confirmed: true, speculate: true)
+        await recoveryWins.settle()
+        precondition(recoveryWins.calls.count == 2)
+        recoveryWins.reply(1, ["Fast confirmed result"]); await recoveryWins.settle()
+        precondition(recoveryWins.selected.count == 1 && recoveryWins.selected[0].1.values == ["Fast confirmed result"])
+        precondition(recoveryWins.cancellations.isEmpty)
+        recoveryWins.reply(0, ["Late speculative result"]); await recoveryWins.settle()
+        precondition(recoveryWins.selected.count == 1 && recoveryWins.backend.activity == nil)
+        recoveryWins.coordinator.reset()
+
+        // OCR mismatch drops the obsolete result, not the underlying session.
+        let draining = Harness(); draining.coordinator.system = .hybridRecovery
+        draining.coordinator.observe(draining.caption("Old subtitle"), confirmed: false, speculate: true)
+        await draining.settle()
+        draining.coordinator.observe(draining.caption("New subtitle", revision: 2), confirmed: true, speculate: true)
+        await draining.settle()
+        precondition(draining.calls.count == 2 && draining.cancellations.isEmpty)
+        precondition(draining.events.contains("hybrid_obsolete_speculation_draining"))
+        draining.reply(1, ["Current confirmed text"]); await draining.settle()
+        draining.reply(0, ["Stale subtitle"]); await draining.settle()
+        precondition(draining.selected.count == 1 && draining.selected[0].1.values == ["Current confirmed text"])
+        draining.coordinator.observe(draining.caption("Third subtitle", revision: 3, id: "third"), confirmed: false, speculate: true)
+        await draining.settle()
+        precondition(draining.calls.count == 3 && draining.calls[2].speculative)
+        draining.reply(2, ["Fresh speculative result"]); await draining.settle()
+        draining.coordinator.reset()
 
         // Failed speculation followed by failed LL permits default fallback only in Hybrid.
         let fallback = Harness(); fallback.coordinator.system = .hybridRecovery
@@ -399,9 +457,10 @@ final class Harness {
         precondition(pressure.selected.count == 1 && pressure.events.contains("memory_pressure"))
         pressure.coordinator.reset()
 
-        precondition(abs(SpeculationWaitPolicy.remaining(elapsed: 0.4, ordinary: [], recovery: [], coldCeiling: 0.7) - 0.3) < 0.0001)
+        precondition(abs(SpeculationWaitPolicy.remaining(elapsed: 0.4, ordinary: [], recovery: [], coldCeiling: 0.7) - 0.05) < 0.0001)
         precondition(SpeculationWaitPolicy.remaining(elapsed: 0.8, ordinary: [], recovery: [], coldCeiling: 0.7) == 0)
         precondition(abs(SpeculationWaitPolicy.remaining(elapsed: 0.2, ordinary: [0.5, 0.5, 0.5, 0.5, 0.5], recovery: [0.1, 0.1, 0.1, 0.1, 0.1], coldCeiling: 0.7) - 0.1) < 0.0001)
+        precondition(abs(SpeculationWaitPolicy.remaining(elapsed: 0.2, ordinary: [0.5, 0.5, 0.5, 0.5, 0.5], recovery: [0.9, 0.9, 0.9, 0.9, 0.9], coldCeiling: 0.7) - 0.3) < 0.0001)
         precondition(SpeculationWaitPolicy.remaining(elapsed: 0.6, ordinary: [0.5, 0.5, 0.5, 0.5, 0.5], recovery: [0.1, 0.1, 0.1, 0.1, 0.1], coldCeiling: 0.7) == 0)
         var thermalCaption = norm.caption(); thermalCaption.thermal = 1
         precondition(thermalCaption.policyCohort != norm.caption().policyCohort)

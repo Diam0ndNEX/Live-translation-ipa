@@ -47,6 +47,17 @@ struct PiPStyle {
     var padding: CGFloat = 24
     var originalFraction: CGFloat = 0.27
 
+    func visuallyEquals(_ other: PiPStyle) -> Bool {
+        bg.isEqual(other.bg) && fg.isEqual(other.fg) &&
+        secondary.isEqual(other.secondary) && accent.isEqual(other.accent) &&
+        hi == other.hi && lo == other.lo &&
+        String(describing: design) == String(describing: other.design) &&
+        highlightNames == other.highlightNames &&
+        weight.rawValue == other.weight.rawValue &&
+        alignment == other.alignment && lineSpacing == other.lineSpacing &&
+        padding == other.padding && originalFraction == other.originalFraction
+    }
+
     static func make(theme: PiPTheme, size: PiPTextSize, font: PiPFont = .standard) -> PiPStyle {
         let hi: CGFloat, lo: CGFloat
         switch size {
@@ -117,6 +128,7 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
     private var heartbeat: Timer?
     private var lastOriginal = "", lastTranslated = "Waiting for screen text…"
     private var lastShowOriginal = true
+    private var lastRenderedStyle: PiPStyle?
     private static let labelRegex = try? NSRegularExpression(pattern: #"^([\p{L}][^\n:]{0,23}:)"#, options: [.anchorsMatchLines])
     var style = PiPStyle.make(theme: .dark, size: .auto)
     var onStatus: ((String) -> Void)?
@@ -178,6 +190,17 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
     }
 
     // MARK: Rendering
+    /// A matching live frame is already being refreshed by the PiP heartbeat.
+    /// This never conflates equal text with a changed appearance or window size.
+    func isShowingIdenticalFrame(original: String, translated: String,
+                                 showOriginal: Bool, size requestedSize: CGSize,
+                                 style proposedStyle: PiPStyle) -> Bool {
+        guard isActive, requestedSize == size, frameBuffer != nil,
+              original == lastOriginal, translated == lastTranslated,
+              showOriginal == lastShowOriginal, let lastRenderedStyle else { return false }
+        return lastRenderedStyle.visuallyEquals(proposedStyle)
+    }
+
     @discardableResult
     func render(original: String, translated: String, showOriginal: Bool,
                 size newSize: CGSize? = nil) -> Bool {
@@ -194,6 +217,7 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
         }
         guard prepared, enqueueCurrentFrame() else { return false }
         lastOriginal = original; lastTranslated = translated; lastShowOriginal = showOriginal
+        lastRenderedStyle = style
         return true
     }
 

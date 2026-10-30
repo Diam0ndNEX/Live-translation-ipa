@@ -51,4 +51,28 @@ assert 'warmup: true' in warm
 assert all(token not in warm for token in ['queueMemory', 'history.append', 'modeCoordinator', 'lowCache'])
 assert 'warmup ? warmupLane' in service
 assert 'preserveIdleSessions: true' in engine
+assert 'lastModePreparationPair' in engine and 'lastModePreparationAt' in engine
+assert 'modeCoordinator.adaptiveHybrid = flag("adaptiveSpeculation", true)' in engine
+assert 'hybrid_overlapped_recovery_ms' in engine
+assert 'lastModePreparationPair = ""' in function(engine, 'invalidatePending'), 'Capture changes must reset mode session readiness throttle'
+assert 'lastModePreparationAt = .distantPast' in function(engine, 'invalidatePending')
+assert '!backendActivity.executing' in engine, 'Avoid live inference contention during readiness checks'
+assert 'pip.isShowingIdenticalFrame' in engine
+assert 'pip_held_unchanged' in engine
+assert 'installedCheckTTL: Double = 30' in service
+assert 'backend_availability_ms' in service
+assert 'backend_task_dispatch_ms' in service
+assert 'hybrid_cross_strategy_overlap' in service
+assert 'model_batch_completed", serviceMs' in service
+assert 'HybridAdmissionPolicy' in core
+assert 'hybrid_hedged_recovery' in core
+assert 'hybrid_obsolete_speculation_draining' in core
+assert 'hybrid_losing_request_draining' in core
+assert 'if system != .hybridRecovery {' in core
+assert 'self.committed != caption' in core
+assert 'sortedDefault' in core and 'recoveryMedian * 0.75' in core
+assert 'hybrid_hedged_recovery' in read('App/DiagnosticArchive.swift')
+assert 'modeAvailabilityCheckMs' in read('App/Diagnostics.swift')
+assert 'exportModeEventWindow()' in read('App/Diagnostics.swift')
+assert 'backend_installed_cache_hit' in service
 print('Legacy algorithm equivalence, installed schema/identity, no preview/refinement, bounded cache and model routing source contracts passed')

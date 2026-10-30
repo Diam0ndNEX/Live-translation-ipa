@@ -27,6 +27,8 @@ final class ModeTranslationService {
     private let confirmed = Lane()
     private let warmupLane = Lane()
     private var warmupPolicy = InitialWarmupPolicy()
+    private var recentlyInstalled: [String: Double] = [:]
+    private let installedCheckTTL: Double = 30
     var warmupEvent: ((InitialWarmupEvent) -> Void)?
     var modelRequestCompleted: ((String, String, RequestedTranslationStrategy, Double) -> Void)?
     private(set) var warmupSkipDescription = ""
@@ -252,20 +254,41 @@ final class ModeTranslationService {
         guard !Task.isCancelled else { return nil }
         let source = Locale.Language(identifier: caption.source), target = Locale.Language(identifier: caption.target)
         activity.advance(activityID, to: .checkingLanguages)
-        let availability: LanguageAvailability
-        if #available(iOS 26.4, *), strategy == .lowLatency {
-            availability = LanguageAvailability(preferredStrategy: .lowLatency)
-        } else { availability = LanguageAvailability() }
-        let pairAvailability = await availability.status(from: source, to: target)
+        let languageCheckStart = ProcessInfo.processInfo.systemUptime
+        let availabilityKey = "\(source.minimalIdentifier)>\(target.minimalIdentifier)|\(strategy.rawValue)"
+        let pairAvailability: LanguageAvailability.Status
+        if let verifiedAt = recentlyInstalled[availabilityKey],
+           languageCheckStart - verifiedAt < installedCheckTTL {
+            pairAvailability = .installed
+            report("backend_installed_cache_hit", nil)
+        } else {
+            let availability: LanguageAvailability
+            if #available(iOS 26.4, *), strategy == .lowLatency {
+                availability = LanguageAvailability(preferredStrategy: .lowLatency)
+            } else { availability = LanguageAvailability() }
+            pairAvailability = await availability.status(from: source, to: target)
+            if pairAvailability == .installed {
+                if recentlyInstalled.count >= 100 { recentlyInstalled.removeAll() }
+                recentlyInstalled[availabilityKey] = ProcessInfo.processInfo.systemUptime
+            }
+        }
+        report("backend_availability_ms", (ProcessInfo.processInfo.systemUptime - languageCheckStart) * 1000)
         guard !Task.isCancelled else { return nil }
         guard pairAvailability == .installed else {
             report("unsupported_or_uninstalled_pair", nil)
-            status?("Translation languages unavailable. Open Languages to install the selected pair.")
+            // Hybrid may still complete this caption through Apple Default.
+            // Missing optional fast assets must not display a fatal status.
+            if caption.system != .hybridRecovery || strategy != .lowLatency {
+                status?("Translation languages unavailable. Open Languages to install the selected pair.")
+            }
             return nil
         }
         // Availability suspended; recheck the lease before acquiring it.
         guard !lane.busy else { return nil }
         let warm = lane.session != nil && !lane.invalidated && lane.key == "\(caption.source)>\(caption.target)|\(strategy.rawValue)"
+        let competingDefault = caption.system == .hybridRecovery && !speculation && strategy == .lowLatency &&
+            speculative.busy && speculative.requestedStrategy == .appleDefault
+        if competingDefault { report("hybrid_cross_strategy_overlap", nil) }
         install(lane, source: source, target: target, strategy: strategy)
         guard let session = lane.session else { return nil }
         lane.busy = true; lane.ticket = UUID(); lane.caption = caption; lane.cancellationAt = nil
@@ -278,6 +301,7 @@ final class ModeTranslationService {
         report(warm ? "retained_session_start" : "new_session_start", nil)
         report(speculation ? "speculative_queue_ms" : "recovery_queue_ms",
                (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)
+        let dispatched = ProcessInfo.processInfo.systemUptime
         return await withTaskCancellationHandler(operation: {
             await withCheckedContinuation { continuation in
                 var completed = false
@@ -296,6 +320,7 @@ final class ModeTranslationService {
                     finish(nil)
                 }
                 Task { @MainActor in
+                    report("backend_task_dispatch_ms", (ProcessInfo.processInfo.systemUptime - dispatched) * 1000)
                     let requests = indices.enumerated().map {
                         TranslationSession.Request(sourceText: caption.units[$0.element], clientIdentifier: String($0.offset))
                     }
@@ -304,17 +329,18 @@ final class ModeTranslationService {
                         let response = try await session.translations(from: requests)
                         output = PipelineSafety.orderedTranslations(response.map { ($0.clientIdentifier, $0.targetText) }, count: indices.count)
                     } catch {
+                        self.recentlyInstalled.removeValue(forKey: availabilityKey)
                         report("model_error", nil)
                     }
                     timeout.cancel()
-                    report(output == nil ? "model_batch_failed" : "model_batch_completed", nil)
+                    let serviceMs = (ProcessInfo.processInfo.systemUptime - start) * 1000
+                    report(output == nil ? "model_batch_failed" : "model_batch_completed", serviceMs)
                     if output != nil {
-                        let elapsed = (ProcessInfo.processInfo.systemUptime - start) * 1000
-                        self.modelRequestCompleted?(caption.source, caption.target, strategy, elapsed)
-                        report(speculation ? "speculative_model_completed" : "confirmed_model_completed", elapsed)
+                        self.modelRequestCompleted?(caption.source, caption.target, strategy, serviceMs)
+                        report(speculation ? "speculative_model_completed" : "confirmed_model_completed", serviceMs)
                     }
-                    report(speculation ? "speculative_service_ms" : "recovery_service_ms",
-                        (ProcessInfo.processInfo.systemUptime - start) * 1000)
+                    report(speculation ? "speculative_service_ms" : "recovery_service_ms", serviceMs)
+                    if competingDefault { report("hybrid_overlapped_recovery_ms", serviceMs) }
                     if lane.ticket == ticket {
                         if let cancelled = lane.cancellationAt {
                             report("cancelled_call_returned", (ProcessInfo.processInfo.systemUptime - cancelled) * 1000)

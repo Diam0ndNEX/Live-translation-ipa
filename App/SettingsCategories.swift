@@ -61,7 +61,7 @@ struct TranslationSettings: View {
                     }
                 }
                 Toggle("Adapt early translation to usefulness", isOn: $adaptiveSpeculation)
-                Text("Reduces speculative model work if many early results go unused, while keeping opportunities to recover.")
+                Text("Reduces early model work when predictions are not useful. Hybrid also temporarily switches to direct Low Latency recovery when Apple Default speculation repeatedly wastes resources.")
                     .font(.footnote).foregroundStyle(.secondary)
             } header: { Text("Translation scheduling") }
 

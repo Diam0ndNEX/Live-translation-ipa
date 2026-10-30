@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.9.0"
-    static let build = 71
+    static let version = "1.9.1"
+    static let build = 72
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("1.9.1", "Hybrid scheduling: adaptive speculative admission with bounded recovery waits, avoids repeated session-readiness checks while translating, 30-second installed-language status cache, strategy overlap/dispatch metrics, safe identical-PiP hold reuse, and comparable full-session diagnostics. Real-device speed and quality acceptance pending."),
         ("1.9.0", "Build 71: strategy-aware language availability and download decisions, clear partial Hybrid readiness, refreshed mode switch state, no false requests for already-installed packs."),
         ("1.9.0", "Build 70: distinguish current sessions from historical model responses across app and mode switches; avoid claiming a model remains loaded; retry interrupted initial warm-up with bounded cooldown and clear skip reasons."),
         ("1.9.0", "Three explicit translation systems built on tested 1.7.2: Legacy, opt-in Hybrid Recovery and Low Latency. Separate result selection, strategy-safe session cache, next-capture settings and correlated diagnostics. Device acceptance pending."),

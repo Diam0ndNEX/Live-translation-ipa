@@ -198,6 +198,13 @@ struct TranslationModeReport: Codable {
     static let reasons: Set<String> = [
         "speculative_model_submitted", "confirmed_model_submitted", "model_batch_failed", "model_batch_completed", "speculative_model_completed", "confirmed_model_completed",
         "cancellation_requested", "cancelled_call_returned",
+        "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
+        "hybrid_cross_strategy_overlap", "hybrid_overlapped_recovery_ms",
+        "hybrid_preserve_confirmed_session", "hybrid_hedged_recovery",
+        "hybrid_obsolete_speculation_draining", "hybrid_losing_request_draining",
+        "hybrid_no_fast_pack_fallback",
+        "backend_availability_ms", "backend_task_dispatch_ms", "backend_installed_cache_hit",
+        "pip_held_unchanged",
         "memory_saved_ram_hit", "memory_session_hit", "memory_legacy_hit", "memory_normalized_hit", "memory_persistent_hit",
         "pip_enqueue_legacy_recovery", "pip_enqueue_confirmed_fresh",
         "selected_origin_compatible_memory", "selected_origin_speculation", "selected_origin_recovery", "selected_origin_session_low_latency",
@@ -261,16 +268,40 @@ struct TranslationModeReport: Codable {
                 }
             }
         }
+        // Full-session totals survive bounded event-ring eviction. Only known
+        // metadata reasons and numeric samples can reach the exported report.
+        let sessionReasons = [
+            "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
+            "hybrid_cross_strategy_overlap", "hybrid_overlapped_recovery_ms",
+        "hybrid_no_fast_pack_fallback",
+            "pip_held_unchanged", "backend_availability_ms", "backend_task_dispatch_ms",
+            "backend_installed_cache_hit",
+            "speculative_queue_ms", "recovery_queue_ms", "model_batch_completed",
+            "cancelled_call_returned"
+        ]
+        for reason in sessionReasons {
+            if let count = counters[reason], count >= 0 {
+                counts["session_" + reason] = min(count, 1_000_000)
+            }
+
+        }
         let modes = ["legacy", "hybridRecovery", "lowLatency"]
         for warmup in safeWarmups {
             let cohort = "warmup_" + warmup.system.rawValue + "_" + warmup.testMode + "_" + warmup.source + "_" + warmup.target + "_" + warmup.strategy.rawValue
             counts[cohort + "_" + warmup.phase, default: 0] += 1
             if let ms = warmup.durationMs { samples[cohort + "_" + warmup.phase, default: []].append(ms) }
         }
+        var finalDistributions = samples.mapValues(DiagnosticDistribution.init)
+        for reason in sessionReasons {
+            if let sample = distributions[reason], sample.count >= 0,
+               sample.mean.isFinite, sample.mean >= 0 {
+                finalDistributions["session_" + reason] = sample
+            }
+        }
         return Self(warmups: safeWarmups, active: modes.contains(active) ? active : "legacy", pending: modes.contains(pending) ? pending : "legacy",
             referenceSHA: referenceSHA.count == 40 && referenceSHA.allSatisfy { $0.isHexDigit } ? referenceSHA : "unknown",
             migration: ["persisted", "explicit_hybrid", "explicit_low_latency", "legacy_or_ambiguous", "unknown_value_legacy"].contains(migration) ? migration : "unknown",
-            events: safe, distributions: samples.mapValues(DiagnosticDistribution.init), counters: counts)
+            events: safe, distributions: finalDistributions, counters: counts)
     }
 }
 
