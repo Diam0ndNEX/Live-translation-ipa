@@ -34,6 +34,15 @@ assert "translateMs = duration" in mode_event
 assert 'reason == "speculative_model_submitted"' in mode_event
 assert "noteSpeculativeModelSubmitted(caption)" in mode_event
 
+warmup = section(diagnostics, "func noteInitialWarmup(", "func noteModeEvent(")
+assert 'observation.phase == "model_submitted"' in warmup
+assert 'noteModelState("warmup_started")' in warmup
+assert 'noteModelState("warmup_model_submitted")' in warmup
+assert 'observation.phase == "model_completed"' in warmup
+assert 'noteModelState("warmup_succeeded")' in warmup
+assert 'noteModelState("warmup_model_completed", durationMs: observation.durationMs)' in warmup
+assert warmup.index('noteModelState("warmup_started")') < warmup.index('noteModelState("warmup_model_submitted")')
+
 model = section(diagnostics, "func recordModeModel(", "func recordLatency(")
 assert "add(\\.translate, ms)" in model
 assert "recordModeSelection(" in model
