@@ -411,6 +411,29 @@ var privateOptions=simulationOptions;privateOptions["privateSession"]="true"
 let privateSimulation=PipelineSimulation.run(options:privateOptions,input:SimulationInput())
 check(privateSimulation.steps.contains { $0.title == "History, persistent memory & feedback" && $0.state == "session only" }, "Simulator explains private retention without writing history or memory")
 check(PipelineSimulation.optionGroups.flatMap { $0.1 }.contains("contextualLanguage"), "Source-context control is represented in the simulator")
+var customComicOptions = simulationOptions
+customComicOptions["mode"] = "comic"
+customComicOptions["rapidTextTracking"] = "true"
+customComicOptions["joinAdjacentText"] = "true"
+customComicOptions["activeTextFocus"] = "true"
+let rapidComicSimulation = PipelineSimulation.run(options: customComicOptions, input: SimulationInput())
+check(rapidComicSimulation.steps.contains {
+    $0.title == "Local delivery & source filtering" &&
+    $0.detail.contains("Adjacent joining: on; active-text focus: on")
+}, "A Comic custom preset must use subtitle grouping and focus when explicitly enabled")
+customComicOptions["rapidTextTracking"] = "false"
+customComicOptions["joinAdjacentText"] = "false"
+customComicOptions["activeTextFocus"] = "false"
+let separateComicSimulation = PipelineSimulation.run(options: customComicOptions, input: SimulationInput())
+check(separateComicSimulation.steps.contains {
+    $0.title == "Local delivery & source filtering" &&
+    $0.detail.contains("Adjacent joining: off; active-text focus: off")
+}, "Independent switches must override the preset category in the simulator")
+let rapidConfirmation = rapidComicSimulation.steps.first { $0.title == "Candidate identity & confirmation" }?.duration ?? .infinity
+let separateConfirmation = separateComicSimulation.steps.first { $0.title == "Candidate identity & confirmation" }?.duration ?? -.infinity
+check(rapidConfirmation < separateConfirmation,
+      "Rapid text confirmation must be available to Comic or any custom preset")
+
 print("Bounded rotation, context recovery and in-app simulation regression checks passed")
 
 let limitedPlan = AdaptiveRecognition.plan(baseEdge: 550, interval: 0.3, enabled: true, cool: true, pressure: true, feedback: hardFeedback, ceiling: 550)
