@@ -225,6 +225,8 @@ final class ThreeModeCoordinator {
     private var speculativeOutput: ModeOutput?
     private var speculativeStarted = 0.0
     private var speculativeFailed = false
+    private var speculativeEligible = false
+    private var speculativeModelSubmitted = false
     private var recoveryStarted = false
     private var hybridAdmission = HybridAdmissionPolicy()
     private var scoredSpeculation: ModeCaption?
@@ -245,6 +247,7 @@ final class ThreeModeCoordinator {
     func reduceSpeculation(memoryPressure: Bool) {
         speculation?.cancel(); cancel(true)
         speculativeCaption = nil; speculativeOutput = nil
+        speculativeEligible = false
         if memoryPressure {
             lowCache.removeAll(); lowOrder.removeAll()
             defaultCache.removeAll(); defaultOrder.removeAll()
@@ -260,6 +263,7 @@ final class ThreeModeCoordinator {
         cancel(true); cancel(false)
         confirmation = nil; deadline = nil
         current = nil; committed = nil; memoryProbePending = nil; speculativeCaption = nil; speculativeOutput = nil
+        speculativeEligible = false; speculativeModelSubmitted = false
         // The speculative task clears its occupied slot only after completion.
         recoveryStarted = false
         hybridAdmission = HybridAdmissionPolicy()
@@ -288,6 +292,7 @@ final class ThreeModeCoordinator {
             }
             scoredSpeculation = nil
             speculativeCaption = caption; speculativeOutput = nil; speculativeFailed = false
+            speculativeEligible = true; speculativeModelSubmitted = false
             speculativeStarted = clock()
             event(caption, "speculation_admitted", nil)
             let strategy: RequestedTranslationStrategy = system == .lowLatency ? .lowLatency : .appleDefault
@@ -310,6 +315,12 @@ final class ThreeModeCoordinator {
         if let previous = current, committed != previous { event(previous, "superseded_missing", nil) }
         if let previous = current, previous.caption == caption.caption, previous.fingerprint != caption.fingerprint {
             event(caption, "source_correction", nil)
+        }
+        // Confirmation, not the previously displayed caption, determines
+        // whether an early next-subtitle prediction has been superseded.
+        if let early = speculativeCaption, !early.matches(caption) {
+            speculativeEligible = false
+            event(caption, "speculation_superseded_before_confirmation", nil)
         }
         current = caption; committed = nil; memoryProbePending = caption; recoveryStarted = false
         // Obsolete Hybrid work loses display authority without cancelling its
@@ -368,17 +379,24 @@ final class ThreeModeCoordinator {
         }
     }
 
-    /// Only work which has not yet entered Apple's model may be abandoned.
-    /// Calls already executing must return normally to preserve their sessions.
-    /// Preview requests can begin before confirmation assigns current.
+    /// An unconfirmed next subtitle is valid while the preceding subtitle is
+    /// displayed. Only a DIFFERENT new confirmation, a reset, or explicit
+    /// cancellation can revoke its right to start inference.
     func shouldStartModel(_ caption: ModeCaption, speculative: Bool) -> Bool {
         guard system != .legacy else { return false }
         if speculative {
-            guard speculativeCaption == caption else { return false }
-            guard let current else { return true }
-            return current.matches(caption) && committed != current
+            guard speculativeEligible, speculativeCaption == caption else { return false }
+            if let current, current.matches(caption) { return committed != current }
+            return true
         }
         return current == caption && committed != caption
+    }
+
+    /// Feedback must reflect actual Apple-default work, not a local admission
+    /// rejection or a cache-only result. Match the complete caption identity.
+    func noteSpeculativeModelSubmitted(_ caption: ModeCaption) {
+        guard speculativeCaption == caption, speculativeEligible else { return }
+        speculativeModelSubmitted = true
     }
 
     func noteOverlappingRecovery(_ milliseconds: Double) {
@@ -390,7 +408,13 @@ final class ThreeModeCoordinator {
         guard system == .hybridRecovery, let early = speculativeCaption,
               early.session == caption.session, scoredSpeculation != early else { return }
         scoredSpeculation = early
-        if adaptiveHybrid { hybridAdmission.record(used: useful) }
+        if !speculativeModelSubmitted && !useful {
+            event(caption, "hybrid_speculation_unexecuted", nil)
+            return
+        }
+        if adaptiveHybrid && speculativeModelSubmitted {
+            hybridAdmission.record(used: useful)
+        }
         event(caption, useful ? "hybrid_speculation_useful" : "hybrid_speculation_wasted", nil)
     }
 
@@ -524,6 +548,9 @@ final class ThreeModeCoordinator {
         let reason = memoryOnly ? "memory_hit" : proposedReason
         guard current == caption, committed != caption, output.complete else { event(caption, "stale_rejected", nil); return }
         committed = caption; deadline?.cancel()
+        if speculativeCaption?.matches(caption) == true {
+            speculativeEligible = false
+        }
         let matchedPreview = proposedReason == "speculation_match_ready" ||
             proposedReason == "speculation_match_in_flight"
         let previewUseful = output.origins.contains("speculation") ||

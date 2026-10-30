@@ -225,7 +225,7 @@ struct DiagnosticsSettings: View {
 
             Section {
                 Button("Reset diagnostic counters") {
-                    engine.diag.reset()
+                    engine.resetDiagnostics()
                     engine.toast("Counters reset")
                 }
             }

@@ -199,6 +199,7 @@ struct TranslationModeReport: Codable {
         "speculative_model_submitted", "confirmed_model_submitted", "model_batch_failed", "model_batch_completed", "speculative_model_completed", "confirmed_model_completed",
         "cancellation_requested", "cancelled_call_returned",
         "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
+        "hybrid_speculation_unexecuted",
         "hybrid_speculation_backend_busy",
         "strategy_cache_hit_appleDefault", "strategy_cache_hit_lowLatency",
         "strategy_cache_populated_appleDefault", "strategy_cache_populated_lowLatency",
@@ -216,6 +217,7 @@ struct TranslationModeReport: Codable {
         "selected_origin_session_low_latency", "selected_origin_session_apple_default",
         "selected_strategy_appleDefault", "selected_strategy_lowLatency", "memory_pressure", "thermal_reduced_speculation",
         "speculation_admitted", "speculation_failed", "speculation_ready", "superseded_missing",
+        "speculation_superseded_before_confirmation",
         "source_correction", "speculation_match_unfinished", "memory_lookup_start", "memory_lookup_end",
         "speculative_enqueue", "recovery_enqueue", "same_strategy_retry", "hybrid_default_fallback",
         "stale_rejected", "recovery_failed_missing", "confirmed", "display_failed",
@@ -280,9 +282,11 @@ struct TranslationModeReport: Codable {
         // metadata reasons and numeric samples can reach the exported report.
         let sessionReasons = [
             "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
+        "hybrid_speculation_unexecuted",
             "hybrid_speculation_backend_busy",
             "strategy_cache_hit_appleDefault", "strategy_cache_hit_lowLatency",
             "strategy_cache_populated_appleDefault", "strategy_cache_populated_lowLatency",
+            "speculation_superseded_before_confirmation", "speculative_model_submitted", "confirmed_model_submitted",
             "hybrid_cross_strategy_overlap", "hybrid_overlapped_recovery_ms", "hybrid_simultaneous_model_overlap_ms",
         "hybrid_no_fast_pack_fallback",
             "pip_held_unchanged", "backend_availability_ms", "backend_task_dispatch_ms",

@@ -780,7 +780,7 @@ final class Diagnostics: ObservableObject {
             intervals: diagnosticIntervals(at: Date()),
             oneSecondIntervals: detailedCollection ? recentIntervals(at: Date(), period: 1) : nil,
             fiveSecondIntervals: diagnosticIntervals(at: Date(), period: 5),
-            measurementBoundary: "First OCR sighting to PiP sample-buffer enqueue; physical display unmeasured. Distributions use the latest bounded samples within this session, not all-time aggregates. Stages can overlap.",
+            measurementBoundary: "First OCR sighting to PiP sample-buffer enqueue; physical display unmeasured. translationMs measures Legacy pipeline processing or completed Hybrid/Low Latency backend model inference, not memory-only selection. Latest bounded samples; stages can overlap.",
             textCapture: false)
     }
 
@@ -958,6 +958,21 @@ final class Diagnostics: ObservableObject {
         add(\.translate, ms)
         event(.translation, "Translated \(sentences) sentence\(sentences == 1 ? "" : "s") \(from) → \(to) in \(Int(ms)) ms",
               detail: UserDefaults.standard.bool(forKey: "diagIncludeText") && !UserDefaults.standard.bool(forKey: "privateSession") ? String(preview.prefix(90)) : nil)
+    }
+
+    /// Completed inference, not the elapsed time for a memory-only caption.
+    /// This feeds the same live timing series as the Legacy pipeline.
+    func recordModeModel(ms: Double, system: TranslationSystem) {
+        guard enabled, ms.isFinite, ms >= 0 else { return }
+        add(\.translate, ms)
+        event(.translation, "Model completed in \(Int(ms)) ms · \(system.title)")
+    }
+
+    /// An actual selected caption can be entirely memory-served; never create
+    /// a fictitious model-duration sample for those translations.
+    func recordModeSelection(sentences: Int, source: String, target: String) {
+        guard enabled else { return }
+        event(.translation, "Translated \(sentences) sentence\(sentences == 1 ? "" : "s") \(source) → \(target)")
     }
 
     func recordLatency(ms: Double) { add(\.latency, ms) }
@@ -1571,7 +1586,10 @@ private struct LineCard: View {
                 }
             }
             if samples.count < 2 {
-                Text("Collecting data…").font(.caption).foregroundStyle(.secondary)
+                Text(samples.isEmpty
+                     ? "No measurements in this range. Detailed collection records measured work, not synthetic values."
+                     : "One measurement: \(fmt(sm.last)) \(unit). Another sample is needed for a trend.")
+                    .font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 90)
             } else {
                 Chart {
@@ -1643,7 +1661,9 @@ private struct HistogramCard: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.subheadline.weight(.semibold))
             if bins.isEmpty {
-                Text("Collecting data…").font(.caption).foregroundStyle(.secondary)
+                Text(values.isEmpty ? "No timing measurements in this range." :
+                     "\(values.count) timing samples; at least three are needed for a histogram.")
+                    .font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 70)
             } else {
                 Chart(bins) { b in
@@ -1714,7 +1734,8 @@ private struct MultiSpeedChart: View {
     let delay: [Sample]
     var body: some View {
         if ocr.count + translate.count + delay.count < 3 {
-            Text("Collecting data…").font(.caption).foregroundStyle(.secondary)
+            Text("Not enough measured timing samples. Memory-only translations do not have model-duration samples.")
+                .font(.caption).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, minHeight: 120)
         } else {
             Chart {
@@ -1897,12 +1918,17 @@ private struct DiagnosticsBody: View {
             .sheet(isPresented: $showSimulator) { NavigationStack { PipelineSimulatorView().environmentObject(engine) } }
             .onAppear { visible = true }
             .onDisappear { visible = false }
+            .onChange(of: collectionEnabled) { _, _ in engine.diagnosticsSettingsChanged() }
+            .onChange(of: collectDetails) { _, _ in engine.diagnosticsSettingsChanged() }
             .confirmationDialog("Delete saved diagnostic sessions? Translation memory and history are preserved.", isPresented: $confirmDeleteSessions, titleVisibility: .visible) {
                 Button("Delete saved sessions", role: .destructive) { Task { await diag.deleteSessions() } }
             }
             .confirmationDialog("Clear all graphs, counters and the timeline?", isPresented: $confirmReset,
                                 titleVisibility: .visible) {
-                Button("Reset diagnostics", role: .destructive) { diag.reset(); engine.toast("Diagnostics reset") }
+                Button("Reset diagnostics", role: .destructive) {
+                    engine.resetDiagnostics()
+                    engine.toast("Diagnostics reset")
+                }
             }
         }
     }
@@ -1944,7 +1970,7 @@ private struct DiagnosticsBody: View {
                 Label("Test evidence", systemImage: "chart.xyaxis.line")
                     .font(.subheadline.weight(.semibold))
                 Spacer()
-                Text("v1.5.0")
+                Text(AppVersion.full)
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(.secondary)
             }
@@ -1977,10 +2003,25 @@ private struct DiagnosticsBody: View {
             LabeledContent("Successful PiP candidate enqueues", value: "\(stats.enqueuedCandidateFrames)")
             LabeledContent("Confirmed but superseded before enqueue", value: "\(stats.supersededUnpresentedConfirmed)")
             LabeledContent("Speculative pipelines discarded", value: "\(stats.specDiscarded)")
-            LabeledContent("Superseded units retained in RAM", value: "\(stats.specRetainedUnits)")
+            if engine.activeTranslationSystem == .legacy {
+                LabeledContent("Superseded units retained in RAM", value: "\(stats.specRetainedUnits)")
+            } else {
+                LabeledContent("Speculative model requests", value: "\(stats.specModelRequests)")
+                Text("Strategy-specific session-cache reuse appears in memory counts; Legacy retained-unit accounting does not apply.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             LabeledContent("Pre-translated sentence hits", value: "\(stats.specHits)")
             if model.n > 0 {
-                Text("Model processing: median \(Int(model.p50)) ms · mean \(Int(model.avg)) ms · P95 \(Int(model.p95)) ms.")
+                Text("Measured model processing: median \(Int(model.p50)) ms · mean \(Int(model.avg)) ms · P95 \(Int(model.p95)) ms (\(model.n) batches).")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if !collectDetails {
+                Text("Model timing charts require Detailed collection. Translation counters remain active in Simple mode.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else if stats.translations > 0 {
+                Text("Translations selected, but no model timings recorded. The captions may have come from memory.")
+                    .font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("No model timing samples yet. Start capture and translate text to collect measurements.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             Text("Candidates, sentence hits and model requests count different events. A lower delay with more lost confirmed candidates is not necessarily an improvement.")
@@ -2317,7 +2358,8 @@ private struct DiagnosticsBody: View {
                 arrow
                 node("Filter", "line.3.horizontal.decrease", "\(diag.s.blocksKept)/\(diag.s.blocksIn)", Color.green)
                 arrow
-                node("Translate", "character.bubble", t.n > 0 ? "\(Int(t.avg)) ms" : "–", level(t.avg, t.n, 400, 800))
+                node(engine.activeTranslationSystem == .legacy ? "Translate" : "Model", "character.bubble",
+                     t.n > 0 ? "\(Int(t.avg)) ms" : "–", level(t.avg, t.n, 400, 800))
                 arrow
                 node("Show", "rectangle.on.rectangle", engine.pipActive ? (d.n > 0 ? "\(Int(d.avg)) ms" : "–") : "closed", showColor)
             }
@@ -2385,12 +2427,16 @@ private struct DiagnosticsBody: View {
         let markers = Array(diag.events.filter { important.contains($0.kind) && $0.time >= rangeStart }.suffix(6))
         return VStack(spacing: 14) {
             LineCard(title: "Reading the screen", samples: slice(diag.ocr), color: Color.green, unit: "ms", rule: 300, markers: markers)
-            LineCard(title: "Translating", samples: slice(diag.translate), color: Color.cyan, unit: "ms", markers: markers)
+            LineCard(title: engine.activeTranslationSystem == .legacy ? "Translating" : "Completed model inference", samples: slice(diag.translate), color: Color.cyan, unit: "ms", markers: markers)
             LineCard(title: "First sighting → frame enqueue", samples: slice(diag.latency), color: Color.orange, unit: "ms", rule: 1500, markers: markers)
             LineCard(title: "Transfer extension → app", samples: slice(diag.transport), color: Color.purple, unit: "ms")
             LineCard(title: "Frames per second", samples: slice(diag.fps), color: Color.teal, unit: "fps")
             HistogramCard(title: "How long reading takes", values: slice(diag.ocr).map { $0.v }, color: Color.green)
             HistogramCard(title: "How long the total delay is", values: slice(diag.latency).map { $0.v }, color: Color.orange)
+            if engine.activeTranslationSystem != .legacy {
+                Text("Model-inference timings include successful backend requests even if an obsolete result was not displayed. Memory-only translations add no model sample. Total delay ends at PiP buffer enqueue.")
+                    .font(.caption).foregroundStyle(.secondary).card()
+            }
             PairedTimingCard(samples: diag.pipeline.filter { $0.date >= rangeStart })
             granularityCard
         }
@@ -2446,7 +2492,8 @@ private struct DiagnosticsBody: View {
         return VStack(alignment: .leading, spacing: 10) {
             Text("Session timeline").font(.subheadline.weight(.semibold))
             if spans.isEmpty {
-                Text("Collecting data…").font(.caption).foregroundStyle(.secondary)
+                Text("No state timeline spans in this range. Capture and Detailed collection are required.")
+                    .font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 90)
             } else {
                 Chart {
@@ -2605,9 +2652,14 @@ private struct DiagnosticsBody: View {
             Text(s.languageContextUsed ? "Recent source context assisted this ambiguous reading" : "Source evidence uses the current reading").font(.caption).foregroundStyle(.secondary)
             Text("\(s.recognitionReason) · \(s.confirmationReason)").font(.caption).foregroundStyle(.secondary)
             Text("Cache sentences · session \(s.cacheHits) · saved \(s.savedHits) · pre-translated \(s.specHits)").font(.footnote)
-            Text("Speculative jobs · started \(s.specStarted) · completed \(s.specCompleted) · discarded \(s.specDiscarded) · declined \(s.specSkipped)").font(.footnote)
-            Text("Spec throttled \(s.adaptiveSpeculationSkipped) · confirmed handoffs \(s.confirmedHandoffDeferred) · slow tails \(s.slowTailEnqueues)").font(.footnote)
-            Text("Discarded work: \(Int(s.specDiscardedMs)) ms. Unconsumed cached results: \(engine.unconsumedSpeculation). Completed results may still be reused later.").font(.caption).foregroundStyle(.secondary)
+            Text("Speculative jobs · admitted \(s.specStarted) · ready \(s.specCompleted) · failed \(s.specDiscarded) · declined \(s.specSkipped)").font(.footnote)
+            if engine.activeTranslationSystem == .legacy {
+                Text("Spec throttled \(s.adaptiveSpeculationSkipped) · confirmed handoffs \(s.confirmedHandoffDeferred) · slow tails \(s.slowTailEnqueues)").font(.footnote)
+                Text("Discarded work: \(Int(s.specDiscardedMs)) ms · unconsumed cached results: \(engine.unconsumedSpeculation).").font(.caption).foregroundStyle(.secondary)
+            } else {
+                Text("Actual speculative model requests: \(s.specModelRequests) · Hybrid admission throttles: \(s.adaptiveSpeculationSkipped) · slow enqueues: \(s.slowTailEnqueues)").font(.footnote)
+                Text("New-mode predictions and confirmed recoveries have separate model lanes. A cache-only result is not counted as model execution. Captions may reuse completed obsolete work.").font(.caption).foregroundStyle(.secondary)
+            }
             Text("Skipped frames · unchanged \(s.unchangedSkipped) · cadence \(s.cadenceSkipped) · paused \(s.pausedSkipped)").font(.caption)
             Text("Recorder self-time · simple \(String(format: "%.1f", diag.recorderCosts.simpleMs)) ms · detailed \(String(format: "%.1f", diag.recorderCosts.detailedMs)) ms. Excludes chart drawing and model work; these are different workloads.").font(.caption).foregroundStyle(.secondary)
         }.card()
@@ -2718,7 +2770,9 @@ private struct DiagnosticsBody: View {
                 StatTile(title: "Source used", value: s.sourceUsed == "–" ? "–" : s.sourceUsed.uppercased(), icon: "sparkle.magnifyingglass")
                 StatTile(title: "Locked to", value: s.lockedLang == "–" ? "none" : s.lockedLang.uppercased(), tint: Color.purple, icon: "lock")
                 StatTile(title: "Language pack", value: pair, tint: pair == "Needs pack" ? Color.orange : Color.green, icon: "arrow.down.circle")
-                StatTile(title: "Engine", value: s.sessionKind == "–" ? "–" : (s.sessionKind.contains("iOS 26") ? "Direct" : "Hosted"), icon: "cpu")
+                StatTile(title: "Engine", value: engine.activeTranslationSystem == .legacy
+                         ? (s.sessionKind == "–" ? "Default" : (s.sessionKind.contains("iOS 26") ? "Direct" : "Hosted"))
+                         : engine.activeTranslationSystem.title, icon: "cpu")
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text(engine.sourceCode == "auto" ? "Source: Automatic" : "Source: \(engine.sourceCode.uppercased()) selected")
@@ -2781,7 +2835,9 @@ private struct DiagnosticsBody: View {
                 Text(thermalName).font(.subheadline.weight(.bold)).foregroundStyle(thermalColor)
             }
             if data.count < 2 {
-                Text("Collecting data…").font(.caption).foregroundStyle(.secondary)
+                Text(data.isEmpty ? "No thermal samples in this range. Detailed collection is required." :
+                     "One thermal sample recorded. The second sample will establish a trend.")
+                    .font(.caption).foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 80)
             } else {
                 Chart(data) { s in
