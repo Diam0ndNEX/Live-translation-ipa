@@ -289,8 +289,15 @@ final class ThreeModeCoordinator {
             event(caption, "source_correction", nil)
         }
         current = caption; committed = nil; memoryProbePending = caption; recoveryStarted = false
-        cancel(false)
-        confirmation?.cancel(); deadline?.cancel()
+        // Obsolete Hybrid work loses display authority without cancelling its
+        // warmed backend session. Only one physical call may occupy each lane.
+        if system != .hybridRecovery {
+            cancel(false)
+            confirmation?.cancel()
+        } else {
+            event(caption, "hybrid_preserve_confirmed_session", nil)
+        }
+        deadline?.cancel()
         // Never wait for model work before the independent memory probe.
         confirmation = Task { [weak self] in
             guard let self else { return }
@@ -311,14 +318,29 @@ final class ThreeModeCoordinator {
                     self.deadline = Task { [weak self] in
                         try? await Task.sleep(nanoseconds: UInt64(max(0, wait) * 1_000_000_000))
                         guard let self, !Task.isCancelled, self.current == caption, self.committed != caption else { return }
-                        self.cancel(true)
+                        if self.system == .hybridRecovery {
+                            // Hedge: the existing matching Apple Default request
+                            // can still win, so its session must not be cancelled.
+                            self.event(caption, "hybrid_hedged_recovery", nil)
+                        } else {
+                            self.cancel(true)
+                        }
                         self.startRecovery(caption, reason: "matching_deadline")
                     }
                     return
                 }
             }
             let reason = self.speculativeCaption == nil ? "speculation_absent" : (self.speculativeFailed ? "speculation_failed" : "source_mismatch")
-            self.speculation?.cancel(); self.cancel(true)
+            if self.system == .hybridRecovery {
+                if self.speculation != nil {
+                    // Incorrect OCR speculation is discarded when it returns,
+                    // but the warmed session survives if the request succeeds.
+                    self.event(caption, "hybrid_obsolete_speculation_draining", nil)
+                }
+            } else {
+                self.speculation?.cancel()
+                self.cancel(true)
+            }
             self.startRecovery(caption, reason: reason)
         }
     }
@@ -400,7 +422,10 @@ final class ThreeModeCoordinator {
 
     private func startRecovery(_ caption: ModeCaption, reason: String) {
         guard current == caption, committed != caption, !recoveryStarted else { return }
-        scoreSpeculation(for: caption, useful: false)
+        // A matching request can still finish first after the hedge starts.
+        if speculativeCaption?.matches(caption) != true {
+            scoreSpeculation(for: caption, useful: false)
+        }
         recoveryStarted = true
         event(caption, "recovery_decision_" + reason, nil)
         confirmation = Task { [weak self] in
@@ -413,12 +438,19 @@ final class ThreeModeCoordinator {
                                             speculative: false)
             // Hybrid alone permits one default fallback after bounded LL failure.
             if result == nil, self.system == .hybridRecovery, useLowLatency,
-               !Task.isCancelled, self.current == caption {
+               !Task.isCancelled, self.current == caption, self.committed != caption {
                 self.event(caption, "hybrid_default_fallback", nil)
                 result = await self.resolve(caption, strategy: .appleDefault, speculative: false)
             }
-            guard !Task.isCancelled, self.current == caption else { self.event(caption, "stale_rejected", nil); return }
-            guard let result else { self.event(caption, "recovery_failed_missing", nil); self.status("Translation unavailable. Check installed languages or select another translation system, then Retry."); return }
+            guard !Task.isCancelled, self.current == caption, self.committed != caption else {
+                self.event(caption, "stale_rejected", nil)
+                return
+            }
+            guard let result else {
+                self.event(caption, "recovery_failed_missing", nil)
+                self.status("Translation unavailable. Check installed languages or select another translation system, then Retry.")
+                return
+            }
             self.commit(caption, result, "recovery_success")
         }
     }
@@ -443,9 +475,17 @@ final class ThreeModeCoordinator {
         }
         event(caption, "selected_" + reason, nil)
         selected(caption, output, reason)
-        // Once selected, competing work has no display authority or inference purpose.
-        speculation?.cancel(); cancel(true)
-        confirmation?.cancel(); cancel(false)
+        // After selection, Hybrid ignores losing output but lets the bounded
+        // underlying call drain. This preserves successful warm-up and cannot
+        // change the selected text. Hard cancel remains for shutdown/pressure.
+        if system == .hybridRecovery {
+            if speculation != nil || recoveryStarted {
+                event(caption, "hybrid_losing_request_draining", nil)
+            }
+        } else {
+            speculation?.cancel(); cancel(true)
+            confirmation?.cancel(); cancel(false)
+        }
     }
 }
 
@@ -482,13 +522,26 @@ enum CaptionClockOrigin {
     }
 }
 
-/// Samples belong to one language pair and thermal cohort; missing evidence uses
-/// the documented total-age ceiling, never an unconditional confirmation delay.
+/// Per-language-pair and thermal-cohort timing guides the matching speculation
+/// hedge. Unknown performance has a bounded cold-start fallback; completed
+/// samples choose the likely Default finish and recovery crossover.
 enum SpeculationWaitPolicy {
     static func remaining(elapsed: Double, ordinary: [Double], recovery: [Double], coldCeiling: Double) -> Double {
-        guard ordinary.count >= 5, recovery.count >= 5 else { return max(0, min(0.20, coldCeiling) - elapsed) }
-        let defaultMedian = ordinary.sorted()[ordinary.count / 2]
-        let recoveryMedian = recovery.sorted()[recovery.count / 2]
-        return max(0, min(0.20, defaultMedian - elapsed, recoveryMedian))
+        let age = max(0, elapsed)
+        let ceiling = max(0, min(coldCeiling, 0.70))
+        guard age < ceiling else { return 0 }
+        let ageBudget = ceiling - age
+        let sortedDefault = ordinary.filter { $0.isFinite && $0 >= 0 }.sorted()
+        guard sortedDefault.count >= 5 else { return min(ageBudget, max(0, 0.45 - age)) }
+        let expectedDefault = sortedDefault[min(sortedDefault.count - 1, Int(Double(sortedDefault.count - 1) * 0.75))]
+        let remainingDefault = max(0, expectedDefault - age)
+        guard remainingDefault > 0 else { return 0 }
+        let validRecovery = recovery.filter { $0.isFinite && $0 >= 0 }.sorted()
+        guard validRecovery.count >= 5 else { return min(ageBudget, remainingDefault) }
+        let recoveryMedian = validRecovery[validRecovery.count / 2]
+        // Fast recovery can start sooner; a slow contended recovery should
+        // not preempt an Apple Default request already nearing completion.
+        let hedgeBudget = max(0.10, min(0.65, recoveryMedian * 0.75))
+        return max(0, min(ageBudget, remainingDefault, hedgeBudget))
     }
 }
