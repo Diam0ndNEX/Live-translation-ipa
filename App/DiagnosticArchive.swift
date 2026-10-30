@@ -202,7 +202,7 @@ struct TranslationModeReport: Codable {
         "hybrid_speculation_backend_busy",
         "strategy_cache_hit_appleDefault", "strategy_cache_hit_lowLatency",
         "strategy_cache_populated_appleDefault", "strategy_cache_populated_lowLatency",
-        "hybrid_cross_strategy_overlap", "hybrid_overlapped_recovery_ms",
+        "hybrid_cross_strategy_overlap", "hybrid_overlapped_recovery_ms", "hybrid_simultaneous_model_overlap_ms",
         "hybrid_preserve_confirmed_session", "hybrid_hedged_recovery",
         "hybrid_obsolete_speculation_draining", "hybrid_losing_request_draining",
         "hybrid_no_fast_pack_fallback",
@@ -281,7 +281,7 @@ struct TranslationModeReport: Codable {
             "hybrid_speculation_backend_busy",
             "strategy_cache_hit_appleDefault", "strategy_cache_hit_lowLatency",
             "strategy_cache_populated_appleDefault", "strategy_cache_populated_lowLatency",
-            "hybrid_cross_strategy_overlap", "hybrid_overlapped_recovery_ms",
+            "hybrid_cross_strategy_overlap", "hybrid_overlapped_recovery_ms", "hybrid_simultaneous_model_overlap_ms",
         "hybrid_no_fast_pack_fallback",
             "pip_held_unchanged", "backend_availability_ms", "backend_task_dispatch_ms",
             "backend_installed_cache_hit", "backend_lane_wait_ms", "backend_lane_admission_rejected",
@@ -454,7 +454,7 @@ actor DiagnosticExportWriter {
             "modeAvailabilityCheckMs", "modeTaskDispatchMs", "modeSpeculativeQueueMs", "modeRecoveryQueueMs",
             "modeBackendLaneWaitMs", "modeSessionAgeMs", "modeSessionCompletedCalls",
             "hybridDefaultWarmupMs", "hybridLowLatencyWarmupMs",
-            "hybridOverlappedRecoveryMs", "modeCancellationReleaseMs",
+            "hybridOverlappedRecoveryMs", "hybridMeasuredOverlapMs", "modeCancellationReleaseMs",
             "speculativeStopReleaseMs", "queueBehindSpeculationMs", "queueBehindConfirmedMs", "queueSchedulingMs"
         ]
         let safeMetrics = snapshot.distributions.filter { key, value in
