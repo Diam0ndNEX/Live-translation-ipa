@@ -42,6 +42,8 @@ final class ModeTranslationService {
     var event: ((ModeCaption, String, Double?) -> Void)?
     var status: ((String) -> Void)?
     var hostedDefault: (([String], Locale.Language, Locale.Language, Bool) async -> [String]?)?
+    /// Checks only not-yet-submitted requests. Already-running calls must drain.
+    var mayStartModel: ((ModeCaption, Bool) -> Bool)?
 
     func cancel(speculation: Bool) {
         let lane = speculation ? speculative : confirmed
@@ -231,6 +233,13 @@ final class ModeTranslationService {
             source: caption.source, target: caption.target, strategy: strategy, stage: .waitingForSlot)
         var heldByActualCall = false
         defer { if !heldByActualCall { activity.end(activityID) } }
+        func eligibleToStart() -> Bool {
+            warmup || mayStartModel?(caption, speculation) != false
+        }
+        guard eligibleToStart() else {
+            report("backend_stale_request_dropped", nil)
+            return nil
+        }
         if strategy == .lowLatency {
             guard #available(iOS 26.4, *) else {
                 status?("Explicit low latency requires iOS 26.4 or later. Select Legacy or Hybrid Recovery to use Apple default.")
@@ -267,6 +276,11 @@ final class ModeTranslationService {
         let enqueued = ProcessInfo.processInfo.systemUptime
         // One current confirmed waiter; superseded tasks exit without taking a slot.
         while lane.busy {
+            guard eligibleToStart() else {
+                report("backend_stale_request_dropped", nil)
+                report("backend_lane_wait_ms", (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)
+                return nil
+            }
             if speculation || Task.isCancelled || ProcessInfo.processInfo.systemUptime - enqueued >= 4 {
                 report("backend_lane_admission_rejected", nil)
                 report("backend_lane_wait_ms", (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)
@@ -275,7 +289,10 @@ final class ModeTranslationService {
             try? await Task.sleep(nanoseconds: 20_000_000)
         }
         report("backend_lane_wait_ms", (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)
-        guard !Task.isCancelled else { return nil }
+        guard !Task.isCancelled, eligibleToStart() else {
+            report("backend_stale_request_dropped", nil)
+            return nil
+        }
         let source = Locale.Language(identifier: caption.source), target = Locale.Language(identifier: caption.target)
         activity.advance(activityID, to: .checkingLanguages)
         let languageCheckStart = ProcessInfo.processInfo.systemUptime
@@ -297,7 +314,10 @@ final class ModeTranslationService {
             }
         }
         report("backend_availability_ms", (ProcessInfo.processInfo.systemUptime - languageCheckStart) * 1000)
-        guard !Task.isCancelled else { return nil }
+        guard !Task.isCancelled, eligibleToStart() else {
+            report("backend_stale_request_dropped", nil)
+            return nil
+        }
         guard pairAvailability == .installed else {
             report("unsupported_or_uninstalled_pair", nil)
             // Hybrid may still complete this caption through Apple Default.
@@ -308,7 +328,10 @@ final class ModeTranslationService {
             return nil
         }
         // Availability suspended; recheck the lease before acquiring it.
-        guard !lane.busy else { return nil }
+        guard !lane.busy, eligibleToStart() else {
+            report("backend_stale_request_dropped", nil)
+            return nil
+        }
         let warm = lane.session != nil && !lane.invalidated && lane.key == "\(caption.source)>\(caption.target)|\(strategy.rawValue)"
         let competingDefault = caption.system == .hybridRecovery && !speculation && strategy == .lowLatency &&
             speculative.busy && speculative.requestedStrategy == .appleDefault
