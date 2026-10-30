@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.9.3"
-    static let build = 74
+    static let version = "1.9.4"
+    static let build = 75
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("1.9.4", "Correct mode-aware initial warm-up Diagnostics counters, improve telemetry consistency, and preserve the measured Legacy, Hybrid and Low Latency scheduling behavior pending controlled device validation."),
         ("1.9.3", "Restore next-caption speculation in Hybrid/Low Latency, prevent false adaptive backoff, and unify live Diagnostics timing, counts, reset, reports and traces."),
         ("1.9.2", "Hybrid contention guard, adaptive backoff, exact-key session reuse across stale model completions, warm-up/session lifecycle metrics and regression tests."),
         ("1.9.1", "Hybrid scheduling: adaptive speculative admission with bounded recovery waits, avoids repeated session-readiness checks while translating, 30-second installed-language status cache, strategy overlap/dispatch metrics, safe identical-PiP hold reuse, and comparable full-session diagnostics. Real-device speed and quality acceptance pending."),
