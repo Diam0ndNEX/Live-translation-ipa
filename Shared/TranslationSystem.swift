@@ -174,14 +174,14 @@ struct HybridAdmissionPolicy {
         }
         consecutiveWaste += 1
         if consecutiveWaste >= 3 {
-            skipped = max(skipped, 5)
+            skipped = max(skipped, 8)
             consecutiveWaste = 0
         }
     }
 
     mutating func overlappingRecovery(milliseconds: Double) {
         guard milliseconds.isFinite, milliseconds >= 350 else { return }
-        skipped = max(skipped, 5)
+        skipped = max(skipped, 12)
         consecutiveWaste = 0
     }
 }
@@ -203,6 +203,7 @@ final class ThreeModeCoordinator {
     var allowsReuse = true
     var adaptiveHybrid = true
     var fastRecoveryInstalled = true
+    var hybridSpeculationPermitted: () -> Bool = { true }
     var coldSpeculationCeiling = 0.7
     var matchingLowLatencyDeadline = 4.0
     private(set) var current: ModeCaption?
@@ -220,6 +221,8 @@ final class ThreeModeCoordinator {
     private var scoredSpeculation: ModeCaption?
     private var lowCache: [String: String] = [:]
     private var lowOrder: [String] = []
+    private var defaultCache: [String: String] = [:]
+    private var defaultOrder: [String] = []
     private var defaultService: [String: [Double]] = [:]
     private var lowService: [String: [Double]] = [:]
 
@@ -233,7 +236,10 @@ final class ThreeModeCoordinator {
     func reduceSpeculation(memoryPressure: Bool) {
         speculation?.cancel(); cancel(true)
         speculativeCaption = nil; speculativeOutput = nil
-        if memoryPressure { lowCache.removeAll(); lowOrder.removeAll() }
+        if memoryPressure {
+            lowCache.removeAll(); lowOrder.removeAll()
+            defaultCache.removeAll(); defaultOrder.removeAll()
+        }
         if let current, committed != current {
             event(current, memoryPressure ? "memory_pressure" : "thermal_reduced_speculation", nil)
             if memoryProbePending != current { startRecovery(current, reason: "speculation_absent") }
@@ -250,6 +256,7 @@ final class ThreeModeCoordinator {
         hybridAdmission = HybridAdmissionPolicy()
         scoredSpeculation = nil
         lowCache.removeAll(); lowOrder.removeAll()
+        defaultCache.removeAll(); defaultOrder.removeAll()
         defaultService.removeAll(); lowService.removeAll()
     }
 
@@ -257,6 +264,12 @@ final class ThreeModeCoordinator {
         guard system != .legacy else { return }
         if !confirmed {
             guard speculate, speculation == nil, current == nil || committed == current else { return }
+            if system == .hybridRecovery && !hybridSpeculationPermitted() {
+                speculativeCaption = nil
+                speculativeOutput = nil
+                event(caption, "hybrid_speculation_backend_busy", nil)
+                return
+            }
             if system == .hybridRecovery && adaptiveHybrid && !hybridAdmission.admit() {
                 speculativeCaption = nil
                 speculativeOutput = nil
@@ -379,8 +392,12 @@ final class ThreeModeCoordinator {
         var strategies: [RequestedTranslationStrategy?] = values.map { _ in nil }
         if allowsReuse {
             for i in values.indices where values[i] == nil {
-                if let cached = lowCache[caption.keys[i]], strategy == .lowLatency {
-                    values[i] = cached; origins[i] = "session_low_latency"; strategies[i] = .lowLatency
+                let cached = strategy == .lowLatency ? lowCache[caption.keys[i]] : defaultCache[caption.keys[i]]
+                if let cached {
+                    values[i] = cached
+                    origins[i] = strategy == .lowLatency ? "session_low_latency" : "session_apple_default"
+                    strategies[i] = strategy
+                    event(caption, "strategy_cache_hit_" + strategy.rawValue, nil)
                 }
             }
         }
@@ -396,7 +413,16 @@ final class ThreeModeCoordinator {
                 event(caption, "same_strategy_retry", nil)
                 result = await translate(caption, missing, strategy, false)
             }
-            guard !Task.isCancelled, let result, result.count == missing.count else { return nil }
+            guard !Task.isCancelled, let result, result.count == missing.count,
+                  result.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else { return nil }
+            // An obsolete Hybrid model result has no display authority, but its
+            // exact-key translation is safe to reuse in this capture session.
+            if allowsReuse {
+                for (position, index) in missing.enumerated() {
+                    cacheCompleted(result[position], for: caption.keys[index], strategy: strategy)
+                }
+                event(caption, "strategy_cache_populated_" + strategy.rawValue, nil)
+            }
             let duration = clock() - began
             let cohort = caption.policyCohort
             if strategy == .appleDefault {
@@ -418,6 +444,18 @@ final class ThreeModeCoordinator {
         guard values.allSatisfy({ $0 != nil }) else { return nil }
         let output = ModeOutput(values: values.compactMap { $0 }, strategies: strategies, origins: origins)
         return output.complete ? output : nil
+    }
+
+    private func cacheCompleted(_ value: String, for key: String, strategy: RequestedTranslationStrategy) {
+        if strategy == .lowLatency {
+            if lowCache[key] == nil { lowOrder.append(key) }
+            lowCache[key] = value
+            if lowOrder.count > 256 { lowCache.removeValue(forKey: lowOrder.removeFirst()) }
+        } else {
+            if defaultCache[key] == nil { defaultOrder.append(key) }
+            defaultCache[key] = value
+            if defaultOrder.count > 256 { defaultCache.removeValue(forKey: defaultOrder.removeFirst()) }
+        }
     }
 
     private func startRecovery(_ caption: ModeCaption, reason: String) {
@@ -456,17 +494,18 @@ final class ThreeModeCoordinator {
     }
 
     private func commit(_ caption: ModeCaption, _ output: ModeOutput, _ proposedReason: String) {
-        let memoryOnly = output.origins.allSatisfy { $0 == "compatible_memory" || $0 == "session_low_latency" }
+        let memoryOnly = output.origins.allSatisfy {
+            $0 == "compatible_memory" || $0 == "session_low_latency" || $0 == "session_apple_default"
+        }
         let reason = memoryOnly ? "memory_hit" : proposedReason
         guard current == caption, committed != caption, output.complete else { event(caption, "stale_rejected", nil); return }
         committed = caption; deadline?.cancel()
         scoreSpeculation(for: caption, useful: output.origins.contains("speculation"))
         if allowsReuse {
-            for i in output.values.indices where output.strategies[i] == .lowLatency {
-                let key = caption.keys[i]
-                if lowCache[key] == nil { lowOrder.append(key) }
-                lowCache[key] = output.values[i]
-                if lowOrder.count > 256 { lowCache.removeValue(forKey: lowOrder.removeFirst()) }
+            for i in output.values.indices {
+                if let strategy = output.strategies[i] {
+                    cacheCompleted(output.values[i], for: caption.keys[i], strategy: strategy)
+                }
             }
         }
         for i in output.values.indices {
