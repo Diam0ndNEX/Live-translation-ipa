@@ -201,6 +201,9 @@ struct TranslationModeReport: Codable {
         "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
         "hybrid_speculation_unexecuted",
         "hybrid_speculation_backend_busy",
+        "hybrid_matching_wait_ms", "mode_plan_reused_ms", "mode_plan_built_ms",
+        "mode_commit_to_pip_ms", "mode_confirmation_to_pip_ms", "mode_ready_to_pip_ms",
+        "mode_trace_ring_overwritten",
         "strategy_cache_hit_appleDefault", "strategy_cache_hit_lowLatency",
         "strategy_cache_populated_appleDefault", "strategy_cache_populated_lowLatency",
         "hybrid_cross_strategy_overlap", "hybrid_overlapped_recovery_ms", "hybrid_simultaneous_model_overlap_ms",
@@ -465,6 +468,8 @@ actor DiagnosticExportWriter {
             "modeBackendLaneWaitMs", "modeSessionAgeMs", "modeSessionCompletedCalls",
             "hybridDefaultWarmupMs", "hybridLowLatencyWarmupMs",
             "hybridOverlappedRecoveryMs", "hybridMeasuredOverlapMs", "modeCancellationReleaseMs",
+            "modePlanBuiltMs", "modePlanReusedMs", "modeCommitToPiPMs",
+            "modeConfirmationToPiPMs", "modeReadyToPiPMs", "hybridMatchingWaitMs",
             "speculativeStopReleaseMs", "queueBehindSpeculationMs", "queueBehindConfirmedMs", "queueSchedulingMs"
         ]
         let safeMetrics = snapshot.distributions.filter { key, value in
