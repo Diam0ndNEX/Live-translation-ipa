@@ -351,8 +351,9 @@ final class ModeTranslationService {
         // reference variant preserves v1.9.5's late admission behavior.
         if caption.system == .hybridRecovery && speculation &&
            strategy == .appleDefault &&
-           HybridSchedulingPolicy.buildVariant != .reference195 &&
-           hasConfirmedLowLatencyDemand {
+           !HybridSchedulingPolicy.maySubmitDefaultAfterAvailability(
+               variant: HybridSchedulingPolicy.buildVariant,
+               confirmedDemand: hasConfirmedLowLatencyDemand) {
             report("hybrid_speculation_yielded_to_confirmed", nil)
             return nil
         }
