@@ -501,9 +501,13 @@ final class TranslatorEngine: ObservableObject {
         if ["speculative_model_submitted", "confirmed_model_submitted", "model_batch_failed", "model_batch_completed", "speculative_model_completed", "confirmed_model_completed"].contains(reason) {
             diag.noteModelState(reason, durationMs: duration, candidate: caption.caption)
         }
-        if caption.session == modeSessionID, reason == "hybrid_overlapped_recovery_ms",
-           let duration {
-            modeCoordinator.noteOverlappingRecovery(duration)
+        if caption.session == modeSessionID,
+           reason == "hybrid_simultaneous_model_overlap_ms", let duration,
+           let fullRecovery = modeModelTimings[modeModelKey(caption)]?.confirmed {
+            // Use physical simultaneous lane occupancy, not the entire
+            // Low Latency service time, to drive speculative admission.
+            modeCoordinator.noteOverlappingRecovery(serviceMilliseconds: fullRecovery,
+                                                    simultaneousMilliseconds: duration)
         }
         if caption.session == modeSessionID, reason == "hybrid_default_fallback" {
             modeAvailability = "Fast recovery unavailable; using Apple default for this caption"
@@ -542,7 +546,7 @@ final class TranslatorEngine: ObservableObject {
                     out: part.sentences.map { _ in nil }, tokens: part.tokens))
                 for sentence in part.sentences {
                     inputs.append(sentence)
-                    keys.append(PipelineSafety.cacheKey(source: source, target: targetCode, text: sentence,
+                    keys.append(SharedTranslationWork.unitKey(source: source, target: targetCode, text: sentence,
                         protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: rulesToken))
                 }
             }
@@ -804,6 +808,7 @@ final class TranslatorEngine: ObservableObject {
     private var directKey = ""
     private var clearTask: Task<Void, Never>?
     private var tickCount = 0
+    private var lastThermalSyncState: ProcessInfo.ThermalState?
     private var toastToken = 0
     // Translation speed system
     private var specQueued: [String]?
@@ -1010,6 +1015,13 @@ final class TranslatorEngine: ObservableObject {
         captureReadiness.tick(at: ProcessInfo.processInfo.systemUptime)
         publishCaptureStatus()
         let alive = Date().timeIntervalSince(lastPacketDate) < 5
+        let thermalState = ProcessInfo.processInfo.thermalState
+        if lastThermalSyncState != thermalState {
+            lastThermalSyncState = thermalState
+            // Restore full capture policy promptly after serious/critical
+            // without touching active translation sessions or persistent memory.
+            if alive { syncConfig() }
+        }
         if captureAlive && !alive {
             status = "Capture stopped – iOS may have closed the capture extension. Tap the broadcast icon again (try Speed: Fast)."
             diag.log("Capture stopped")
@@ -1034,7 +1046,7 @@ final class TranslatorEngine: ObservableObject {
         if tickCount % 5 == 0 { refreshLegacyScanContext() }
         if tickCount % 5 == 0, flag("legacyIdleValidationEnabled", false),
            !legacyValidationExhausted, mayRunIdleValidation {
-            let fair = ProcessInfo.processInfo.thermalState == .fair
+            let fair = ThermalPerformancePolicy.automaticPressure(for: ProcessInfo.processInfo.thermalState)
             if Date().timeIntervalSince(lastIdleValidationAttempt) >=
                 IdleLegacyBatchPolicy.cooldownSeconds(thermalFair: fair) {
                 startLegacyValidation(maxEntries: IdleLegacyBatchPolicy.automaticEntries)
@@ -1094,7 +1106,7 @@ final class TranslatorEngine: ObservableObject {
         if !memoryTestMode.allowsSpeculation { return false }
         if !flag("coolMode", false) { return true }
         return flag("smartCool", true) && ocrMs < 100 && queued == nil
-            && !ProcessInfo.processInfo.isLowPowerModeEnabled && ProcessInfo.processInfo.thermalState == .nominal
+            && !ProcessInfo.processInfo.isLowPowerModeEnabled && !ThermalPerformancePolicy.automaticPressure(for: ProcessInfo.processInfo.thermalState)
     }
 
     private var runtimePolicy: RuntimePolicy {
@@ -1201,7 +1213,13 @@ final class TranslatorEngine: ObservableObject {
         }
         let intelligentCool = flag("coolMode", false) && flag("smartCool", true)
         if !intelligentCool { interval = runtimePolicy.captureInterval(interval) }
-        if diag.enabled { diag.s.rotation = effectiveRot }
+        if diag.enabled {
+            diag.s.rotation = effectiveRot
+            diag.noteCapturePolicy(edge: maxEdge, interval: interval,
+                coolMode: flag("coolMode", false),
+                memoryPressure: extFreeMB > 0 && extFreeMB < 12,
+                workloadPressure: busy && queued != nil)
+        }
         server.send(Config(lang: SourceLanguageRouter.captureLanguage(selected: sourceCode, locked: lockedLang), y0: r.lowerBound, y1: r.upperBound,
                            maxEdge: maxEdge, interval: interval, paused: paused || manualMode,
                            stability: int("stability", 2), rot: effectiveRot, rev: rotRev,
@@ -1215,7 +1233,7 @@ final class TranslatorEngine: ObservableObject {
                            adaptiveOCR: speed == .automatic || (speed == .balanced && flag("adaptiveOCR", true)),
                            adaptiveConfirmation: flag("adaptiveConfirmation", false), subtitleTracking: flag("subtitleTracking", true),
                            confirmationDeadline: num("confirmationDeadline", 0.6), smartCool: intelligentCool,
-                           pressure: flag("adaptive", true) && (intelligentCool || speed == .automatic || (speed == .balanced && flag("adaptiveOCR", true))) && (ProcessInfo.processInfo.thermalState != .nominal || (busy && queued != nil)),
+                           pressure: flag("adaptive", true) && (intelligentCool || speed == .automatic || (speed == .balanced && flag("adaptiveOCR", true))) && (ThermalPerformancePolicy.automaticPressure(for: ProcessInfo.processInfo.thermalState) || (busy && queued != nil)),
                            selectiveSpeculation: flag("selectiveSpeculation", true), speculationConfidence: num("speculationConfidence", 0.85),
                            detailCeiling: (ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical || (extFreeMB > 0 && extFreeMB < 12)) ? maxEdge : 2400,
                            confirmationBurst: !flag("coolMode", false),
@@ -2330,7 +2348,7 @@ final class TranslatorEngine: ObservableObject {
                     slang: flag("slang", true), speakers: flag("speakerDetect", true), protected: never) {
                 var values: [String?] = []
                 for sentence in part.sentences {
-                    let key = PipelineSafety.cacheKey(source: id, target: targetCode, text: sentence,
+                    let key = SharedTranslationWork.unitKey(source: id, target: targetCode, text: sentence,
                         protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: rules)
                     let lookupStarted = ProcessInfo.processInfo.systemUptime
                     guard let value = ram.values[key],
@@ -2397,7 +2415,7 @@ final class TranslatorEngine: ObservableObject {
             for part in preparedSourceUnits(text, language: languageCode,
                     slang: slangEnabled, speakers: speakersEnabled, protected: never) {
                 for sentence in part.sentences {
-                    keys.insert(PipelineSafety.cacheKey(source: id, target: targetCode, text: sentence,
+                    keys.insert(SharedTranslationWork.unitKey(source: id, target: targetCode, text: sentence,
                         protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: rules))
                 }
             }
@@ -2529,7 +2547,7 @@ final class TranslatorEngine: ObservableObject {
                 if display && diag.enabled { diag.s.sentences += sentences.count }
                 var outs: [String?] = []
                 for (si, s) in sentences.enumerated() {
-                    let key = PipelineSafety.cacheKey(source: id, target: destination, text: s, protectedWords: d.tokens.map { "\($0.0)=\($0.1)" }, rules: rules)
+                    let key = SharedTranslationWork.unitKey(source: id, target: destination, text: s, protectedWords: d.tokens.map { "\($0.0)=\($0.1)" }, rules: rules)
                     if memoryEligible && TranslationUnitPlanning.mayRemember(s, confirmed: display) {
                         eligibleMemoryKeys.insert(key)
                     }
@@ -3549,7 +3567,7 @@ final class TranslatorEngine: ObservableObject {
         let scanSource = sourceCode
         let scanTarget = targetCode
         let maxCount = max(1, min(IdleLegacyBatchPolicy.maximumEntries, maxEntries))
-        let fair = ProcessInfo.processInfo.thermalState == .fair
+        let fair = ThermalPerformancePolicy.automaticPressure(for: ProcessInfo.processInfo.thermalState)
         let workers = IdleLegacyBatchPolicy.concurrency(thermalFair: fair)
         legacyBatchWorkers = workers
         legacyIdleValidationStatus = "Scanning up to \(maxCount) older entries…"

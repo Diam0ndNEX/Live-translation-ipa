@@ -254,6 +254,49 @@ import Foundation
             "confirmed_continuity_loss", "pip_enqueue_failure",
             "enqueue_slow_tail", "enqueue_typical_latency"
         ]), "Diagnostic findings must identify normal latency, slow tail and continuity separately")
+        let hybridEvidence = DiagnosticSessionExport(
+            translationModes: TranslationModeReport(active: "hybridRecovery",
+                pending: "hybridRecovery", referenceSHA: String(repeating: "0", count: 40),
+                migration: "persisted", events: [], distributions: [:],
+                counters: ["hybrid_cross_strategy_overlap": 6]),
+            id: UUID(), startedAt: Date(), endedAt: Date(),
+            appVersion: "1.9.5", systemVersion: "test",
+            settings: ["thermalState": "fair", "performanceTier": "full_performance",
+                       "reductionReasons": "none", "rapidTextTracking": "true",
+                       "joinAdjacentText": "true", "activeTextFocus": "true",
+                       "effectiveRapidTextTracking": "true",
+                       "effectiveJoinAdjacentText": "true", "effectiveActiveTextFocus": "true",
+                       "glossary": "private-protected-names"],
+            health: MemoryDiagnosticHealth(), counters: [:],
+            distributions: [
+                "hybridOverlappedRecoveryMs": DiagnosticDistribution([1010, 1150, 1209, 1320, 1400]),
+                "hybridMeasuredOverlapMs": DiagnosticDistribution([100, 140, 302, 330, 360])
+            ], events: [], measurementBoundary: "OCR through PiP enqueue", textCapture: false)
+        let hybridFindings = DiagnosticIssueDetector.assess(hybridEvidence)
+        precondition(hybridFindings.contains { $0.code == "hybrid_slow_recovery" && $0.occurrences == 5 },
+            "Full recovery over one second must yield a bounded, sample-counted finding")
+        precondition(!hybridFindings.contains { $0.code == "hybrid_missing_overlap_measurement" },
+            "Actual overlap measurements must not be misclassified as missing")
+        let hybridArchive = try await writer.decode(try await writer.encode(hybridEvidence))
+        precondition(hybridArchive.settings["thermalState"] == "fair" &&
+                     hybridArchive.settings["performanceTier"] == "full_performance" &&
+                     hybridArchive.settings["reductionReasons"] == "none" &&
+                     hybridArchive.settings["effectiveRapidTextTracking"] == "true" &&
+                     hybridArchive.settings["effectiveJoinAdjacentText"] == "true" &&
+                     hybridArchive.settings["effectiveActiveTextFocus"] == "true" &&
+                     hybridArchive.settings["glossary"] == nil,
+            "Effective thermal and custom-preset values must survive privacy filtering")
+        let absentOverlapEvidence = DiagnosticSessionExport(
+            translationModes: hybridEvidence.translationModes,
+            id: UUID(), startedAt: Date(), endedAt: Date(),
+            appVersion: "1.9.5", systemVersion: "test",
+            settings: [:], health: MemoryDiagnosticHealth(), counters: [:],
+            distributions: [
+                "hybridOverlappedRecoveryMs": DiagnosticDistribution([1010, 1150, 1209])],
+            events: [], measurementBoundary: "OCR through PiP enqueue", textCapture: false)
+        precondition(DiagnosticIssueDetector.assess(absentOverlapEvidence).contains {
+            $0.code == "hybrid_missing_overlap_measurement" && $0.occurrences == 6
+        }, "Repeated overlap events without timings must generate a diagnostic finding")
         let safeContinuity = try await writer.decode(try await writer.encode(continuityEvidence))
         precondition(safeContinuity.settings["lowLatencyTranslation"] == "true" &&
                      safeContinuity.settings["directPiPBuffer"] == "false",

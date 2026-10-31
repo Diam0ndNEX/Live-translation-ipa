@@ -136,7 +136,21 @@ struct ModeCaption: Equatable {
     let keys: [String]
     let firstOCR: Double
     var fingerprint: String { ConfirmedSourceIdentity.normalize(text) }
-    var policyCohort: String { "\(source)>\(target)|thermal\(thermal)" }
+    var policyCohort: String {
+        let tier = thermal <= 1 ? "full_performance" : (thermal == 2 ? "protected" : "emergency")
+        return "\(source)>\(target)|tier\(tier)"
+    }
+
+    /// Temperature is observation metadata, not a candidate identity boundary.
+    /// A nominal/fair transition must not invalidate an active translation.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.system == rhs.system && lhs.session == rhs.session &&
+        lhs.caption == rhs.caption && lhs.revision == rhs.revision &&
+        lhs.source == rhs.source && lhs.target == rhs.target &&
+        lhs.rules == rhs.rules && lhs.text == rhs.text &&
+        lhs.units == rhs.units && lhs.keys == rhs.keys &&
+        lhs.firstOCR == rhs.firstOCR
+    }
     func matches(_ other: Self) -> Bool {
         system == other.system && session == other.session && caption == other.caption && source == other.source &&
         target == other.target && rules == other.rules && fingerprint == other.fingerprint &&
@@ -188,9 +202,18 @@ struct HybridAdmissionPolicy {
         }
     }
 
-    mutating func overlappingRecovery(milliseconds: Double) {
-        guard milliseconds.isFinite, milliseconds >= 350 else { return }
-        skipped = max(skipped, 12)
+    /// Recovery service includes time after speculation has finished. Never
+    /// treat the entire service duration as proof of simultaneous contention.
+    /// Repeated wasted requests are handled independently by record(used:).
+    mutating func recordRecovery(serviceMilliseconds: Double, simultaneousMilliseconds: Double) {
+        guard serviceMilliseconds.isFinite, simultaneousMilliseconds.isFinite,
+              serviceMilliseconds > 0, simultaneousMilliseconds >= 0 else { return }
+        let actualOverlap = min(serviceMilliseconds, simultaneousMilliseconds)
+        guard actualOverlap >= 350,
+              actualOverlap / serviceMilliseconds >= 0.25 else { return }
+        // Bound admission backoff; leave periodic opportunities to re-evaluate
+        // whether Apple Default is once again useful for the current scene.
+        skipped = max(skipped, actualOverlap >= 600 ? 12 : 4)
         consecutiveWaste = 0
     }
 }
@@ -231,6 +254,7 @@ final class ThreeModeCoordinator {
     private var recoveryStarted = false
     private var hybridAdmission = HybridAdmissionPolicy()
     private var scoredSpeculation: ModeCaption?
+    private var cacheEpoch = UUID()
     private var lowCache: [String: String] = [:]
     private var lowOrder: [String] = []
     private var defaultCache: [String: String] = [:]
@@ -274,6 +298,7 @@ final class ThreeModeCoordinator {
         recoveryStarted = false
         hybridAdmission = HybridAdmissionPolicy()
         scoredSpeculation = nil
+        cacheEpoch = UUID()
         lowCache.removeAll(); lowOrder.removeAll()
         defaultCache.removeAll(); defaultOrder.removeAll()
         defaultService.removeAll(); lowService.removeAll()
@@ -410,9 +435,10 @@ final class ThreeModeCoordinator {
         speculativeModelSubmitted = true
     }
 
-    func noteOverlappingRecovery(_ milliseconds: Double) {
+    func noteOverlappingRecovery(serviceMilliseconds: Double, simultaneousMilliseconds: Double) {
         guard system == .hybridRecovery, adaptiveHybrid else { return }
-        hybridAdmission.overlappingRecovery(milliseconds: milliseconds)
+        hybridAdmission.recordRecovery(serviceMilliseconds: serviceMilliseconds,
+                                       simultaneousMilliseconds: simultaneousMilliseconds)
     }
 
     private func scoreSpeculation(for caption: ModeCaption, useful: Bool) {
@@ -445,6 +471,7 @@ final class ThreeModeCoordinator {
     }
 
     private func resolve(_ caption: ModeCaption, strategy: RequestedTranslationStrategy, speculative: Bool) async -> ModeOutput? {
+        let workEpoch = cacheEpoch
         var values = await lookupValues(caption)
         var origins = values.map { $0 == nil ? "fresh" : "compatible_memory" }
         var strategies: [RequestedTranslationStrategy?] = values.map { _ in nil }
@@ -459,9 +486,10 @@ final class ThreeModeCoordinator {
                 }
             }
         }
-        var uniqueKeys = Set<String>()
         let allMissing = values.indices.filter { values[$0] == nil }
-        let missing = allMissing.filter { uniqueKeys.insert(caption.keys[$0]).inserted }
+        guard let missing = SharedTranslationWork.unresolvedIndices(keys: caption.keys, values: values) else {
+            return nil
+        }
         if !missing.isEmpty {
             guard !Task.isCancelled else { return nil }
             event(caption, speculative ? "speculative_enqueue" : "recovery_enqueue", nil)
@@ -476,7 +504,9 @@ final class ThreeModeCoordinator {
                   result.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else { return nil }
             // An obsolete Hybrid model result has no display authority, but its
             // exact-key translation is safe to reuse in this capture session.
-            if allowsReuse {
+            if allowsReuse && SharedTranslationWork.mayReuse(
+                workEpoch: workEpoch, currentEpoch: cacheEpoch,
+                requestedCancellation: Task.isCancelled, compatibleContext: true) {
                 for (position, index) in missing.enumerated() {
                     cacheCompleted(result[position], for: caption.keys[index], strategy: strategy)
                 }

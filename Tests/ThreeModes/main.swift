@@ -104,16 +104,46 @@ final class Harness {
         resetRace.reply(1, ["Valid new-session response"])
         await resetRace.settle()
         resetRace.coordinator.reset()
+        let sameSession = UUID()
+        let nominalCaption = ModeCaption(system: .hybridRecovery, thermal: 0, session: sameSession,
+            caption: "candidate", revision: 1, source: "pt", target: "en", rules: "r",
+            text: "Bom dia", units: ["Bom dia"], keys: ["key"], firstOCR: 7.0)
+        var fairCaption = nominalCaption
+        fairCaption.thermal = 1
+        precondition(nominalCaption == fairCaption && nominalCaption.matches(fairCaption),
+            "Nominal/fair transitions cannot revoke an otherwise identical translation")
+        precondition(nominalCaption.policyCohort == fairCaption.policyCohort,
+            "Nominal and fair must share adaptive model scheduling evidence")
+        fairCaption.thermal = 2
+        precondition(nominalCaption == fairCaption &&
+                     nominalCaption.policyCohort != fairCaption.policyCohort,
+            "Serious protection changes scheduling evidence but not caption authority")
         var governor = HybridAdmissionPolicy()
         for _ in 0..<3 { precondition(governor.admit()); governor.record(used: false) }
         for _ in 0..<8 { precondition(!governor.admit()) }
         precondition(governor.admit())
         governor.record(used: true)
         precondition(governor.admit())
-        governor.overlappingRecovery(milliseconds: 700)
+        governor.recordRecovery(serviceMilliseconds: 900, simultaneousMilliseconds: 700)
         for _ in 0..<12 { precondition(!governor.admit()) }
-        governor.overlappingRecovery(milliseconds: 42)
+        governor.recordRecovery(serviceMilliseconds: 900, simultaneousMilliseconds: 42)
         precondition(governor.admit())
+        var shortOverlap = HybridAdmissionPolicy()
+        shortOverlap.recordRecovery(serviceMilliseconds: 900, simultaneousMilliseconds: 100)
+        precondition(shortOverlap.admit(), "A long recovery without physical overlap must not throttle speculation")
+        var realContention = HybridAdmissionPolicy()
+        realContention.recordRecovery(serviceMilliseconds: 900, simultaneousMilliseconds: 600)
+        precondition(!realContention.admit(), "A long simultaneous overlap warrants bounded backoff")
+        realContention.record(used: true)
+        precondition(realContention.admit(), "Useful speculation must restore opportunities")
+        var moderateOverlap = HybridAdmissionPolicy()
+        moderateOverlap.recordRecovery(serviceMilliseconds: 900, simultaneousMilliseconds: 360)
+        for _ in 0..<4 { precondition(!moderateOverlap.admit()) }
+        precondition(moderateOverlap.admit())
+        var invalidOverlap = HybridAdmissionPolicy()
+        invalidOverlap.recordRecovery(serviceMilliseconds: .nan, simultaneousMilliseconds: 800)
+        invalidOverlap.recordRecovery(serviceMilliseconds: 900, simultaneousMilliseconds: .infinity)
+        precondition(invalidOverlap.admit())
         var distinctBackoff = HybridAdmissionPolicy()
         for _ in 0..<3 { distinctBackoff.record(used: false) }
         precondition(!distinctBackoff.admit(identity: "caption-A"))
@@ -122,7 +152,7 @@ final class Harness {
         for i in 0..<7 { precondition(!distinctBackoff.admit(identity: "caption-\(i)")) }
         precondition(distinctBackoff.rejected == 8)
         precondition(distinctBackoff.admit(identity: "next-caption"))
-        distinctBackoff.overlappingRecovery(milliseconds: 700)
+        distinctBackoff.recordRecovery(serviceMilliseconds: 900, simultaneousMilliseconds: 700)
         precondition(!distinctBackoff.admit(identity: "slow-caption"))
         distinctBackoff.record(used: true)
         precondition(distinctBackoff.admit(identity: "after-useful"))
@@ -690,7 +720,8 @@ final class Harness {
         precondition(abs(SpeculationWaitPolicy.remaining(elapsed: 0.2, ordinary: [0.5, 0.5, 0.5, 0.5, 0.5], recovery: [0.9, 0.9, 0.9, 0.9, 0.9], coldCeiling: 0.7) - 0.3) < 0.0001)
         precondition(SpeculationWaitPolicy.remaining(elapsed: 0.6, ordinary: [0.5, 0.5, 0.5, 0.5, 0.5], recovery: [0.1, 0.1, 0.1, 0.1, 0.1], coldCeiling: 0.7) == 0)
         var thermalCaption = norm.caption(); thermalCaption.thermal = 1
-        precondition(thermalCaption.policyCohort != norm.caption().policyCohort)
+        precondition(thermalCaption.policyCohort == norm.caption().policyCohort,
+            "Nominal and fair thermal evidence must use one full-performance cohort")
         precondition(norm.caption(source: "pt").policyCohort != norm.caption().policyCohort)
         precondition(CaptionClockOrigin.monotonic(firstSeen: 80, wallFirstSeen: 1000, wallNow: 5000, uptimeNow: 100) == 80,
             "Wall-clock changes cannot reset a supplied monotonic OCR origin")

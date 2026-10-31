@@ -1,5 +1,58 @@
 import Foundation
 
+/// A single thermal contract shared by capture, translation, and simulation.
+/// Apple's fair state never changes our software scheduling policy.
+enum ThermalPerformancePolicy {
+    enum Tier: String, Codable {
+        case fullPerformance = "full_performance"
+        case protected = "protected"
+        case emergency = "emergency"
+    }
+
+    static func tier(for state: ProcessInfo.ThermalState) -> Tier {
+        switch state {
+        case .nominal, .fair: return .fullPerformance
+        case .serious: return .protected
+        case .critical: return .emergency
+        @unknown default: return .emergency
+        }
+    }
+
+    static func tier(named state: String) -> Tier {
+        switch state {
+        case "nominal", "fair": return .fullPerformance
+        case "serious": return .protected
+        default: return .emergency
+        }
+    }
+
+    static func automaticPressure(for state: ProcessInfo.ThermalState) -> Bool {
+        tier(for: state) != .fullPerformance
+    }
+
+    static func automaticPressure(named state: String) -> Bool {
+        tier(named: state) != .fullPerformance
+    }
+
+    /// Labels are independent: a user setting or measured workload does not
+    /// become a thermal slowdown merely because a device reports fair.
+    static func reductionReasons(state: ProcessInfo.ThermalState,
+                                 coolMode: Bool, lowPower: Bool,
+                                 memoryPressure: Bool, workloadPressure: Bool) -> [String] {
+        var reasons: [String] = []
+        switch tier(for: state) {
+        case .fullPerformance: break
+        case .protected: reasons.append("thermal_serious")
+        case .emergency: reasons.append("thermal_critical")
+        }
+        if coolMode { reasons.append("user_cool_mode") }
+        if lowPower { reasons.append("low_power") }
+        if memoryPressure { reasons.append("true_memory_pressure") }
+        if workloadPressure { reasons.append("actual_workload_backpressure") }
+        return reasons.isEmpty ? ["none"] : reasons
+    }
+}
+
 /// Recognition behavior is a set of independently selectable capabilities.
 /// The legacy "mode" is used only to migrate preferences that predate these
 /// switches; running OCR never branches on a preset's name or category.

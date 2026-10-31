@@ -233,6 +233,20 @@ final class Diagnostics: ObservableObject {
     private var eventTotals: [String: Int] = [:]
     private var lastCaptureConnected = false
     private var lastRecordedThermalState: String?
+    private(set) var captureReductionReasons = ["none"]
+    private var requestedCaptureIntervalMs = 0
+    private var requestedCaptureEdgePx = 0
+
+    /// App-to-extension configuration, not a claim about actual Vision cadence.
+    func noteCapturePolicy(edge: Double, interval: Double, coolMode: Bool,
+                           memoryPressure: Bool, workloadPressure: Bool) {
+        requestedCaptureEdgePx = max(0, Int(edge))
+        requestedCaptureIntervalMs = max(0, Int((interval * 1000).rounded()))
+        captureReductionReasons = ThermalPerformancePolicy.reductionReasons(
+            state: ProcessInfo.processInfo.thermalState, coolMode: coolMode,
+            lowPower: ProcessInfo.processInfo.isLowPowerModeEnabled,
+            memoryPressure: memoryPressure, workloadPressure: workloadPressure)
+    }
     private var candidateIDs: [String: UUID] = [:]
     private var frameIDs: [Int: UUID] = [:]
     private var unitIDs: [String: UUID] = [:]
@@ -703,7 +717,8 @@ final class Diagnostics: ObservableObject {
                     "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
                     "deduplicateCopies", "contextualLanguage", "languageRecovery",
                     "continuousRotation", "smartCool", "persistDiagnosticSessions",
-                    "diagSamples", "heartbeatInterval", "keepAwake", "suppressOwnInterface", "temporaryMemoryTest"]
+                    "diagSamples", "heartbeatInterval", "keepAwake", "suppressOwnInterface", "temporaryMemoryTest",
+                    "rapidTextTracking", "joinAdjacentText", "activeTextFocus"]
         var settings: [String: String] = [:]
         for key in keys {
             if let value = UserDefaults.standard.object(forKey: key) ?? TranslatorEngine.defaults[key] {
@@ -714,6 +729,27 @@ final class Diagnostics: ObservableObject {
         settings["freshTranslationTest"] = translationTestMode == .freshRequests ? "true" : "false"
         settings["temporaryMemoryTest"] = translationTestMode == .temporaryMemory ? "true" : "false"
         settings["startingRAMEntries"] = String(startingRAMEntries)
+        let inherited = PresetRecognitionPolicy.legacyDefaults(
+            for: UserDefaults.standard.string(forKey: "mode") ?? "movie")
+        for key in [PresetRecognitionPolicy.rapidTextTracking,
+                    PresetRecognitionPolicy.joinAdjacentText,
+                    PresetRecognitionPolicy.activeTextFocus] {
+            let effective = (UserDefaults.standard.object(forKey: key) as? Bool)
+                ?? inherited[key] ?? false
+            settings["effective" + key.prefix(1).uppercased() + String(key.dropFirst())] = String(effective)
+        }
+        let thermalState = ProcessInfo.processInfo.thermalState
+        switch thermalState {
+        case .nominal: settings["thermalState"] = "nominal"
+        case .fair: settings["thermalState"] = "fair"
+        case .serious: settings["thermalState"] = "serious"
+        case .critical: settings["thermalState"] = "critical"
+        @unknown default: settings["thermalState"] = "unknown"
+        }
+        settings["performanceTier"] = ThermalPerformancePolicy.tier(for: thermalState).rawValue
+        settings["reductionReasons"] = captureReductionReasons.joined(separator: "_")
+        settings["appRequestedCaptureIntervalMs"] = String(requestedCaptureIntervalMs)
+        settings["appRequestedCaptureEdgePx"] = String(requestedCaptureEdgePx)
         settings.merge(legacyValidationPair) { _, new in new }
         var counters = cumulativeCounters()
         counters.merge(legacyValidationSnapshot) { _, new in new }
@@ -2838,6 +2874,12 @@ private struct DiagnosticsBody: View {
                 Spacer()
                 Text(thermalName).font(.subheadline.weight(.bold)).foregroundStyle(thermalColor)
             }
+            Text("App performance: " + ThermalPerformancePolicy.tier(for: ProcessInfo.processInfo.thermalState).rawValue)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Text("Reduction reasons: " + diag.captureReductionReasons.joined(separator: ", "))
+                .font(.caption)
+                .foregroundStyle(.secondary)
             if data.count < 2 {
                 Text(data.isEmpty ? "No thermal samples in this range. Detailed collection is required." :
                      "One thermal sample recorded. The second sample will establish a trend.")

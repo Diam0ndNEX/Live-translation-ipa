@@ -35,6 +35,30 @@ check(segmentation.count == 0, "Explicit RAM clear must drop temporary segmentat
 print("Bounded segmentation cache regression checks passed")
 print("Pipeline regression checks passed")
 
+let workKey = SharedTranslationWork.unitKey(source: "pt", target: "en", text: "Bom dia",
+    protectedWords: ["5:Maria"], rules: "privacy-rules")
+check(workKey == PipelineSafety.cacheKey(source: "pt", target: "en", text: "Bom dia",
+    protectedWords: ["5:Maria"], rules: "privacy-rules"),
+    "Shared Legacy/Hybrid planning must preserve persisted exact context key bytes")
+check(workKey != SharedTranslationWork.unitKey(source: "pt", target: "en", text: "Bom dia",
+    protectedWords: ["5:Maria"], rules: "changed-rules"),
+    "Different language rules cannot silently share speculative memory")
+check(SharedTranslationWork.unresolvedIndices(keys: ["a","b","a","c"],
+    values: [nil, "already stored", nil, nil]) == [0,3],
+    "Shared work planner must submit one request per distinct missing unit")
+check(SharedTranslationWork.unresolvedIndices(keys: ["a"], values: []) == nil,
+    "Malformed model plans must be rejected before inference")
+let workEpoch = UUID()
+check(SharedTranslationWork.mayReuse(workEpoch: workEpoch, currentEpoch: workEpoch,
+    requestedCancellation: false, compatibleContext: true),
+    "Completed same-epoch work may populate compatible volatile cache")
+check(!SharedTranslationWork.mayReuse(workEpoch: workEpoch, currentEpoch: UUID(),
+    requestedCancellation: false, compatibleContext: true) &&
+      !SharedTranslationWork.mayReuse(workEpoch: workEpoch, currentEpoch: workEpoch,
+    requestedCancellation: true, compatibleContext: true),
+    "Cancelled or reset work cannot refill a different capture generation")
+
+
 let firstHalf = OCRLine(t: "Olá meu amigo", x: 0.30, y: 0.20, h: 0.03, w: 0.30)
 let secondHalf = OCRLine(t: "como você está?", x: 0.62, y: 0.201, h: 0.03, w: 0.30)
 let subtitle = OCRGrouping.makeBlocks([secondHalf, firstHalf], joinAdjacentText: true)
@@ -442,6 +466,70 @@ var lowPowerSimulation=SimulationInput();lowPowerSimulation.lowPower=true
 let lowPowerResult=PipelineSimulation.run(options:simulationOptions,input:lowPowerSimulation)
 check(lowPowerResult.steps.contains { $0.title == "Speculative-work gate" && $0.state == "wait for confirmation" }, "Low Power Mode disables speculative model work in the simulator")
 print("Thermal ceiling and Low Power Mode checks passed")
+
+let thermalStates: [ProcessInfo.ThermalState] = [.nominal, .fair, .serious, .critical]
+check(ThermalPerformancePolicy.tier(for: .nominal) == .fullPerformance &&
+      ThermalPerformancePolicy.tier(for: .fair) == .fullPerformance,
+      "Nominal and fair must share the same full-performance tier")
+check(ThermalPerformancePolicy.tier(for: .serious) == .protected &&
+      ThermalPerformancePolicy.tier(for: .critical) == .emergency,
+      "Only serious/critical activate automatic protection")
+for state in thermalStates {
+    let protected = state == .serious || state == .critical
+    check(ThermalPerformancePolicy.automaticPressure(for: state) == protected,
+          "Thermal pressure must begin at serious")
+}
+for state in [ProcessInfo.ThermalState.nominal, .fair] {
+    check(ThermalPerformancePolicy.reductionReasons(state: state, coolMode: false,
+          lowPower: false, memoryPressure: false, workloadPressure: false) == ["none"],
+          "No thermal reduction reasons may be emitted at nominal or fair")
+    check(ThermalPerformancePolicy.reductionReasons(state: state, coolMode: true,
+          lowPower: false, memoryPressure: false, workloadPressure: false) == ["user_cool_mode"],
+          "Explicit Cool Mode must be independent of thermal state")
+    check(ThermalPerformancePolicy.reductionReasons(state: state, coolMode: false,
+          lowPower: true, memoryPressure: false, workloadPressure: false) == ["low_power"],
+          "Low Power Mode must be independent of thermal state")
+}
+let fullPerformanceTransitions: [(ProcessInfo.ThermalState, ThermalPerformancePolicy.Tier)] = [
+    (.nominal, .fullPerformance), (.fair, .fullPerformance), (.nominal, .fullPerformance),
+    (.fair, .fullPerformance), (.serious, .protected), (.fair, .fullPerformance),
+    (.serious, .protected), (.critical, .emergency), (.fair, .fullPerformance)
+]
+for (state, expected) in fullPerformanceTransitions {
+    check(ThermalPerformancePolicy.tier(for: state) == expected,
+          "Thermal recovery must restore full performance without a cooldown")
+}
+for system in ["legacy", "hybridRecovery", "lowLatency"] {
+    for preset in ["movie", "comic", "game", "lyrics", "custom"] {
+        for rapid in [false, true] {
+            var options = simulationOptions
+            options["translationSystem"] = system
+            options["mode"] = preset
+            options["rapidTextTracking"] = String(rapid)
+            options["joinAdjacentText"] = "true"
+            options["activeTextFocus"] = "true"
+            options["translateAhead"] = "true"
+            options["adaptive"] = "true"
+            for speed in ["fast", "balanced", "sharp", "automatic"] {
+                options["speed"] = speed
+                var nominal = SimulationInput()
+                nominal.thermal = "nominal"
+                var fair = nominal
+                fair.thermal = "fair"
+                let lhs = PipelineSimulation.run(options: options, input: nominal)
+                let rhs = PipelineSimulation.run(options: options, input: fair)
+                check(lhs.interval == rhs.interval && lhs.resolution == rhs.resolution &&
+                      lhs.displayAccepted == rhs.displayAccepted && lhs.totalMs == rhs.totalMs,
+                      "Fair cannot change capture detail, cadence, selection or PiP scheduling")
+                check(lhs.steps.map { $0.title + $0.state + $0.detail } ==
+                      rhs.steps.map { $0.title + $0.state + $0.detail },
+                      "Every simulator stage must be nominal/fair equivalent for all modes/presets")
+            }
+        }
+    }
+}
+print("v1.9.5 three-backend, all-preset, transition and nominal/fair parity gates passed")
+
 
 var sqliteScenario = SimulationInput()
 sqliteScenario.cacheOrigin = "sqlite"

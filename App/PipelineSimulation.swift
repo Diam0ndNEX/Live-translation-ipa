@@ -104,7 +104,7 @@ enum PipelineSimulation {
         let feedback = RecognitionFeedback(confidence: s.confidence, textHeight: s.height, processingMs: s.ocrMs, failures: s.emptyReads, unchangedSeconds: s.unchangedSeconds, motion: s.motion)
         let plan = AdaptiveRecognition.plan(baseEdge: edge, interval: baseInterval,
             enabled: speed == "automatic" || (speed == "balanced" && b("adaptiveOCR",true)), cool: smartCool,
-            pressure: b("adaptive",true) && s.thermal != "nominal", feedback: feedback,
+            pressure: b("adaptive",true) && ThermalPerformancePolicy.automaticPressure(named: s.thermal), feedback: feedback,
             ceiling: (s.thermal == "serious" || s.thermal == "critical") ? edge : 2400)
         r.resolution = plan.edge; r.interval = plan.interval
         add("Video frame", "ReplayKit extension", s.paused ? "paused" : "received", "Virtual frame: sample text and normalized boxes. No screen capture occurs in this simulator.", ["mode","idleMinutes","sessionLimit"])
@@ -142,7 +142,7 @@ enum PipelineSimulation {
                 rapidTextTracking: rapidText, enabled: b("idleBackoff",true),
                 secondsSinceText: s.unchangedSeconds),
             pending: true, rapidTextTracking: rapidText,
-            pressure: cool || s.lowPower || s.thermal != "nominal", processingMs: readMs)
+            pressure: cool || s.lowPower || ThermalPerformancePolicy.automaticPressure(named: s.thermal), processingMs: readMs)
         let cadenceMs = max(pendingInterval*1000,readMs)
         var confirmationMs = 0.0, confirmed = false, reason = "fixed read count"
         for index in 0..<12 {
@@ -200,7 +200,7 @@ enum PipelineSimulation {
         let testMode = TranslationTestMode(freshRequests: b("freshTranslationTest"), temporaryMemory: b("temporaryMemoryTest"))
         let persistentOrigin = ["saved", "sqlite", "legacy"].contains(s.cacheOrigin)
         let origin = !testMode.allowsReuse || (persistentOrigin && (!testMode.allowsPersistentTranslations || !b("remember",true) || b("privateSession"))) ? "fresh" : s.cacheOrigin
-        let speculate = testMode.allowsSpeculation && b("translateAhead",true) && !s.lowPower && s.thermal != "serious" && s.thermal != "critical" && (!cool || (smartCool && readMs<100 && s.thermal=="nominal"))
+        let speculate = testMode.allowsSpeculation && b("translateAhead",true) && !s.lowPower && s.thermal != "serious" && s.thermal != "critical" && (!cool || (smartCool && readMs<100 && !ThermalPerformancePolicy.automaticPressure(named: s.thermal)))
             && (!b("selectiveSpeculation",true) || SpeculationPolicy.credible(lines:lines,threshold:cool ? max(0.95,n("speculationConfidence",0.85)) : n("speculationConfidence",0.85)))
         add("Speculative-work gate", "Main app", speculate ? "credible early work" : "wait for confirmation", "Early work starts after the first OCR pass. Uncertain/near-duplicate candidates are declined, only the newest candidate is queued, and superseded results are never published. Model cancellation is cooperative. Adaptive throttling depends on runtime history and is not predicted here.", ["translateAhead","selectiveSpeculation","speculationConfidence","coolMode","smartCool"])
         add("Translation memory lookup", "Main app", origin, "Session, saved-memory and speculative hits are separate. Rule fingerprints, source/target and protected-token context namespace every entry. Memory capacity changes retention, not wording.", ["remember","memoryCapacity","privateSession","glossary"])
