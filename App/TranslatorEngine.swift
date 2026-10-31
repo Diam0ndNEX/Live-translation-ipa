@@ -1831,7 +1831,7 @@ final class TranslatorEngine: ObservableObject {
                 // send model work. Do not consume the bounded governor's probe
                 // budget on one. The user-defined threshold is unchanged.
                 if !credible {
-                    if diag.enabled { diag.s.specSkipped += 1 }
+                    if diag.enabled { diag.s.specSkipped += 1; diag.s.legacyLowConfidenceSkips += 1 }
                     diag.notePipelineDecision(candidate: p.candidateID,
                         frameIndex: p.frames, stage: "stability",
                         reason: "legacy_speculation_low_confidence")
@@ -1843,7 +1843,11 @@ final class TranslatorEngine: ObservableObject {
                     enabled: flag("adaptiveSpeculation", true), strongCandidate: highConfidence)
                 #endif
                 guard admittedByHistory else {
-                    if diag.enabled { diag.s.adaptiveSpeculationSkipped += 1 }
+                    if diag.enabled {
+                        diag.s.adaptiveSpeculationSkipped += 1
+                        if ram.speculationWindow.savedMemoryDominant { diag.s.legacyAdaptiveSavedSkips += 1 }
+                        else { diag.s.legacyAdaptiveLowYieldSkips += 1 }
+                    }
                     if ram.speculationWindow.savedMemoryDominant { diag.noteMemoryAwareSpeculationSkip() }
                     diag.notePipelineDecision(candidate: p.candidateID,
                         frameIndex: p.frames, stage: "stability",
@@ -1852,7 +1856,10 @@ final class TranslatorEngine: ObservableObject {
                     return
                 }
                 guard credible else {
-                    if diag.enabled { diag.s.specSkipped += 1 }
+                    if diag.enabled {
+                        diag.s.specSkipped += 1
+                        diag.s.legacyLowConfidenceSkips += 1
+                    }
                     if diag.detailedCollection {
                         diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
                             stage: "stability", reason: "legacy_speculation_low_confidence")
@@ -1930,15 +1937,24 @@ final class TranslatorEngine: ObservableObject {
         // Confirmed translations own the model. A changing subtitle should not
         // multiply low-priority speculative work while a confirmed job is busy.
         guard !busy, queued == nil else {
-            if diag.enabled { diag.s.specSkipped += 1 }
+            if diag.enabled {
+                diag.s.specSkipped += 1
+                diag.s.legacyBusySpeculationSkips += 1
+            }
             return
         }
         let thermal = ProcessInfo.processInfo.thermalState
         if ProcessInfo.processInfo.isLowPowerModeEnabled || thermal == .serious || thermal == .critical { return }
         let joined = blocks.joined(separator: "\n")
-        guard !frozen, joined != lastHandled, joined != lastSpecText else { return }
+        guard !frozen, joined != lastHandled, joined != lastSpecText else {
+            if diag.enabled { diag.s.legacyDuplicateSpeculationSkips += 1 }
+            return
+        }
         if flag("selectiveSpeculation", true), TextSim.similar(joined, lastSpecText, 0.97) {
-            if diag.enabled { diag.s.specSkipped += 1 }
+            if diag.enabled {
+                diag.s.specSkipped += 1
+                diag.s.legacyDuplicateSpeculationSkips += 1
+            }
             return
         }
         lastSpecText = joined
