@@ -300,6 +300,12 @@ import Foundation
         precondition(DiagnosticIssueDetector.assess(absentOverlapEvidence).contains {
             $0.code == "hybrid_missing_overlap_measurement" && $0.occurrences == 6
         }, "Repeated overlap events without timings must generate a diagnostic finding")
+        let ringOverflow = TranslationModeReport(active: "lowLatency", pending: "lowLatency",
+            referenceSHA: String(repeating: "0", count: 40), migration: "persisted",
+            events: [], distributions: [:],
+            counters: ["mode_trace_ring_overwritten": 37]).sanitized()
+        precondition(ringOverflow.counters["session_mode_trace_ring_overwritten"] == 37,
+            "Full-session event loss must survive the 2400-event privacy ring boundary")
         let fallbackCounters: [String: Int] = [
             "hybrid_default_fallback": 5, "recovery_decision_source_mismatch": 12]
         let fallbackEvidence = DiagnosticSessionExport(
