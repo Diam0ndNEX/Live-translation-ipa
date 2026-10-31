@@ -98,3 +98,32 @@ struct AppleDefaultLeaseState {
         requestCancellation()
     }
 }
+
+    
+/// Build-time A/B controls used for the v1.9.5 comparison matrix. Defaults are
+/// the optimized implementations; define each reference flag separately with
+/// SWIFT_ACTIVE_COMPILATION_CONDITIONS to isolate L0 and F0 without a setting,
+/// model-strategy change, or an extra runtime branch in the selected path.
+enum TranslationHotPathAB {
+    static var reuseStandaloneLowLatencyPlan: Bool {
+        #if SCREENLINGO_REFERENCE_LL_PLAN
+        return false
+        #else
+        return true
+        #endif
+    }
+
+    static var reuseLegacyPreparedUnits: Bool {
+        #if SCREENLINGO_REFERENCE_LEGACY_UNITS
+        return false
+        #else
+        return true
+        #endif
+    }
+
+    static var label: String {
+        let legacy = reuseLegacyPreparedUnits ? "L1" : "L0"
+        let fast = reuseStandaloneLowLatencyPlan ? "F1" : "F0"
+        return legacy + "_" + fast
+    }
+}
