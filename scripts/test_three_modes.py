@@ -13,8 +13,22 @@ def function(source, name):
     end = source.find('\n    private func ', start + 1)
     return source[start:end if end != -1 else len(source)]
 engine = read('App/TranslatorEngine.swift')
-for name in ['process', 'drain', 'speculate', 'cachedCaption']:
-    assert function(engine, name).replace('SharedTranslationWork.unitKey', 'PipelineSafety.cacheKey') == function(old('App/TranslatorEngine.swift'), name), name + ' Legacy algorithm changed beyond the verified cache-key delegation'
+for name in ['process', 'drain', 'cachedCaption']:
+    assert function(engine, name).replace('SharedTranslationWork.unitKey', 'PipelineSafety.cacheKey') == function(old('App/TranslatorEngine.swift'), name), name + ' Legacy model drain/assembly algorithm changed beyond verified exact-key delegation'
+# The only Legacy speculate() changes in v1.9.7 are reason-coded skips;
+# confirmed drain, exact-cache safety and physical lease remain immutable.
+legacy_speculate = function(engine, 'speculate')
+for invariant in [
+    'guard speculationAllowed else { return }',
+    'guard !busy, queued == nil else',
+    'lastSpecText = joined',
+    'specQueued = blocks',
+    'startDrain()'
+]:
+    assert invariant in legacy_speculate, 'Missing essential Legacy speculation ownership: ' + invariant
+assert 'SCREENLINGO_REFERENCE_LEGACY_ADMISSION' in engine
+assert 'allowsCredibleOpportunity' in engine
+assert 'legacyAdaptiveLowYieldSkips' in engine
 # Recognition settings are no longer hard-coded to the built-in Movie category.
 # Normalize only these intentional capability routing changes; all of the
 # original Legacy extraction and active-text selection logic must stay intact.
