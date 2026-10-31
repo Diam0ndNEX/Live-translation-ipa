@@ -33,7 +33,9 @@ assert "cfg.skipUnchanged ?? true" in capture
 assert "rapidTextTracking: rapidText" in capture
 assert "lastOcrMs" in capture
 assert "if mayProbeEarly && !changed { cadenceSkipped += 1; return }" in capture
-assert "if mayProbeEarly && changed { visualWakeCount += 1 }" in capture
+assert "if mayProbeEarly && changed {" in capture
+assert "visualWakeWindowCount += 1" in capture
+assert "visualWakeCount += 1" in capture
 assert "recognize(pb, orientation, cfg, edge: plan.edge)" in capture
 assert "earlyVisualWakes: visualWakeCount" in capture
 assert "static func physicalDrainBudget" in coordinator
