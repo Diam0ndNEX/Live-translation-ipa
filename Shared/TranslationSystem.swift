@@ -203,7 +203,12 @@ enum HybridSchedulingPolicy {
         // Favor a verified fast LL recovery when no contention has been
         // observed and Default is far from likely completion.
         if recentContention == 0 && lowValid.count >= 4 &&
-            lowMedian <= 0.12 && remaining > 0.45 { return 0 }
+            lowMedian <= 0.12 && remaining > max(0.08, lowMedian * 1.5) {
+            // The fast confirmed strategy is expected to finish well before
+            // Default. A fixed 450ms gate incorrectly delayed 40ms LL
+            // recoveries behind predicted 250-400ms speculation.
+            return 0
+        }
         // When overlap has correlated with expensive LL work, let a matching
         // already-running Apple Default call get a short bounded head start.
         if recentContention > 0 && remaining > 0 {
