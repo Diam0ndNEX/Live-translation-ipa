@@ -1581,7 +1581,9 @@ final class TranslatorEngine: ObservableObject {
         if let t = p.ocrMs, t != ocrMs { ocrMs = t }
         if let m = p.memFreeMB, m != extFreeMB { extFreeMB = m }
         if p.kind != "ocr" || p.rev == nil || p.rev == rotRev {
-            diag.onPacket(p, transport: p.ts.map { max(0, now.timeIntervalSince1970 - $0) * 1000 })
+            let transit = p.sentMonotonic.map { max(0, ProcessInfo.processInfo.systemUptime - $0) * 1000 }
+                ?? p.ts.map { max(0, now.timeIntervalSince1970 - $0) * 1000 }
+            diag.onPacket(p, transport: transit)
         }
 
         if !wasAlive {
