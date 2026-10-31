@@ -396,6 +396,8 @@ final class TranslatorEngine: ObservableObject {
         var confirmed: Double?
     }
     private var modeModelTimings: [String: ModeModelTiming] = [:]
+    private var modeConfirmationUptime: [String: Double] = [:]
+    private var modeResultReadyUptime: [String: Double] = [:]
     private func modeModelKey(_ caption: ModeCaption) -> String {
         caption.session.uuidString + "|" + caption.caption + "|" + String(caption.revision)
     }
@@ -466,6 +468,14 @@ final class TranslatorEngine: ObservableObject {
 
     private func noteModeEvent(_ caption: ModeCaption, reason: String, duration: Double?) {
         if caption.session == modeSessionID {
+            if reason == "confirmed" {
+                if modeConfirmationUptime.count >= 256 { modeConfirmationUptime.removeAll() }
+                modeConfirmationUptime[modeModelKey(caption)] = ProcessInfo.processInfo.systemUptime
+            }
+            if reason.hasPrefix("selected_") {
+                if modeResultReadyUptime.count >= 256 { modeResultReadyUptime.removeAll() }
+                modeResultReadyUptime[modeModelKey(caption)] = ProcessInfo.processInfo.systemUptime
+            }
             if reason == "speculative_model_submitted" {
                 modeCoordinator.noteSpeculativeModelSubmitted(caption)
             }
@@ -522,6 +532,7 @@ final class TranslatorEngine: ObservableObject {
                 let key = modeModelKey(caption)
                 if modeModelTimings.count >= 256 && modeModelTimings[key] == nil {
                     modeModelTimings.removeAll()
+        modeConfirmationUptime.removeAll(); modeResultReadyUptime.removeAll()
                 }
                 var timing = modeModelTimings[key] ?? ModeModelTiming()
                 if reason == "speculative_model_completed" { timing.speculative = duration }
@@ -707,6 +718,7 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func selectModeResult(_ caption: ModeCaption, output: ModeOutput, reason: String) {
+        let commitBegan = ProcessInfo.processInfo.systemUptime
         guard caption.session == modeSessionID, let (template, packet, expected) = modePlans[caption.caption],
               caption == expected, caption.source == (sourceCode == "auto" ? detectedLang : Locale.Language(identifier: sourceCode).minimalIdentifier),
               caption.target == targetCode, caption.rules == memoryRuleToken else { return }
@@ -769,6 +781,17 @@ final class TranslatorEngine: ObservableObject {
         status = "\(caption.source) → \(caption.target) ✓"
         let presented = show(caption.text, result, timing: timing)
         if presented {
+            let pipAt = ProcessInfo.processInfo.systemUptime
+            noteModeEvent(caption, reason: "mode_commit_to_pip_ms",
+                duration: max(0, pipAt - commitBegan) * 1000)
+            if let confirmedAt = modeConfirmationUptime[modeModelKey(caption)] {
+                noteModeEvent(caption, reason: "mode_confirmation_to_pip_ms",
+                    duration: max(0, pipAt - confirmedAt) * 1000)
+            }
+            if let readyAt = modeResultReadyUptime[modeModelKey(caption)] {
+                noteModeEvent(caption, reason: "mode_ready_to_pip_ms",
+                    duration: max(0, pipAt - readyAt) * 1000)
+            }
             diag.recordModeSelection(sentences: output.values.count, source: caption.source, target: caption.target)
             noteModeEvent(caption, reason: lastShowReusedFrame ? "pip_held_unchanged" : "pip_enqueue_" + reason,
                 duration: max(0, ProcessInfo.processInfo.systemUptime - caption.firstOCR) * 1000)
