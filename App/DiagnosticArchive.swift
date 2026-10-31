@@ -200,7 +200,7 @@ struct TranslationModeReport: Codable {
         "cancellation_requested", "cancelled_call_returned",
         "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
         "hybrid_speculation_unexecuted",
-        "hybrid_speculation_backend_busy",
+        "hybrid_speculation_backend_busy", "hybrid_speculation_yielded_to_confirmed",
         "hybrid_matching_wait_ms", "mode_plan_reused_ms", "mode_plan_built_ms",
         "mode_commit_to_pip_ms", "mode_confirmation_to_pip_ms", "mode_ready_to_pip_ms",
         "mode_trace_ring_overwritten",
@@ -286,7 +286,7 @@ struct TranslationModeReport: Codable {
         let sessionReasons = [
             "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
         "hybrid_speculation_unexecuted",
-            "hybrid_speculation_backend_busy",
+            "hybrid_speculation_backend_busy", "hybrid_speculation_yielded_to_confirmed",
             "strategy_cache_hit_appleDefault", "strategy_cache_hit_lowLatency",
             "strategy_cache_populated_appleDefault", "strategy_cache_populated_lowLatency",
             "speculation_superseded_before_confirmation", "speculative_model_submitted", "confirmed_model_submitted",
