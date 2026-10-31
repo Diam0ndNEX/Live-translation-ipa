@@ -1034,7 +1034,7 @@ final class TranslatorEngine: ObservableObject {
         if tickCount % 5 == 0 { refreshLegacyScanContext() }
         if tickCount % 5 == 0, flag("legacyIdleValidationEnabled", false),
            !legacyValidationExhausted, mayRunIdleValidation {
-            let fair = ProcessInfo.processInfo.thermalState == .fair
+            let fair = ThermalPerformancePolicy.automaticPressure(for: ProcessInfo.processInfo.thermalState)
             if Date().timeIntervalSince(lastIdleValidationAttempt) >=
                 IdleLegacyBatchPolicy.cooldownSeconds(thermalFair: fair) {
                 startLegacyValidation(maxEntries: IdleLegacyBatchPolicy.automaticEntries)
@@ -1094,7 +1094,7 @@ final class TranslatorEngine: ObservableObject {
         if !memoryTestMode.allowsSpeculation { return false }
         if !flag("coolMode", false) { return true }
         return flag("smartCool", true) && ocrMs < 100 && queued == nil
-            && !ProcessInfo.processInfo.isLowPowerModeEnabled && ProcessInfo.processInfo.thermalState == .nominal
+            && !ProcessInfo.processInfo.isLowPowerModeEnabled && !ThermalPerformancePolicy.automaticPressure(for: ProcessInfo.processInfo.thermalState)
     }
 
     private var runtimePolicy: RuntimePolicy {
@@ -1215,7 +1215,7 @@ final class TranslatorEngine: ObservableObject {
                            adaptiveOCR: speed == .automatic || (speed == .balanced && flag("adaptiveOCR", true)),
                            adaptiveConfirmation: flag("adaptiveConfirmation", false), subtitleTracking: flag("subtitleTracking", true),
                            confirmationDeadline: num("confirmationDeadline", 0.6), smartCool: intelligentCool,
-                           pressure: flag("adaptive", true) && (intelligentCool || speed == .automatic || (speed == .balanced && flag("adaptiveOCR", true))) && (ProcessInfo.processInfo.thermalState != .nominal || (busy && queued != nil)),
+                           pressure: flag("adaptive", true) && (intelligentCool || speed == .automatic || (speed == .balanced && flag("adaptiveOCR", true))) && (ThermalPerformancePolicy.automaticPressure(for: ProcessInfo.processInfo.thermalState) || (busy && queued != nil)),
                            selectiveSpeculation: flag("selectiveSpeculation", true), speculationConfidence: num("speculationConfidence", 0.85),
                            detailCeiling: (ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical || (extFreeMB > 0 && extFreeMB < 12)) ? maxEdge : 2400,
                            confirmationBurst: !flag("coolMode", false),
@@ -3549,7 +3549,7 @@ final class TranslatorEngine: ObservableObject {
         let scanSource = sourceCode
         let scanTarget = targetCode
         let maxCount = max(1, min(IdleLegacyBatchPolicy.maximumEntries, maxEntries))
-        let fair = ProcessInfo.processInfo.thermalState == .fair
+        let fair = ThermalPerformancePolicy.automaticPressure(for: ProcessInfo.processInfo.thermalState)
         let workers = IdleLegacyBatchPolicy.concurrency(thermalFair: fair)
         legacyBatchWorkers = workers
         legacyIdleValidationStatus = "Scanning up to \(maxCount) older entries…"
