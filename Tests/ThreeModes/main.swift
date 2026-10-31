@@ -629,10 +629,24 @@ final class Harness {
         precondition(fail.calls.count == 2 && fail.calls.allSatisfy { $0.strategy == .lowLatency })
         precondition(fail.selected.isEmpty && fail.events.contains("status"))
         fail.coordinator.reset()
-        // Ready speculation survives harmless whitespace, but never changed meaning.
+        // Whitespace-only OCR normalization is safe only with identical
+        // ordered translation units, exact context keys and config revision.
         let norm = Harness()
         let c = norm.caption()
-        precondition(c.matches(norm.caption("I do not\nhave 10 cats.")))
+        let whitespaceSameWork = ModeCaption(session: c.session, caption: c.caption,
+            revision: c.revision, source: c.source, target: c.target, rules: c.rules,
+            text: "I do not\nhave 10 cats.", units: c.units, keys: c.keys, firstOCR: c.firstOCR)
+        precondition(c.matches(whitespaceSameWork))
+        precondition(!c.matches(norm.caption("I do not\nhave 10 cats.")),
+            "Different exact unit keys must block speculative output")
+        precondition(!c.matches(norm.caption(revision: 2)),
+            "Capture/settings revision must invalidate earlier speculation")
+        let twoUnits = ModeCaption(session: c.session, caption: c.caption,
+            revision: c.revision, source: c.source, target: c.target, rules: c.rules,
+            text: c.text, units: ["I do not", "have 10 cats."],
+            keys: ["unit1", "unit2"], firstOCR: c.firstOCR)
+        precondition(!c.matches(twoUnits),
+            "A changed OCR unit split cannot borrow a one-unit prediction")
         for text in ["I have 10 cats.", "I do not have 20 cats.", "not have 10 cats.", "i do not have 10 cats.", "I do not have 10 cats!"] {
             precondition(!c.matches(norm.caption(text)))
         }
