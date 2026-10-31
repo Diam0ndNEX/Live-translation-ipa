@@ -443,6 +443,70 @@ let lowPowerResult=PipelineSimulation.run(options:simulationOptions,input:lowPow
 check(lowPowerResult.steps.contains { $0.title == "Speculative-work gate" && $0.state == "wait for confirmation" }, "Low Power Mode disables speculative model work in the simulator")
 print("Thermal ceiling and Low Power Mode checks passed")
 
+let thermalStates: [ProcessInfo.ThermalState] = [.nominal, .fair, .serious, .critical]
+check(ThermalPerformancePolicy.tier(for: .nominal) == .fullPerformance &&
+      ThermalPerformancePolicy.tier(for: .fair) == .fullPerformance,
+      "Nominal and fair must share the same full-performance tier")
+check(ThermalPerformancePolicy.tier(for: .serious) == .protected &&
+      ThermalPerformancePolicy.tier(for: .critical) == .emergency,
+      "Only serious/critical activate automatic protection")
+for state in thermalStates {
+    let protected = state == .serious || state == .critical
+    check(ThermalPerformancePolicy.automaticPressure(for: state) == protected,
+          "Thermal pressure must begin at serious")
+}
+for state in [ProcessInfo.ThermalState.nominal, .fair] {
+    check(ThermalPerformancePolicy.reductionReasons(state: state, coolMode: false,
+          lowPower: false, memoryPressure: false, workloadPressure: false) == ["none"],
+          "No thermal reduction reasons may be emitted at nominal or fair")
+    check(ThermalPerformancePolicy.reductionReasons(state: state, coolMode: true,
+          lowPower: false, memoryPressure: false, workloadPressure: false) == ["user_cool_mode"],
+          "Explicit Cool Mode must be independent of thermal state")
+    check(ThermalPerformancePolicy.reductionReasons(state: state, coolMode: false,
+          lowPower: true, memoryPressure: false, workloadPressure: false) == ["low_power"],
+          "Low Power Mode must be independent of thermal state")
+}
+let fullPerformanceTransitions: [(ProcessInfo.ThermalState, ThermalPerformancePolicy.Tier)] = [
+    (.nominal, .fullPerformance), (.fair, .fullPerformance), (.nominal, .fullPerformance),
+    (.fair, .fullPerformance), (.serious, .protected), (.fair, .fullPerformance),
+    (.serious, .protected), (.critical, .emergency), (.fair, .fullPerformance)
+]
+for (state, expected) in fullPerformanceTransitions {
+    check(ThermalPerformancePolicy.tier(for: state) == expected,
+          "Thermal recovery must restore full performance without a cooldown")
+}
+for system in ["legacy", "hybridRecovery", "lowLatency"] {
+    for preset in ["movie", "comic", "game", "lyrics", "custom"] {
+        for rapid in [false, true] {
+            var options = simulationOptions
+            options["translationSystem"] = system
+            options["mode"] = preset
+            options["rapidTextTracking"] = String(rapid)
+            options["joinAdjacentText"] = "true"
+            options["activeTextFocus"] = "true"
+            options["translateAhead"] = "true"
+            options["adaptive"] = "true"
+            for speed in ["fast", "balanced", "sharp", "automatic"] {
+                options["speed"] = speed
+                var nominal = SimulationInput()
+                nominal.thermal = "nominal"
+                var fair = nominal
+                fair.thermal = "fair"
+                let lhs = PipelineSimulation.run(options: options, input: nominal)
+                let rhs = PipelineSimulation.run(options: options, input: fair)
+                check(lhs.interval == rhs.interval && lhs.resolution == rhs.resolution &&
+                      lhs.displayAccepted == rhs.displayAccepted && lhs.totalMs == rhs.totalMs,
+                      "Fair cannot change capture detail, cadence, selection or PiP scheduling")
+                check(lhs.steps.map { $0.title + $0.state + $0.detail } ==
+                      rhs.steps.map { $0.title + $0.state + $0.detail },
+                      "Every simulator stage must be nominal/fair equivalent for all modes/presets")
+            }
+        }
+    }
+}
+print("v1.9.5 three-backend, all-preset, transition and nominal/fair parity gates passed")
+
+
 var sqliteScenario = SimulationInput()
 sqliteScenario.cacheOrigin = "sqlite"
 sqliteScenario.memoryLookupMs = 3
