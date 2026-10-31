@@ -41,6 +41,10 @@ final class ModeTranslationService {
     var mayAdmitReferenceHybridSpeculation: Bool {
         !speculative.busy && !confirmed.busy && !warmupLane.busy && hostedTask == nil
     }
+    /// Includes availability/preflight suspension, not only actual Apple work.
+    var hasConfirmedLowLatencyDemand: Bool {
+        confirmedDemand > 0 || confirmed.busy
+    }
     private let installedCheckTTL: Double = 30
     var warmupEvent: ((InitialWarmupEvent) -> Void)?
     var modelRequestCompleted: ((String, String, RequestedTranslationStrategy, Double) -> Void)?
