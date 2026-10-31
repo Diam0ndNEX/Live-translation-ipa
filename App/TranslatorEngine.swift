@@ -501,9 +501,13 @@ final class TranslatorEngine: ObservableObject {
         if ["speculative_model_submitted", "confirmed_model_submitted", "model_batch_failed", "model_batch_completed", "speculative_model_completed", "confirmed_model_completed"].contains(reason) {
             diag.noteModelState(reason, durationMs: duration, candidate: caption.caption)
         }
-        if caption.session == modeSessionID, reason == "hybrid_overlapped_recovery_ms",
-           let duration {
-            modeCoordinator.noteOverlappingRecovery(duration)
+        if caption.session == modeSessionID,
+           reason == "hybrid_simultaneous_model_overlap_ms", let duration,
+           let fullRecovery = modeModelTimings[modeModelKey(caption)]?.confirmed {
+            // Use physical simultaneous lane occupancy, not the entire
+            // Low Latency service time, to drive speculative admission.
+            modeCoordinator.noteOverlappingRecovery(serviceMilliseconds: fullRecovery,
+                                                    simultaneousMilliseconds: duration)
         }
         if caption.session == modeSessionID, reason == "hybrid_default_fallback" {
             modeAvailability = "Fast recovery unavailable; using Apple default for this caption"
