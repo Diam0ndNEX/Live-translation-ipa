@@ -14,7 +14,7 @@ def function(source, name):
     return source[start:end if end != -1 else len(source)]
 engine = read('App/TranslatorEngine.swift')
 for name in ['process', 'drain', 'speculate', 'cachedCaption']:
-    assert function(engine, name) == function(old('App/TranslatorEngine.swift'), name), name + ' Legacy policy changed'
+    assert function(engine, name).replace('SharedTranslationWork.unitKey', 'PipelineSafety.cacheKey') == function(old('App/TranslatorEngine.swift'), name), name + ' Legacy algorithm changed beyond the verified cache-key delegation'
 # Recognition settings are no longer hard-coded to the built-in Movie category.
 # Normalize only these intentional capability routing changes; all of the
 # original Legacy extraction and active-text selection logic must stay intact.
@@ -62,7 +62,7 @@ assert 'warmup ? warmupLane' in service
 assert 'preserveIdleSessions: true' in engine
 assert 'lastModePreparationPair' in engine and 'lastModePreparationAt' in engine
 assert 'modeCoordinator.adaptiveHybrid = flag("adaptiveSpeculation", true)' in engine
-assert 'hybrid_overlapped_recovery_ms' in engine
+assert 'hybrid_simultaneous_model_overlap_ms' in engine and 'noteOverlappingRecovery(serviceMilliseconds:' in engine
 assert 'lastModePreparationPair = ""' in function(engine, 'invalidatePending'), 'Capture changes must reset mode session readiness throttle'
 assert 'lastModePreparationAt = .distantPast' in function(engine, 'invalidatePending')
 assert '!backendActivity.executing' in engine, 'Avoid live inference contention during readiness checks'
