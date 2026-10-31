@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.9.8"
-    static let build = 81
+    static let version = "1.9.9"
+    static let build = 82
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("1.9.9", "Build 82: correct cross-strategy Hybrid language-pair proximity tracking; benchmark a bounded 220ms post-Default Low Latency settling interval, with explicit request timing and source-context diagnostics. Limit optional visual-wake OCR to two early reads per second during motion, without changing regular OCR cadence or independent confirmation. Legacy v1.9.8 queue and Nominal/Fair policies preserved; device speed acceptance pending."),
         ("1.9.8", "Build 81: restore conservative matching speculation waits and bounded physical Default drain before Hybrid Low Latency recovery, discard obsolete unstarted Legacy speculation on confirmed OCR, and allow visual-change-triggered early OCR with Skip Unchanged Frames disabled. Nominal/Fair both remain full-performance states; device validation pending."),
         ("1.9.7", "Build 80 conservative hot path: avoid repeated caption Unicode normalization, temporary array construction and single-unit duplicate memory bookkeeping. Keeps all scheduling, OCR, translation strategy and output contracts unchanged; device speed still unverified."),
         ("1.9.7", "Three-mode latency experiments: bounded visually-triggered earlier OCR, smarter Legacy credible speculation, no duplicate confirmed LL/Hybrid memory probe, and Hybrid residual recovery tracing."),
