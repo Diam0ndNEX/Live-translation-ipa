@@ -736,7 +736,7 @@ final class Diagnostics: ObservableObject {
                     PresetRecognitionPolicy.activeTextFocus] {
             let effective = (UserDefaults.standard.object(forKey: key) as? Bool)
                 ?? inherited[key] ?? false
-            settings["effective" + key.prefix(1).uppercased() + key.dropFirst()] = String(effective)
+            settings["effective" + key.prefix(1).uppercased() + String(key.dropFirst())] = String(effective)
         }
         let thermalState = ProcessInfo.processInfo.thermalState
         switch thermalState {
