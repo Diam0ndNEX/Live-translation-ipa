@@ -23,7 +23,7 @@ memory = read("App/TranslationMemoryStore.swift")
 workflow = read(".github/workflows/build.yml")
 
 assert 'static let version = "1.9.7"' in shared
-assert "static let build = 79" in shared
+assert "static let build = 80" in shared
 assert project.count('"1.9.7"') == 3
 assert project.count('"79"') == 3
 
@@ -49,6 +49,9 @@ assert "guard !busy, queued == nil" in engine
 assert "if presentQueuedFromRAMIfComplete() { return }" in engine
 assert "SpeculativeSessionOwner" in engine
 
+assert "if units == other.units { return true }" in coordinator
+assert "if missing.count == 1 && allMissing.count == 1" in coordinator
+assert "if caption.keys.count == 1" in engine
 assert "SCREENLINGO_REFERENCE_CONFIRMED_PROBE" in coordinator
 assert "verifiedConfirmedMemory" in coordinator
 assert "verified.caption == caption" in coordinator
