@@ -416,6 +416,7 @@ actor DiagnosticExportWriter {
             "rapidTextTracking", "joinAdjacentText", "activeTextFocus",
             "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
             "thermalState", "performanceTier", "reductionReasons",
+            "hotPathAB", "hybridSchedulerAB",
             "appRequestedCaptureIntervalMs", "appRequestedCaptureEdgePx"
         ]
         let safeSettings = snapshot.settings.filter { pair in
