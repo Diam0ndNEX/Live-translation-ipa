@@ -118,6 +118,41 @@ final class Harness {
         precondition(nominalCaption == fairCaption &&
                      nominalCaption.policyCohort != fairCaption.policyCohort,
             "Serious protection changes scheduling evidence but not caption authority")
+        let referenceDecision = HybridSchedulingPolicy.matchingWait(variant: .reference195,
+            elapsed: 0.10, defaultSamples: [0.25, 0.25, 0.25, 0.25],
+            lowSamples: [0.04, 0.04, 0.04, 0.04], oldWait: 0.17, recentContention: 8)
+        precondition(abs(referenceDecision - 0.17) < 0.00001,
+            "Variant A must preserve v1.9.5 matching-deadline behavior")
+        let recoveryFirstDecision = HybridSchedulingPolicy.matchingWait(variant: .recoveryFirst,
+            elapsed: 0.10, defaultSamples: [0.25, 0.25, 0.25, 0.25],
+            lowSamples: [0.04, 0.04, 0.04, 0.04], oldWait: 0.17, recentContention: 8)
+        precondition(recoveryFirstDecision == referenceDecision,
+            "Variant B differs only in confirmed-demand admission, not result matching")
+        let fastRecovery = HybridSchedulingPolicy.matchingWait(variant: .evidenceBounded,
+            elapsed: 0.10, defaultSamples: [0.6, 0.6, 0.6, 0.6],
+            lowSamples: [0.04, 0.045, 0.05, 0.05], oldWait: 0.2, recentContention: 0)
+        precondition(fastRecovery == 0,
+            "A verified 40ms LL recovery must not wait for a distant 400ms+ speculative prediction")
+        let matchingFastDefault = HybridSchedulingPolicy.matchingWait(variant: .evidenceBounded,
+            elapsed: 0.10, defaultSamples: [0.25, 0.25, 0.25, 0.25],
+            lowSamples: [0.9, 1.2, 1.5, 1.5], oldWait: 0.05, recentContention: 5)
+        precondition(abs(matchingFastDefault - 0.15) < 0.00001,
+            "A matching 250ms Default request may finish before a costly contested LL request")
+        let boundedSlow = HybridSchedulingPolicy.matchingWait(variant: .evidenceBounded,
+            elapsed: 0.05, defaultSamples: [0.9, 1.2, 1.5, 1.5],
+            lowSamples: [0.9, 1.2, 1.5], oldWait: 0.05, recentContention: 8)
+        precondition(boundedSlow <= 0.58 && boundedSlow >= 0,
+            "Even 900-1500ms cross-strategy tails cannot create an indefinite wait")
+        let coldEvidence = HybridSchedulingPolicy.matchingWait(variant: .evidenceBounded,
+            elapsed: 0.05, defaultSamples: [], lowSamples: [],
+            oldWait: 0.18, recentContention: 0)
+        precondition(abs(coldEvidence - 0.18) < 0.00001,
+            "Cold/no-data scheduling must preserve bounded reference behavior")
+        let recoveringNoOverlap = HybridAdmissionPolicy()
+        var lastOverlap = recoveringNoOverlap
+        lastOverlap.recordRecovery(serviceMilliseconds: 1400, simultaneousMilliseconds: 100)
+        precondition(lastOverlap.admit(),
+            "A 1400ms recovery with only 100ms measured overlap cannot cause ungrounded backoff")
         var governor = HybridAdmissionPolicy()
         for _ in 0..<3 { precondition(governor.admit()); governor.record(used: false) }
         for _ in 0..<8 { precondition(!governor.admit()) }
