@@ -113,11 +113,12 @@ private func hybridTimeline(variant: HybridSchedulerVariant, matching: Bool,
     let defaultSubmittedAt = firstOCR + 100
     let confirmedAt = firstOCR + 200
     let defaultDone = defaultSubmittedAt + defaultMs
-    let remaining = HybridSchedulingPolicy.matchingWait(variant: variant,
+    // A mismatch is never eligible for the matching-Default deadline.
+    let remaining = matching ? HybridSchedulingPolicy.matchingWait(variant: variant,
         elapsed: (confirmedAt - defaultSubmittedAt) / 1000,
         defaultSamples: previousDefault.map { $0 / 1000 },
         lowSamples: previousLow.map { $0 / 1000 },
-        oldWait: oldWaitMs / 1000, recentContention: correlatedContention)
+        oldWait: oldWaitMs / 1000, recentContention: correlatedContention) : 0
     let recoveryAt = confirmedAt + remaining * 1000
     let overlapped = max(0, defaultDone - recoveryAt)
     let extra = overlapped > 0 ? overlapPenaltyMs : 0
@@ -210,7 +211,9 @@ private func hybridTimeline(variant: HybridSchedulerVariant, matching: Bool,
             defaultMs: 250, lowMs: 45, oldWaitMs: 50,
             previousDefault: [250, 250, 250, 250], previousLow: [45, 45, 45, 45],
             correlatedContention: 0, overlapPenaltyMs: 0)
-        precondition(corrected.selected == "confirmed_low_latency")
+        precondition(corrected.selected == "confirmed_low_latency" &&
+            corrected.startRecoveryAt == 200,
+            "Corrected OCR must start confirmed recovery immediately without waiting for obsolete Default")
 
         let cold = hybridTimeline(variant: .evidenceBounded, matching: true,
             defaultMs: 350, lowMs: 45, oldWaitMs: 100,
