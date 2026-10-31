@@ -25,7 +25,7 @@ workflow = read(".github/workflows/build.yml")
 assert 'static let version = "1.9.7"' in shared
 assert "static let build = 80" in shared
 assert project.count('"1.9.7"') == 3
-assert project.count('"79"') == 3
+assert project.count('"80"') == 3
 
 assert "SCREENLINGO_REFERENCE_CAPTURE_CADENCE" in capture
 assert "SubtitleAcquisitionPolicy.allowsEarlyVisualWake" in capture
