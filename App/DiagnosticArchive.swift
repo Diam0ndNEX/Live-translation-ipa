@@ -409,7 +409,11 @@ actor DiagnosticExportWriter {
             "deduplicateCopies", "contextualLanguage", "languageRecovery",
             "continuousRotation", "smartCool", "persistDiagnosticSessions",
             "diagSamples", "heartbeatInterval", "keepAwake", "suppressOwnInterface",
-            "temporaryMemoryTest", "translationTestMode", "startingRAMEntries"
+            "temporaryMemoryTest", "translationTestMode", "startingRAMEntries",
+            "rapidTextTracking", "joinAdjacentText", "activeTextFocus",
+            "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
+            "thermalState", "performanceTier", "reductionReasons",
+            "appRequestedCaptureIntervalMs", "appRequestedCaptureEdgePx"
         ]
         let safeSettings = snapshot.settings.filter { pair in
             settingsKeys.contains(pair.key) && pair.value.utf8.count <= 48 &&
@@ -903,6 +907,19 @@ enum DiagnosticIssueDetector {
            let median = enqueue.p50, median >= 1200 {
             add("enqueue_typical_latency", "suspected", enqueue.count,
                 "Typical OCR-to-PiP enqueue time is high, even if the slowest tail has improved.")
+        }
+        // Detect sustained expensive Hybrid recovery separately from physical
+        // overlap; the two values answer different performance questions.
+        let recovery = session.distributions["hybridOverlappedRecoveryMs"]
+        if let recovery, recovery.count >= 3, let p95 = recovery.p95, p95 >= 1000 {
+            add("hybrid_slow_recovery", "observed", recovery.count,
+                "At least three overlapping Hybrid recovery samples were recorded; full recovery P95 is >=1000ms. This is service time, not simultaneous model contention.")
+        }
+        let observedOverlap = session.translationModes?.counters["hybrid_cross_strategy_overlap"] ?? 0
+        let measuredOverlap = session.distributions["hybridMeasuredOverlapMs"]?.count ?? 0
+        if observedOverlap >= 3 && measuredOverlap == 0 {
+            add("hybrid_missing_overlap_measurement", "observed", observedOverlap,
+                "Hybrid cross-strategy overlap was reported but no physical-overlap duration was measured. Inspect backend telemetry.")
         }
         return findings
     }
