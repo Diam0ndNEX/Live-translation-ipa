@@ -170,7 +170,15 @@ for skipSetting in [true, false] {
         rapidTextTracking: true, pressure: false),
         "Visual wake must not depend on skipUnchanged=\(skipSetting)")
 }
-print("v1.9.8 physical drain, Legacy priority and skip-independent wake checks passed")
+check(SubtitleAcquisitionPolicy.mayProbeEarlyInWindow(count: 0, elapsedSeconds: 0.2),
+    "First early wake in a one-second interval must remain eligible")
+check(SubtitleAcquisitionPolicy.mayProbeEarlyInWindow(count: 1, elapsedSeconds: 0.4),
+    "Second early wake in a one-second interval must remain eligible")
+check(!SubtitleAcquisitionPolicy.mayProbeEarlyInWindow(count: 2, elapsedSeconds: 0.6),
+    "Background motion must not cause unlimited pre-cadence OCR")
+check(SubtitleAcquisitionPolicy.mayProbeEarlyInWindow(count: 2, elapsedSeconds: 1.0),
+    "A new one-second window must permit new early reads")
+print("v1.9.9 bounded optional wake budget and recovery spacing tests passed")
 
 let workKey = SharedTranslationWork.unitKey(source: "pt", target: "en", text: "Bom dia",
     protectedWords: ["5:Maria"], rules: "privacy-rules")

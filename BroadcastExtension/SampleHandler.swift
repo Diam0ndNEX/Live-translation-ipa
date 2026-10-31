@@ -45,6 +45,8 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var effectiveOCRIntervalMs = 0.0
     private var visualWakeCount = 0
     private var lastVisualWakeProbe = Date.distantPast
+    private var visualWakeWindowStart = Date.distantPast
+    private var visualWakeWindowCount = 0
     private var feedback = RecognitionFeedback()
     private var lastChanged = Date()
     private var lastRecognizedKey = ""
@@ -101,6 +103,8 @@ class SampleHandler: RPBroadcastSampleHandler {
             candidateKey = ""; sentKey = ""; specKey = ""; candidateCount = 0
             ocrSig = []; emptyReads.reset()
             lastVisualWakeProbe = .distantPast
+            visualWakeWindowStart = .distantPast
+            visualWakeWindowCount = 0
             tracker.reset(); candidateID = nil
         }
         lastOCRConfig = cfg
@@ -136,6 +140,9 @@ class SampleHandler: RPBroadcastSampleHandler {
             SubtitleAcquisitionPolicy.allowsEarlyVisualWake(
                 elapsed: elapsed, planned: interval, lastOCRMilliseconds: lastOcrMs,
                 rapidTextTracking: rapidText, pressure: pressure) &&
+            SubtitleAcquisitionPolicy.mayProbeEarlyInWindow(
+                count: visualWakeWindowCount,
+                elapsedSeconds: now.timeIntervalSince(visualWakeWindowStart)) &&
             now.timeIntervalSince(lastVisualWakeProbe) >= 0.065
         #endif
         guard ordinaryDue || mayProbeEarly else { cadenceSkipped += 1; return }
@@ -160,7 +167,14 @@ class SampleHandler: RPBroadcastSampleHandler {
             let comparable = !sig.isEmpty && sig.count == ocrSig.count
             let changed = comparable && SubtitleAcquisitionPolicy.changed(previous: ocrSig, current: sig)
             if mayProbeEarly && !changed { cadenceSkipped += 1; return }
-            if mayProbeEarly && changed { visualWakeCount += 1 }
+            if mayProbeEarly && changed {
+                if now.timeIntervalSince(visualWakeWindowStart) >= 1 {
+                    visualWakeWindowStart = now
+                    visualWakeWindowCount = 0
+                }
+                visualWakeWindowCount += 1
+                visualWakeCount += 1
+            }
             if comparable { feedback.motion = meanDiff(sig, ocrSig) }
             if changed { visualChanges += 1; lastVisualChangeAt = now }
             if (cfg.skipUnchanged ?? true), candidateCount == 0,

@@ -221,6 +221,22 @@ enum HybridSchedulingPolicy {
         return 0.45
     }
 
+    /// iPhone traces show many 900ms confirmed LL calls beginning less than
+    /// 150ms after a Default call returned, even with no logical overlap.
+    /// A bounded pair-specific settling interval is an experiment, not a
+    /// claim about Apple's internal scheduling or processor allocation.
+    /// Never block standalone Low Latency, Legacy, or a cold/unknown pair.
+    static func postDefaultSettlement(variant: HybridSchedulerVariant,
+                                      millisecondsSinceReturn: Double?) -> Double {
+        #if SCREENLINGO_REFERENCE_HYBRID_EXIT_SETTLING
+        return 0
+        #else
+        guard variant != .reference195, let age = millisecondsSinceReturn,
+              age.isFinite, age >= 0, age < 220 else { return 0 }
+        return min(0.22, max(0, (220 - age) / 1000))
+        #endif
+    }
+
     static func matchingWait(variant: HybridSchedulerVariant,
                              elapsed: Double, defaultSamples: [Double],
                              lowSamples: [Double], oldWait: Double,
