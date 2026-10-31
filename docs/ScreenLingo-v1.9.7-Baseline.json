@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "readme": "Immutable, user-supplied observational device baselines. Individual captions within a session are correlated; not paired trials.",
+  "measurement_endpoint": "first recognized OCR sighting to PiP buffer enqueue, not visible display",
+  "hardware": "iPhone18,2",
+  "os": "iOS 27.0.1",
+  "language_pair": "pt>en",
+  "speed": "Balanced",
+  "preset": "Movie",
+  "memory": "Temporary Memory",
+  "diagnostics": "detailed",
+  "thermal": "nominal",
+  "builds": {
+    "1.9.6": {
+      "build": 78,
+      "commit": "3721d616ce4dbfd2dc7891d4f968c83efbe8da26",
+      "CI_run": 41166347423,
+      "legacy": {
+        "n": 92,
+        "p50_ms": 543.5,
+        "p95_ms": 918.6,
+        "ocr_p50_ms": 115.5,
+        "confirmation_p50_ms": 114.4,
+        "spec_model_p50_ms": 240.9,
+        "confirmed_model_p50_ms": 303.5,
+        "queue_p50_ms": 13.7,
+        "queue_p95_ms": 393.4,
+        "adaptive_skips": 70,
+        "spec_units_reused": 43,
+        "confirmed_batches": 66,
+        "archive": "ScreenLingo-Diagnostics-2026-10-31T04-26-11Z-133A298B.zip"
+      },
+      "hybrid": {
+        "n": 83,
+        "p50_ms": 530.1,
+        "p95_ms": 1068.2,
+        "ocr_p50_ms": 115.1,
+        "confirmation_p50_ms": 127.5,
+        "spec_model_p50_ms": 308.9,
+        "confirmed_model_p50_ms": 396.1,
+        "confirmed_model_p95_ms": 1053.5,
+        "confirmed_model_n": 50,
+        "recorded_admission_overlap": 0,
+        "spec_units_reused": 59,
+        "archive": "ScreenLingo-Diagnostics-2026-10-31T04-32-18Z-7AB8162F.zip"
+      },
+      "low_latency": {
+        "n": 86,
+        "p50_ms": 248.1,
+        "p95_ms": 440.3,
+        "ocr_p50_ms": 120.9,
+        "confirmation_p50_ms": 134.2,
+        "confirmation_to_pip_p50_ms": 28.6,
+        "model_ready_to_pip_p50_ms": 1.2,
+        "spec_model_p50_ms": 42.1,
+        "spec_model_p95_ms": 59.2,
+        "spec_model_n": 168,
+        "plan_build_p50_ms": 0.2,
+        "plan_reuse_hits": 12,
+        "plan_observations_approx": 401,
+        "archive": "ScreenLingo-Diagnostics-2026-10-31T04-45-41Z-E56444F4.zip"
+      }
+    },
+    "1.9.5": {
+      "legacy": {
+        "p50_ms": 498,
+        "p95_ms": 871,
+        "adaptive_skips": 33,
+        "spec_units_reused": 57
+      },
+      "hybrid": {
+        "p50_ms": 677,
+        "p95_ms": 1374
+      },
+      "low_latency": {
+        "p50_ms": 249,
+        "p95_ms": 461
+      }
+    }
+  },
+  "historical_uncontrolled": {
+    "hybrid_v1_9_2": {
+      "p50_ms": 355,
+      "p95_ms": 539
+    },
+    "low_latency_v1_9_1": {
+      "p50_ms": 230,
+      "p95_ms": 433
+    }
+  },
+  "acceptance_targets": {
+    "legacy": {
+      "p50_ms": 475,
+      "p95_ms": 850
+    },
+    "hybrid": {
+      "p50_ms": 450,
+      "p95_ms": 850
+    },
+    "low_latency": {
+      "p50_ms": 225,
+      "p95_ms": 410
+    }
+  },
+  "v1_9_7_device_trials": {
+    "legacy": [],
+    "hybrid": [],
+    "low_latency": []
+  },
+  "status": "NOT YET DEVICE VALIDATED; all three objectives UNVERIFIED"
+}
