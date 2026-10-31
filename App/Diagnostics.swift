@@ -751,6 +751,8 @@ final class Diagnostics: ObservableObject {
         @unknown default: settings["thermalState"] = "unknown"
         }
         settings["performanceTier"] = ThermalPerformancePolicy.tier(for: thermalState).rawValue
+        settings["hotPathAB"] = TranslationHotPathAB.label
+        settings["hybridSchedulerAB"] = HybridSchedulingPolicy.buildVariant.rawValue
         settings["reductionReasons"] = captureReductionReasons.joined(separator: "_")
         settings["appRequestedCaptureIntervalMs"] = String(requestedCaptureIntervalMs)
         settings["appRequestedCaptureEdgePx"] = String(requestedCaptureEdgePx)
