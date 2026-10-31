@@ -159,6 +159,9 @@ struct Stats {
     var specModelRequests = 0
     var specStarted = 0, specCompleted = 0, specDiscarded = 0, specSkipped = 0
     var adaptiveSpeculationSkipped = 0, confirmedHandoffDeferred = 0
+    var legacyAdaptiveLowYieldSkips = 0, legacyAdaptiveSavedSkips = 0
+    var legacyLowConfidenceSkips = 0, legacyBusySpeculationSkips = 0
+    var legacyDuplicateSpeculationSkips = 0
     var slowTailEnqueues = 0
     var specPreemptionRequested = 0, specMatchingConfirmation = 0
     var specRetainedUnits = 0
@@ -783,6 +786,11 @@ final class Diagnostics: ObservableObject {
         counters["queueReplacements"] = s.queueReplacements
         counters["visualChanges"] = s.visualChanges
         counters["earlyVisualWakes"] = s.earlyVisualWakes
+        counters["legacyAdaptiveLowYieldSkips"] = s.legacyAdaptiveLowYieldSkips
+        counters["legacyAdaptiveSavedSkips"] = s.legacyAdaptiveSavedSkips
+        counters["legacyLowConfidenceSkips"] = s.legacyLowConfidenceSkips
+        counters["legacyBusySpeculationSkips"] = s.legacyBusySpeculationSkips
+        counters["legacyDuplicateSpeculationSkips"] = s.legacyDuplicateSpeculationSkips
         counters["emptyOCRPasses"] = s.emptyOCRPasses
         var currentHealth = memoryHealth
         currentHealth.ramEntries = ramEntryCount?() ?? memoryHealth.ramEntries
@@ -1241,6 +1249,11 @@ final class Diagnostics: ObservableObject {
             "earlyDeferred": s.deferredEarlyCandidates,
             "handoffDeferred": s.confirmedHandoffDeferred,
             "adaptiveSpeculationSkipped": s.adaptiveSpeculationSkipped,
+            "legacyAdaptiveLowYieldSkips": s.legacyAdaptiveLowYieldSkips,
+            "legacyAdaptiveSavedSkips": s.legacyAdaptiveSavedSkips,
+            "legacyLowConfidenceSkips": s.legacyLowConfidenceSkips,
+            "legacyBusySpeculationSkips": s.legacyBusySpeculationSkips,
+            "legacyDuplicateSpeculationSkips": s.legacyDuplicateSpeculationSkips,
             "slowTailEnqueues": s.slowTailEnqueues,
             "legacyBatchEntries": s.legacyBatchEntries,
             "legacyBatchVerified": s.legacyBatchVerified,
