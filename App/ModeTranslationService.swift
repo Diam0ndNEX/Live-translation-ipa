@@ -390,7 +390,10 @@ final class ModeTranslationService {
                     try? await Task.sleep(nanoseconds: 4_000_000_000)
                     guard !Task.isCancelled, !completed else { return }
                     lane.invalidated = true; lane.sharedDefaultLease.requestCancellation(); session.cancel()
-                    if warmup, lane.cancellationAt == nil { lane.cancellationAt = ProcessInfo.processInfo.systemUptime; report("cancellation_requested") }
+                    if lane.cancellationAt == nil {
+                        lane.cancellationAt = ProcessInfo.processInfo.systemUptime
+                        report("cancellation_requested")
+                    }
                     self.activity.advance(activityID, to: .cancelling)
                     report("model_timeout", nil)
                     finish(nil)
@@ -458,7 +461,10 @@ final class ModeTranslationService {
             Task { @MainActor in
                 guard lane.ticket == ticket, lane.busy else { return }
                 lane.invalidated = true; lane.sharedDefaultLease.requestCancellation(); session.cancel()
-                if warmup, lane.cancellationAt == nil { lane.cancellationAt = ProcessInfo.processInfo.systemUptime; report("cancellation_requested") }
+                if lane.cancellationAt == nil {
+                        lane.cancellationAt = ProcessInfo.processInfo.systemUptime
+                        report("cancellation_requested")
+                    }
                 self.activity.advance(activityID, to: .cancelling)
             }
         })
