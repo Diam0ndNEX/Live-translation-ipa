@@ -306,6 +306,7 @@ final class ThreeModeCoordinator {
     private(set) var current: ModeCaption?
     private var committed: ModeCaption?
     private var memoryProbePending: ModeCaption?
+    private var verifiedConfirmedMemory: (caption: ModeCaption, hits: [String?])?
     private var confirmation: Task<Void, Never>?
     private var deadline: Task<Void, Never>?
     private var speculation: Task<Void, Never>?
@@ -357,7 +358,8 @@ final class ThreeModeCoordinator {
         speculationTicket = UUID()
         speculation = nil
         confirmation = nil; deadline = nil
-        current = nil; committed = nil; memoryProbePending = nil; speculativeCaption = nil; speculativeOutput = nil
+        current = nil; committed = nil; memoryProbePending = nil; verifiedConfirmedMemory = nil
+        speculativeCaption = nil; speculativeOutput = nil
         speculativeEligible = false; speculativeModelSubmitted = false
         // The speculative task clears its occupied slot only after completion.
         recoveryStarted = false
@@ -423,7 +425,8 @@ final class ThreeModeCoordinator {
             speculativeEligible = false
             event(caption, "speculation_superseded_before_confirmation", nil)
         }
-        current = caption; committed = nil; memoryProbePending = caption; recoveryStarted = false
+        current = caption; committed = nil; memoryProbePending = caption
+        verifiedConfirmedMemory = nil; recoveryStarted = false
         // Obsolete Hybrid work loses display authority without cancelling its
         // warmed backend session. Only one physical call may occupy each lane.
         if system != .hybridRecovery {
@@ -439,6 +442,10 @@ final class ThreeModeCoordinator {
             let hits = await self.lookupValues(caption)
             guard !Task.isCancelled, self.current == caption else { return }
             self.memoryProbePending = nil
+            // The exact confirmed memory probe already produced this result.
+            // Recoveries and fallback must not perform a second identical
+            // SQLite round trip after confirmed OCR has been validated.
+            self.verifiedConfirmedMemory = (caption, hits)
             if hits.allSatisfy({ $0 != nil }) {
                 self.commit(caption, ModeOutput(values: hits.compactMap { $0 }, strategies: hits.map { _ in nil },
                     origins: hits.map { _ in "compatible_memory" }), "memory_hit")
@@ -545,7 +552,19 @@ final class ThreeModeCoordinator {
 
     private func resolve(_ caption: ModeCaption, strategy: RequestedTranslationStrategy, speculative: Bool) async -> ModeOutput? {
         let workEpoch = cacheEpoch
-        var values = await lookupValues(caption)
+        let valuesFromProbe: [String?]
+        #if SCREENLINGO_REFERENCE_CONFIRMED_PROBE
+        valuesFromProbe = await lookupValues(caption)
+        #else
+        if !speculative, let verified = verifiedConfirmedMemory,
+           verified.caption == caption, verified.hits.count == caption.units.count {
+            valuesFromProbe = verified.hits
+            event(caption, "confirmed_memory_probe_reused", nil)
+        } else {
+            valuesFromProbe = await lookupValues(caption)
+        }
+        #endif
+        var values = valuesFromProbe
         var origins = values.map { $0 == nil ? "fresh" : "compatible_memory" }
         var strategies: [RequestedTranslationStrategy?] = values.map { _ in nil }
         if allowsReuse {
