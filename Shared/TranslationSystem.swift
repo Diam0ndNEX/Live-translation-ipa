@@ -174,6 +174,17 @@ enum HybridSchedulerVariant: String {
 }
 
 enum HybridSchedulingPolicy {
+    /// These are build-time reference variants, not user-facing modes.
+    static var buildVariant: HybridSchedulerVariant {
+        #if SCREENLINGO_HYBRID_REFERENCE
+        return .reference195
+        #elseif SCREENLINGO_HYBRID_RECOVERY_FIRST
+        return .recoveryFirst
+        #else
+        return .evidenceBounded
+        #endif
+    }
+
     /// The expected gain is a bounded reduction of LL/Default cross-lane
     /// contention, not a claim of independent Apple inference hardware.
     static func matchingWait(variant: HybridSchedulerVariant,
@@ -274,7 +285,7 @@ final class ThreeModeCoordinator {
     var system: TranslationSystem = .legacy
     var allowsReuse = true
     var adaptiveHybrid = true
-    var hybridVariant: HybridSchedulerVariant = .evidenceBounded
+    var hybridVariant: HybridSchedulerVariant = HybridSchedulingPolicy.buildVariant
     var fastRecoveryInstalled = true
     var hybridSpeculationPermitted: () -> Bool = { true }
     var coldSpeculationCeiling = 0.7
