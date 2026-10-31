@@ -398,6 +398,10 @@ final class TranslatorEngine: ObservableObject {
     private var modeModelTimings: [String: ModeModelTiming] = [:]
     private var modeConfirmationUptime: [String: Double] = [:]
     private var modeResultReadyUptime: [String: Double] = [:]
+    // Hash only once per full capture-session/caption revision. The trace
+    // never exports OCR text or an unhashed fingerprint. This removes repeated
+    // SHA-256 and hex formatting from the high-frequency LL/Hybrid event path.
+    private var modeFingerprintDigests: [String: String] = [:]
     private func modeModelKey(_ caption: ModeCaption) -> String {
         caption.session.uuidString + "|" + caption.caption + "|" + String(caption.revision)
     }
@@ -554,10 +558,27 @@ final class TranslatorEngine: ObservableObject {
         if caption.session == modeSessionID, reason == "hybrid_default_fallback" {
             modeAvailability = "Fast recovery unavailable; using Apple default for this caption"
         }
-        diag.noteModeEvent(session: caption.session, caption: caption.caption, revision: caption.revision,
-            source: caption.source, target: caption.target,
-            fingerprint: SHA256.hash(data: Data(caption.fingerprint.utf8)).map { String(format: "%02x", $0) }.joined(),
-            reason: reason, firstOCR: caption.firstOCR, duration: duration, mode: caption.system?.rawValue)
+        // Diagnostics can be disabled without paying the SHA-256 work for
+        // every request phase; while enabled, reuse the same privacy-safe digest
+        // for every stage of this exact caption revision.
+        if diag.enabled {
+            let key = modeModelKey(caption)
+            let fingerprint: String
+            if let cached = modeFingerprintDigests[key] {
+                fingerprint = cached
+            } else {
+                fingerprint = SHA256.hash(data: Data(caption.fingerprint.utf8))
+                    .map { String(format: "%02x", $0) }.joined()
+                if modeFingerprintDigests.count >= 256 {
+                    modeFingerprintDigests.removeAll(keepingCapacity: true)
+                }
+                modeFingerprintDigests[key] = fingerprint
+            }
+            diag.noteModeEvent(session: caption.session, caption: caption.caption, revision: caption.revision,
+                source: caption.source, target: caption.target,
+                fingerprint: fingerprint, reason: reason, firstOCR: caption.firstOCR,
+                duration: duration, mode: caption.system?.rawValue)
+        }
     }
 
     private func handleModeCaption(_ blocks: [String], packet: Packet) {
@@ -1387,6 +1408,7 @@ final class TranslatorEngine: ObservableObject {
         interruptWarmupForLiveWork()
         modeSessionID = UUID(); modeLastIdentity = ""; modePlans.removeAll(); modeMemoryOrigins.removeAll()
         modePreparedPlans.clear(); preparedUnits.clear()
+        modeFingerprintDigests.removeAll(keepingCapacity: true)
         modeModelTimings.removeAll()
         if modeDiagnosticEpochs.count >= 64 { modeDiagnosticEpochs.removeAll() }
         modeDiagnosticEpochs[modeSessionID] = diag.started
