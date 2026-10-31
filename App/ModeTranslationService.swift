@@ -345,7 +345,17 @@ final class ModeTranslationService {
             }
             return nil
         }
-        // Availability suspended; recheck the lease before acquiring it.
+        // Availability suspended. The original admission decision is not a
+        // reservation to execute Default later: confirmed LL demand can begin
+        // while LanguageAvailability is awaiting its result. Only the H0
+        // reference variant preserves v1.9.5's late admission behavior.
+        if caption.system == .hybridRecovery && speculation &&
+           strategy == .appleDefault &&
+           HybridSchedulingPolicy.buildVariant != .reference195 &&
+           hasConfirmedLowLatencyDemand {
+            report("hybrid_speculation_yielded_to_confirmed", nil)
+            return nil
+        }
         guard !lane.busy, eligibleToStart() else {
             report("backend_stale_request_dropped", nil)
             return nil
