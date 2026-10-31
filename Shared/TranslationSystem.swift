@@ -136,7 +136,21 @@ struct ModeCaption: Equatable {
     let keys: [String]
     let firstOCR: Double
     var fingerprint: String { ConfirmedSourceIdentity.normalize(text) }
-    var policyCohort: String { "\(source)>\(target)|thermal\(thermal)" }
+    var policyCohort: String {
+        let tier = thermal <= 1 ? "full_performance" : (thermal == 2 ? "protected" : "emergency")
+        return "\(source)>\(target)|tier\(tier)"
+    }
+
+    /// Temperature is observation metadata, not a candidate identity boundary.
+    /// A nominal/fair transition must not invalidate an active translation.
+    static func == (lhs: Self, rhs: Self) -> Bool {
+        lhs.system == rhs.system && lhs.session == rhs.session &&
+        lhs.caption == rhs.caption && lhs.revision == rhs.revision &&
+        lhs.source == rhs.source && lhs.target == rhs.target &&
+        lhs.rules == rhs.rules && lhs.text == rhs.text &&
+        lhs.units == rhs.units && lhs.keys == rhs.keys &&
+        lhs.firstOCR == rhs.firstOCR
+    }
     func matches(_ other: Self) -> Bool {
         system == other.system && session == other.session && caption == other.caption && source == other.source &&
         target == other.target && rules == other.rules && fingerprint == other.fingerprint &&
