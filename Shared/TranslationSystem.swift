@@ -152,8 +152,13 @@ struct ModeCaption: Equatable {
         lhs.firstOCR == rhs.firstOCR
     }
     func matches(_ other: Self) -> Bool {
-        system == other.system && session == other.session && caption == other.caption && source == other.source &&
-        target == other.target && rules == other.rules && fingerprint == other.fingerprint &&
+        // OCR whitespace normalization is safe only when the actual ordered
+        // translation inputs AND exact context keys are unchanged. A settings
+        // revision or new unit split cannot inherit an older speculative model
+        // result even when the visually normalized caption text looks equal.
+        system == other.system && session == other.session && caption == other.caption &&
+        revision == other.revision && source == other.source && target == other.target &&
+        rules == other.rules && keys == other.keys && fingerprint == other.fingerprint &&
         units.map(ConfirmedSourceIdentity.normalize) == other.units.map(ConfirmedSourceIdentity.normalize)
     }
 }
