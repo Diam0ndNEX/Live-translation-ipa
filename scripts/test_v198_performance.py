@@ -66,7 +66,7 @@ assert "verifiedConfirmedMemory" in coordinator
 assert "verified.caption == caption" in coordinator
 assert "verified.hits.count == caption.units.count" in coordinator
 assert "confirmed_memory_probe_reused" in coordinator
-assert "SCREENLINGO_REFERENCE_HYBRID_PREFLIGHT" in coordinator
+assert "physicalDrainBudget" in coordinator
 assert "hybrid_unsubmitted_hedge_ms" in coordinator
 assert "hybridVariant" in coordinator
 assert "hybrid_default_fallback" in coordinator
@@ -91,9 +91,9 @@ assert "earlyVisualWakes" in archive
 assert "hybrid_unsubmitted_hedge_ms" in archive
 assert "legacyAdaptiveLowYieldSkips" in archive
 assert "CREATE TABLE" in memory
-assert "codex/screenlingo-v1.9.8-three-mode-gains" in workflow
+assert "codex/screenlingo-v1.9.8-three-mode-performance" in workflow
 assert "codex/screenlingo-v1.9.6-hybrid-contention" in workflow
-assert "Verify v1.9.8 isolated three-mode performance contract" in workflow
+assert "Verify v1.9.8 three-mode regression contract" in workflow
 
 print("v1.9.8 nominal/fair, custom preset, exact-lane and A/B wiring contract passed")
 
