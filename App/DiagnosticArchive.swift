@@ -201,7 +201,11 @@ struct TranslationModeReport: Codable {
         "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
         "hybrid_speculation_unexecuted",
         "hybrid_speculation_backend_busy", "hybrid_speculation_yielded_to_confirmed",
-        "hybrid_matching_wait_ms", "mode_plan_reused_ms", "mode_plan_built_ms",
+        "hybrid_matching_wait_ms", "hybrid_unsubmitted_hedge_ms",
+        "confirmed_memory_probe_reused", "backend_apple_call_entered", "backend_apple_call_returned",
+        "hybrid_previous_default_exit_gap_ms", "hybrid_recovery_post_default_service_ms",
+        "hybrid_recovery_no_recent_overlap_service_ms", "hybrid_unexplained_slow_recovery_ms",
+        "mode_plan_reused_ms", "mode_plan_built_ms",
         "mode_commit_to_pip_ms", "mode_confirmation_to_pip_ms", "mode_ready_to_pip_ms",
         "mode_trace_ring_overwritten",
         "strategy_cache_hit_appleDefault", "strategy_cache_hit_lowLatency",
@@ -296,7 +300,10 @@ struct TranslationModeReport: Codable {
             "backend_installed_cache_hit", "backend_lane_wait_ms", "backend_lane_admission_rejected",
             "backend_stale_request_dropped", "backend_session_age_ms", "backend_session_reuse_count",
             "speculative_queue_ms", "recovery_queue_ms", "model_batch_completed",
-            "cancelled_call_returned", "mode_trace_ring_overwritten"
+            "cancelled_call_returned", "mode_trace_ring_overwritten",
+            "confirmed_memory_probe_reused", "hybrid_unsubmitted_hedge_ms",
+            "hybrid_previous_default_exit_gap_ms", "hybrid_recovery_post_default_service_ms",
+            "hybrid_recovery_no_recent_overlap_service_ms", "hybrid_unexplained_slow_recovery_ms"
         ]
         for reason in sessionReasons {
             if let count = counters[reason], count >= 0 {
