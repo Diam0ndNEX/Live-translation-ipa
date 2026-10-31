@@ -174,6 +174,14 @@ enum HybridSchedulerVariant: String {
 }
 
 enum HybridSchedulingPolicy {
+    /// Admission must be validated again after any asynchronous availability
+    /// check. H0 faithfully preserves the old physical-call admission; H1/H2
+    /// yield unstarted Apple Default work to already-demanded confirmed LL.
+    static func maySubmitDefaultAfterAvailability(variant: HybridSchedulerVariant,
+                                                   confirmedDemand: Bool) -> Bool {
+        variant == .reference195 || !confirmedDemand
+    }
+
     /// These are build-time reference variants, not user-facing modes.
     static var buildVariant: HybridSchedulerVariant {
         #if SCREENLINGO_HYBRID_REFERENCE
