@@ -18,6 +18,7 @@ final class ModeTranslationService {
         var createdAt: Double?
         var lastFinishedAt: Double?
         var completedCalls = 0
+        var sharedDefaultLease = AppleDefaultLeaseState()
     }
     private var hostedIsSpeculative = false
     private var hostedTask: Task<[String]?, Never>?
@@ -25,6 +26,7 @@ final class ModeTranslationService {
     var activityChanged: ((TranslationBackendActivity) -> Void)?
     private var activity = TranslationBackendActivity() { didSet { activityChanged?(activity) } }
     private var generation = 0
+    private var confirmedDemand = 0
     private var preparationRevision = 0
     private let speculative = Lane()
     private let confirmed = Lane()
@@ -33,7 +35,7 @@ final class ModeTranslationService {
     private var recentlyInstalled: [String: Double] = [:]
     /// Logical lane occupancy, not a claim of physical model residency.
     var mayAdmitHybridSpeculation: Bool {
-        !speculative.busy && !confirmed.busy && !warmupLane.busy && hostedTask == nil
+        !speculative.busy && !confirmed.busy && confirmedDemand == 0 && !warmupLane.busy && hostedTask == nil
     }
     private let installedCheckTTL: Double = 30
     var warmupEvent: ((InitialWarmupEvent) -> Void)?
@@ -57,6 +59,7 @@ final class ModeTranslationService {
                 if let caption = lane.caption { event?(caption, "cancellation_requested", nil) }
             }
             lane.invalidated = true
+            lane.sharedDefaultLease.requestCancellation()
             if let id = lane.activityID { activity.advance(id, to: .cancelling) }
             lane.session?.cancel()
         }
@@ -82,6 +85,7 @@ final class ModeTranslationService {
         hostedTask?.cancel()
         if let id = hostedActivityID { activity.advance(id, to: .cancelling) }
         for lane in [speculative, confirmed, warmupLane] {
+            lane.sharedDefaultLease.reset()
             if preserveIdleSessions, lane !== warmupLane, !lane.busy, !lane.invalidated { continue }
             if #available(iOS 26.0, *) { lane.session?.cancel() }
             lane.invalidated = true
@@ -229,6 +233,9 @@ final class ModeTranslationService {
                     strategy: strategy, phase: phase, monotonicTime: ProcessInfo.processInfo.systemUptime, durationMs: duration))
             } else { self.event?(caption, reason, duration) }
         }
+        let tracksConfirmedDemand = !warmup && !speculation && strategy == .lowLatency
+        if tracksConfirmedDemand { confirmedDemand += 1 }
+        defer { if tracksConfirmedDemand { confirmedDemand = max(0, confirmedDemand - 1) } }
         let activityID = activity.begin(kind: warmup ? .warmup : (speculation ? .speculative : .confirmed),
             source: caption.source, target: caption.target, strategy: strategy, stage: .waitingForSlot)
         var heldByActualCall = false
@@ -341,6 +348,14 @@ final class ModeTranslationService {
         if competingDefault { report("hybrid_cross_strategy_overlap", nil) }
         install(lane, source: source, target: target, strategy: strategy)
         guard let session = lane.session else { return nil }
+        let sharedDefaultTicket: UUID?
+        if speculation && strategy == .appleDefault && !warmup {
+            guard let lease = lane.sharedDefaultLease.begin() else {
+                report("backend_lane_admission_rejected", nil)
+                return nil
+            }
+            sharedDefaultTicket = lease
+        } else { sharedDefaultTicket = nil }
         lane.busy = true; lane.ticket = UUID(); lane.caption = caption; lane.cancellationAt = nil
         lane.activityID = activityID; heldByActualCall = true
         lane.requestedStrategy = strategy
@@ -366,7 +381,7 @@ final class ModeTranslationService {
                 let timeout = Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 4_000_000_000)
                     guard !Task.isCancelled, !completed else { return }
-                    lane.invalidated = true; session.cancel()
+                    lane.invalidated = true; lane.sharedDefaultLease.requestCancellation(); session.cancel()
                     if warmup, lane.cancellationAt == nil { lane.cancellationAt = ProcessInfo.processInfo.systemUptime; report("cancellation_requested") }
                     self.activity.advance(activityID, to: .cancelling)
                     report("model_timeout", nil)
@@ -407,6 +422,10 @@ final class ModeTranslationService {
                         report("hybrid_simultaneous_model_overlap_ms", overlapMs)
                     }
                     if lane.ticket == ticket {
+                        if let sharedDefaultTicket,
+                           !lane.sharedDefaultLease.finish(sharedDefaultTicket, successful: output != nil) {
+                            lane.invalidated = true
+                        }
                         lane.lastFinishedAt = finishedAt
                         if let cancelled = lane.cancellationAt {
                             report("cancelled_call_returned", (ProcessInfo.processInfo.systemUptime - cancelled) * 1000)
@@ -430,7 +449,7 @@ final class ModeTranslationService {
         }, onCancel: {
             Task { @MainActor in
                 guard lane.ticket == ticket, lane.busy else { return }
-                lane.invalidated = true; session.cancel()
+                lane.invalidated = true; lane.sharedDefaultLease.requestCancellation(); session.cancel()
                 if warmup, lane.cancellationAt == nil { lane.cancellationAt = ProcessInfo.processInfo.systemUptime; report("cancellation_requested") }
                 self.activity.advance(activityID, to: .cancelling)
             }
