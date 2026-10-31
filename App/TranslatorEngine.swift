@@ -808,6 +808,7 @@ final class TranslatorEngine: ObservableObject {
     private var directKey = ""
     private var clearTask: Task<Void, Never>?
     private var tickCount = 0
+    private var lastThermalSyncState: ProcessInfo.ThermalState?
     private var toastToken = 0
     // Translation speed system
     private var specQueued: [String]?
@@ -1014,6 +1015,13 @@ final class TranslatorEngine: ObservableObject {
         captureReadiness.tick(at: ProcessInfo.processInfo.systemUptime)
         publishCaptureStatus()
         let alive = Date().timeIntervalSince(lastPacketDate) < 5
+        let thermalState = ProcessInfo.processInfo.thermalState
+        if lastThermalSyncState != thermalState {
+            lastThermalSyncState = thermalState
+            // Restore full capture policy promptly after serious/critical
+            // without touching active translation sessions or persistent memory.
+            if alive { syncConfig() }
+        }
         if captureAlive && !alive {
             status = "Capture stopped – iOS may have closed the capture extension. Tap the broadcast icon again (try Speed: Fast)."
             diag.log("Capture stopped")
