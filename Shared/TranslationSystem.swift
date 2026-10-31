@@ -653,10 +653,18 @@ final class ThreeModeCoordinator {
                 lowService[cohort, default: []].append(duration)
                 lowService[cohort] = Array(lowService[cohort, default: []].suffix(32))
             }
-            for (position, index) in missing.enumerated() {
-                for duplicate in allMissing where caption.keys[duplicate] == caption.keys[index] {
-                    values[duplicate] = result[position]; strategies[duplicate] = strategy
-                    origins[duplicate] = speculative ? "speculation" : "recovery"
+            if missing.count == 1 && allMissing.count == 1 {
+                // The common single-unresolved-unit case needs no duplicate-key scan.
+                let index = allMissing[0]
+                values[index] = result[0]
+                strategies[index] = strategy
+                origins[index] = speculative ? "speculation" : "recovery"
+            } else {
+                for (position, index) in missing.enumerated() {
+                    for duplicate in allMissing where caption.keys[duplicate] == caption.keys[index] {
+                        values[duplicate] = result[position]; strategies[duplicate] = strategy
+                        origins[duplicate] = speculative ? "speculation" : "recovery"
+                    }
                 }
             }
         }
