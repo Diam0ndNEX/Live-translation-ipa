@@ -1205,7 +1205,13 @@ final class TranslatorEngine: ObservableObject {
         }
         let intelligentCool = flag("coolMode", false) && flag("smartCool", true)
         if !intelligentCool { interval = runtimePolicy.captureInterval(interval) }
-        if diag.enabled { diag.s.rotation = effectiveRot }
+        if diag.enabled {
+            diag.s.rotation = effectiveRot
+            diag.noteCapturePolicy(edge: maxEdge, interval: interval,
+                coolMode: flag("coolMode", false),
+                memoryPressure: extFreeMB > 0 && extFreeMB < 12,
+                workloadPressure: busy && queued != nil)
+        }
         server.send(Config(lang: SourceLanguageRouter.captureLanguage(selected: sourceCode, locked: lockedLang), y0: r.lowerBound, y1: r.upperBound,
                            maxEdge: maxEdge, interval: interval, paused: paused || manualMode,
                            stability: int("stability", 2), rot: effectiveRot, rev: rotRev,
