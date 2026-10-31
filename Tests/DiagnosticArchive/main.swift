@@ -286,9 +286,14 @@ import Foundation
                      hybridArchive.settings["effectiveActiveTextFocus"] == "true" &&
                      hybridArchive.settings["glossary"] == nil,
             "Effective thermal and custom-preset values must survive privacy filtering")
-        var absentOverlapEvidence = hybridEvidence
-        absentOverlapEvidence.distributions = [
-            "hybridOverlappedRecoveryMs": DiagnosticDistribution([1010, 1150, 1209])]
+        let absentOverlapEvidence = DiagnosticSessionExport(
+            translationModes: hybridEvidence.translationModes,
+            id: UUID(), startedAt: Date(), endedAt: Date(),
+            appVersion: "1.9.5", systemVersion: "test",
+            settings: [:], health: MemoryDiagnosticHealth(), counters: [:],
+            distributions: [
+                "hybridOverlappedRecoveryMs": DiagnosticDistribution([1010, 1150, 1209])],
+            events: [], measurementBoundary: "OCR through PiP enqueue", textCapture: false)
         precondition(DiagnosticIssueDetector.assess(absentOverlapEvidence).contains {
             $0.code == "hybrid_missing_overlap_measurement" && $0.occurrences == 6
         }, "Repeated overlap events without timings must generate a diagnostic finding")
