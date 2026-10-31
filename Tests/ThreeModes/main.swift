@@ -87,6 +87,21 @@ final class Harness {
             variant: .evidenceBounded, submitted: true, fastRecoveryInstalled: true,
             proposed: 0.4) == 0.4,
             "Already-running matching Default retains bounded winner opportunity")
+        #if SCREENLINGO_REFERENCE_HYBRID_EXIT_SETTLING
+        precondition(HybridSchedulingPolicy.postDefaultSettlement(
+            variant: .evidenceBounded, millisecondsSinceReturn: 0) == 0)
+        #else
+        precondition(HybridSchedulingPolicy.postDefaultSettlement(
+            variant: .evidenceBounded, millisecondsSinceReturn: 0) == 0.22)
+        precondition(HybridSchedulingPolicy.postDefaultSettlement(
+            variant: .evidenceBounded, millisecondsSinceReturn: 100) == 0.12)
+        precondition(HybridSchedulingPolicy.postDefaultSettlement(
+            variant: .evidenceBounded, millisecondsSinceReturn: 250) == 0)
+        #endif
+        precondition(HybridSchedulingPolicy.postDefaultSettlement(
+            variant: .reference195, millisecondsSinceReturn: 0) == 0)
+        precondition(HybridSchedulingPolicy.postDefaultSettlement(
+            variant: .evidenceBounded, millisecondsSinceReturn: nil) == 0)
         precondition(HybridSchedulingPolicy.physicalDrainBudget(
             variant: .evidenceBounded, speculativeActive: true) == 0.45)
         precondition(HybridSchedulingPolicy.physicalDrainBudget(

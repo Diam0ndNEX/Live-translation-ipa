@@ -319,7 +319,8 @@ final class ModeTranslationService {
         let source = Locale.Language(identifier: caption.source), target = Locale.Language(identifier: caption.target)
         activity.advance(activityID, to: .checkingLanguages)
         let languageCheckStart = ProcessInfo.processInfo.systemUptime
-        let availabilityKey = "\(source.minimalIdentifier)>\(target.minimalIdentifier)|\(strategy.rawValue)"
+        let languagePairKey = "\(source.minimalIdentifier)>\(target.minimalIdentifier)"
+        let availabilityKey = languagePairKey + "|\(strategy.rawValue)"
         let pairAvailability: LanguageAvailability.Status
         if let verifiedAt = recentlyInstalled[availabilityKey],
            languageCheckStart - verifiedAt < installedCheckTTL {
@@ -393,19 +394,46 @@ final class ModeTranslationService {
                 }
             }
         }
+        // Both model strategies belong to the same language pair. Comparing
+        // strategy-suffixed availability keys incorrectly classified every
+        // post-Default LL request as having no recent Default completion.
+        let samePairDefaultReturn = speculative.requestedStrategy == .appleDefault &&
+            speculative.lastFinishedPair == languagePairKey
+        let gapBeforeSettlement: Double?
+        if caption.system == .hybridRecovery, !speculation, strategy == .lowLatency,
+           samePairDefaultReturn, let previousFinished = speculative.lastFinishedAt {
+            let elapsed = (ProcessInfo.processInfo.systemUptime - previousFinished) * 1000
+            gapBeforeSettlement = elapsed.isFinite && elapsed >= 0 && elapsed <= 1500 ? elapsed : nil
+        } else { gapBeforeSettlement = nil }
+        if let gapBeforeSettlement {
+            report("hybrid_previous_default_exit_gap_ms", gapBeforeSettlement)
+            let proposed = HybridSchedulingPolicy.postDefaultSettlement(
+                variant: HybridSchedulingPolicy.buildVariant,
+                millisecondsSinceReturn: gapBeforeSettlement)
+            if proposed > 0 {
+                let settlingStarted = ProcessInfo.processInfo.systemUptime
+                // A new speculative request can enter while this task yields;
+                // never treat an old elapsed-time calculation as a lease.
+                try? await Task.sleep(nanoseconds: UInt64(proposed * 1_000_000_000))
+                guard !Task.isCancelled, eligibleToStart() else {
+                    report("backend_stale_request_dropped", nil)
+                    return nil
+                }
+                report("hybrid_post_default_settlement_wait_ms",
+                       (ProcessInfo.processInfo.systemUptime - settlingStarted) * 1000)
+            }
+        }
+        // A different Default request can start during the bounded settling
+        // wait. Revalidate physical occupation instead of trusting old state.
+        if caption.system == .hybridRecovery && !speculation && strategy == .lowLatency &&
+           speculative.busy && speculative.requestedStrategy == .appleDefault {
+            report("hybrid_default_reentered_during_settlement", nil)
+        }
         let warm = lane.session != nil && !lane.invalidated && lane.key == "\(caption.source)>\(caption.target)|\(strategy.rawValue)"
         let competingDefault = caption.system == .hybridRecovery && !speculation && strategy == .lowLatency &&
             speculative.busy && speculative.requestedStrategy == .appleDefault
-        let previousDefaultGap: Double?
-        if caption.system == .hybridRecovery, !speculation, strategy == .lowLatency,
-           !competingDefault, speculative.requestedStrategy == .appleDefault,
-           speculative.lastFinishedPair == availabilityKey,
-           let previousFinished = speculative.lastFinishedAt {
-            let elapsed = ProcessInfo.processInfo.systemUptime - previousFinished
-            previousDefaultGap = elapsed >= 0 && elapsed <= 1.5 ? elapsed * 1000 : nil
-        } else { previousDefaultGap = nil }
+        let previousDefaultGap: Double? = competingDefault ? nil : gapBeforeSettlement
         if competingDefault { report("hybrid_cross_strategy_overlap", nil) }
-        if let previousDefaultGap { report("hybrid_previous_default_exit_gap_ms", previousDefaultGap) }
         install(lane, source: source, target: target, strategy: strategy)
         guard let session = lane.session else { return nil }
         let sharedDefaultTicket: UUID?
@@ -470,6 +498,7 @@ final class ModeTranslationService {
                     report("backend_apple_call_returned", serviceMs)
                     if let previousDefaultGap {
                         report("hybrid_recovery_post_default_service_ms", serviceMs)
+                        if serviceMs >= 800 { report("hybrid_slow_post_default_ms", serviceMs) }
                     } else if caption.system == .hybridRecovery && !speculation &&
                               strategy == .lowLatency && !competingDefault {
                         report("hybrid_recovery_no_recent_overlap_service_ms", serviceMs)
@@ -501,7 +530,7 @@ final class ModeTranslationService {
                             lane.invalidated = true
                         }
                         lane.lastFinishedAt = finishedAt
-                        lane.lastFinishedPair = availabilityKey
+                        lane.lastFinishedPair = languagePairKey
                         if let cancelled = lane.cancellationAt {
                             report("cancelled_call_returned", (ProcessInfo.processInfo.systemUptime - cancelled) * 1000)
                         }

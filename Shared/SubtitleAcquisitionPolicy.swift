@@ -32,6 +32,15 @@ enum SubtitleAcquisitionPolicy {
         return elapsed >= earliest && elapsed < planned
     }
 
+    /// Per-second cap for optional pre-cadence probes; never affects the
+    /// ordinary requested OCR cadence or independent confirmation reads.
+    /// Reduces excess OCR caused by full-screen video motion triggering many
+    /// visual wakes without new subtitle text.
+    static func mayProbeEarlyInWindow(count: Int, elapsedSeconds: Double) -> Bool {
+        elapsedSeconds.isFinite && elapsedSeconds >= 0 &&
+            (elapsedSeconds >= 1 || count < 2)
+    }
+
     /// A global mean alone can overlook a short text change in a largely static frame.
     /// Sparse high-contrast sample changes are a second signal, never a reason to skip OCR.
     static func changed(previous: [UInt8], current: [UInt8]) -> Bool {
