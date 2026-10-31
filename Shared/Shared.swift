@@ -2,8 +2,8 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.9.4"
-    static let build = 76
+    static let version = "1.9.5"
+    static let build = 77
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
