@@ -637,6 +637,28 @@ final class Harness {
             revision: c.revision, source: c.source, target: c.target, rules: c.rules,
             text: "I do not\nhave 10 cats.", units: c.units, keys: c.keys, firstOCR: c.firstOCR)
         precondition(c.matches(whitespaceSameWork))
+        // Raw identical unit strings must take the allocation-free match path.
+        precondition(c.matches(c))
+        let normalizedUnit = ModeCaption(session: c.session, caption: c.caption,
+            revision: c.revision, source: c.source, target: c.target, rules: c.rules,
+            text: c.text, units: ["I do not\nhave 10 cats."],
+            keys: c.keys, firstOCR: c.firstOCR)
+        precondition(c.matches(normalizedUnit),
+            "Whitespace-only unit changes retain identical exact-key work")
+        let changedUnit = ModeCaption(session: c.session, caption: c.caption,
+            revision: c.revision, source: c.source, target: c.target, rules: c.rules,
+            text: c.text, units: ["I do not have 20 cats."],
+            keys: c.keys, firstOCR: c.firstOCR)
+        precondition(!c.matches(changedUnit),
+            "Matching caption text cannot hide changed translation inputs")
+        let unicodeBase = ModeCaption(session: c.session, caption: c.caption,
+            revision: c.revision, source: c.source, target: c.target, rules: c.rules,
+            text: "Café", units: ["Café"], keys: ["unicode-exact-key"], firstOCR: c.firstOCR)
+        let unicodeVariant = ModeCaption(session: c.session, caption: c.caption,
+            revision: c.revision, source: c.source, target: c.target, rules: c.rules,
+            text: "Cafe\u{301}", units: ["Cafe\u{301}"], keys: ["unicode-exact-key"], firstOCR: c.firstOCR)
+        precondition(unicodeBase.matches(unicodeVariant),
+            "Canonical Unicode equivalents retain existing matching semantics")
         precondition(!c.matches(norm.caption("I do not\nhave 10 cats.")),
             "Different exact unit keys must block speculative output")
         precondition(!c.matches(norm.caption(revision: 2)),

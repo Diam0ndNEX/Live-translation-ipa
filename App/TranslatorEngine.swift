@@ -688,6 +688,35 @@ final class TranslatorEngine: ObservableObject {
         let bank = ram, context = contextRevision
         let canReadPersistent = allowsPersistentTranslations && memoryReady &&
             flag("remember", true) && !flag("privateSession", false)
+        // Most live subtitles have exactly one translation unit. Resolve that
+        // directly without allocating duplicate-key maps/sets, while retaining
+        // the identical RAM -> SQLite -> fresh ordering and all invalidation
+        // checks. Multi-unit captions continue through the existing path.
+        if caption.keys.count == 1 {
+            guard context == contextRevision, caption.session == modeSessionID else {
+                return [nil]
+            }
+            let key = caption.keys[0]
+            if let hit = bank.values[key] {
+                if modeMemoryOrigins.count >= 3000 { modeMemoryOrigins.removeAll() }
+                let saved = bank.savedKeys.contains(key)
+                modeMemoryOrigins[key] = saved ? "saved_ram" : "ram"
+                noteModeEvent(caption, reason: saved ? "memory_saved_ram_hit" : "memory_session_hit", duration: nil)
+                return [hit]
+            }
+            guard canReadPersistent else { return [nil] }
+            let hit = await memoryStore.lookup(key: key)
+            guard context == contextRevision, caption.session == modeSessionID else {
+                return [nil]
+            }
+            guard let value = hit.value else { return [nil] }
+            if modeMemoryOrigins.count >= 3000 { modeMemoryOrigins.removeAll() }
+            modeMemoryOrigins[key] = hit.outcome == "normalized_hit" ? "normalized" : hit.origin
+            let origin = hit.origin == "legacy" ? "memory_legacy_hit" :
+                (hit.origin == "normalized" ? "memory_normalized_hit" : "memory_persistent_hit")
+            noteModeEvent(caption, reason: origin, duration: hit.durationMs)
+            return [value]
+        }
         var output: [String?] = []
         output.reserveCapacity(caption.keys.count)
         // Repeated subtitle units share one identity. Never perform duplicate
