@@ -102,7 +102,7 @@ assert "earlyVisualWakes" in archive
 assert "hybrid_unsubmitted_hedge_ms" in archive
 assert "legacyAdaptiveLowYieldSkips" in archive
 assert "CREATE TABLE" in memory
-assert "codex/screenlingo-v1.9.9-three-mode-performance" in workflow
+assert "codex/screenlingo-v1.9.9-recovery-evidence" in workflow
 assert "codex/screenlingo-v1.9.6-hybrid-contention" in workflow
 assert "Verify v1.9.9 three-mode regression contract" in workflow
 
