@@ -45,6 +45,12 @@ jobs:
         run: |
           swiftc -parse-as-library Shared/SharedTranslationWork.swift Shared/TranslationSystem.swift Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/HotPathAB/main.swift -o /tmp/screenlingo-v196-timed-tests
           /tmp/screenlingo-v196-timed-tests
+      - name: Compile isolated reference Hybrid and confirmed-probe variants
+        run: |
+          swiftc -parse-as-library -D SCREENLINGO_REFERENCE_CONFIRMED_PROBE -D SCREENLINGO_REFERENCE_HYBRID_PREFLIGHT -D SCREENLINGO_HYBRID_REFERENCE Shared/SharedTranslationWork.swift Shared/TranslationSystem.swift Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/HotPathAB/main.swift -o /tmp/screenlingo-v197-reference-tests
+          /tmp/screenlingo-v197-reference-tests
+          swiftc -parse-as-library -D SCREENLINGO_HYBRID_RECOVERY_FIRST Shared/SharedTranslationWork.swift Shared/TranslationSystem.swift Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/HotPathAB/main.swift -o /tmp/screenlingo-v197-recovery-first-tests
+          /tmp/screenlingo-v197-recovery-first-tests
       - name: Verify three-mode diagnostics live routing
         run: python3 scripts/test_mode_diagnostics_ui.py
       - name: Verify performance acceptance gate
