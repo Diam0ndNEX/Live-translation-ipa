@@ -188,9 +188,18 @@ struct HybridAdmissionPolicy {
         }
     }
 
-    mutating func overlappingRecovery(milliseconds: Double) {
-        guard milliseconds.isFinite, milliseconds >= 350 else { return }
-        skipped = max(skipped, 12)
+    /// Recovery service includes time after speculation has finished. Never
+    /// treat the entire service duration as proof of simultaneous contention.
+    /// Repeated wasted requests are handled independently by record(used:).
+    mutating func recordRecovery(serviceMilliseconds: Double, simultaneousMilliseconds: Double) {
+        guard serviceMilliseconds.isFinite, simultaneousMilliseconds.isFinite,
+              serviceMilliseconds > 0, simultaneousMilliseconds >= 0 else { return }
+        let actualOverlap = min(serviceMilliseconds, simultaneousMilliseconds)
+        guard actualOverlap >= 350,
+              actualOverlap / serviceMilliseconds >= 0.25 else { return }
+        // Bound admission backoff; leave periodic opportunities to re-evaluate
+        // whether Apple Default is once again useful for the current scene.
+        skipped = max(skipped, actualOverlap >= 600 ? 12 : 4)
         consecutiveWaste = 0
     }
 }
@@ -410,9 +419,10 @@ final class ThreeModeCoordinator {
         speculativeModelSubmitted = true
     }
 
-    func noteOverlappingRecovery(_ milliseconds: Double) {
+    func noteOverlappingRecovery(serviceMilliseconds: Double, simultaneousMilliseconds: Double) {
         guard system == .hybridRecovery, adaptiveHybrid else { return }
-        hybridAdmission.overlappingRecovery(milliseconds: milliseconds)
+        hybridAdmission.recordRecovery(serviceMilliseconds: serviceMilliseconds,
+                                       simultaneousMilliseconds: simultaneousMilliseconds)
     }
 
     private func scoreSpeculation(for caption: ModeCaption, useful: Bool) {
