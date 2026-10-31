@@ -201,10 +201,14 @@ enum HybridSchedulingPolicy {
     static func preflightWait(variant: HybridSchedulerVariant, submitted: Bool,
                               fastRecoveryInstalled: Bool, proposed: Double) -> Double {
         guard proposed.isFinite else { return 0 }
+        #if SCREENLINGO_REFERENCE_HYBRID_PREFLIGHT
+        return max(0, proposed)
+        #else
         guard variant != .reference195, fastRecoveryInstalled, !submitted else {
             return max(0, proposed)
         }
         return min(0.025, max(0, proposed))
+        #endif
     }
 
     static func matchingWait(variant: HybridSchedulerVariant,
