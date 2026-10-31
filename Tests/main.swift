@@ -35,6 +35,30 @@ check(segmentation.count == 0, "Explicit RAM clear must drop temporary segmentat
 print("Bounded segmentation cache regression checks passed")
 print("Pipeline regression checks passed")
 
+let workKey = SharedTranslationWork.unitKey(source: "pt", target: "en", text: "Bom dia",
+    protectedWords: ["5:Maria"], rules: "privacy-rules")
+check(workKey == PipelineSafety.cacheKey(source: "pt", target: "en", text: "Bom dia",
+    protectedWords: ["5:Maria"], rules: "privacy-rules"),
+    "Shared Legacy/Hybrid planning must preserve persisted exact context key bytes")
+check(workKey != SharedTranslationWork.unitKey(source: "pt", target: "en", text: "Bom dia",
+    protectedWords: ["5:Maria"], rules: "changed-rules"),
+    "Different language rules cannot silently share speculative memory")
+check(SharedTranslationWork.unresolvedIndices(keys: ["a","b","a","c"],
+    values: [nil, "already stored", nil, nil]) == [0,3],
+    "Shared work planner must submit one request per distinct missing unit")
+check(SharedTranslationWork.unresolvedIndices(keys: ["a"], values: []) == nil,
+    "Malformed model plans must be rejected before inference")
+let workEpoch = UUID()
+check(SharedTranslationWork.mayReuse(workEpoch: workEpoch, currentEpoch: workEpoch,
+    requestedCancellation: false, compatibleContext: true),
+    "Completed same-epoch work may populate compatible volatile cache")
+check(!SharedTranslationWork.mayReuse(workEpoch: workEpoch, currentEpoch: UUID(),
+    requestedCancellation: false, compatibleContext: true) &&
+      !SharedTranslationWork.mayReuse(workEpoch: workEpoch, currentEpoch: workEpoch,
+    requestedCancellation: true, compatibleContext: true),
+    "Cancelled or reset work cannot refill a different capture generation")
+
+
 let firstHalf = OCRLine(t: "Olá meu amigo", x: 0.30, y: 0.20, h: 0.03, w: 0.30)
 let secondHalf = OCRLine(t: "como você está?", x: 0.62, y: 0.201, h: 0.03, w: 0.30)
 let subtitle = OCRGrouping.makeBlocks([secondHalf, firstHalf], joinAdjacentText: true)
