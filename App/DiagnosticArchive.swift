@@ -911,9 +911,11 @@ enum DiagnosticIssueDetector {
         // Detect sustained expensive Hybrid recovery separately from physical
         // overlap; the two values answer different performance questions.
         let recovery = session.distributions["hybridOverlappedRecoveryMs"]
-        if let recovery, recovery.count >= 3, let p95 = recovery.p95, p95 >= 1000 {
+        if let recovery, recovery.count >= 3,
+           let measured = recovery.p95 ?? recovery.p50, measured >= 1000 {
+            let statistic = recovery.p95 == nil ? "median" : "P95"
             add("hybrid_slow_recovery", "observed", recovery.count,
-                "At least three overlapping Hybrid recovery samples were recorded; full recovery P95 is >=1000ms. This is service time, not simultaneous model contention.")
+                "Hybrid full recovery \(statistic) is >=1000ms over \(recovery.count) observed samples. Percentiles below 20 samples are unavailable; these are service durations, not simultaneous model occupancy.")
         }
         let observedOverlap = session.translationModes?.counters["hybrid_cross_strategy_overlap"] ?? 0
         let measuredOverlap = session.distributions["hybridMeasuredOverlapMs"]?.count ?? 0
