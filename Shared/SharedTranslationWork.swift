@@ -8,8 +8,10 @@ enum SharedTranslationWork {
     @inline(__always)
     static func unitKey(source: String, target: String, text: String,
                         protectedWords: [String], rules: String) -> String {
-        PipelineSafety.cacheKey(source: source, target: target, text: text,
-                                protectedWords: protectedWords, rules: rules)
+        let context = protectedWords.map { "\($0.utf8.count):\($0)" }.joined()
+        let version = protectedWords.isEmpty ? "v2" : "v3"
+        if !rules.isEmpty { return "v4|\(rules)|\(source)>\(target)|\(context.utf8.count):\(context)|\(text)" }
+        return "\(version)|\(source)>\(target)|\(context.utf8.count):\(context)|\(text)"
     }
 
     /// One model request per distinct unresolved exact-context unit, retaining
