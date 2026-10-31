@@ -104,6 +104,20 @@ final class Harness {
         resetRace.reply(1, ["Valid new-session response"])
         await resetRace.settle()
         resetRace.coordinator.reset()
+        let sameSession = UUID()
+        let nominalCaption = ModeCaption(system: .hybridRecovery, thermal: 0, session: sameSession,
+            caption: "candidate", revision: 1, source: "pt", target: "en", rules: "r",
+            text: "Bom dia", units: ["Bom dia"], keys: ["key"], firstOCR: 7.0)
+        var fairCaption = nominalCaption
+        fairCaption.thermal = 1
+        precondition(nominalCaption == fairCaption && nominalCaption.matches(fairCaption),
+            "Nominal/fair transitions cannot revoke an otherwise identical translation")
+        precondition(nominalCaption.policyCohort == fairCaption.policyCohort,
+            "Nominal and fair must share adaptive model scheduling evidence")
+        fairCaption.thermal = 2
+        precondition(nominalCaption == fairCaption &&
+                     nominalCaption.policyCohort != fairCaption.policyCohort,
+            "Serious protection changes scheduling evidence but not caption authority")
         var governor = HybridAdmissionPolicy()
         for _ in 0..<3 { precondition(governor.admit()); governor.record(used: false) }
         for _ in 0..<8 { precondition(!governor.admit()) }
