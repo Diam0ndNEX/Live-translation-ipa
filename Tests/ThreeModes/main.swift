@@ -118,6 +118,17 @@ final class Harness {
         precondition(nominalCaption == fairCaption &&
                      nominalCaption.policyCohort != fairCaption.policyCohort,
             "Serious protection changes scheduling evidence but not caption authority")
+        precondition(HybridSchedulingPolicy.maySubmitDefaultAfterAvailability(
+            variant: .reference195, confirmedDemand: true),
+            "H0 must preserve v1.9.5 late physical admission for comparison")
+        for variant in [HybridSchedulerVariant.recoveryFirst, .evidenceBounded] {
+            precondition(!HybridSchedulingPolicy.maySubmitDefaultAfterAvailability(
+                variant: variant, confirmedDemand: true),
+                "H1/H2 must yield unstarted Apple Default after LL demand begins")
+            precondition(HybridSchedulingPolicy.maySubmitDefaultAfterAvailability(
+                variant: variant, confirmedDemand: false),
+                "H1/H2 may still speculate without confirmed LL demand")
+        }
         let referenceDecision = HybridSchedulingPolicy.matchingWait(variant: .reference195,
             elapsed: 0.10, defaultSamples: [0.25, 0.25, 0.25, 0.25],
             lowSamples: [0.04, 0.04, 0.04, 0.04], oldWait: 0.17, recentContention: 8)
