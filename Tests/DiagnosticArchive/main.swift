@@ -297,6 +297,23 @@ import Foundation
         precondition(DiagnosticIssueDetector.assess(absentOverlapEvidence).contains {
             $0.code == "hybrid_missing_overlap_measurement" && $0.occurrences == 6
         }, "Repeated overlap events without timings must generate a diagnostic finding")
+        let fallbackCounters: [String: Int] = [
+            "hybrid_default_fallback": 5, "recovery_decision_source_mismatch": 12]
+        let fallbackEvidence = DiagnosticSessionExport(
+            translationModes: TranslationModeReport(active: "hybridRecovery",
+                pending: "hybridRecovery", referenceSHA: String(repeating: "0", count: 40),
+                migration: "persisted", events: [], distributions: [:], counters: fallbackCounters),
+            id: UUID(), startedAt: Date(), endedAt: Date(),
+            appVersion: "1.9.6", systemVersion: "test",
+            settings: [:], health: MemoryDiagnosticHealth(), counters: [:],
+            distributions: ["confirmedModelMs": DiagnosticDistribution(
+                Array(repeating: 80.0, count: 17) + [1050, 1220, 1500])],
+            events: [], measurementBoundary: "OCR through PiP enqueue", textCapture: false)
+        let fallbackFindings = DiagnosticIssueDetector.assess(fallbackEvidence)
+        precondition(fallbackFindings.contains { $0.code == "hybrid_confirmed_long_tail" },
+            "Hybrid confirmed model tail must not require an overlap-at-admission tag")
+        precondition(fallbackFindings.contains { $0.code == "hybrid_fallback_storm" },
+            "Repeated fast-pack failures must generate a thresholded finding")
         let safeContinuity = try await writer.decode(try await writer.encode(continuityEvidence))
         precondition(safeContinuity.settings["lowLatencyTranslation"] == "true" &&
                      safeContinuity.settings["directPiPBuffer"] == "false",
