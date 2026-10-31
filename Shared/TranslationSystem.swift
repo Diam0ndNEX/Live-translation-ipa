@@ -152,8 +152,13 @@ struct ModeCaption: Equatable {
         lhs.firstOCR == rhs.firstOCR
     }
     func matches(_ other: Self) -> Bool {
-        system == other.system && session == other.session && caption == other.caption && source == other.source &&
-        target == other.target && rules == other.rules && fingerprint == other.fingerprint &&
+        // OCR whitespace normalization is safe only when the actual ordered
+        // translation inputs AND exact context keys are unchanged. A settings
+        // revision or new unit split cannot inherit an older speculative model
+        // result even when the visually normalized caption text looks equal.
+        system == other.system && session == other.session && caption == other.caption &&
+        revision == other.revision && source == other.source && target == other.target &&
+        rules == other.rules && keys == other.keys && fingerprint == other.fingerprint &&
         units.map(ConfirmedSourceIdentity.normalize) == other.units.map(ConfirmedSourceIdentity.normalize)
     }
 }
@@ -195,6 +200,22 @@ enum HybridSchedulingPolicy {
 
     /// The expected gain is a bounded reduction of LL/Default cross-lane
     /// contention, not a claim of independent Apple inference hardware.
+    /// Do not spend the full matching deadline waiting for work that has not
+    /// entered Apple's model. A small bounded grace protects a forthcoming
+    /// complete cached response; real confirmed LL remains independent.
+    static func preflightWait(variant: HybridSchedulerVariant, submitted: Bool,
+                              fastRecoveryInstalled: Bool, proposed: Double) -> Double {
+        guard proposed.isFinite else { return 0 }
+        #if SCREENLINGO_REFERENCE_HYBRID_PREFLIGHT
+        return max(0, proposed)
+        #else
+        guard variant != .reference195, fastRecoveryInstalled, !submitted else {
+            return max(0, proposed)
+        }
+        return min(0.025, max(0, proposed))
+        #endif
+    }
+
     static func matchingWait(variant: HybridSchedulerVariant,
                              elapsed: Double, defaultSamples: [Double],
                              lowSamples: [Double], oldWait: Double,
@@ -306,6 +327,7 @@ final class ThreeModeCoordinator {
     private(set) var current: ModeCaption?
     private var committed: ModeCaption?
     private var memoryProbePending: ModeCaption?
+    private var verifiedConfirmedMemory: (caption: ModeCaption, hits: [String?])?
     private var confirmation: Task<Void, Never>?
     private var deadline: Task<Void, Never>?
     private var speculation: Task<Void, Never>?
@@ -357,7 +379,8 @@ final class ThreeModeCoordinator {
         speculationTicket = UUID()
         speculation = nil
         confirmation = nil; deadline = nil
-        current = nil; committed = nil; memoryProbePending = nil; speculativeCaption = nil; speculativeOutput = nil
+        current = nil; committed = nil; memoryProbePending = nil; verifiedConfirmedMemory = nil
+        speculativeCaption = nil; speculativeOutput = nil
         speculativeEligible = false; speculativeModelSubmitted = false
         // The speculative task clears its occupied slot only after completion.
         recoveryStarted = false
@@ -423,7 +446,8 @@ final class ThreeModeCoordinator {
             speculativeEligible = false
             event(caption, "speculation_superseded_before_confirmation", nil)
         }
-        current = caption; committed = nil; memoryProbePending = caption; recoveryStarted = false
+        current = caption; committed = nil; memoryProbePending = caption
+        verifiedConfirmedMemory = nil; recoveryStarted = false
         // Obsolete Hybrid work loses display authority without cancelling its
         // warmed backend session. Only one physical call may occupy each lane.
         if system != .hybridRecovery {
@@ -439,6 +463,10 @@ final class ThreeModeCoordinator {
             let hits = await self.lookupValues(caption)
             guard !Task.isCancelled, self.current == caption else { return }
             self.memoryProbePending = nil
+            // The exact confirmed memory probe already produced this result.
+            // Recoveries and fallback must not perform a second identical
+            // SQLite round trip after confirmed OCR has been validated.
+            self.verifiedConfirmedMemory = (caption, hits)
             if hits.allSatisfy({ $0 != nil }) {
                 self.commit(caption, ModeOutput(values: hits.compactMap { $0 }, strategies: hits.map { _ in nil },
                     origins: hits.map { _ in "compatible_memory" }), "memory_hit")
@@ -449,7 +477,18 @@ final class ThreeModeCoordinator {
                 if self.speculation != nil && !self.speculativeFailed {
                     self.event(caption, "speculation_match_unfinished", nil)
                     // LL shares the original request. A hung request has a same-strategy deadline.
-                    let wait = self.system == .lowLatency ? max(0, self.matchingLowLatencyDeadline - (self.clock() - self.speculativeStarted)) : self.remainingWait(caption)
+                    let wait: Double
+                    if self.system == .lowLatency {
+                        wait = max(0, self.matchingLowLatencyDeadline - (self.clock() - self.speculativeStarted))
+                    } else {
+                        let ordinary = self.remainingWait(caption)
+                        wait = HybridSchedulingPolicy.preflightWait(
+                            variant: self.hybridVariant,
+                            submitted: self.speculativeModelSubmitted,
+                            fastRecoveryInstalled: self.fastRecoveryInstalled,
+                            proposed: ordinary)
+                        if wait < ordinary { self.event(caption, "hybrid_unsubmitted_hedge_ms", wait * 1000) }
+                    }
                     self.deadline = Task { [weak self] in
                         try? await Task.sleep(nanoseconds: UInt64(max(0, wait) * 1_000_000_000))
                         guard let self, !Task.isCancelled, self.current == caption, self.committed != caption else { return }
@@ -545,7 +584,19 @@ final class ThreeModeCoordinator {
 
     private func resolve(_ caption: ModeCaption, strategy: RequestedTranslationStrategy, speculative: Bool) async -> ModeOutput? {
         let workEpoch = cacheEpoch
-        var values = await lookupValues(caption)
+        let valuesFromProbe: [String?]
+        #if SCREENLINGO_REFERENCE_CONFIRMED_PROBE
+        valuesFromProbe = await lookupValues(caption)
+        #else
+        if !speculative, let verified = verifiedConfirmedMemory,
+           verified.caption == caption, verified.hits.count == caption.units.count {
+            valuesFromProbe = verified.hits
+            event(caption, "confirmed_memory_probe_reused", nil)
+        } else {
+            valuesFromProbe = await lookupValues(caption)
+        }
+        #endif
+        var values = valuesFromProbe
         var origins = values.map { $0 == nil ? "fresh" : "compatible_memory" }
         var strategies: [RequestedTranslationStrategy?] = values.map { _ in nil }
         if allowsReuse {

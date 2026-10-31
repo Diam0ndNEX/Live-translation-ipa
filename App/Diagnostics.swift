@@ -159,6 +159,9 @@ struct Stats {
     var specModelRequests = 0
     var specStarted = 0, specCompleted = 0, specDiscarded = 0, specSkipped = 0
     var adaptiveSpeculationSkipped = 0, confirmedHandoffDeferred = 0
+    var legacyAdaptiveLowYieldSkips = 0, legacyAdaptiveSavedSkips = 0
+    var legacyLowConfidenceSkips = 0, legacyBusySpeculationSkips = 0
+    var legacyDuplicateSpeculationSkips = 0
     var slowTailEnqueues = 0
     var specPreemptionRequested = 0, specMatchingConfirmation = 0
     var specRetainedUnits = 0
@@ -174,7 +177,7 @@ struct Stats {
     var confirmedCandidatePackets = 0, deferredEarlyCandidates = 0
     var supersededUnpresentedConfirmed = 0, enqueuedCandidateFrames = 0
     var movieSelections = 0, movieTemporalOverrides = 0, movieRejectedSmall = 0
-    var queueReplacements = 0, visualChanges = 0, emptyOCRPasses = 0
+    var queueReplacements = 0, visualChanges = 0, earlyVisualWakes = 0, emptyOCRPasses = 0
     var firstSightVisualChangeLagMs = 0.0
     var effectiveOCRIntervalMs = 0.0
 }
@@ -782,6 +785,12 @@ final class Diagnostics: ObservableObject {
         counters["movieRejectedSmall"] = s.movieRejectedSmall
         counters["queueReplacements"] = s.queueReplacements
         counters["visualChanges"] = s.visualChanges
+        counters["earlyVisualWakes"] = s.earlyVisualWakes
+        counters["legacyAdaptiveLowYieldSkips"] = s.legacyAdaptiveLowYieldSkips
+        counters["legacyAdaptiveSavedSkips"] = s.legacyAdaptiveSavedSkips
+        counters["legacyLowConfidenceSkips"] = s.legacyLowConfidenceSkips
+        counters["legacyBusySpeculationSkips"] = s.legacyBusySpeculationSkips
+        counters["legacyDuplicateSpeculationSkips"] = s.legacyDuplicateSpeculationSkips
         counters["emptyOCRPasses"] = s.emptyOCRPasses
         var currentHealth = memoryHealth
         currentHealth.ramEntries = ramEntryCount?() ?? memoryHealth.ramEntries
@@ -827,7 +836,12 @@ final class Diagnostics: ObservableObject {
                 "modeCommitToPiPMs": DiagnosticDistribution(modeTimingSamples["mode_commit_to_pip_ms", default: []]),
                 "modeConfirmationToPiPMs": DiagnosticDistribution(modeTimingSamples["mode_confirmation_to_pip_ms", default: []]),
                 "modeReadyToPiPMs": DiagnosticDistribution(modeTimingSamples["mode_ready_to_pip_ms", default: []]),
-                "hybridMatchingWaitMs": DiagnosticDistribution(modeTimingSamples["hybrid_matching_wait_ms", default: []])],
+                "hybridMatchingWaitMs": DiagnosticDistribution(modeTimingSamples["hybrid_matching_wait_ms", default: []]),
+                "hybridUnsubmittedHedgeMs": DiagnosticDistribution(modeTimingSamples["hybrid_unsubmitted_hedge_ms", default: []]),
+                "hybridPreviousDefaultExitGapMs": DiagnosticDistribution(modeTimingSamples["hybrid_previous_default_exit_gap_ms", default: []]),
+                "hybridPostDefaultRecoveryServiceMs": DiagnosticDistribution(modeTimingSamples["hybrid_recovery_post_default_service_ms", default: []]),
+                "hybridNoOverlapRecoveryServiceMs": DiagnosticDistribution(modeTimingSamples["hybrid_recovery_no_recent_overlap_service_ms", default: []]),
+                "hybridUnexplainedSlowRecoveryMs": DiagnosticDistribution(modeTimingSamples["hybrid_unexplained_slow_recovery_ms", default: []])],
             events: exportEventWindow(),
             intervals: diagnosticIntervals(at: Date()),
             oneSecondIntervals: detailedCollection ? recentIntervals(at: Date(), period: 1) : nil,
@@ -1082,6 +1096,7 @@ final class Diagnostics: ObservableObject {
         s.emptyReads = p.emptyReads ?? s.emptyReads
         s.retryCount = p.retryCount ?? s.retryCount
         s.visualChanges = p.visualChanges ?? s.visualChanges
+        s.earlyVisualWakes = p.earlyVisualWakes ?? s.earlyVisualWakes
         s.emptyOCRPasses = p.totalEmptyOCRPasses ?? s.emptyOCRPasses
         s.effectiveOCRIntervalMs = p.effectiveOCRIntervalMs ?? s.effectiveOCRIntervalMs
         if let first = p.firstSeenAt, let visual = p.lastVisualChangeAt,
@@ -1234,6 +1249,11 @@ final class Diagnostics: ObservableObject {
             "earlyDeferred": s.deferredEarlyCandidates,
             "handoffDeferred": s.confirmedHandoffDeferred,
             "adaptiveSpeculationSkipped": s.adaptiveSpeculationSkipped,
+            "legacyAdaptiveLowYieldSkips": s.legacyAdaptiveLowYieldSkips,
+            "legacyAdaptiveSavedSkips": s.legacyAdaptiveSavedSkips,
+            "legacyLowConfidenceSkips": s.legacyLowConfidenceSkips,
+            "legacyBusySpeculationSkips": s.legacyBusySpeculationSkips,
+            "legacyDuplicateSpeculationSkips": s.legacyDuplicateSpeculationSkips,
             "slowTailEnqueues": s.slowTailEnqueues,
             "legacyBatchEntries": s.legacyBatchEntries,
             "legacyBatchVerified": s.legacyBatchVerified,
@@ -2707,12 +2727,14 @@ private struct DiagnosticsBody: View {
             Text("Speculative jobs · admitted \(s.specStarted) · ready \(s.specCompleted) · failed \(s.specDiscarded) · declined \(s.specSkipped)").font(.footnote)
             if engine.activeTranslationSystem == .legacy {
                 Text("Spec throttled \(s.adaptiveSpeculationSkipped) · confirmed handoffs \(s.confirmedHandoffDeferred) · slow tails \(s.slowTailEnqueues)").font(.footnote)
+                Text("Legacy declines · low confidence \(s.legacyLowConfidenceSkips) · low yield \(s.legacyAdaptiveLowYieldSkips) · saved memory \(s.legacyAdaptiveSavedSkips) · model busy \(s.legacyBusySpeculationSkips) · duplicate \(s.legacyDuplicateSpeculationSkips)").font(.caption).foregroundStyle(.secondary)
                 Text("Discarded work: \(Int(s.specDiscardedMs)) ms · unconsumed cached results: \(engine.unconsumedSpeculation).").font(.caption).foregroundStyle(.secondary)
             } else {
                 Text("Actual speculative model requests: \(s.specModelRequests) · Hybrid admission throttles: \(s.adaptiveSpeculationSkipped) · slow enqueues: \(s.slowTailEnqueues)").font(.footnote)
                 Text("New-mode predictions and confirmed recoveries have separate model lanes. A cache-only result is not counted as model execution. Captions may reuse completed obsolete work.").font(.caption).foregroundStyle(.secondary)
             }
             Text("Skipped frames · unchanged \(s.unchangedSkipped) · cadence \(s.cadenceSkipped) · paused \(s.pausedSkipped)").font(.caption)
+            Text("Early OCR visual-change wakes: \(s.earlyVisualWakes) · derived from visual motion only, not confirmed text.").font(.caption).foregroundStyle(.secondary)
             Text("Recorder self-time · simple \(String(format: "%.1f", diag.recorderCosts.simpleMs)) ms · detailed \(String(format: "%.1f", diag.recorderCosts.detailedMs)) ms. Excludes chart drawing and model work; these are different workloads.").font(.caption).foregroundStyle(.secondary)
         }.card()
     }

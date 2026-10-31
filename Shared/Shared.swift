@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.9.6"
-    static let build = 78
+    static let version = "1.9.7"
+    static let build = 79
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("1.9.7", "Three-mode latency experiments: bounded visually-triggered earlier OCR, smarter Legacy credible speculation, no duplicate confirmed LL/Hybrid memory probe, and Hybrid residual recovery tracing."),
         ("1.9.6", "Internal Hybrid contention-aware scheduling, generation-safe shared speculation ownership, and bounded candidate plan reuse for Low Latency and Legacy."),
         ("1.9.4", "Build 76: make rapid-text OCR, adjacent-fragment joining and active-text focus independent of Movie/Game/Comic presets, with custom preset switches and safe migration. Retains faster confirmation, exact-memory reuse, improved model handoff, and corrected diagnostics. Device speed still requires verification."),
         ("1.9.3", "Restore next-caption speculation in Hybrid/Low Latency, prevent false adaptive backoff, and unify live Diagnostics timing, counts, reset, reports and traces."),
@@ -91,6 +92,7 @@ struct Packet: Codable {
     var retryCount: Int? = nil
     // Numeric metadata only; retained across ping packets even when OCR sees no text.
     var visualChanges: Int? = nil
+    var earlyVisualWakes: Int? = nil
     var totalEmptyOCRPasses: Int? = nil
     var lastVisualChangeAt: Double? = nil
     var effectiveOCRIntervalMs: Double? = nil

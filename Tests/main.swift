@@ -112,6 +112,52 @@ check(zip(legacyPathInjected, legacyPathBaseline).allSatisfy { $0.0 - $0.1 == 25
 print("v1.9.6 LL/Legacy bounded plan reuse, cancellation lease and overhead-injection checks passed")
 
 
+// A scene change can only advance a normal OCR pass. False visual
+// signatures never delay that pass or relax source confirmation.
+check(!SubtitleAcquisitionPolicy.allowsEarlyVisualWake(
+    elapsed: 0.09, planned: 0.22, lastOCRMilliseconds: 120,
+    rapidTextTracking: true, pressure: false),
+    "A rapid visual change must not cause a 90ms OCR storm")
+check(SubtitleAcquisitionPolicy.allowsEarlyVisualWake(
+    elapsed: 0.17, planned: 0.22, lastOCRMilliseconds: 120,
+    rapidTextTracking: true, pressure: false),
+    "Verified change may advance a due-soon read without a different OCR quality setting")
+check(!SubtitleAcquisitionPolicy.allowsEarlyVisualWake(
+    elapsed: 0.17, planned: 0.22, lastOCRMilliseconds: 120,
+    rapidTextTracking: false, pressure: false) &&
+    !SubtitleAcquisitionPolicy.allowsEarlyVisualWake(
+    elapsed: 0.17, planned: 0.22, lastOCRMilliseconds: 120,
+    rapidTextTracking: true, pressure: true),
+    "User custom rapid-text toggle and independent pressure gates are respected")
+check(!SubtitleAcquisitionPolicy.allowsEarlyVisualWake(
+    elapsed: 0.25, planned: 0.22, lastOCRMilliseconds: 120,
+    rapidTextTracking: true, pressure: false),
+    "An ordinary due pass is not reclassified as an early wake")
+var legacyFeedback = SpeculativeWorkWindow()
+for i in 0..<32 {
+    let ticket = legacyFeedback.begin()
+    legacyFeedback.finish(ticket, discarded: i < 24)
+    if i == 26 || i == 30 { legacyFeedback.reuse(ticket) }
+}
+check(legacyFeedback.allowsCredibleOpportunity(enabled: true, strongCandidate: true),
+    "Recently useful exact predictions may regain a bounded Legacy opportunity")
+check(legacyFeedback.allowsCredibleOpportunity(enabled: true, strongCandidate: false),
+    "Ordinary even-numbered Legacy probes still recover under the reference policy")
+check(!legacyFeedback.allowsCredibleOpportunity(enabled: true, strongCandidate: false),
+    "Uncertain Legacy OCR cannot receive the extra evidence-only odd-numbered probe")
+var legacyProbeWindow = SpeculativeWorkWindow()
+for i in 0..<32 {
+    let ticket = legacyProbeWindow.begin()
+    legacyProbeWindow.finish(ticket, discarded: i < 24)
+    if i == 26 || i == 30 { legacyProbeWindow.reuse(ticket) }
+}
+let boundedLegacyProbeDecisions = (0..<8).map { _ in
+    legacyProbeWindow.allowsCredibleOpportunity(enabled: true, strongCandidate: true)
+}
+check(boundedLegacyProbeDecisions == [true, true, false, true, true, true, false, true],
+      "High-confidence Legacy feedback must admit exactly 3/4 opportunities, never all of them")
+print("v1.9.7 per-mode policy and candidate-active cadence checks passed")
+
 let workKey = SharedTranslationWork.unitKey(source: "pt", target: "en", text: "Bom dia",
     protectedWords: ["5:Maria"], rules: "privacy-rules")
 check(workKey == PipelineSafety.cacheKey(source: "pt", target: "en", text: "Bom dia",

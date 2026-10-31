@@ -17,6 +17,7 @@ final class ModeTranslationService {
         var requestedStrategy: RequestedTranslationStrategy?
         var createdAt: Double?
         var lastFinishedAt: Double?
+        var lastFinishedPair = ""
         var completedCalls = 0
         var sharedDefaultLease = AppleDefaultLeaseState()
     }
@@ -102,6 +103,7 @@ final class ModeTranslationService {
                 lane.session = nil; lane.key = ""
                 lane.createdAt = nil; lane.completedCalls = 0
                 lane.lastFinishedAt = nil
+                lane.lastFinishedPair = ""
             }
         }
     }
@@ -142,9 +144,11 @@ final class ModeTranslationService {
             destination.createdAt = warmupLane.createdAt
             destination.completedCalls = warmupLane.completedCalls
             destination.lastFinishedAt = warmupLane.lastFinishedAt
+            destination.lastFinishedPair = warmupLane.lastFinishedPair
             warmupLane.session = nil; warmupLane.key = ""
             warmupLane.createdAt = nil; warmupLane.completedCalls = 0
             warmupLane.lastFinishedAt = nil
+            warmupLane.lastFinishedPair = ""
             warmupPolicy.finish(source: source, target: target, strategy: strategy, succeeded: true)
             completedStrategies += 1
         }
@@ -228,6 +232,7 @@ final class ModeTranslationService {
         lane.key = key; lane.invalidated = false
         lane.createdAt = ProcessInfo.processInfo.systemUptime
         lane.lastFinishedAt = nil
+        lane.lastFinishedPair = ""
         lane.completedCalls = 0
     }
 
@@ -364,7 +369,16 @@ final class ModeTranslationService {
         let warm = lane.session != nil && !lane.invalidated && lane.key == "\(caption.source)>\(caption.target)|\(strategy.rawValue)"
         let competingDefault = caption.system == .hybridRecovery && !speculation && strategy == .lowLatency &&
             speculative.busy && speculative.requestedStrategy == .appleDefault
+        let previousDefaultGap: Double?
+        if caption.system == .hybridRecovery, !speculation, strategy == .lowLatency,
+           !competingDefault, speculative.requestedStrategy == .appleDefault,
+           speculative.lastFinishedPair == availabilityKey,
+           let previousFinished = speculative.lastFinishedAt {
+            let elapsed = ProcessInfo.processInfo.systemUptime - previousFinished
+            previousDefaultGap = elapsed >= 0 && elapsed <= 1.5 ? elapsed * 1000 : nil
+        } else { previousDefaultGap = nil }
         if competingDefault { report("hybrid_cross_strategy_overlap", nil) }
+        if let previousDefaultGap { report("hybrid_previous_default_exit_gap_ms", previousDefaultGap) }
         install(lane, source: source, target: target, strategy: strategy)
         guard let session = lane.session else { return nil }
         let sharedDefaultTicket: UUID?
@@ -411,6 +425,7 @@ final class ModeTranslationService {
                 }
                 Task { @MainActor in
                     report("backend_task_dispatch_ms", (ProcessInfo.processInfo.systemUptime - dispatched) * 1000)
+                    report("backend_apple_call_entered", nil)
                     let requests = indices.enumerated().map {
                         TranslationSession.Request(sourceText: caption.units[$0.element], clientIdentifier: String($0.offset))
                     }
@@ -425,6 +440,16 @@ final class ModeTranslationService {
                     timeout.cancel()
                     let finishedAt = ProcessInfo.processInfo.systemUptime
                     let serviceMs = (finishedAt - start) * 1000
+                    report("backend_apple_call_returned", serviceMs)
+                    if let previousDefaultGap {
+                        report("hybrid_recovery_post_default_service_ms", serviceMs)
+                    } else if caption.system == .hybridRecovery && !speculation &&
+                              strategy == .lowLatency && !competingDefault {
+                        report("hybrid_recovery_no_recent_overlap_service_ms", serviceMs)
+                        if serviceMs >= 800 {
+                            report("hybrid_unexplained_slow_recovery_ms", serviceMs)
+                        }
+                    }
                     report(output == nil ? "model_batch_failed" : "model_batch_completed", serviceMs)
                     if output != nil {
                         // Warm-up completion is accounted for by warmupEvent.
@@ -449,6 +474,7 @@ final class ModeTranslationService {
                             lane.invalidated = true
                         }
                         lane.lastFinishedAt = finishedAt
+                        lane.lastFinishedPair = availabilityKey
                         if let cancelled = lane.cancellationAt {
                             report("cancelled_call_returned", (ProcessInfo.processInfo.systemUptime - cancelled) * 1000)
                         }

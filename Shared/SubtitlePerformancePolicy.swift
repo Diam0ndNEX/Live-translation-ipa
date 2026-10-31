@@ -224,5 +224,27 @@ struct SpeculativeWorkWindow {
             hits: completed.filter { $0.reused }.count,
             opportunity: opportunities, enabled: enabled, savedMemoryDominant: savedMemoryDominant)
     }
+
+    /// The input has already passed the user's exact confidence/letter gate.
+    /// A small number of recent independently confirmed useful predictions
+    /// grants one extra opportunity out of four when ordinary backoff is on.
+    /// The physical serial drain remains the final authority on model calls.
+    /// Existing reference admission is retained through allowsOpportunity().
+    mutating func allowsCredibleOpportunity(enabled: Bool, strongCandidate: Bool) -> Bool {
+        opportunities &+= 1
+        let completed = samples.filter { $0.discarded != nil }
+        let reference = SubtitlePerformancePolicy.allowSpeculation(attempts: completed.count,
+            discarded: completed.filter { $0.discarded == true }.count,
+            hits: completed.filter { $0.reused }.count,
+            opportunity: opportunities, enabled: enabled, savedMemoryDominant: savedMemoryDominant)
+        if reference { return true }
+        let recent = Array(completed.suffix(16))
+        guard enabled, strongCandidate, !savedMemoryDominant,
+              recent.count >= 12, recent.filter({ $0.reused }).count >= 2 else { return false }
+        // Reference backoff allows opportunities 2 and 4 of every four.
+        // Admit only opportunity 1 as an extra proven-useful probe, leaving
+        // opportunity 3 blocked. This is a genuine 3/4 ceiling, not 100%.
+        return opportunities % 4 == 1
+    }
 }
 

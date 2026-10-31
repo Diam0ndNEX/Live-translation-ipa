@@ -14,6 +14,24 @@ struct OCREmptyReadStreak {
 /// Conservative, testable screen-change and live-caption scheduling policy.
 /// A missed subtitle is more costly than an occasional extra OCR pass.
 enum SubtitleAcquisitionPolicy {
+    /// A visual change can pull an already-due-soon OCR pass forward, never
+    /// postpone the configured cadence. This is ONLY scheduling evidence:
+    /// Vision still reads the complete configured ROI with its original detail,
+    /// and the normal independent confirmation count is unchanged. Background
+    /// motion can trigger a false positive, so the minimum interval is bounded
+    /// by measured OCR service and 72% of the user's requested cadence.
+    static func allowsEarlyVisualWake(elapsed: Double, planned: Double,
+                                      lastOCRMilliseconds: Double,
+                                      rapidTextTracking: Bool, pressure: Bool) -> Bool {
+        guard rapidTextTracking, !pressure,
+              elapsed.isFinite, planned.isFinite,
+              lastOCRMilliseconds.isFinite,
+              planned > 0, elapsed >= 0, lastOCRMilliseconds > 0 else { return false }
+        let service = lastOCRMilliseconds / 1000
+        let earliest = max(0.12, service, planned * 0.72)
+        return elapsed >= earliest && elapsed < planned
+    }
+
     /// A global mean alone can overlook a short text change in a largely static frame.
     /// Sparse high-contrast sample changes are a second signal, never a reason to skip OCR.
     static func changed(previous: [UInt8], current: [UInt8]) -> Bool {

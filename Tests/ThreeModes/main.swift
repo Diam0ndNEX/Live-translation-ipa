@@ -14,6 +14,7 @@ final class Harness {
     var selected: [(ModeCaption, ModeOutput, String)] = []
     var events: [String] = []
     var memory: [String?] = [nil]
+    var lookupCount = 0
     var delayedMemory = false
     var pendingLookups: [CheckedContinuation<[String?], Never>] = []
     var cancellations: [Bool] = []
@@ -21,6 +22,7 @@ final class Harness {
     lazy var coordinator = ThreeModeCoordinator(
         lookup: { [weak self] _ in
             guard let self else { return [nil] }
+            self.lookupCount += 1
             if self.delayedMemory {
                 return await withCheckedContinuation { self.pendingLookups.append($0) }
             }
@@ -72,6 +74,32 @@ final class Harness {
         precondition(readiness.state == .stopped)
         readiness.requested(at: 12); readiness.tick(at: 42)
         precondition(readiness.state == .timedOut)
+
+        precondition(HybridSchedulingPolicy.preflightWait(
+            variant: .evidenceBounded, submitted: false, fastRecoveryInstalled: true,
+            proposed: 0.4) == 0.025,
+            "Unsubmitted Default work cannot block an already confirmed LL candidate")
+        precondition(HybridSchedulingPolicy.preflightWait(
+            variant: .reference195, submitted: false, fastRecoveryInstalled: true,
+            proposed: 0.4) == 0.4,
+            "H0 must preserve the v1.9.6 matching deadline")
+        precondition(HybridSchedulingPolicy.preflightWait(
+            variant: .evidenceBounded, submitted: true, fastRecoveryInstalled: true,
+            proposed: 0.4) == 0.4,
+            "Already-running matching Default retains bounded winner opportunity")
+        for mode in [TranslationSystem.lowLatency, .hybridRecovery] {
+            let probe = Harness()
+            probe.coordinator.system = mode
+            probe.coordinator.observe(probe.caption(id: "probe"), confirmed: true, speculate: false)
+            await probe.settle()
+            precondition(probe.lookupCount == 1 &&
+                probe.calls.count == 1,
+                "Confirmed memory probe must be reused; no duplicate SQLite read on recovery")
+            probe.reply(0, ["Confirmed response"])
+            await probe.settle()
+            precondition(probe.selected.count == 1)
+            probe.coordinator.reset()
+        }
 
         let noFastPack = Harness()
         noFastPack.coordinator.system = .hybridRecovery
@@ -601,10 +629,24 @@ final class Harness {
         precondition(fail.calls.count == 2 && fail.calls.allSatisfy { $0.strategy == .lowLatency })
         precondition(fail.selected.isEmpty && fail.events.contains("status"))
         fail.coordinator.reset()
-        // Ready speculation survives harmless whitespace, but never changed meaning.
+        // Whitespace-only OCR normalization is safe only with identical
+        // ordered translation units, exact context keys and config revision.
         let norm = Harness()
         let c = norm.caption()
-        precondition(c.matches(norm.caption("I do not\nhave 10 cats.")))
+        let whitespaceSameWork = ModeCaption(session: c.session, caption: c.caption,
+            revision: c.revision, source: c.source, target: c.target, rules: c.rules,
+            text: "I do not\nhave 10 cats.", units: c.units, keys: c.keys, firstOCR: c.firstOCR)
+        precondition(c.matches(whitespaceSameWork))
+        precondition(!c.matches(norm.caption("I do not\nhave 10 cats.")),
+            "Different exact unit keys must block speculative output")
+        precondition(!c.matches(norm.caption(revision: 2)),
+            "Capture/settings revision must invalidate earlier speculation")
+        let twoUnits = ModeCaption(session: c.session, caption: c.caption,
+            revision: c.revision, source: c.source, target: c.target, rules: c.rules,
+            text: c.text, units: ["I do not", "have 10 cats."],
+            keys: ["unit1", "unit2"], firstOCR: c.firstOCR)
+        precondition(!c.matches(twoUnits),
+            "A changed OCR unit split cannot borrow a one-unit prediction")
         for text in ["I have 10 cats.", "I do not have 20 cats.", "not have 10 cats.", "i do not have 10 cats.", "I do not have 10 cats!"] {
             precondition(!c.matches(norm.caption(text)))
         }

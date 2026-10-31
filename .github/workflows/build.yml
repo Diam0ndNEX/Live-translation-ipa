@@ -1,9 +1,9 @@
 name: Build ScreenLingo IPA
 on:
   push:
-    branches: [codex/screenlingo-v1.9.6-hybrid-contention, codex/screenlingo-v1.9.5-full-performance, codex/screenlingo-v1.9.4-measured-reliability, codex/screenlingo-v1.9.3-prediction-diagnostics, codex/screenlingo-v1.9.2-hybrid-reliability, codex/screenlingo-v1.9.1-hybrid-performance, codex/screenlingo-v1.9.0-three-modes, codex/screenlingo-v0.7.0, codex/screenlingo-v0.8.0, codex/screenlingo-v0.9.0, codex/screenlingo-v1.0.0, codex/screenlingo-v1.1.0, codex/screenlingo-v1.2.0, codex/screenlingo-v1.2.1, codex/screenlingo-v1.3.0, codex/screenlingo-v1.4.1, codex/screenlingo-v1.4.1-static-overlay, codex/screenlingo-v1.4.1-diagnostics, codex/screenlingo-v1.4.2, codex/screenlingo-v1.4.3-batch-memory, codex/screenlingo-v1.4.4-performance, codex/screenlingo-v1.4.5-latency, codex/screenlingo-v1.4.6-validation, codex/screenlingo-v1.4.7-intelligence, codex/screenlingo-v1.4.8-continuity, codex/screenlingo-v1.5.0-refinement, codex/screenlingo-v1.7.0-performance, codex/screenlingo-v1.7.1-testing, codex/screenlingo-v1.7.2-performance]
+    branches: [codex/screenlingo-v1.9.7-three-mode-gains, codex/screenlingo-v1.9.6-hybrid-contention, codex/screenlingo-v1.9.5-full-performance, codex/screenlingo-v1.9.4-measured-reliability, codex/screenlingo-v1.9.3-prediction-diagnostics, codex/screenlingo-v1.9.2-hybrid-reliability, codex/screenlingo-v1.9.1-hybrid-performance, codex/screenlingo-v1.9.0-three-modes, codex/screenlingo-v0.7.0, codex/screenlingo-v0.8.0, codex/screenlingo-v0.9.0, codex/screenlingo-v1.0.0, codex/screenlingo-v1.1.0, codex/screenlingo-v1.2.0, codex/screenlingo-v1.2.1, codex/screenlingo-v1.3.0, codex/screenlingo-v1.4.1, codex/screenlingo-v1.4.1-static-overlay, codex/screenlingo-v1.4.1-diagnostics, codex/screenlingo-v1.4.2, codex/screenlingo-v1.4.3-batch-memory, codex/screenlingo-v1.4.4-performance, codex/screenlingo-v1.4.5-latency, codex/screenlingo-v1.4.6-validation, codex/screenlingo-v1.4.7-intelligence, codex/screenlingo-v1.4.8-continuity, codex/screenlingo-v1.5.0-refinement, codex/screenlingo-v1.7.0-performance, codex/screenlingo-v1.7.1-testing, codex/screenlingo-v1.7.2-performance]
   pull_request:
-    branches: [codex/screenlingo-v1.9.5-full-performance, codex/screenlingo-v1.9.4-measured-reliability, codex/screenlingo-v1.3.0, codex/screenlingo-v1.4.0, codex/screenlingo-v1.4.1, codex/screenlingo-v1.4.2, codex/screenlingo-v1.4.3-batch-memory, codex/screenlingo-v1.4.4-performance, codex/screenlingo-v1.4.5-latency, codex/screenlingo-v1.4.6-validation, "codex/memory2-**"]
+    branches: [codex/screenlingo-v1.9.6-hybrid-contention, codex/screenlingo-v1.9.5-full-performance, codex/screenlingo-v1.9.4-measured-reliability, codex/screenlingo-v1.3.0, codex/screenlingo-v1.4.0, codex/screenlingo-v1.4.1, codex/screenlingo-v1.4.2, codex/screenlingo-v1.4.3-batch-memory, codex/screenlingo-v1.4.4-performance, codex/screenlingo-v1.4.5-latency, codex/screenlingo-v1.4.6-validation, "codex/memory2-**"]
   workflow_dispatch:
     inputs:
       interface_preview:
@@ -29,6 +29,8 @@ jobs:
           xcode-version: "26.6"
       - name: Enforce nominal/fair full-performance parity
         run: python3 scripts/test_thermal_parity.py
+      - name: Verify v1.9.7 isolated three-mode performance contract
+        run: python3 scripts/test_v197_experiments.py
       - name: Check pipeline regressions
         run: |
           swiftc Shared/*.swift App/TextIntelligence.swift App/CaptionAssembly.swift App/MemoryWriter.swift App/PipelineSimulation.swift Tests/main.swift -o /tmp/pipeline-tests
@@ -43,6 +45,12 @@ jobs:
         run: |
           swiftc -parse-as-library Shared/SharedTranslationWork.swift Shared/TranslationSystem.swift Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/HotPathAB/main.swift -o /tmp/screenlingo-v196-timed-tests
           /tmp/screenlingo-v196-timed-tests
+      - name: Compile isolated reference Hybrid and confirmed-probe variants
+        run: |
+          swiftc -parse-as-library -D SCREENLINGO_REFERENCE_CONFIRMED_PROBE -D SCREENLINGO_REFERENCE_HYBRID_PREFLIGHT -D SCREENLINGO_HYBRID_REFERENCE Shared/SharedTranslationWork.swift Shared/TranslationSystem.swift Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/HotPathAB/main.swift -o /tmp/screenlingo-v197-reference-tests
+          /tmp/screenlingo-v197-reference-tests
+          swiftc -parse-as-library -D SCREENLINGO_HYBRID_RECOVERY_FIRST Shared/SharedTranslationWork.swift Shared/TranslationSystem.swift Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/HotPathAB/main.swift -o /tmp/screenlingo-v197-recovery-first-tests
+          /tmp/screenlingo-v197-recovery-first-tests
       - name: Verify three-mode diagnostics live routing
         run: python3 scripts/test_mode_diagnostics_ui.py
       - name: Verify performance acceptance gate
