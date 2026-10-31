@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "measured_endpoint": "first recognized OCR sighting to PiP sample-buffer enqueue, not physical display",
+  "status": "historical device samples, not matched paired trials",
+  "device": "iPhone18,2",
+  "os": "iOS 27.0.1",
+  "language_pair": "pt>en",
+  "speed": "balanced",
+  "memory_mode": "temporaryMemory",
+  "recognition_preset": "movie",
+  "builds": {
+    "1.9.3": {
+      "legacy": {
+        "p50_ms": 550,
+        "p95_ms": 1017
+      },
+      "hybridRecovery": {
+        "p50_ms": 382,
+        "p95_ms": 1409
+      },
+      "lowLatency": {
+        "n": 84,
+        "p50_ms": 232.29,
+        "p95_ms": 441.76,
+        "ocr_all_pass_p50_ms": 105.57,
+        "final_accepted_ocr_p50_ms": 90.05,
+        "confirmation_p50_ms": 134.03,
+        "speculative_model_p50_ms": 45.44,
+        "speculative_model_p95_ms": 64.32,
+        "thermal": "nominal"
+      }
+    },
+    "1.9.4": {
+      "legacy": {
+        "p50_ms": 621,
+        "p95_ms": 934
+      },
+      "hybridRecovery": {
+        "p50_ms": 496,
+        "p95_ms": 1390
+      },
+      "lowLatency": {
+        "n": 89,
+        "p50_ms": 240.77,
+        "p95_ms": 451.25,
+        "ocr_all_pass_p50_ms": 120.67,
+        "final_accepted_ocr_p50_ms": 102.38,
+        "confirmation_p50_ms": 130.01,
+        "speculative_model_p50_ms": 43.47,
+        "speculative_model_p95_ms": 64.17,
+        "thermal": "nominal"
+      }
+    },
+    "1.9.5": {
+      "commit": "39d4046f5718f46367eea54edc577526884960a6",
+      "build": 77,
+      "legacy": {
+        "n": 92,
+        "p50_ms": 498,
+        "p95_ms": 871,
+        "ocr_all_pass_p50_ms": 113,
+        "speculative_model_p50_ms": 241,
+        "confirmed_model_p50_ms": 274,
+        "queue_p50_ms": 28,
+        "thermal": "nominal",
+        "diagnostics": "ScreenLingo-Diagnostics-2026-10-31T02-07-36Z-BC7EF2B4.zip"
+      },
+      "hybridRecovery": {
+        "n": 79,
+        "p50_ms": 677,
+        "p95_ms": 1374,
+        "ocr_all_pass_p50_ms": 108,
+        "speculative_model_p50_ms": 437,
+        "confirmed_model_p50_ms": 921,
+        "thermal": "nominal/fair",
+        "diagnostics": "ScreenLingo-Diagnostics-2026-10-31T02-13-20Z-D6F2C5E9.zip"
+      },
+      "lowLatency": {
+        "n": 83,
+        "p50_ms": 249.32,
+        "p95_ms": 460.56,
+        "ocr_all_pass_p50_ms": 124.39,
+        "final_accepted_ocr_p50_ms": 98.87,
+        "confirmation_p50_ms": 140.51,
+        "speculative_model_p50_ms": 43.85,
+        "speculative_model_p95_ms": 64.41,
+        "thermal": "fair",
+        "diagnostics": "ScreenLingo-Diagnostics-2026-10-31T02-19-52Z-3A5D0C5E.zip"
+      }
+    }
+  },
+  "hybrid_historical_stretch": {
+    "version": "1.9.2",
+    "p50_ms": 355,
+    "p95_ms": 539,
+    "comparability": "uncontrolled historical reference"
+  },
+  "reliability": "Cross-build observations are not causal experiments. No v1.9.6 device samples are available."
+}
