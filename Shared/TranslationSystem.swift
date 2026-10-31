@@ -204,22 +204,21 @@ enum HybridSchedulingPolicy {
         #endif
     }
 
-    /// The expected gain is a bounded reduction of LL/Default cross-lane
-    /// contention, not a claim of independent Apple inference hardware.
-    /// Do not spend the full matching deadline waiting for work that has not
-    /// entered Apple's model. A small bounded grace protects a forthcoming
-    /// complete cached response; real confirmed LL remains independent.
+    /// Restore the bounded v1.9.6 matching deadline: the premature 25ms
+    /// hedge in v1.9.7 correlated with slow overlapping model requests.
     static func preflightWait(variant: HybridSchedulerVariant, submitted: Bool,
                               fastRecoveryInstalled: Bool, proposed: Double) -> Double {
         guard proposed.isFinite else { return 0 }
-        #if SCREENLINGO_REFERENCE_HYBRID_PREFLIGHT
         return max(0, proposed)
-        #else
-        guard variant != .reference195, fastRecoveryInstalled, !submitted else {
-            return max(0, proposed)
-        }
-        return min(0.025, max(0, proposed))
-        #endif
+    }
+
+    /// Wait briefly for an actual Default call to release its physical lane
+    /// before initiating an independent confirmed Low Latency model call.
+    /// The budget is finite even if Apple's cancellation is slow to return.
+    static func physicalDrainBudget(variant: HybridSchedulerVariant,
+                                    speculativeActive: Bool) -> Double {
+        guard variant != .reference195, speculativeActive else { return 0 }
+        return 0.45
     }
 
     static func matchingWait(variant: HybridSchedulerVariant,

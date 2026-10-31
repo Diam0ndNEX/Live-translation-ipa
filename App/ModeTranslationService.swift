@@ -366,6 +366,33 @@ final class ModeTranslationService {
             report("backend_stale_request_dropped", nil)
             return nil
         }
+        // Physical Apple model requests can continue even after Swift's
+        // cancellation. Allow an ongoing speculative Default request a short
+        // release window, but never block confirmed Low Latency indefinitely.
+        if caption.system == .hybridRecovery && !speculation && strategy == .lowLatency {
+            let budget = HybridSchedulingPolicy.physicalDrainBudget(
+                variant: HybridSchedulingPolicy.buildVariant,
+                speculativeActive: speculative.busy && speculative.requestedStrategy == .appleDefault)
+            if budget > 0 {
+                let waitStarted = ProcessInfo.processInfo.systemUptime
+                while speculative.busy && speculative.requestedStrategy == .appleDefault &&
+                      ProcessInfo.processInfo.systemUptime - waitStarted < budget {
+                    guard !Task.isCancelled, eligibleToStart() else {
+                        report("backend_stale_request_dropped", nil)
+                        return nil
+                    }
+                    try? await Task.sleep(nanoseconds: 5_000_000)
+                }
+                let elapsed = (ProcessInfo.processInfo.systemUptime - waitStarted) * 1000
+                report("hybrid_physical_default_drain_wait_ms", elapsed)
+                report(speculative.busy ? "hybrid_default_drain_budget_exceeded" :
+                    "hybrid_default_drain_completed", elapsed)
+                guard !Task.isCancelled, eligibleToStart() else {
+                    report("backend_stale_request_dropped", nil)
+                    return nil
+                }
+            }
+        }
         let warm = lane.session != nil && !lane.invalidated && lane.key == "\(caption.source)>\(caption.target)|\(strategy.rawValue)"
         let competingDefault = caption.system == .hybridRecovery && !speculation && strategy == .lowLatency &&
             speculative.busy && speculative.requestedStrategy == .appleDefault

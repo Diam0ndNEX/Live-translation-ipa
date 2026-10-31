@@ -156,7 +156,21 @@ let boundedLegacyProbeDecisions = (0..<8).map { _ in
 }
 check(boundedLegacyProbeDecisions == [true, true, false, true, true, true, false, true],
       "High-confidence Legacy feedback must admit exactly 3/4 opportunities, never all of them")
-print("v1.9.7 per-mode policy and candidate-active cadence checks passed")
+check(SubtitlePerformancePolicy.discardPendingSpeculation(
+    confirmedIncoming: true, speculativePending: true),
+    "Accepted confirmation removes obsolete pending speculation")
+check(!SubtitlePerformancePolicy.discardPendingSpeculation(
+    confirmedIncoming: false, speculativePending: true) &&
+    !SubtitlePerformancePolicy.discardPendingSpeculation(
+    confirmedIncoming: true, speculativePending: false),
+    "Tentative OCR never cancels queued work and empty queues are unchanged")
+for skipSetting in [true, false] {
+    check(SubtitleAcquisitionPolicy.allowsEarlyVisualWake(
+        elapsed: 0.17, planned: 0.22, lastOCRMilliseconds: 120,
+        rapidTextTracking: true, pressure: false),
+        "Visual wake must not depend on skipUnchanged=\(skipSetting)")
+}
+print("v1.9.8 physical drain, Legacy priority and skip-independent wake checks passed")
 
 let workKey = SharedTranslationWork.unitKey(source: "pt", target: "en", text: "Bom dia",
     protectedWords: ["5:Maria"], rules: "privacy-rules")

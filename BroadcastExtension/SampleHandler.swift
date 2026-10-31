@@ -100,6 +100,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         if cfg.resetsRecognition(comparedTo: lastOCRConfig) {
             candidateKey = ""; sentKey = ""; specKey = ""; candidateCount = 0
             ocrSig = []; emptyReads.reset()
+            lastVisualWakeProbe = .distantPast
             tracker.reset(); candidateID = nil
         }
         lastOCRConfig = cfg
@@ -132,7 +133,6 @@ class SampleHandler: RPBroadcastSampleHandler {
         let mayProbeEarly = false
         #else
         let mayProbeEarly = !ordinaryDue && candidateCount == 0 &&
-            (cfg.skipUnchanged ?? true) &&
             SubtitleAcquisitionPolicy.allowsEarlyVisualWake(
                 elapsed: elapsed, planned: interval, lastOCRMilliseconds: lastOcrMs,
                 rapidTextTracking: rapidText, pressure: pressure) &&
@@ -151,7 +151,10 @@ class SampleHandler: RPBroadcastSampleHandler {
         // changed signature. A false positive costs bounded extra OCR, never
         // an earlier confirmation or changed confidence/quality threshold.
         // A false negative leaves the normal cadence untouched.
-        if (cfg.skipUnchanged ?? true) || (cfg.captureDiagnostics ?? false) {
+        if (cfg.skipUnchanged ?? true) || (cfg.captureDiagnostics ?? false) ||
+            (rapidText && !pressure) {
+            // Retain a signature baseline even with skipUnchanged disabled.
+            // Early probing never suppresses an ordinarily due OCR read.
             if mayProbeEarly { lastVisualWakeProbe = now }
             let sig = signature(pb, config: cfg, oriented: orientation)
             let comparable = !sig.isEmpty && sig.count == ocrSig.count

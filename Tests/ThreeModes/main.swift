@@ -77,8 +77,8 @@ final class Harness {
 
         precondition(HybridSchedulingPolicy.preflightWait(
             variant: .evidenceBounded, submitted: false, fastRecoveryInstalled: true,
-            proposed: 0.4) == 0.025,
-            "Unsubmitted Default work cannot block an already confirmed LL candidate")
+            proposed: 0.4) == 0.4,
+            "Matching Default speculation keeps its bounded winner opportunity")
         precondition(HybridSchedulingPolicy.preflightWait(
             variant: .reference195, submitted: false, fastRecoveryInstalled: true,
             proposed: 0.4) == 0.4,
@@ -87,6 +87,12 @@ final class Harness {
             variant: .evidenceBounded, submitted: true, fastRecoveryInstalled: true,
             proposed: 0.4) == 0.4,
             "Already-running matching Default retains bounded winner opportunity")
+        precondition(HybridSchedulingPolicy.physicalDrainBudget(
+            variant: .evidenceBounded, speculativeActive: true) == 0.45)
+        precondition(HybridSchedulingPolicy.physicalDrainBudget(
+            variant: .evidenceBounded, speculativeActive: false) == 0)
+        precondition(HybridSchedulingPolicy.physicalDrainBudget(
+            variant: .reference195, speculativeActive: true) == 0)
         for mode in [TranslationSystem.lowLatency, .hybridRecovery] {
             let probe = Harness()
             probe.coordinator.system = mode
