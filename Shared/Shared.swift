@@ -96,6 +96,7 @@ struct Packet: Codable {
     var effectiveOCRIntervalMs: Double? = nil
     var captureSessionID: String? = nil
     var firstSeenMonotonic: Double? = nil
+    var sentMonotonic: Double? = nil
 }
 
 /// App → extension (sent back over the same localhost link)
