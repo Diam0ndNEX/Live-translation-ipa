@@ -73,6 +73,12 @@ The mode plan cache has four entries; keys include capture session, candidate, s
 
 A/B/C are internal experiment labels; they are not a new user-facing preset or persistent setting. Source tests and fake service-time cases validate bounded decisions. No policy guarantees physical concurrency or an end-to-end speedup.
 
+### Reproducible internal A/B build flags
+
+Production defaults are **L1** (Legacy bounded unit reuse), **F1** (standalone LL immutable candidate-plan reuse) and **H2** (evidenceBounded Hybrid). For isolated reference builds, add one Swift compilation condition at a time: `SCREENLINGO_REFERENCE_LEGACY_UNITS` produces **L0**; `SCREENLINGO_REFERENCE_LL_PLAN` produces **F0**; `SCREENLINGO_HYBRID_REFERENCE` produces **H0**; and `SCREENLINGO_HYBRID_RECOVERY_FIRST` produces **H1**. Do not define both Hybrid reference flags simultaneously. There are no user-facing Settings switches and no source, language, session, OCR, memory or model-strategy differences created by these A/B flags. The `hotPathAB` and `hybridSchedulerAB` values are fixed privacy-safe diagnostic metadata for identifying a tested executable.
+
+A dedicated `Tests/HotPathAB/main.swift` exercises actual shared immutable plan-cache and scheduler policy helpers using synthetic monotonic timelines and a controllable fake model. The companion reference tests verify selection never occurs before independent confirmation, multi-row ordered-unit identity, corrected-source rejection, zero extra model calls for a memory hit, cancelled physical lease ownership and detectable 20/25ms synthetic handoff penalties. It deliberately does **not** claim that Swift unit-level savings imply measured iPhone wins. Both source-level A/B flags and real-device paired runs remain necessary.
+
 ## Monotonic instrumentation
 
 The ReplayKit extension now adds an optional monotonic packet-send timestamp; the app computes transport timing from the same boot uptime where available and retains backwards compatibility with old packets. The app also measures exact plan built vs reused, confirmed-to-PiP, committed-result-to-PiP and commit-to-PiP separately. Existing metadata-only candidate+revision+SHA256 fingerprint event traces track request submissions, availability, queues, inferred logical overlap, service and stale rejection. Diagnostic ring overflow has an explicit counter; bounded aggregate distributions continue after ring eviction. ZIP keeps allowlisted numeric stage metrics, never raw OCR, protected words, translation text or coordinates.
