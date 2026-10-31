@@ -103,11 +103,11 @@ check(physicalDefault.completed == 3, "Physical completion must be counted only 
 // can detect a 20ms planning or confirmed-queue penalty at the target scale.
 let appPathBaseline = [104.0, 112, 128, 140, 180].map { $0 + 45 }
 let appPathInjected = appPathBaseline.map { $0 + 20 }
-check(zip(appPathInjected, appPathBaseline).allSatisfy { $0 - $1 == 20 },
+check(zip(appPathInjected, appPathBaseline).allSatisfy { $0.0 - $0.1 == 20 },
       "LL candidate plan profiler must detect a 20ms injected critical-path delay")
 let legacyPathBaseline = [100.0, 140, 180, 220, 250].map { $0 + 270 }
 let legacyPathInjected = legacyPathBaseline.map { $0 + 25 }
-check(zip(legacyPathInjected, legacyPathBaseline).allSatisfy { $0 - $1 == 25 },
+check(zip(legacyPathInjected, legacyPathBaseline).allSatisfy { $0.0 - $0.1 == 25 },
       "Legacy queue profiler must detect a 25ms injected critical-path delay")
 print("v1.9.6 LL/Legacy bounded plan reuse, cancellation lease and overhead-injection checks passed")
 
