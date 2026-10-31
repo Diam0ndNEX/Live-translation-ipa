@@ -448,7 +448,7 @@ actor DiagnosticExportWriter {
             "supersededSpeculativePipelines", "confirmedCandidatePackets",
             "deferredEarlyCandidates", "supersededUnpresentedConfirmed",
             "enqueuedCandidateFrames", "unchangedSkippedFrames",
-            "cadenceSkippedFrames", "pausedSkippedFrames", "emptyReads",
+            "cadenceSkippedFrames", "earlyVisualWakes", "pausedSkippedFrames", "emptyReads",
             "contrastRetries", "emptyOCRPasses"
         ]
         let allowedCounters = DiagnosticIntervalBucket.allowedCounters
