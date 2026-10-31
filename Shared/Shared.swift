@@ -91,6 +91,7 @@ struct Packet: Codable {
     var retryCount: Int? = nil
     // Numeric metadata only; retained across ping packets even when OCR sees no text.
     var visualChanges: Int? = nil
+    var earlyVisualWakes: Int? = nil
     var totalEmptyOCRPasses: Int? = nil
     var lastVisualChangeAt: Double? = nil
     var effectiveOCRIntervalMs: Double? = nil
