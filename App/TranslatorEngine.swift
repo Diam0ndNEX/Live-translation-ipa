@@ -546,7 +546,7 @@ final class TranslatorEngine: ObservableObject {
                     out: part.sentences.map { _ in nil }, tokens: part.tokens))
                 for sentence in part.sentences {
                     inputs.append(sentence)
-                    keys.append(PipelineSafety.cacheKey(source: source, target: targetCode, text: sentence,
+                    keys.append(SharedTranslationWork.unitKey(source: source, target: targetCode, text: sentence,
                         protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: rulesToken))
                 }
             }
@@ -2340,7 +2340,7 @@ final class TranslatorEngine: ObservableObject {
                     slang: flag("slang", true), speakers: flag("speakerDetect", true), protected: never) {
                 var values: [String?] = []
                 for sentence in part.sentences {
-                    let key = PipelineSafety.cacheKey(source: id, target: targetCode, text: sentence,
+                    let key = SharedTranslationWork.unitKey(source: id, target: targetCode, text: sentence,
                         protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: rules)
                     let lookupStarted = ProcessInfo.processInfo.systemUptime
                     guard let value = ram.values[key],
@@ -2407,7 +2407,7 @@ final class TranslatorEngine: ObservableObject {
             for part in preparedSourceUnits(text, language: languageCode,
                     slang: slangEnabled, speakers: speakersEnabled, protected: never) {
                 for sentence in part.sentences {
-                    keys.insert(PipelineSafety.cacheKey(source: id, target: targetCode, text: sentence,
+                    keys.insert(SharedTranslationWork.unitKey(source: id, target: targetCode, text: sentence,
                         protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: rules))
                 }
             }
@@ -2539,7 +2539,7 @@ final class TranslatorEngine: ObservableObject {
                 if display && diag.enabled { diag.s.sentences += sentences.count }
                 var outs: [String?] = []
                 for (si, s) in sentences.enumerated() {
-                    let key = PipelineSafety.cacheKey(source: id, target: destination, text: s, protectedWords: d.tokens.map { "\($0.0)=\($0.1)" }, rules: rules)
+                    let key = SharedTranslationWork.unitKey(source: id, target: destination, text: s, protectedWords: d.tokens.map { "\($0.0)=\($0.1)" }, rules: rules)
                     if memoryEligible && TranslationUnitPlanning.mayRemember(s, confirmed: display) {
                         eligibleMemoryKeys.insert(key)
                     }
