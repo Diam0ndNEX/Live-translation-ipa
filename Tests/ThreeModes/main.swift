@@ -14,6 +14,7 @@ final class Harness {
     var selected: [(ModeCaption, ModeOutput, String)] = []
     var events: [String] = []
     var memory: [String?] = [nil]
+    var lookupCount = 0
     var delayedMemory = false
     var pendingLookups: [CheckedContinuation<[String?], Never>] = []
     var cancellations: [Bool] = []
@@ -21,6 +22,7 @@ final class Harness {
     lazy var coordinator = ThreeModeCoordinator(
         lookup: { [weak self] _ in
             guard let self else { return [nil] }
+            self.lookupCount += 1
             if self.delayedMemory {
                 return await withCheckedContinuation { self.pendingLookups.append($0) }
             }
@@ -72,6 +74,32 @@ final class Harness {
         precondition(readiness.state == .stopped)
         readiness.requested(at: 12); readiness.tick(at: 42)
         precondition(readiness.state == .timedOut)
+
+        precondition(HybridSchedulingPolicy.preflightWait(
+            variant: .evidenceBounded, submitted: false, fastRecoveryInstalled: true,
+            proposed: 0.4) == 0.025,
+            "Unsubmitted Default work cannot block an already confirmed LL candidate")
+        precondition(HybridSchedulingPolicy.preflightWait(
+            variant: .reference195, submitted: false, fastRecoveryInstalled: true,
+            proposed: 0.4) == 0.4,
+            "H0 must preserve the v1.9.6 matching deadline")
+        precondition(HybridSchedulingPolicy.preflightWait(
+            variant: .evidenceBounded, submitted: true, fastRecoveryInstalled: true,
+            proposed: 0.4) == 0.4,
+            "Already-running matching Default retains bounded winner opportunity")
+        for mode in [TranslationSystem.lowLatency, .hybridRecovery] {
+            let probe = Harness()
+            probe.coordinator.system = mode
+            probe.coordinator.observe(probe.caption(id: "probe"), confirmed: true, speculate: false)
+            await probe.settle()
+            precondition(probe.lookupCount == 1 &&
+                probe.calls.count == 1,
+                "Confirmed memory probe must be reused; no duplicate SQLite read on recovery")
+            probe.reply(0, ["Confirmed response"])
+            await probe.settle()
+            precondition(probe.selected.count == 1)
+            probe.coordinator.reset()
+        }
 
         let noFastPack = Harness()
         noFastPack.coordinator.system = .hybridRecovery
