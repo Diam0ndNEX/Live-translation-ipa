@@ -43,6 +43,8 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var visualChanges = 0, totalEmptyOCRPasses = 0
     private var lastVisualChangeAt = Date.distantPast
     private var effectiveOCRIntervalMs = 0.0
+    private var visualWakeCount = 0
+    private var lastVisualWakeProbe = Date.distantPast
     private var feedback = RecognitionFeedback()
     private var lastChanged = Date()
     private var lastRecognizedKey = ""
@@ -120,8 +122,23 @@ class SampleHandler: RPBroadcastSampleHandler {
             processingMs: lastOcrMs)
         effectiveOCRIntervalMs = interval * 1000
         guard !cfg.paused && cfg.appInterfaceVisible != true else { pausedSkipped += 1; return }
-        guard CaptureCadence.remaining(startedAt: lastRun.timeIntervalSince1970, now: now.timeIntervalSince1970,
-                                       interval: interval) <= 0 else { cadenceSkipped += 1; return }
+        let elapsed = now.timeIntervalSince(lastRun)
+        let ordinaryDue = CaptureCadence.remaining(startedAt: lastRun.timeIntervalSince1970,
+                                                    now: now.timeIntervalSince1970, interval: interval) <= 0
+        let pressure = cfg.confirmationBurst == false || (cfg.pressure ?? false) ||
+            (cfg.smartCool ?? false) || ProcessInfo.processInfo.isLowPowerModeEnabled ||
+            ThermalPerformancePolicy.automaticPressure(for: ProcessInfo.processInfo.thermalState)
+        #if SCREENLINGO_REFERENCE_CAPTURE_CADENCE
+        let mayProbeEarly = false
+        #else
+        let mayProbeEarly = !ordinaryDue && candidateCount == 0 &&
+            (cfg.skipUnchanged ?? true) &&
+            SubtitleAcquisitionPolicy.allowsEarlyVisualWake(
+                elapsed: elapsed, planned: interval, lastOCRMilliseconds: lastOcrMs,
+                rapidTextTracking: rapidText, pressure: pressure) &&
+            now.timeIntervalSince(lastVisualWakeProbe) >= 0.065
+        #endif
+        guard ordinaryDue || mayProbeEarly else { cadenceSkipped += 1; return }
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
         var orientation = CGImagePropertyOrientation.up
@@ -130,13 +147,17 @@ class SampleHandler: RPBroadcastSampleHandler {
            let o = CGImagePropertyOrientation(rawValue: n.uint32Value) {
             orientation = o
         }
-        // When diagnostics are enabled, sample lightweight *numeric* visual change
-        // even if frame skipping is off; only the counters/timestamp leave the extension.
-        // This is NOT a subtitle-presence oracle: moving scenes also trigger it.
+        // A pre-cadence probe may ONLY advance a normal OCR pass after a
+        // changed signature. A false positive costs bounded extra OCR, never
+        // an earlier confirmation or changed confidence/quality threshold.
+        // A false negative leaves the normal cadence untouched.
         if (cfg.skipUnchanged ?? true) || (cfg.captureDiagnostics ?? false) {
+            if mayProbeEarly { lastVisualWakeProbe = now }
             let sig = signature(pb, config: cfg, oriented: orientation)
             let comparable = !sig.isEmpty && sig.count == ocrSig.count
             let changed = comparable && SubtitleAcquisitionPolicy.changed(previous: ocrSig, current: sig)
+            if mayProbeEarly && !changed { cadenceSkipped += 1; return }
+            if mayProbeEarly && changed { visualWakeCount += 1 }
             if comparable { feedback.motion = meanDiff(sig, ocrSig) }
             if changed { visualChanges += 1; lastVisualChangeAt = now }
             if (cfg.skipUnchanged ?? true), candidateCount == 0,
@@ -396,7 +417,7 @@ class SampleHandler: RPBroadcastSampleHandler {
                                              recognitionReason: recognitionReason, confirmationReason: confirmationReason,
                                              unchangedSkipped: unchangedSkipped, cadenceSkipped: cadenceSkipped, pausedSkipped: pausedSkipped,
                                              emptyReads: feedback.failures, retryCount: retryCount,
-                                             visualChanges: visualChanges,
+                                             visualChanges: visualChanges, earlyVisualWakes: visualWakeCount,
                                              totalEmptyOCRPasses: totalEmptyOCRPasses,
                                              lastVisualChangeAt: lastVisualChangeAt == .distantPast ?
                                                 nil : lastVisualChangeAt.timeIntervalSince1970,
