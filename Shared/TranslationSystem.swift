@@ -240,6 +240,7 @@ final class ThreeModeCoordinator {
     private var recoveryStarted = false
     private var hybridAdmission = HybridAdmissionPolicy()
     private var scoredSpeculation: ModeCaption?
+    private var cacheEpoch = UUID()
     private var lowCache: [String: String] = [:]
     private var lowOrder: [String] = []
     private var defaultCache: [String: String] = [:]
@@ -283,6 +284,7 @@ final class ThreeModeCoordinator {
         recoveryStarted = false
         hybridAdmission = HybridAdmissionPolicy()
         scoredSpeculation = nil
+        cacheEpoch = UUID()
         lowCache.removeAll(); lowOrder.removeAll()
         defaultCache.removeAll(); defaultOrder.removeAll()
         defaultService.removeAll(); lowService.removeAll()
@@ -455,6 +457,7 @@ final class ThreeModeCoordinator {
     }
 
     private func resolve(_ caption: ModeCaption, strategy: RequestedTranslationStrategy, speculative: Bool) async -> ModeOutput? {
+        let workEpoch = cacheEpoch
         var values = await lookupValues(caption)
         var origins = values.map { $0 == nil ? "fresh" : "compatible_memory" }
         var strategies: [RequestedTranslationStrategy?] = values.map { _ in nil }
@@ -469,9 +472,10 @@ final class ThreeModeCoordinator {
                 }
             }
         }
-        var uniqueKeys = Set<String>()
         let allMissing = values.indices.filter { values[$0] == nil }
-        let missing = allMissing.filter { uniqueKeys.insert(caption.keys[$0]).inserted }
+        guard let missing = SharedTranslationWork.unresolvedIndices(keys: caption.keys, values: values) else {
+            return nil
+        }
         if !missing.isEmpty {
             guard !Task.isCancelled else { return nil }
             event(caption, speculative ? "speculative_enqueue" : "recovery_enqueue", nil)
@@ -486,7 +490,9 @@ final class ThreeModeCoordinator {
                   result.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else { return nil }
             // An obsolete Hybrid model result has no display authority, but its
             // exact-key translation is safe to reuse in this capture session.
-            if allowsReuse {
+            if allowsReuse && SharedTranslationWork.mayReuse(
+                workEpoch: workEpoch, currentEpoch: cacheEpoch,
+                requestedCancellation: Task.isCancelled, compatibleContext: true) {
                 for (position, index) in missing.enumerated() {
                     cacheCompleted(result[position], for: caption.keys[index], strategy: strategy)
                 }
