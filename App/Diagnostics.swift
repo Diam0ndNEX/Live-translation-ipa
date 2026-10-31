@@ -174,7 +174,7 @@ struct Stats {
     var confirmedCandidatePackets = 0, deferredEarlyCandidates = 0
     var supersededUnpresentedConfirmed = 0, enqueuedCandidateFrames = 0
     var movieSelections = 0, movieTemporalOverrides = 0, movieRejectedSmall = 0
-    var queueReplacements = 0, visualChanges = 0, emptyOCRPasses = 0
+    var queueReplacements = 0, visualChanges = 0, earlyVisualWakes = 0, emptyOCRPasses = 0
     var firstSightVisualChangeLagMs = 0.0
     var effectiveOCRIntervalMs = 0.0
 }
@@ -782,6 +782,7 @@ final class Diagnostics: ObservableObject {
         counters["movieRejectedSmall"] = s.movieRejectedSmall
         counters["queueReplacements"] = s.queueReplacements
         counters["visualChanges"] = s.visualChanges
+        counters["earlyVisualWakes"] = s.earlyVisualWakes
         counters["emptyOCRPasses"] = s.emptyOCRPasses
         var currentHealth = memoryHealth
         currentHealth.ramEntries = ramEntryCount?() ?? memoryHealth.ramEntries
@@ -1082,6 +1083,7 @@ final class Diagnostics: ObservableObject {
         s.emptyReads = p.emptyReads ?? s.emptyReads
         s.retryCount = p.retryCount ?? s.retryCount
         s.visualChanges = p.visualChanges ?? s.visualChanges
+        s.earlyVisualWakes = p.earlyVisualWakes ?? s.earlyVisualWakes
         s.emptyOCRPasses = p.totalEmptyOCRPasses ?? s.emptyOCRPasses
         s.effectiveOCRIntervalMs = p.effectiveOCRIntervalMs ?? s.effectiveOCRIntervalMs
         if let first = p.firstSeenAt, let visual = p.lastVisualChangeAt,
