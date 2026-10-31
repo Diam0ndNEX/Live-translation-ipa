@@ -374,7 +374,7 @@ final class ModeTranslationService {
            !competingDefault, speculative.requestedStrategy == .appleDefault,
            speculative.lastFinishedPair == availabilityKey,
            let previousFinished = speculative.lastFinishedAt {
-            let elapsed = languageCheckStart - previousFinished
+            let elapsed = ProcessInfo.processInfo.systemUptime - previousFinished
             previousDefaultGap = elapsed >= 0 && elapsed <= 1.5 ? elapsed * 1000 : nil
         } else { previousDefaultGap = nil }
         if competingDefault { report("hybrid_cross_strategy_overlap", nil) }
