@@ -116,7 +116,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             rapidTextTracking: rapidText,
             pressure: cfg.confirmationBurst == false || (cfg.pressure ?? false) || (cfg.smartCool ?? false) ||
                 ProcessInfo.processInfo.isLowPowerModeEnabled ||
-                ProcessInfo.processInfo.thermalState != .nominal,
+                ThermalPerformancePolicy.automaticPressure(for: ProcessInfo.processInfo.thermalState),
             processingMs: lastOcrMs)
         effectiveOCRIntervalMs = interval * 1000
         guard !cfg.paused && cfg.appInterfaceVisible != true else { pausedSkipped += 1; return }
