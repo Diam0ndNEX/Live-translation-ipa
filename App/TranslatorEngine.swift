@@ -2191,6 +2191,13 @@ final class TranslatorEngine: ObservableObject {
         cancelPresentation()
         lastHandled = joined
         if queued != nil { diag.noteQueueReplacement() }
+        // Confirmed OCR supersedes unstarted speculation; the currently
+        // executing model retains its physical session until it returns.
+        if SubtitlePerformancePolicy.discardPendingSpeculation(
+            confirmedIncoming: true, speculativePending: specQueued != nil) {
+            specQueued = nil
+            diag.noteModelState("legacy_queued_speculation_superseded")
+        }
         queued = blocks
         queuedAt = Date()
         queuedWaitOwner = busy ? activeQueueOwner : .scheduling

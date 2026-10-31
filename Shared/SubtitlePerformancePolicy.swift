@@ -176,6 +176,12 @@ enum SubtitlePerformancePolicy {
                                          translating: Bool) -> Bool {
         confirmedQueued || translating
     }
+
+    /// Discard only queued work, never an active physical Apple session.
+    static func discardPendingSpeculation(confirmedIncoming: Bool,
+                                          speculativePending: Bool) -> Bool {
+        confirmedIncoming && speculativePending
+    }
 }
 
 /// Runtime policy evidence is independent of diagnostic collection. A rolling
