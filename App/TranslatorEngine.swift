@@ -360,6 +360,37 @@ final class TranslatorEngine: ObservableObject {
     private var modeLastIdentity = ""
     private var modeMemoryOrigins: [String: String] = [:]
     private var modePlans: [String: ([[CaptionTranslationUnit]], Packet, ModeCaption)] = [:]
+    private struct ModeLayout: Equatable {
+        let text: String
+        let x: Double
+        let y: Double
+        let height: Double
+        let width: Double?
+        init(_ line: OCRLine) {
+            text = line.t; x = line.x; y = line.y; height = line.h; width = line.w
+        }
+    }
+    private struct ModePlanIdentity: Equatable {
+        let session: UUID
+        let candidate: String
+        let system: TranslationSystem
+        let source: String
+        let target: String
+        let rules: String
+        let configuration: Int
+        let rotation: Int
+        let context: Int
+        let orientation: Int?
+        let blocks: [String]
+        let layout: [ModeLayout]
+    }
+    private struct ModePreparedPlan {
+        let rows: [[CaptionTranslationUnit]]
+        let keys: [String]
+        let inputs: [String]
+    }
+    private var modePreparedPlans = ExactPlanReuseCache<ModePlanIdentity, ModePreparedPlan>(capacity: 4)
+
     private struct ModeModelTiming {
         var speculative: Double?
         var confirmed: Double?
@@ -519,60 +550,81 @@ final class TranslatorEngine: ObservableObject {
     }
 
     private func handleModeCaption(_ blocks: [String], packet: Packet) {
-        guard let choice = detectSource(blocks.joined(separator: "\n"), record: packet.stable != false),
+        let started = ProcessInfo.processInfo.systemUptime
+        let text = blocks.joined(separator: "\n")
+        // Source routing is deliberately repeated on the independent confirmed
+        // OCR read; an earlier tentative language guess is never reused blindly.
+        guard let choice = detectSource(text, record: packet.stable != false),
               choice.language.languageCode != Locale.Language(identifier: targetCode).languageCode else { return }
         let source = choice.language.minimalIdentifier
-        let text = blocks.joined(separator: "\n")
         let identity = "\(packet.candidateID ?? "manual")|\(source)|\(targetCode)|\(ConfirmedSourceIdentity.normalize(text))"
         if identity != modeLastIdentity { modeRevision += 1; modeLastIdentity = identity }
-        var rows: [[CaptionTranslationUnit]] = []
-        var keys: [String] = [], inputs: [String] = []
-        // The same settings apply to every block in one OCR packet. Read and
-        // normalize them once rather than repeatedly parsing preferences.
-        let cleaningEnabled = flag("cleanOCR", true)
-        let sourceFixes = pairs("sourceFixes")
-        let slangEnabled = flag("slang", true)
-        let speakersEnabled = flag("speakerDetect", true)
-        let protectedWords = list("neverTranslate", lower: false)
-        let languageCode = choice.language.languageCode?.identifier ?? source
         let rulesToken = memoryRuleToken
-        for block in blocks {
-            let clean = cleanedSource(block, enabled: cleaningEnabled, fixes: sourceFixes)
-            let parts = preparedSourceUnits(clean, language: languageCode,
-                slang: slangEnabled, speakers: speakersEnabled, protected: protectedWords)
-            var row: [CaptionTranslationUnit] = []
-            for part in parts {
-                row.append(CaptionTranslationUnit(label: part.label, sentences: part.sentences,
-                    out: part.sentences.map { _ in nil }, tokens: part.tokens))
-                for sentence in part.sentences {
-                    inputs.append(sentence)
-                    keys.append(SharedTranslationWork.unitKey(source: source, target: targetCode, text: sentence,
-                        protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: rulesToken))
-                }
-            }
-            rows.append(row)
-        }
-        guard !inputs.isEmpty else { return }
         let captionID = packet.candidateID ?? "manual-\(modeRevision)"
+        let planIdentity = ModePlanIdentity(session: modeSessionID, candidate: captionID,
+            system: activeTranslationSystem, source: source, target: targetCode,
+            rules: rulesToken, configuration: packet.rev ?? -1, rotation: rotRev,
+            context: contextRevision, orientation: packet.orient, blocks: blocks,
+            layout: packet.lines.map(ModeLayout.init))
+        let plan: ModePreparedPlan
+        let reused: Bool
+        if let cached = modePreparedPlans.lookup(planIdentity) {
+            plan = cached
+            reused = true
+        } else {
+            let cleaningEnabled = flag("cleanOCR", true)
+            let sourceFixes = pairs("sourceFixes")
+            let slangEnabled = flag("slang", true)
+            let speakersEnabled = flag("speakerDetect", true)
+            let protectedWords = list("neverTranslate", lower: false)
+            let languageCode = choice.language.languageCode?.identifier ?? source
+            var rows: [[CaptionTranslationUnit]] = []
+            var keys: [String] = [], inputs: [String] = []
+            for block in blocks {
+                let clean = cleanedSource(block, enabled: cleaningEnabled, fixes: sourceFixes)
+                let parts = preparedSourceUnits(clean, language: languageCode,
+                    slang: slangEnabled, speakers: speakersEnabled, protected: protectedWords)
+                var row: [CaptionTranslationUnit] = []
+                for part in parts {
+                    row.append(CaptionTranslationUnit(label: part.label, sentences: part.sentences,
+                        out: part.sentences.map { _ in nil }, tokens: part.tokens))
+                    for sentence in part.sentences {
+                        inputs.append(sentence)
+                        keys.append(SharedTranslationWork.unitKey(source: source, target: targetCode, text: sentence,
+                            protectedWords: part.tokens.map { "\($0.0)=\($0.1)" }, rules: rulesToken))
+                    }
+                }
+                rows.append(row)
+            }
+            plan = ModePreparedPlan(rows: rows, keys: keys, inputs: inputs)
+            modePreparedPlans.insert(plan, for: planIdentity)
+            reused = false
+        }
+        guard !plan.inputs.isEmpty else { return }
         let monotonicOrigin = CaptionClockOrigin.monotonic(firstSeen: packet.firstSeenMonotonic,
             wallFirstSeen: packet.firstSeenAt ?? packet.ts ?? Date().timeIntervalSince1970,
             wallNow: Date().timeIntervalSince1970, uptimeNow: ProcessInfo.processInfo.systemUptime)
-        let caption = ModeCaption(system: activeTranslationSystem, thermal: ProcessInfo.processInfo.thermalState.rawValue, session: modeSessionID, caption: captionID, revision: modeRevision,
+        let caption = ModeCaption(system: activeTranslationSystem, thermal: ProcessInfo.processInfo.thermalState.rawValue,
+            session: modeSessionID, caption: captionID, revision: modeRevision,
             source: source, target: targetCode, rules: rulesToken, text: text,
-            units: inputs, keys: keys, firstOCR: monotonicOrigin)
+            units: plan.inputs, keys: plan.keys, firstOCR: monotonicOrigin)
         let confirmed = packet.stable != false
-        if confirmed, let current = modeCoordinator.current, current.matches(caption), current.revision == caption.revision { return }
+        if confirmed, let current = modeCoordinator.current, current.matches(caption),
+           current.revision == caption.revision { return }
+        noteModeEvent(caption, reason: reused ? "mode_plan_reused_ms" : "mode_plan_built_ms",
+            duration: (ProcessInfo.processInfo.systemUptime - started) * 1000)
         if confirmed {
             isTranslating = true
             activeCandidateID = captionID; activeCandidateText = text
             activeCandidateConfirmed = true; activeCandidatePresented = false
             latestBlocks = blocks
-            modePlans = [captionID: (rows, packet, caption)]
+            modePlans = [captionID: (plan.rows, packet, caption)]
             detectedLang = source
             noteModeEvent(caption, reason: "confirmed", duration: nil)
         }
         let thermal = ProcessInfo.processInfo.thermalState
-        let admitted = speculationAllowed && !ProcessInfo.processInfo.isLowPowerModeEnabled && memoryTestMode.allowsSpeculation && flag("translateAhead", true) &&
+        let admitted = speculationAllowed && !ProcessInfo.processInfo.isLowPowerModeEnabled &&
+            memoryTestMode.allowsSpeculation && flag("translateAhead", true) &&
             thermal != .serious && thermal != .critical &&
             SpeculationPolicy.credible(lines: packet.lines, threshold: num("speculationConfidence", 0.85))
         modeCoordinator.allowsReuse = memoryTestMode.allowsReuse && !bypassMemory
@@ -584,8 +636,6 @@ final class TranslatorEngine: ObservableObject {
             let pair = source + ">" + caption.target + "|" + activeTranslationSystem.rawValue
             let needsCheck = modelReadiness.source != source || modelReadiness.target != caption.target ||
                 (modelReadiness.sessions != .complete && modelReadiness.sessions != .working)
-            // isReady is a language-resource check, not a per-caption model warm-up.
-            // Calling it twice during Hybrid inference can contend with actual requests.
             if needsCheck && !backendActivity.executing &&
                 (pair != lastModePreparationPair || Date().timeIntervalSince(lastModePreparationAt) >= 5) {
                 lastModePreparationPair = pair
@@ -1300,6 +1350,7 @@ final class TranslatorEngine: ObservableObject {
         lastModePreparationAt = .distantPast
         interruptWarmupForLiveWork()
         modeSessionID = UUID(); modeLastIdentity = ""; modePlans.removeAll(); modeMemoryOrigins.removeAll()
+        modePreparedPlans.clear(); preparedUnits.clear()
         modeModelTimings.removeAll()
         if modeDiagnosticEpochs.count >= 64 { modeDiagnosticEpochs.removeAll() }
         modeDiagnosticEpochs[modeSessionID] = diag.started
@@ -2307,6 +2358,15 @@ final class TranslatorEngine: ObservableObject {
         let sentences: [String]
         let tokens: [(String, String)]
     }
+    private struct PreparedUnitIdentity: Equatable {
+        let text: String
+        let language: String
+        let slang: Bool
+        let speakers: Bool
+        let protected: [String]
+        let context: Int
+    }
+    private var preparedUnits = ExactPlanReuseCache<PreparedUnitIdentity, [PreparedSourceUnit]>(capacity: 12)
 
     private func cleanedSource(_ raw: String, enabled: Bool, fixes: [(String, String)]) -> String {
         var text = enabled ? TextIntel.cleanOCR(raw) : raw
@@ -2317,12 +2377,17 @@ final class TranslatorEngine: ObservableObject {
     /// Shared by real processing and the in-flight exact-key overlap check.
     private func preparedSourceUnits(_ text: String, language: String, slang: Bool,
                                      speakers: Bool, protected: [String]) -> [PreparedSourceUnit] {
+        let key = PreparedUnitIdentity(text: text, language: language, slang: slang,
+                                       speakers: speakers, protected: protected, context: contextRevision)
+        if let cached = preparedUnits.lookup(key) { return cached }
         let expanded = slang ? TextIntel.expandSlang(text, lang: language) : text
         let parts = speakers ? TextIntel.splitDialogue(expanded) : [(label: String?.none, text: expanded)]
-        return parts.map { part in
+        let output = parts.map { part in
             let tokens = TextIntel.protect(part.text, words: protected)
             return PreparedSourceUnit(label: part.label, sentences: splitSentences(tokens.text), tokens: tokens.tokens)
         }
+        preparedUnits.insert(output, for: key)
+        return output
     }
 
     /// Synchronous and RAM-only: safe while the model lane is awaiting unrelated work.
