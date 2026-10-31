@@ -9,10 +9,11 @@ final class SpeculativeSessionOwner<Session: AnyObject> {
         let session: Session
         let key: String
         let epoch: UUID
+        let ticket: UUID
         private(set) var cancellationRequestedAt: TimeInterval?
 
-        init(session: Session, key: String, epoch: UUID) {
-            self.session = session; self.key = key; self.epoch = epoch
+        init(session: Session, key: String, epoch: UUID, ticket: UUID) {
+            self.session = session; self.key = key; self.epoch = epoch; self.ticket = ticket
         }
 
         fileprivate func requestCancellation(at now: TimeInterval) {
@@ -21,6 +22,7 @@ final class SpeculativeSessionOwner<Session: AnyObject> {
     }
 
     private var epoch = UUID()
+    private var sharedLease = AppleDefaultLeaseState()
     private var idle: (key: String, session: Session)?
     private var active: Lease?
     private let cancel: @MainActor (Session) -> Void
@@ -29,9 +31,10 @@ final class SpeculativeSessionOwner<Session: AnyObject> {
 
     func begin(key: String, make: () -> Session) -> Lease {
         precondition(active == nil, "Speculative requests must remain serialized")
+        guard let ticket = sharedLease.begin() else { preconditionFailure("Actual Apple Default call still owns the speculative session") }
         let session = idle?.key == key ? idle!.session : make()
         idle = nil
-        let lease = Lease(session: session, key: key, epoch: epoch)
+        let lease = Lease(session: session, key: key, epoch: epoch, ticket: ticket)
         active = lease
         return lease
     }
@@ -42,6 +45,7 @@ final class SpeculativeSessionOwner<Session: AnyObject> {
     func cancelActive(now: TimeInterval = ProcessInfo.processInfo.systemUptime) -> Bool {
         guard let active, active.cancellationRequestedAt == nil else { return false }
         active.requestCancellation(at: now)
+        sharedLease.requestCancellation()
         cancel(active.session)
         return true
     }
@@ -49,7 +53,8 @@ final class SpeculativeSessionOwner<Session: AnyObject> {
     func finish(_ lease: Lease, reusable: Bool) {
         guard active === lease else { return }
         active = nil
-        if reusable, lease.epoch == epoch, lease.cancellationRequestedAt == nil {
+        let physicalReusable = sharedLease.finish(lease.ticket, successful: reusable)
+        if physicalReusable, lease.epoch == epoch, lease.cancellationRequestedAt == nil {
             idle = (lease.key, lease.session)
         }
     }
@@ -58,6 +63,7 @@ final class SpeculativeSessionOwner<Session: AnyObject> {
     /// restoring a previous language/model session into the reusable slot.
     func reset() {
         epoch = UUID()
+        sharedLease.reset()
         idle = nil
         cancelActive()
     }

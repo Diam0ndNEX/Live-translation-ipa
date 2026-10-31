@@ -165,6 +165,67 @@ struct ModeOutput {
     var complete: Bool { !values.isEmpty && values.allSatisfy { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty } }
 }
 
+/// Internal-only A/B strategies. These never change the user's translation
+/// system or permit tentative text to be displayed before confirmation.
+enum HybridSchedulerVariant: String {
+    case reference195
+    case recoveryFirst
+    case evidenceBounded
+}
+
+enum HybridSchedulingPolicy {
+    /// Admission must be validated again after any asynchronous availability
+    /// check. H0 faithfully preserves the old physical-call admission; H1/H2
+    /// yield unstarted Apple Default work to already-demanded confirmed LL.
+    static func maySubmitDefaultAfterAvailability(variant: HybridSchedulerVariant,
+                                                   confirmedDemand: Bool) -> Bool {
+        variant == .reference195 || !confirmedDemand
+    }
+
+    /// These are build-time reference variants, not user-facing modes.
+    static var buildVariant: HybridSchedulerVariant {
+        #if SCREENLINGO_HYBRID_REFERENCE
+        return .reference195
+        #elseif SCREENLINGO_HYBRID_RECOVERY_FIRST
+        return .recoveryFirst
+        #else
+        return .evidenceBounded
+        #endif
+    }
+
+    /// The expected gain is a bounded reduction of LL/Default cross-lane
+    /// contention, not a claim of independent Apple inference hardware.
+    static func matchingWait(variant: HybridSchedulerVariant,
+                             elapsed: Double, defaultSamples: [Double],
+                             lowSamples: [Double], oldWait: Double,
+                             recentContention: Int) -> Double {
+        guard elapsed.isFinite, oldWait.isFinite else { return 0 }
+        if variant != .evidenceBounded { return max(0, min(0.7, oldWait)) }
+        let defaultValid = defaultSamples.filter { $0.isFinite && $0 > 0 }.suffix(32).sorted()
+        let lowValid = lowSamples.filter { $0.isFinite && $0 > 0 }.suffix(32).sorted()
+        // Without enough evidence use the proven bounded reference deadline.
+        guard defaultValid.count >= 4 else { return max(0, min(0.7, oldWait)) }
+        let predicted = defaultValid[min(defaultValid.count - 1, (defaultValid.count * 3) / 4)]
+        let remaining = max(0, predicted - max(0, elapsed))
+        let lowMedian = lowValid.isEmpty ? 0.15 : lowValid[lowValid.count / 2]
+        // Favor a verified fast LL recovery when no contention has been
+        // observed and Default is far from likely completion.
+        if recentContention == 0 && lowValid.count >= 4 &&
+            lowMedian <= 0.12 && remaining > max(0.08, lowMedian * 1.5) {
+            // The fast confirmed strategy is expected to finish well before
+            // Default. A fixed 450ms gate incorrectly delayed 40ms LL
+            // recoveries behind predicted 250-400ms speculation.
+            return 0
+        }
+        // When overlap has correlated with expensive LL work, let a matching
+        // already-running Apple Default call get a short bounded head start.
+        if recentContention > 0 && remaining > 0 {
+            return min(0.58, max(0.08, remaining))
+        }
+        return min(0.45, max(0, remaining))
+    }
+}
+
 /// A bounded feedback controller; never changes Legacy or the explicit Low Latency mode.
 /// A successful speculative display clears backoff; repeated wasted speculation uses
 /// fast confirmed Low Latency instead of competing Apple Default inference.
@@ -172,6 +233,7 @@ struct HybridAdmissionPolicy {
     private(set) var consecutiveWaste = 0
     private(set) var skipped = 0
     private(set) var rejected = 0
+    private(set) var recentContention = 0
     private var lastRejectedIdentity: String?
 
     /// A repeated OCR packet must not exhaust a backoff intended to cover
@@ -192,6 +254,7 @@ struct HybridAdmissionPolicy {
         if used {
             consecutiveWaste = 0
             skipped = 0
+            recentContention = max(0, recentContention - 1)
             lastRejectedIdentity = nil
             return
         }
@@ -214,6 +277,7 @@ struct HybridAdmissionPolicy {
         // Bound admission backoff; leave periodic opportunities to re-evaluate
         // whether Apple Default is once again useful for the current scene.
         skipped = max(skipped, actualOverlap >= 600 ? 12 : 4)
+        recentContention = min(8, recentContention + 1)
         consecutiveWaste = 0
     }
 }
@@ -234,6 +298,7 @@ final class ThreeModeCoordinator {
     var system: TranslationSystem = .legacy
     var allowsReuse = true
     var adaptiveHybrid = true
+    var hybridVariant: HybridSchedulerVariant = HybridSchedulingPolicy.buildVariant
     var fastRecoveryInstalled = true
     var hybridSpeculationPermitted: () -> Bool = { true }
     var coldSpeculationCeiling = 0.7
@@ -456,9 +521,17 @@ final class ThreeModeCoordinator {
     }
 
     private func remainingWait(_ caption: ModeCaption) -> Double {
-        SpeculationWaitPolicy.remaining(elapsed: max(0, clock() - speculativeStarted),
-            ordinary: defaultService[caption.policyCohort, default: []],
-            recovery: lowService[caption.policyCohort, default: []], coldCeiling: coldSpeculationCeiling)
+        let elapsed = max(0, clock() - speculativeStarted)
+        let ordinary = defaultService[caption.policyCohort, default: []]
+        let recovery = lowService[caption.policyCohort, default: []]
+        let referenceWait = SpeculationWaitPolicy.remaining(elapsed: elapsed,
+            ordinary: ordinary, recovery: recovery, coldCeiling: coldSpeculationCeiling)
+        guard system == .hybridRecovery else { return referenceWait }
+        let chosen = HybridSchedulingPolicy.matchingWait(variant: hybridVariant,
+            elapsed: elapsed, defaultSamples: ordinary, lowSamples: recovery,
+            oldWait: referenceWait, recentContention: hybridAdmission.recentContention)
+        event(caption, "hybrid_matching_wait_ms", chosen * 1000)
+        return chosen
     }
 
     private func lookupValues(_ caption: ModeCaption) async -> [String?] {

@@ -402,7 +402,8 @@ class SampleHandler: RPBroadcastSampleHandler {
                                                 nil : lastVisualChangeAt.timeIntervalSince1970,
                                              effectiveOCRIntervalMs: effectiveOCRIntervalMs,
                                              captureSessionID: captureID,
-                                             firstSeenMonotonic: kind == "ocr" && config.strictCaptionIdentity == true ? candidateStartedMonotonic : nil))
+                                             firstSeenMonotonic: kind == "ocr" && config.strictCaptionIdentity == true ? candidateStartedMonotonic : nil,
+                                             sentMonotonic: ProcessInfo.processInfo.systemUptime))
         }
         var data = encode(lines)
         if let d = data, d.count > 60000 { data = encode(Array(lines.prefix(30))) }

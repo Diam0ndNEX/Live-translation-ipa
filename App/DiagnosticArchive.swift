@@ -200,7 +200,10 @@ struct TranslationModeReport: Codable {
         "cancellation_requested", "cancelled_call_returned",
         "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
         "hybrid_speculation_unexecuted",
-        "hybrid_speculation_backend_busy",
+        "hybrid_speculation_backend_busy", "hybrid_speculation_yielded_to_confirmed",
+        "hybrid_matching_wait_ms", "mode_plan_reused_ms", "mode_plan_built_ms",
+        "mode_commit_to_pip_ms", "mode_confirmation_to_pip_ms", "mode_ready_to_pip_ms",
+        "mode_trace_ring_overwritten",
         "strategy_cache_hit_appleDefault", "strategy_cache_hit_lowLatency",
         "strategy_cache_populated_appleDefault", "strategy_cache_populated_lowLatency",
         "hybrid_cross_strategy_overlap", "hybrid_overlapped_recovery_ms", "hybrid_simultaneous_model_overlap_ms",
@@ -283,7 +286,7 @@ struct TranslationModeReport: Codable {
         let sessionReasons = [
             "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
         "hybrid_speculation_unexecuted",
-            "hybrid_speculation_backend_busy",
+            "hybrid_speculation_backend_busy", "hybrid_speculation_yielded_to_confirmed",
             "strategy_cache_hit_appleDefault", "strategy_cache_hit_lowLatency",
             "strategy_cache_populated_appleDefault", "strategy_cache_populated_lowLatency",
             "speculation_superseded_before_confirmation", "speculative_model_submitted", "confirmed_model_submitted",
@@ -293,7 +296,7 @@ struct TranslationModeReport: Codable {
             "backend_installed_cache_hit", "backend_lane_wait_ms", "backend_lane_admission_rejected",
             "backend_stale_request_dropped", "backend_session_age_ms", "backend_session_reuse_count",
             "speculative_queue_ms", "recovery_queue_ms", "model_batch_completed",
-            "cancelled_call_returned"
+            "cancelled_call_returned", "mode_trace_ring_overwritten"
         ]
         for reason in sessionReasons {
             if let count = counters[reason], count >= 0 {
@@ -413,6 +416,7 @@ actor DiagnosticExportWriter {
             "rapidTextTracking", "joinAdjacentText", "activeTextFocus",
             "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
             "thermalState", "performanceTier", "reductionReasons",
+            "hotPathAB", "hybridSchedulerAB",
             "appRequestedCaptureIntervalMs", "appRequestedCaptureEdgePx"
         ]
         let safeSettings = snapshot.settings.filter { pair in
@@ -465,6 +469,8 @@ actor DiagnosticExportWriter {
             "modeBackendLaneWaitMs", "modeSessionAgeMs", "modeSessionCompletedCalls",
             "hybridDefaultWarmupMs", "hybridLowLatencyWarmupMs",
             "hybridOverlappedRecoveryMs", "hybridMeasuredOverlapMs", "modeCancellationReleaseMs",
+            "modePlanBuiltMs", "modePlanReusedMs", "modeCommitToPiPMs",
+            "modeConfirmationToPiPMs", "modeReadyToPiPMs", "hybridMatchingWaitMs",
             "speculativeStopReleaseMs", "queueBehindSpeculationMs", "queueBehindConfirmedMs", "queueSchedulingMs"
         ]
         let safeMetrics = snapshot.distributions.filter { key, value in
@@ -916,6 +922,23 @@ enum DiagnosticIssueDetector {
             let statistic = recovery.p95 == nil ? "median" : "P95"
             add("hybrid_slow_recovery", "observed", recovery.count,
                 "Hybrid full recovery \(statistic) is >=1000ms over \(recovery.count) observed samples. Percentiles below 20 samples are unavailable; these are service durations, not simultaneous model occupancy.")
+        }
+        // A confirmed Hybrid long tail can occur without an overlap-at-start
+        // flag, so examine all Hybrid confirmed calls separately as well.
+        if session.translationModes?.active == "hybridRecovery",
+           let confirmed = session.distributions["confirmedModelMs"],
+           confirmed.count >= 20, let tail = confirmed.p95, tail >= 1000 {
+            add("hybrid_confirmed_long_tail", "observed", confirmed.count,
+                "Hybrid confirmed-model P95 exceeds 1000ms with at least 20 measured calls. This does not by itself establish physical model contention.")
+        }
+        let fallbacks = session.translationModes?.counters["hybrid_default_fallback"] ?? 0
+        let recoveryDecisions = session.translationModes?.counters
+            .filter { $0.key.hasPrefix("recovery_decision_") }
+            .values.reduce(0, +) ?? 0
+        if fallbacks >= 3 && recoveryDecisions >= 6 &&
+           Double(fallbacks) / Double(recoveryDecisions) >= 0.25 {
+            add("hybrid_fallback_storm", "suspected", fallbacks,
+                "At least a quarter of the observed Hybrid recovery decisions needed Apple Default fallback. Verify fast-language assets and error events.")
         }
         let observedOverlap = session.translationModes?.counters["hybrid_cross_strategy_overlap"] ?? 0
         let measuredOverlap = session.distributions["hybridMeasuredOverlapMs"]?.count ?? 0

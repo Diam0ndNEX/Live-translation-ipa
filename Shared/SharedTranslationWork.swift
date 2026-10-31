@@ -31,3 +31,99 @@ enum SharedTranslationWork {
         workEpoch == currentEpoch && !requestedCancellation && compatibleContext
     }
 }
+
+
+/// A four-entry, synchronous, value-semantic preparation cache. The caller owns
+/// the full identity: capture, layout, source, rules, rotation and work epoch.
+/// No actor hop, disk access, asynchronous task or model session is introduced.
+struct ExactPlanReuseCache<Key: Equatable, Value> {
+    private(set) var entries: [(key: Key, value: Value)] = []
+    private(set) var hits = 0
+    private(set) var misses = 0
+    let capacity: Int
+
+    init(capacity: Int = 4) { self.capacity = max(1, min(16, capacity)) }
+
+    mutating func lookup(_ key: Key) -> Value? {
+        guard let position = entries.firstIndex(where: { $0.key == key }) else {
+            misses += 1
+            return nil
+        }
+        hits += 1
+        let entry = entries.remove(at: position)
+        entries.append(entry)
+        return entry.value
+    }
+
+    mutating func insert(_ value: Value, for key: Key) {
+        entries.removeAll { $0.key == key }
+        entries.append((key, value))
+        if entries.count > capacity { entries.removeFirst(entries.count - capacity) }
+    }
+
+    mutating func clear() { entries.removeAll(keepingCapacity: true) }
+    var count: Int { entries.count }
+}
+
+/// Common physical-request ownership contract for Legacy and Hybrid Apple
+/// Default. Cancellation is advisory and never releases active ownership.
+/// A completion may return a reusable session only for an unchanged epoch.
+struct AppleDefaultLeaseState {
+    private(set) var active: UUID?
+    private(set) var epoch = UUID()
+    private(set) var cancellationRequested = false
+    private(set) var completed = 0
+
+    mutating func begin() -> UUID? {
+        guard active == nil else { return nil }
+        let ticket = UUID()
+        active = ticket
+        cancellationRequested = false
+        return ticket
+    }
+
+    mutating func requestCancellation() {
+        if active != nil { cancellationRequested = true }
+    }
+
+    mutating func finish(_ ticket: UUID, successful: Bool) -> Bool {
+        guard active == ticket else { return false }
+        active = nil
+        completed += 1
+        return successful && !cancellationRequested
+    }
+
+    mutating func reset() {
+        epoch = UUID()
+        requestCancellation()
+    }
+}
+
+    
+/// Build-time A/B controls used for the v1.9.5 comparison matrix. Defaults are
+/// the optimized implementations; define each reference flag separately with
+/// SWIFT_ACTIVE_COMPILATION_CONDITIONS to isolate L0 and F0 without a setting,
+/// model-strategy change, or an extra runtime branch in the selected path.
+enum TranslationHotPathAB {
+    static var reuseStandaloneLowLatencyPlan: Bool {
+        #if SCREENLINGO_REFERENCE_LL_PLAN
+        return false
+        #else
+        return true
+        #endif
+    }
+
+    static var reuseLegacyPreparedUnits: Bool {
+        #if SCREENLINGO_REFERENCE_LEGACY_UNITS
+        return false
+        #else
+        return true
+        #endif
+    }
+
+    static var label: String {
+        let legacy = reuseLegacyPreparedUnits ? "L1" : "L0"
+        let fast = reuseStandaloneLowLatencyPlan ? "F1" : "F0"
+        return legacy + "_" + fast
+    }
+}

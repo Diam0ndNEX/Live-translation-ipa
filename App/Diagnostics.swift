@@ -684,7 +684,11 @@ final class Diagnostics: ObservableObject {
             monotonicTime: ProcessInfo.processInfo.systemUptime, firstOCR: firstOCR,
             durationMs: duration, thermal: ProcessInfo.processInfo.thermalState.rawValue)
         modeTrace.append(entry)
-        if modeTrace.count > 2400 { modeTrace.removeFirst(modeTrace.count - 2400) }
+        if modeTrace.count > 2400 {
+            let discarded = modeTrace.count - 2400
+            modeTrace.removeFirst(discarded)
+            modeEventCounts["mode_trace_ring_overwritten", default: 0] += discarded
+        }
         // Keep early and late execution boundaries in the same export for comparisons.
         if Date().timeIntervalSince(started) < 120, openingModeTrace.count < 160,
            (reason.hasPrefix("recovery_decision_") || reason.hasPrefix("pip_enqueue_") ||
@@ -747,6 +751,8 @@ final class Diagnostics: ObservableObject {
         @unknown default: settings["thermalState"] = "unknown"
         }
         settings["performanceTier"] = ThermalPerformancePolicy.tier(for: thermalState).rawValue
+        settings["hotPathAB"] = TranslationHotPathAB.label
+        settings["hybridSchedulerAB"] = HybridSchedulingPolicy.buildVariant.rawValue
         settings["reductionReasons"] = captureReductionReasons.joined(separator: "_")
         settings["appRequestedCaptureIntervalMs"] = String(requestedCaptureIntervalMs)
         settings["appRequestedCaptureEdgePx"] = String(requestedCaptureEdgePx)
@@ -815,7 +821,13 @@ final class Diagnostics: ObservableObject {
                 "hybridLowLatencyWarmupMs": DiagnosticDistribution(modeTimingSamples["initial_warmup_lowLatency_model_completed_ms", default: []]),
                 "hybridOverlappedRecoveryMs": DiagnosticDistribution(modeTimingSamples["hybrid_overlapped_recovery_ms", default: []]),
                 "hybridMeasuredOverlapMs": DiagnosticDistribution(modeTimingSamples["hybrid_simultaneous_model_overlap_ms", default: []]),
-                "modeCancellationReleaseMs": DiagnosticDistribution(modeTimingSamples["cancelled_call_returned", default: []])],
+                "modeCancellationReleaseMs": DiagnosticDistribution(modeTimingSamples["cancelled_call_returned", default: []]),
+                "modePlanBuiltMs": DiagnosticDistribution(modeTimingSamples["mode_plan_built_ms", default: []]),
+                "modePlanReusedMs": DiagnosticDistribution(modeTimingSamples["mode_plan_reused_ms", default: []]),
+                "modeCommitToPiPMs": DiagnosticDistribution(modeTimingSamples["mode_commit_to_pip_ms", default: []]),
+                "modeConfirmationToPiPMs": DiagnosticDistribution(modeTimingSamples["mode_confirmation_to_pip_ms", default: []]),
+                "modeReadyToPiPMs": DiagnosticDistribution(modeTimingSamples["mode_ready_to_pip_ms", default: []]),
+                "hybridMatchingWaitMs": DiagnosticDistribution(modeTimingSamples["hybrid_matching_wait_ms", default: []])],
             events: exportEventWindow(),
             intervals: diagnosticIntervals(at: Date()),
             oneSecondIntervals: detailedCollection ? recentIntervals(at: Date(), period: 1) : nil,
