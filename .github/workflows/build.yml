@@ -39,6 +39,10 @@ jobs:
           /tmp/three-mode-tests
           python3 scripts/test_three_modes.py
           python3 scripts/test_compare_three_modes.py
+      - name: Verify deterministic LL Legacy and Hybrid timed A/B matrix
+        run: |
+          swiftc -parse-as-library Shared/SharedTranslationWork.swift Shared/TranslationSystem.swift Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/HotPathAB/main.swift -o /tmp/screenlingo-v196-timed-tests
+          /tmp/screenlingo-v196-timed-tests
       - name: Verify three-mode diagnostics live routing
         run: python3 scripts/test_mode_diagnostics_ui.py
       - name: Verify performance acceptance gate
