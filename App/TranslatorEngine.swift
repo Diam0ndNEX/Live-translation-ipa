@@ -1002,7 +1002,14 @@ final class TranslatorEngine: ObservableObject {
             }
         }
         modeService.mayStartModel = { [weak self] caption, speculative in
-            self?.modeCoordinator.shouldStartModel(caption, speculative: speculative) ?? false
+            guard let self, self.modeCoordinator.shouldStartModel(caption, speculative: speculative) else { return false }
+            // A request can suspend on RAM or language availability after it
+            // was admitted. Check *again* immediately before acquiring the
+            // real speculative Apple session, never just at OCR observation.
+            if speculative && caption.system == .hybridRecovery &&
+                self.modeCoordinator.hybridVariant != .reference195 &&
+                self.modeService.hasConfirmedLowLatencyDemand { return false }
+            return true
         }
         modeService.hostedDefault = { [weak self] texts, source, target, speculative in
             await self?.translateLegacy(texts, source: source, target: target, speculative: speculative)
