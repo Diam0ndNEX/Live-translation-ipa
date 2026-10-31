@@ -266,6 +266,7 @@ import Foundation
                        "joinAdjacentText": "true", "activeTextFocus": "true",
                        "effectiveRapidTextTracking": "true",
                        "effectiveJoinAdjacentText": "true", "effectiveActiveTextFocus": "true",
+                       "hotPathAB": "L1_F1", "hybridSchedulerAB": "evidenceBounded",
                        "glossary": "private-protected-names"],
             health: MemoryDiagnosticHealth(), counters: [:],
             distributions: [
@@ -284,6 +285,8 @@ import Foundation
                      hybridArchive.settings["effectiveRapidTextTracking"] == "true" &&
                      hybridArchive.settings["effectiveJoinAdjacentText"] == "true" &&
                      hybridArchive.settings["effectiveActiveTextFocus"] == "true" &&
+                     hybridArchive.settings["hotPathAB"] == "L1_F1" &&
+                     hybridArchive.settings["hybridSchedulerAB"] == "evidenceBounded" &&
                      hybridArchive.settings["glossary"] == nil,
             "Effective thermal and custom-preset values must survive privacy filtering")
         let absentOverlapEvidence = DiagnosticSessionExport(
