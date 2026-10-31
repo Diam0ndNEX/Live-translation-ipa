@@ -189,6 +189,17 @@ private func hybridTimeline(variant: HybridSchedulerVariant, matching: Bool,
             reusePlan: true, memoryHit: true)
         precondition(memory.modelCalls == 0 && memory.selectedUnits.count == 2)
 
+        // A request may be logically admitted before awaiting availability;
+        // H1/H2 recheck actual LL demand at physical-call acquisition.
+        precondition(HybridSchedulingPolicy.maySubmitDefaultAfterAvailability(
+            variant: .reference195, confirmedDemand: true))
+        precondition(!HybridSchedulingPolicy.maySubmitDefaultAfterAvailability(
+            variant: .recoveryFirst, confirmedDemand: true))
+        precondition(!HybridSchedulingPolicy.maySubmitDefaultAfterAvailability(
+            variant: .evidenceBounded, confirmedDemand: true))
+        precondition(HybridSchedulingPolicy.maySubmitDefaultAfterAvailability(
+            variant: .evidenceBounded, confirmedDemand: false))
+
         // C should hedge promptly toward a 40ms LL service when Default is
         // predicted to take much longer and no contention has been observed.
         let fast = hybridTimeline(variant: .evidenceBounded, matching: true,
