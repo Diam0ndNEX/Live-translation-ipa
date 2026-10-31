@@ -37,6 +37,10 @@ final class ModeTranslationService {
     var mayAdmitHybridSpeculation: Bool {
         !speculative.busy && !confirmed.busy && confirmedDemand == 0 && !warmupLane.busy && hostedTask == nil
     }
+    /// Frozen v1.9.5 admission predicate for internal reference A/B tests.
+    var mayAdmitReferenceHybridSpeculation: Bool {
+        !speculative.busy && !confirmed.busy && !warmupLane.busy && hostedTask == nil
+    }
     private let installedCheckTTL: Double = 30
     var warmupEvent: ((InitialWarmupEvent) -> Void)?
     var modelRequestCompleted: ((String, String, RequestedTranslationStrategy, Double) -> Void)?
