@@ -27,6 +27,8 @@ jobs:
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: "26.6"
+      - name: Enforce nominal/fair full-performance parity
+        run: python3 scripts/test_thermal_parity.py
       - name: Check pipeline regressions
         run: |
           swiftc Shared/*.swift App/TextIntelligence.swift App/CaptionAssembly.swift App/MemoryWriter.swift App/PipelineSimulation.swift Tests/main.swift -o /tmp/pipeline-tests
