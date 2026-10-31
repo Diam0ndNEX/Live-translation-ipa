@@ -579,7 +579,9 @@ final class TranslatorEngine: ObservableObject {
             layout: packet.lines.map(ModeLayout.init))
         let plan: ModePreparedPlan
         let reused: Bool
-        if let cached = modePreparedPlans.lookup(planIdentity) {
+        let planReuseEnabled = activeTranslationSystem != .lowLatency ||
+            TranslationHotPathAB.reuseStandaloneLowLatencyPlan
+        if planReuseEnabled, let cached = modePreparedPlans.lookup(planIdentity) {
             plan = cached
             reused = true
         } else {
@@ -2415,7 +2417,9 @@ final class TranslatorEngine: ObservableObject {
                                      speakers: Bool, protected: [String]) -> [PreparedSourceUnit] {
         let key = PreparedUnitIdentity(text: text, language: language, slang: slang,
                                        speakers: speakers, protected: protected, context: contextRevision)
-        if let cached = preparedUnits.lookup(key) { return cached }
+        let reuseEnabled = activeTranslationSystem != .legacy ||
+            TranslationHotPathAB.reuseLegacyPreparedUnits
+        if reuseEnabled, let cached = preparedUnits.lookup(key) { return cached }
         let expanded = slang ? TextIntel.expandSlang(text, lang: language) : text
         let parts = speakers ? TextIntel.splitDialogue(expanded) : [(label: String?.none, text: expanded)]
         let output = parts.map { part in
