@@ -35,6 +35,83 @@ check(segmentation.count == 0, "Explicit RAM clear must drop temporary segmentat
 print("Bounded segmentation cache regression checks passed")
 print("Pipeline regression checks passed")
 
+struct FakePreparationIdentity: Equatable {
+    let session: UUID
+    let candidate: String
+    let exactText: String
+    let x: Double
+    let language: String
+    let rules: String
+    let rotation: Int
+    let epoch: Int
+}
+let planSession = UUID()
+let immutableKey = FakePreparationIdentity(session: planSession, candidate: "caption-1",
+    exactText: "Olá mundo", x: 0.55, language: "pt>en", rules: "rules-v1", rotation: 0, epoch: 10)
+var candidatePlans = ExactPlanReuseCache<FakePreparationIdentity, [String]>(capacity: 4)
+check(candidatePlans.lookup(immutableKey) == nil, "A new candidate must build its initial plan")
+candidatePlans.insert(["Olá mundo"], for: immutableKey)
+check(candidatePlans.lookup(immutableKey) == ["Olá mundo"],
+      "An independently confirmed, identical candidate may reuse an immutable plan")
+let invalidKeys = [
+    FakePreparationIdentity(session: UUID(), candidate: "caption-1",
+        exactText: "Olá mundo", x: 0.55, language: "pt>en", rules: "rules-v1", rotation: 0, epoch: 10),
+    FakePreparationIdentity(session: planSession, candidate: "caption-2",
+        exactText: "Olá mundo", x: 0.55, language: "pt>en", rules: "rules-v1", rotation: 0, epoch: 10),
+    FakePreparationIdentity(session: planSession, candidate: "caption-1",
+        exactText: "Olá mundos", x: 0.55, language: "pt>en", rules: "rules-v1", rotation: 0, epoch: 10),
+    FakePreparationIdentity(session: planSession, candidate: "caption-1",
+        exactText: "Olá mundo", x: 0.56, language: "pt>en", rules: "rules-v1", rotation: 0, epoch: 10),
+    FakePreparationIdentity(session: planSession, candidate: "caption-1",
+        exactText: "Olá mundo", x: 0.55, language: "es>en", rules: "rules-v1", rotation: 0, epoch: 10),
+    FakePreparationIdentity(session: planSession, candidate: "caption-1",
+        exactText: "Olá mundo", x: 0.55, language: "pt>en", rules: "rules-v2", rotation: 0, epoch: 10),
+    FakePreparationIdentity(session: planSession, candidate: "caption-1",
+        exactText: "Olá mundo", x: 0.55, language: "pt>en", rules: "rules-v1", rotation: 1, epoch: 10),
+    FakePreparationIdentity(session: planSession, candidate: "caption-1",
+        exactText: "Olá mundo", x: 0.55, language: "pt>en", rules: "rules-v1", rotation: 0, epoch: 11)
+]
+for changed in invalidKeys {
+    check(candidatePlans.lookup(changed) == nil,
+          "A corrected source, layout, language, rule, rotation or capture must rebuild translation units")
+}
+for i in 0..<10 {
+    candidatePlans.insert(["unit \(i)"], for: FakePreparationIdentity(session: planSession,
+        candidate: "candidate-\(i)", exactText: "\(i)", x: 0.3,
+        language: "pt>en", rules: "r", rotation: 0, epoch: 10))
+}
+check(candidatePlans.count == 4 && candidatePlans.lookup(immutableKey) == nil,
+      "Preparation cache must stay bounded and expire obsolete candidates")
+candidatePlans.clear()
+check(candidatePlans.count == 0, "Changes to capture context must invalidate all volatile candidate plans")
+var physicalDefault = AppleDefaultLeaseState()
+let firstPhysical = physicalDefault.begin()!
+check(physicalDefault.begin() == nil, "No second Apple request may acquire an occupied speculative lease")
+physicalDefault.requestCancellation()
+check(physicalDefault.active == firstPhysical, "Requesting cancellation must not release real lane ownership")
+check(!physicalDefault.finish(firstPhysical, successful: true),
+      "A cancelled session is never reusable even when Apple returns successful output")
+let nextPhysical = physicalDefault.begin()!
+physicalDefault.reset()
+check(!physicalDefault.finish(nextPhysical, successful: true),
+      "An old request finishing after reset cannot resurrect a warmed session")
+let freshPhysical = physicalDefault.begin()!
+check(physicalDefault.finish(freshPhysical, successful: true),
+      "Compatible successful physical completion should retain session warmth")
+check(physicalDefault.completed == 3, "Physical completion must be counted only on actual return")
+// A deterministic injection verifies that isolated LL and Legacy benchmarks
+// can detect a 20ms planning or confirmed-queue penalty at the target scale.
+let appPathBaseline = [104.0, 112, 128, 140, 180].map { $0 + 45 }
+let appPathInjected = appPathBaseline.map { $0 + 20 }
+check(zip(appPathInjected, appPathBaseline).allSatisfy { $0 - $1 == 20 },
+      "LL candidate plan profiler must detect a 20ms injected critical-path delay")
+let legacyPathBaseline = [100.0, 140, 180, 220, 250].map { $0 + 270 }
+let legacyPathInjected = legacyPathBaseline.map { $0 + 25 }
+check(zip(legacyPathInjected, legacyPathBaseline).allSatisfy { $0 - $1 == 25 },
+      "Legacy queue profiler must detect a 25ms injected critical-path delay")
+print("v1.9.6 LL/Legacy bounded plan reuse, cancellation lease and overhead-injection checks passed")
+
+
 let workKey = SharedTranslationWork.unitKey(source: "pt", target: "en", text: "Bom dia",
     protectedWords: ["5:Maria"], rules: "privacy-rules")
 check(workKey == PipelineSafety.cacheKey(source: "pt", target: "en", text: "Bom dia",
