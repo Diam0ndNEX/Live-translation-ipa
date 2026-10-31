@@ -141,8 +141,10 @@ for i in 0..<32 {
 }
 check(legacyFeedback.allowsCredibleOpportunity(enabled: true, strongCandidate: true),
     "Recently useful exact predictions may regain a bounded Legacy opportunity")
+check(legacyFeedback.allowsCredibleOpportunity(enabled: true, strongCandidate: false),
+    "Ordinary even-numbered Legacy probes still recover under the reference policy")
 check(!legacyFeedback.allowsCredibleOpportunity(enabled: true, strongCandidate: false),
-    "Uncertain Legacy OCR must never bypass adaptive feedback")
+    "Uncertain Legacy OCR cannot receive the extra evidence-only odd-numbered probe")
 print("v1.9.7 per-mode policy and candidate-active cadence checks passed")
 
 let workKey = SharedTranslationWork.unitKey(source: "pt", target: "en", text: "Bom dia",
