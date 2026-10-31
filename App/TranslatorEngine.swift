@@ -1819,19 +1819,43 @@ final class TranslatorEngine: ObservableObject {
         // First, unconfirmed sighting: translate quietly now so the result is ready the moment the text is confirmed.
         if p.stable == false {
             if speculationAllowed && flag("translateAhead", true) {
-                if !ram.speculationWindow.allowsOpportunity(enabled: flag("adaptiveSpeculation", true)) {
+                let minimumSpecConfidence = flag("coolMode", false) ?
+                    max(0.95, num("speculationConfidence", 0.85)) : num("speculationConfidence", 0.85)
+                let credible = !flag("selectiveSpeculation", true) ||
+                    SpeculationPolicy.credible(lines: p.lines, threshold: minimumSpecConfidence)
+                #if SCREENLINGO_REFERENCE_LEGACY_ADMISSION
+                let admittedByHistory = ram.speculationWindow.allowsOpportunity(
+                    enabled: flag("adaptiveSpeculation", true))
+                #else
+                // A low-confidence rejected OCR packet is not an opportunity to
+                // send model work. Do not consume the bounded governor's probe
+                // budget on one. The user-defined threshold is unchanged.
+                if !credible {
+                    if diag.enabled { diag.s.specSkipped += 1 }
+                    diag.notePipelineDecision(candidate: p.candidateID,
+                        frameIndex: p.frames, stage: "stability",
+                        reason: "legacy_speculation_low_confidence")
+                    return
+                }
+                let highConfidence = SpeculationPolicy.credible(
+                    lines: p.lines, threshold: max(0.95, minimumSpecConfidence))
+                let admittedByHistory = ram.speculationWindow.allowsCredibleOpportunity(
+                    enabled: flag("adaptiveSpeculation", true), strongCandidate: highConfidence)
+                #endif
+                guard admittedByHistory else {
                     if diag.enabled { diag.s.adaptiveSpeculationSkipped += 1 }
                     if ram.speculationWindow.savedMemoryDominant { diag.noteMemoryAwareSpeculationSkip() }
                     diag.notePipelineDecision(candidate: p.candidateID,
                         frameIndex: p.frames, stage: "stability",
-                        reason: "adaptive_speculation_backoff")
+                        reason: ram.speculationWindow.savedMemoryDominant ?
+                            "legacy_speculation_saved_memory_backoff" : "legacy_speculation_low_yield_backoff")
                     return
                 }
-                if flag("selectiveSpeculation", true), !SpeculationPolicy.credible(lines: p.lines, threshold: flag("coolMode", false) ? max(0.95, num("speculationConfidence", 0.85)) : num("speculationConfidence", 0.85)) {
+                guard credible else {
                     if diag.enabled { diag.s.specSkipped += 1 }
                     if diag.detailedCollection {
                         diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
-                            stage: "stability", reason: "rejected_low_confidence")
+                            stage: "stability", reason: "legacy_speculation_low_confidence")
                     }
                     return
                 }
