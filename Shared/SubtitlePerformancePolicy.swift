@@ -241,8 +241,10 @@ struct SpeculativeWorkWindow {
         let recent = Array(completed.suffix(16))
         guard enabled, strongCandidate, !savedMemoryDominant,
               recent.count >= 12, recent.filter({ $0.reused }).count >= 2 else { return false }
-        // Never escalate into full unconditional speculation after a bad window.
-        return opportunities.isMultiple(of: 4) == false
+        // Reference backoff allows opportunities 2 and 4 of every four.
+        // Admit only opportunity 1 as an extra proven-useful probe, leaving
+        // opportunity 3 blocked. This is a genuine 3/4 ceiling, not 100%.
+        return opportunities % 4 == 1
     }
 }
 
