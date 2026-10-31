@@ -296,7 +296,7 @@ struct TranslationModeReport: Codable {
             "backend_installed_cache_hit", "backend_lane_wait_ms", "backend_lane_admission_rejected",
             "backend_stale_request_dropped", "backend_session_age_ms", "backend_session_reuse_count",
             "speculative_queue_ms", "recovery_queue_ms", "model_batch_completed",
-            "cancelled_call_returned"
+            "cancelled_call_returned", "mode_trace_ring_overwritten"
         ]
         for reason in sessionReasons {
             if let count = counters[reason], count >= 0 {
