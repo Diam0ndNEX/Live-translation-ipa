@@ -33,7 +33,7 @@ jobs:
           /tmp/pipeline-tests
       - name: Verify three-mode coordinator and source contract
         run: |
-          swiftc -parse-as-library Shared/TranslationSystem.swift Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/ThreeModes/main.swift -o /tmp/three-mode-tests
+          swiftc -parse-as-library Shared/SharedTranslationWork.swift Shared/TranslationSystem.swift Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/ThreeModes/main.swift -o /tmp/three-mode-tests
           /tmp/three-mode-tests
           python3 scripts/test_three_modes.py
           python3 scripts/test_compare_three_modes.py
