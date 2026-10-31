@@ -972,7 +972,11 @@ final class TranslatorEngine: ObservableObject {
         modeDiagnosticEpochs[modeSessionID] = diag.started
         modeCoordinator.system = activeTranslationSystem
         modeCoordinator.hybridSpeculationPermitted = { [weak self] in
-            self?.modeService.mayAdmitHybridSpeculation ?? false
+            guard let self else { return false }
+            switch self.modeCoordinator.hybridVariant {
+            case .reference195: return self.modeService.mayAdmitReferenceHybridSpeculation
+            case .recoveryFirst, .evidenceBounded: return self.modeService.mayAdmitHybridSpeculation
+            }
         }
         modeService.mayStartModel = { [weak self] caption, speculative in
             self?.modeCoordinator.shouldStartModel(caption, speculative: speculative) ?? false
