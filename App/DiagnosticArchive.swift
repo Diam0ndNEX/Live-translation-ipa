@@ -922,6 +922,23 @@ enum DiagnosticIssueDetector {
             add("hybrid_slow_recovery", "observed", recovery.count,
                 "Hybrid full recovery \(statistic) is >=1000ms over \(recovery.count) observed samples. Percentiles below 20 samples are unavailable; these are service durations, not simultaneous model occupancy.")
         }
+        // A confirmed Hybrid long tail can occur without an overlap-at-start
+        // flag, so examine all Hybrid confirmed calls separately as well.
+        if session.translationModes?.active == "hybridRecovery",
+           let confirmed = session.distributions["confirmedModelMs"],
+           confirmed.count >= 20, let tail = confirmed.p95, tail >= 1000 {
+            add("hybrid_confirmed_long_tail", "observed", confirmed.count,
+                "Hybrid confirmed-model P95 exceeds 1000ms with at least 20 measured calls. This does not by itself establish physical model contention.")
+        }
+        let fallbacks = session.translationModes?.counters["hybrid_default_fallback"] ?? 0
+        let recoveryDecisions = session.translationModes?.counters
+            .filter { $0.key.hasPrefix("recovery_decision_") }
+            .values.reduce(0, +) ?? 0
+        if fallbacks >= 3 && recoveryDecisions >= 6 &&
+           Double(fallbacks) / Double(recoveryDecisions) >= 0.25 {
+            add("hybrid_fallback_storm", "suspected", fallbacks,
+                "At least a quarter of the observed Hybrid recovery decisions needed Apple Default fallback. Verify fast-language assets and error events.")
+        }
         let observedOverlap = session.translationModes?.counters["hybrid_cross_strategy_overlap"] ?? 0
         let measuredOverlap = session.distributions["hybridMeasuredOverlapMs"]?.count ?? 0
         if observedOverlap >= 3 && measuredOverlap == 0 {
