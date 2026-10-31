@@ -195,6 +195,18 @@ enum HybridSchedulingPolicy {
 
     /// The expected gain is a bounded reduction of LL/Default cross-lane
     /// contention, not a claim of independent Apple inference hardware.
+    /// Do not spend the full matching deadline waiting for work that has not
+    /// entered Apple's model. A small bounded grace protects a forthcoming
+    /// complete cached response; real confirmed LL remains independent.
+    static func preflightWait(variant: HybridSchedulerVariant, submitted: Bool,
+                              fastRecoveryInstalled: Bool, proposed: Double) -> Double {
+        guard proposed.isFinite else { return 0 }
+        guard variant != .reference195, fastRecoveryInstalled, !submitted else {
+            return max(0, proposed)
+        }
+        return min(0.025, max(0, proposed))
+    }
+
     static func matchingWait(variant: HybridSchedulerVariant,
                              elapsed: Double, defaultSamples: [Double],
                              lowSamples: [Double], oldWait: Double,
@@ -456,7 +468,18 @@ final class ThreeModeCoordinator {
                 if self.speculation != nil && !self.speculativeFailed {
                     self.event(caption, "speculation_match_unfinished", nil)
                     // LL shares the original request. A hung request has a same-strategy deadline.
-                    let wait = self.system == .lowLatency ? max(0, self.matchingLowLatencyDeadline - (self.clock() - self.speculativeStarted)) : self.remainingWait(caption)
+                    let wait: Double
+                    if self.system == .lowLatency {
+                        wait = max(0, self.matchingLowLatencyDeadline - (self.clock() - self.speculativeStarted))
+                    } else {
+                        let ordinary = self.remainingWait(caption)
+                        wait = HybridSchedulingPolicy.preflightWait(
+                            variant: self.hybridVariant,
+                            submitted: self.speculativeModelSubmitted,
+                            fastRecoveryInstalled: self.fastRecoveryInstalled,
+                            proposed: ordinary)
+                        if wait < ordinary { self.event(caption, "hybrid_unsubmitted_hedge_ms", wait * 1000) }
+                    }
                     self.deadline = Task { [weak self] in
                         try? await Task.sleep(nanoseconds: UInt64(max(0, wait) * 1_000_000_000))
                         guard let self, !Task.isCancelled, self.current == caption, self.committed != caption else { return }
