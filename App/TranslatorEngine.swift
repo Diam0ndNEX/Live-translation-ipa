@@ -242,6 +242,11 @@ final class TranslatorEngine: ObservableObject {
     private var initialWarmupTask: Task<Void, Never>?
     private var initialWarmupID = UUID()
     private var observedModelRuns: [String: (at: Date, milliseconds: Double?)] = [:]
+    /// v2.0.0 L2 (diagnostics only): Legacy model calls in flight per
+    /// TranslationSession and the last return, to split confirmed model time
+    /// by whether another session's call was running or ended < 1.5 s earlier.
+    private var legacyModelInFlight: [ObjectIdentifier: Int] = [:]
+    private var legacyLastModelReturn: (session: ObjectIdentifier, at: Double)?
 
     private func modelRunKey(_ source: String, _ target: String, _ strategy: RequestedTranslationStrategy) -> String {
         source + ">" + target + "|" + strategy.rawValue
@@ -3116,6 +3121,19 @@ final class TranslatorEngine: ObservableObject {
         let marker = modelPerf.beginInterval("TranslationBatch")
         defer { modelPerf.endInterval("TranslationBatch", marker) }
         let began = ProcessInfo.processInfo.systemUptime
+        let sessionID = ObjectIdentifier(session)
+        let measuresSwitch = !warmup && activeTranslationSystem == .legacy
+        let otherSessionNearby = measuresSwitch &&
+            (legacyModelInFlight.contains { $0.key != sessionID && $0.value > 0 } ||
+             (legacyLastModelReturn.map { $0.session != sessionID && began - $0.at < 1.5 } ?? false))
+        if measuresSwitch { legacyModelInFlight[sessionID, default: 0] += 1 }
+        defer {
+            if measuresSwitch {
+                let remaining = (legacyModelInFlight[sessionID] ?? 1) - 1
+                legacyModelInFlight[sessionID] = remaining > 0 ? remaining : nil
+                legacyLastModelReturn = (sessionID, ProcessInfo.processInfo.systemUptime)
+            }
+        }
         let modelCandidate = warmup ? nil : currentPacket?.candidateID
         let first30s = !warmup && sessionStarted.map {
             let age = Date().timeIntervalSince($0)
@@ -3153,6 +3171,10 @@ final class TranslatorEngine: ObservableObject {
                     (speculative ? "speculative_model_completed" : "confirmed_model_completed"),
                     durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000,
                     candidate: modelCandidate)
+                if measuresSwitch && !speculative {
+                    record(otherSessionNearby ? "legacy_confirmed_after_switch" : "legacy_confirmed_no_switch",
+                        durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
+                }
             }
             if first30s {
                 record("model_batch_first_30s",

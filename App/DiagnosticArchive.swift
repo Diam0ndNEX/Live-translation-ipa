@@ -491,7 +491,8 @@ actor DiagnosticExportWriter {
             "hybridOverlappedRecoveryMs", "hybridMeasuredOverlapMs", "modeCancellationReleaseMs",
             "modePlanBuiltMs", "modePlanReusedMs", "modeCommitToPiPMs",
             "modeConfirmationToPiPMs", "modeReadyToPiPMs", "hybridMatchingWaitMs",
-            "speculativeStopReleaseMs", "queueBehindSpeculationMs", "queueBehindConfirmedMs", "queueSchedulingMs"
+            "speculativeStopReleaseMs", "queueBehindSpeculationMs", "queueBehindConfirmedMs", "queueSchedulingMs",
+            "legacyConfirmedAfterSessionSwitchMs", "legacyConfirmedNoSwitchMs"
         ]
         let safeMetrics = snapshot.distributions.filter { key, value in
             allowedMetrics.contains(key) && value.count >= 0 &&
@@ -669,6 +670,11 @@ actor DiagnosticExportWriter {
             - Confirmed model requests: \(metric("confirmedModelMs"))
             - Speculative model requests: \(metric("speculativeModelMs"))
             - PiP frame preparation: \(metric("renderingMs"))
+
+            ## Legacy model sessions (v2.0.0, diagnostics only)
+            - Confirmed model, other session's call running or ended < 1.5 s: \(metric("legacyConfirmedAfterSessionSwitchMs"))
+            - Confirmed model, no other session nearby: \(metric("legacyConfirmedNoSwitchMs"))
+            - Speculative sessions created: \(count("speculativeSessionsCreated"))
 
             ## Subtitle lifecycle (candidates, not sentences)
             - Confirmed packets: \(count("confirmedCandidatePackets"))

@@ -478,7 +478,8 @@ final class Diagnostics: ObservableObject {
             "speculative_session_created", "speculative_stop_requested", "speculative_stop_released",
             "warmup_source_unresolved", "warmup_predicted_source", "warmup_preempted",
             "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started",
-            "legacy_idle_completed", "legacy_idle_deferred"
+            "legacy_idle_completed", "legacy_idle_deferred",
+            "legacy_confirmed_after_switch", "legacy_confirmed_no_switch"
         ]
         guard allowed.contains(reason) else { return }
         if modeActiveSystem == "legacy", let candidate {
@@ -490,7 +491,8 @@ final class Diagnostics: ObservableObject {
             if reason == "confirmed_model_completed" { legacyModeEvent(candidate, reason: "recovery_service_ms", duration: durationMs) }
             if reason == "speculative_model_completed" { legacyModeEvent(candidate, reason: "speculative_service_ms", duration: durationMs) }
         }
-        if ["model_batch_completed", "confirmed_model_completed", "speculative_model_completed", "speculative_stop_released"].contains(reason),
+        if ["model_batch_completed", "confirmed_model_completed", "speculative_model_completed", "speculative_stop_released",
+            "legacy_confirmed_after_switch", "legacy_confirmed_no_switch"].contains(reason),
            let durationMs, durationMs.isFinite, durationMs >= 0 {
             modelTimingSamples[reason, default: []].append(durationMs)
             if modelTimingSamples[reason, default: []].count > 1200 {
@@ -822,6 +824,8 @@ final class Diagnostics: ObservableObject {
                 "speculativeModelMs": DiagnosticDistribution(modelTimingSamples["speculative_model_completed", default: []]),
                 "confirmedModelMs": DiagnosticDistribution(modelTimingSamples["confirmed_model_completed", default: []]),
                 "modelBatchMs": DiagnosticDistribution(modelTimingSamples["model_batch_completed", default: []]),
+                "legacyConfirmedAfterSessionSwitchMs": DiagnosticDistribution(modelTimingSamples["legacy_confirmed_after_switch", default: []]),
+                "legacyConfirmedNoSwitchMs": DiagnosticDistribution(modelTimingSamples["legacy_confirmed_no_switch", default: []]),
                 "modeAvailabilityCheckMs": DiagnosticDistribution(modeTimingSamples["backend_availability_ms", default: []]),
                 "modeTaskDispatchMs": DiagnosticDistribution(modeTimingSamples["backend_task_dispatch_ms", default: []]),
                 "modeSpeculativeQueueMs": DiagnosticDistribution(modeTimingSamples["speculative_queue_ms", default: []]),
@@ -1513,6 +1517,22 @@ final class Diagnostics: ObservableObject {
         return rows.joined(separator: "\n")
     }
 
+    /// v2.0.0 L1/L3/L2 one-line view of where confirmed sentences came from,
+    /// how often new speculative sessions were created, and confirmed model
+    /// time split by a nearby call on another session. Diagnostics only.
+    var servedByLine: String {
+        let total = s.specHits + s.cacheHits + s.savedHits + s.cacheMisses
+        func share(_ n: Int) -> String { total == 0 ? "–" : "\(Int((Double(n) / Double(total) * 100).rounded()))%" }
+        let minutes = max(1.0 / 60, Date().timeIntervalSince(started) / 60)
+        let created = eventTotals["speculative_session_created", default: 0]
+        func median(_ key: String) -> String {
+            let values = (modelTimingSamples[key] ?? []).sorted()
+            guard !values.isEmpty else { return "– (0)" }
+            return "\(Int(values[values.count / 2])) ms (\(values.count))"
+        }
+        return "Served by (sentences): speculation \(share(s.specHits)), session RAM \(share(s.cacheHits)), saved memory \(share(s.savedHits)), model \(share(s.cacheMisses)) of \(total). Speculative sessions created \(created) (\(String(format: "%.1f", Double(created) / minutes))/min). Legacy confirmed model median: other session nearby \(median("legacy_confirmed_after_switch")), no switch \(median("legacy_confirmed_no_switch"))."
+    }
+
     func report(engine: TranslatorEngine) -> String {
         let a = assessment(alive: engine.captureAlive, paused: engine.paused)
         let o = Diagnostics.summarize(ocr), t = Diagnostics.summarize(translate)
@@ -1535,6 +1555,7 @@ final class Diagnostics: ObservableObject {
         l.append("Translations \(s.translations), sentences \(s.sentences), cache \(s.cacheHits + s.savedHits)/\(s.cacheHits + s.savedHits + s.specHits + s.cacheMisses) (pre-translated \(s.specHits)), failures \(s.failures), engine \(s.sessionKind)")
         l.append("Configured source \(engine.sourceCode), last source used \(s.sourceUsed) (\(s.sourceOrigin)), automatic detector \(engine.sourceCode == "auto" ? "enabled" : "off – source selected"), locked \(s.lockedLang).")
         l.append("Cache origins: session \(s.cacheHits), saved memory \(s.savedHits), speculative \(s.specHits), fresh requests \(s.cacheMisses).")
+        l.append(servedByLine)
         l.append("Speculative model requests \(s.specModelRequests); pipeline attempts \(s.specStarted), completed \(s.specCompleted), superseded/cancelled \(s.specDiscarded), declined \(s.specSkipped), unconsumed results \(engine.unconsumedSpeculation); processing \(Int(s.specProcessingMs)) ms, discarded work \(Int(s.specDiscardedMs)) ms. Attempts count pipeline jobs; cache hits count sentences.")
         l.append("Idle validation: selected \(s.legacyBatchEntries), verified \(s.legacyBatchVerified), skipped \(s.legacyBatchSkipped); peak workers \(s.legacyBatchPeakWorkers); model + commit wall time \(Int(s.legacyBatchElapsedMs)) ms.")
         l.append("v1.4.5: deferred confirmed handoffs \(s.confirmedHandoffDeferred); adaptive speculative skips \(s.adaptiveSpeculationSkipped); slow (>1200 ms) PiP enqueues \(s.slowTailEnqueues).")
