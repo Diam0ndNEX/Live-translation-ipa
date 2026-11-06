@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "1.9.9"
-    static let build = 82
+    static let version = "2.0.0"
+    static let build = 83
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("2.0.0", "Build 83: version and CI housekeeping release on top of the unchanged v1.9.9 runtime. Capture, OCR, translation systems, memory and presentation behavior are identical to build 82; CI now builds claude/** branches, and docs/v2.0.0-specification.md records a code review with ranked, unverified performance opportunities that need on-device measurement before any hot-path change."),
         ("1.9.9", "Build 82: correct cross-strategy Hybrid language-pair proximity tracking; benchmark a bounded 220ms post-Default Low Latency settling interval, with explicit request timing and source-context diagnostics. Limit optional visual-wake OCR to two early reads per second during motion, without changing regular OCR cadence or independent confirmation. Legacy v1.9.8 queue and Nominal/Fair policies preserved; device speed acceptance pending."),
         ("1.9.8", "Build 81: restore conservative matching speculation waits and bounded physical Default drain before Hybrid Low Latency recovery, discard obsolete unstarted Legacy speculation on confirmed OCR, and allow visual-change-triggered early OCR with Skip Unchanged Frames disabled. Nominal/Fair both remain full-performance states; device validation pending."),
         ("1.9.7", "Build 80 conservative hot path: avoid repeated caption Unicode normalization, temporary array construction and single-unit duplicate memory bookkeeping. Keeps all scheduling, OCR, translation strategy and output contracts unchanged; device speed still unverified."),
@@ -174,4 +175,3 @@ enum TextSim {
         return Double(g.intersection(set).count) / Double(g.count)
     }
 }
-
