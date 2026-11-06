@@ -19,6 +19,8 @@ struct HomeView: View {
     @AppStorage("homeDetailsExpanded") private var showDetails = false
     @AppStorage("homeQuickExpanded") private var showQuick = false
     @AppStorage("homeMetrics") private var homeMetrics = true
+    /// Same key as Settings → Translation; both pickers edit one value.
+    @AppStorage("translationSystem") private var translationSystem = TranslationSystem.legacy.rawValue
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var state: String {
@@ -52,6 +54,7 @@ struct HomeView: View {
                     header
                     languageCard
                     liveCard
+                    modeSwitch
                     warmupCard
                     if homeTools { outputTools }
                     if homeStatus && homeMetrics { LatencyReadout(monitor: engine.latency) }
@@ -73,6 +76,7 @@ struct HomeView: View {
             .onChange(of: mode) { _, _ in engine.syncConfig() }
             .onChange(of: winSize) { _, _ in engine.applyWindowSize() }
             .onChange(of: showOriginal) { _, _ in engine.applyStyle() }
+            .onChange(of: translationSystem) { _, _ in engine.translationSystemChanged() }
         }
         .sheet(item: $destination) { destination in
             switch destination {
@@ -189,6 +193,24 @@ struct HomeView: View {
                 Image(systemName: engine.captureAlive ? (engine.paused ? "play.fill" : "pause.fill") : "pip.enter")
                     .frame(width: 44, height: 44).background(Theme.cardStrong, in: Circle())
             }.accessibilityLabel(engine.captureAlive ? (engine.paused ? "Resume translation" : "Pause translation") : "Open or close floating window")
+        }
+    }
+
+    /// v2.0.0: switch translation system from Home for three-mode tests.
+    private var modeSwitch: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Picker("Translation system", selection: $translationSystem) {
+                Text("Legacy").tag(TranslationSystem.legacy.rawValue)
+                Text("Hybrid").tag(TranslationSystem.hybridRecovery.rawValue)
+                Text("Low Latency").tag(TranslationSystem.lowLatency.rawValue)
+            }
+            .pickerStyle(.segmented)
+            .accessibilityLabel("Translation system")
+            Text(engine.pendingTranslationSystem != engine.activeTranslationSystem ?
+                 "Active: \(engine.activeTranslationSystem.title) · \(engine.pendingTranslationSystem.title) applies when the broadcast stops" :
+                 "Active: \(engine.activeTranslationSystem.title)")
+                .font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
