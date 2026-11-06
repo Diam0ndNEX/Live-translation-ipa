@@ -217,6 +217,11 @@ struct TranslationModeReport: Codable {
         "hybrid_preserve_confirmed_session", "hybrid_hedged_recovery",
         "hybrid_obsolete_speculation_draining", "hybrid_losing_request_draining",
         "hybrid_no_fast_pack_fallback",
+        "hybrid_switch_guard_default", "hybrid_switch_guard_low_latency",
+        "hybrid_hedge_suppressed", "hybrid_suppressed_hedge_deadline",
+        "hybrid_physical_default_drain_wait_ms", "hybrid_default_drain_completed",
+        "hybrid_default_drain_budget_exceeded", "hybrid_post_default_settlement_wait_ms",
+        "hybrid_slow_post_default_ms", "hybrid_default_reentered_during_settlement",
         "backend_availability_ms", "backend_task_dispatch_ms", "backend_installed_cache_hit",
         "backend_lane_wait_ms", "backend_lane_admission_rejected", "backend_stale_request_dropped",
         "backend_session_age_ms", "backend_session_reuse_count",
@@ -306,7 +311,12 @@ struct TranslationModeReport: Codable {
             "cancelled_call_returned", "mode_trace_ring_overwritten",
             "confirmed_memory_probe_reused", "hybrid_unsubmitted_hedge_ms",
             "hybrid_previous_default_exit_gap_ms", "hybrid_recovery_post_default_service_ms",
-            "hybrid_recovery_no_recent_overlap_service_ms", "hybrid_unexplained_slow_recovery_ms"
+            "hybrid_recovery_no_recent_overlap_service_ms", "hybrid_unexplained_slow_recovery_ms",
+            "hybrid_switch_guard_default", "hybrid_switch_guard_low_latency",
+        "hybrid_hedge_suppressed", "hybrid_suppressed_hedge_deadline",
+        "hybrid_physical_default_drain_wait_ms", "hybrid_default_drain_completed",
+        "hybrid_default_drain_budget_exceeded", "hybrid_post_default_settlement_wait_ms",
+        "hybrid_slow_post_default_ms", "hybrid_default_reentered_during_settlement"
         ]
         for reason in sessionReasons {
             if let count = counters[reason], count >= 0 {
@@ -417,7 +427,7 @@ actor DiagnosticExportWriter {
             "skipUnchanged", "idleBackoff", "adaptiveConfirmation", "subtitleTracking",
             "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest",
             "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
-            "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer",
+            "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard",
             "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
             "deduplicateCopies", "contextualLanguage", "languageRecovery",
             "continuousRotation", "smartCool", "persistDiagnosticSessions",
