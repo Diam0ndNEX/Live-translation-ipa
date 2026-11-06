@@ -3540,6 +3540,18 @@ final class TranslatorEngine: ObservableObject {
         // memory maintenance, diagnostics reset, mode toggles or app switches.
     }
 
+    /// v2.0.0 test helper: empties only process-owned Temporary Memory so the
+    /// next mode run cannot reuse the previous run's translations. Never
+    /// touches saved memory or normal RAM. Refused while capture is live.
+    @discardableResult
+    func clearTemporaryTestMemory() -> Bool {
+        guard !captureAlive else { return false }
+        invalidatePending()
+        processMemory.temporary.clear()
+        temporaryMemoryEntries = 0
+        return true
+    }
+
     func deleteUnvalidatedLegacy() async throws -> Int {
         guard memoryReady, !captureAlive, !pipActive, !busy, !warming,
               !legacyValidationBusy, idleValidationTask == nil, !memorySaving,

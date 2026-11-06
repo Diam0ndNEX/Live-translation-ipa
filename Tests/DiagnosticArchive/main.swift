@@ -576,6 +576,60 @@ import Foundation
         let modeZIP = try await writer.exportZIP(modeSnapshot)
         let modeZIPData = try Data(contentsOf: modeZIP)
         precondition(modeZIPData.range(of: Data("translation_modes.json".utf8)) != nil)
+        // v2.0.0: one combined Markdown report for a three-mode test.
+        func reportSession(_ mode: String, offset: Double) -> DiagnosticSessionExport {
+            func trace(_ reason: String, _ at: Double, _ duration: Double? = nil, caption: String = "cap1") -> TranslationModeTrace {
+                TranslationModeTrace(mode: mode, testMode: "temporaryMemory", session: session, caption: caption,
+                    revision: 1, source: "pt", target: "en", fingerprint: safeHash, reason: reason,
+                    monotonicTime: offset + at, firstOCR: offset + 1, durationMs: duration, thermal: 1)
+            }
+            var events = [
+                trace("confirmed", 1.2), trace("requested_lowLatency", 1.21),
+                trace("confirmed_model_submitted", 1.220), trace("new_session_start", 1.221),
+                trace("recovery_queue_ms", 1.222, 2), trace("hybrid_switch_guard_low_latency", 1.2),
+                trace("recovery_service_ms", 1.27, 45), trace("selected_origin_recovery", 1.28),
+                trace("selected_strategy_lowLatency", 1.28), trace("selected_recovery_success", 1.28),
+                trace("pip_enqueue_recovery_success", 1.30),
+                trace("confirmed", 2, caption: "secret OCR text")
+            ]
+            events.append(trace("hybrid_hedge_suppressed", 1.25, 900))
+            let modes = TranslationModeReport(warmups: nil, active: mode, pending: mode,
+                referenceSHA: String(repeating: "a", count: 40), migration: "persisted",
+                events: events, distributions: [:], counters: [:])
+            var export = DiagnosticSessionExport(id: UUID(), startedAt: Date(timeIntervalSince1970: 1_000 + offset),
+                endedAt: Date(timeIntervalSince1970: 1_300 + offset), appVersion: "2.0.0", systemVersion: "27.0.1",
+                hardwareModel: "iPhone18,2",
+                settings: ["speed": "balanced", "translationTestMode": "temporaryMemory", "startingRAMEntries": "0",
+                           "hybridSwitchGuard": "true", "source": "secret OCR text"],
+                health: MemoryDiagnosticHealth(), counters: ["enqueueFailed": 0],
+                distributions: ["enqueueLatencyMs": DiagnosticDistribution((1...40).map { Double($0) * 10 })],
+                events: [event], measurementBoundary: "OCR through PiP enqueue", textCapture: false)
+            export.translationModes = modes
+            return export
+        }
+        let three = [reportSession("legacy", offset: 0), reportSession("hybridRecovery", offset: 400),
+                     reportSession("lowLatency", offset: 800)]
+        let reportURL = try await writer.exportCombinedReport(three, version: "2.0.0", build: 83)
+        precondition(reportURL.lastPathComponent.hasPrefix("ScreenLingo-Report-2.0.0-b83-") &&
+                     reportURL.pathExtension == "md")
+        let reportData = try Data(contentsOf: reportURL)
+        precondition(reportData.count < 150_000, "Combined report must stay small")
+        let reportText = String(decoding: reportData, as: UTF8.self)
+        for header in ["## 1. Sessions", "## 2. Comparison", "## 3. Stage timings", "## 4. Model calls",
+                       "## 5. Captions", "## 6. Hybrid and recovery decisions", "## 7. Findings", "## 8. Truncation"] {
+            precondition(reportText.contains(header), "Missing report section " + header)
+        }
+        precondition(!reportText.contains("secret"), "Report must not contain OCR or source text")
+        precondition(reportText.contains("S1,legacy,confirmed,lowLatency,0,"), "Model call row reconstructed")
+        precondition(reportText.contains("hybrid_hedge_suppressed"))
+        precondition(reportText.contains(",c1,") && !reportText.contains("cap1"), "Caption ids are replaced by sequence refs")
+        precondition(reportText.contains("S1–S2: 100%"), "Same-content fingerprint overlap")
+        let parsedTrace = CombinedDiagnosticReport.parse(three[0].translationModes?.sanitized(), label: "S1")
+        precondition(parsedTrace.calls.count == 1 && parsedTrace.calls[0].serviceMs == 45 &&
+                     parsedTrace.calls[0].warm == "new" && parsedTrace.calls[0].queueMs == 2)
+        precondition(parsedTrace.captions.first?.recoveryStrategy == "lowLatency" &&
+                     parsedTrace.captions.first?.reason == "recovery_success")
+
         print("Diagnostic percentile, privacy, correlation, compatibility and comparison passed")
     }
 }

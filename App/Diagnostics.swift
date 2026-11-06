@@ -901,6 +901,35 @@ final class Diagnostics: ObservableObject {
         }
     }
 
+    /// v2.0.0: the newest saved session of each translation system,
+    /// newest first; the default selection for the combined test report.
+    var defaultReportSelection: [UUID] {
+        var seen = Set<String>(), ids: [UUID] = []
+        for session in archivedSessions.sorted(by: { $0.endedAt > $1.endedAt }) {
+            let mode = session.translationModes?.active ?? "unknown"
+            if seen.insert(mode).inserted { ids.append(session.id) }
+        }
+        return ids
+    }
+
+    /// v2.0.0: one Markdown file for up to six saved sessions.
+    func exportTestReport(ids: [UUID]) async {
+        guard !exportInProgress else { return }
+        let chosen = archivedSessions.filter { ids.contains($0.id) }
+        guard !chosen.isEmpty else { archiveStatus = "Select at least one saved session"; return }
+        exportInProgress = true
+        defer { exportInProgress = false }
+        do {
+            let url = try await exportWriter.exportCombinedReport(
+                Array(chosen.prefix(CombinedDiagnosticReport.maximumSessions)),
+                version: AppVersion.version, build: AppVersion.build)
+            Sharer.present([url])
+            archiveStatus = "Test report ready"
+        } catch {
+            archiveStatus = "Test report export failed; no file was shared"
+        }
+    }
+
     func persistSession() {
         guard enabled, UserDefaults.standard.bool(forKey: "persistDiagnosticSessions"),
               !UserDefaults.standard.bool(forKey: "privateSession"), !archiveInProgress,
@@ -1923,6 +1952,7 @@ private struct DiagnosticsBody: View {
     @State private var confirmDeleteSessions = false
     @State private var bucketSeconds = 1
     @AppStorage("persistDiagnosticSessions") private var persistSessions = false
+    @State private var showTestReport = false
 
     private var page: DiagPage { DiagPage(rawValue: pageRaw) ?? .overview }
     private var range: DiagRange { DiagRange(rawValue: rangeRaw) ?? .fiveMin }
@@ -2014,6 +2044,7 @@ private struct DiagnosticsBody: View {
                 }
             }
             .sheet(isPresented: $showSimulator) { NavigationStack { PipelineSimulatorView().environmentObject(engine) } }
+            .sheet(isPresented: $showTestReport) { TestReportSheet(diag: diag) }
             .onAppear { visible = true }
             .onDisappear { visible = false }
             .onChange(of: collectionEnabled) { _, _ in engine.diagnosticsSettingsChanged() }
@@ -2341,6 +2372,11 @@ private struct DiagnosticsBody: View {
                 Button("Save now") { diag.persistSession() }.disabled(!persistSessions)
                 Button("Refresh") { Task { await diag.loadSessions() } }
             }
+            Button { showTestReport = true } label: {
+                Label("Export test report", systemImage: "doc.text")
+            }
+            Text("One Markdown file comparing saved sessions (newest of each mode preselected). Metadata only.")
+                .font(.caption).foregroundStyle(.secondary)
             Text(diag.archiveStatus).font(.caption)
             ForEach(diag.archivedSessions) { session in
                 DisclosureGroup(session.startedAt.formatted()) {
@@ -3016,3 +3052,75 @@ private struct DiagnosticsBody: View {
     }
 }
 
+
+
+/// v2.0.0: choose up to six saved sessions and export one Markdown report.
+/// The newest saved session of each translation system is preselected.
+struct TestReportSheet: View {
+    @ObservedObject var diag: Diagnostics
+    @Environment(\.dismiss) private var dismiss
+    @State private var selection: Set<UUID> = []
+    @State private var loaded = false
+
+    private func title(_ session: DiagnosticSessionExport) -> String {
+        let mode: String
+        switch session.translationModes?.active {
+        case "legacy": mode = "Legacy"
+        case "hybridRecovery": mode = "Hybrid"
+        case "lowLatency": mode = "Low Latency"
+        default: mode = "Unknown mode"
+        }
+        return mode + " · " + session.startedAt.formatted(date: .abbreviated, time: .shortened)
+    }
+
+    var body: some View {
+        NavigationStack {
+            List {
+                Section {
+                    if !loaded {
+                        ProgressView()
+                    } else if diag.archivedSessions.isEmpty {
+                        Text("No saved sessions. Turn on Save sessions, run each mode, then tap Save run.")
+                            .font(.footnote).foregroundStyle(.secondary)
+                    }
+                    ForEach(diag.archivedSessions) { session in
+                        Button {
+                            if selection.contains(session.id) { selection.remove(session.id) }
+                            else if selection.count < CombinedDiagnosticReport.maximumSessions { selection.insert(session.id) }
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(title(session)).font(.subheadline)
+                                    Text("\(Int(session.endedAt.timeIntervalSince(session.startedAt) / 60)) min · \(session.appVersion)")
+                                        .font(.caption).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Image(systemName: selection.contains(session.id) ? "checkmark.circle.fill" : "circle")
+                                    .foregroundStyle(selection.contains(session.id) ? Color.accentColor : Color.secondary)
+                            }
+                        }.buttonStyle(.plain)
+                    }
+                } footer: {
+                    Text("Up to \(CombinedDiagnosticReport.maximumSessions) sessions. Metadata only: no subtitle, OCR or translated text.")
+                }
+                if !diag.archiveStatus.isEmpty {
+                    Section { Text(diag.archiveStatus).font(.caption).foregroundStyle(.secondary) }
+                }
+            }
+            .navigationTitle("Test report")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Export") { Task { await diag.exportTestReport(ids: Array(selection)) } }
+                        .disabled(selection.isEmpty || diag.exportInProgress)
+                }
+            }
+            .task {
+                await diag.loadSessions()
+                selection = Set(diag.defaultReportSelection)
+                loaded = true
+            }
+        }
+    }
+}
