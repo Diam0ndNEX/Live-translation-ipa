@@ -217,6 +217,7 @@ struct TranslationModeReport: Codable {
         "hybrid_preserve_confirmed_session", "hybrid_hedged_recovery",
         "hybrid_obsolete_speculation_draining", "hybrid_losing_request_draining",
         "hybrid_no_fast_pack_fallback",
+        "memory_probe_reused",
         "hybrid_switch_guard_default", "hybrid_switch_guard_low_latency",
         "hybrid_hedge_suppressed", "hybrid_suppressed_hedge_deadline",
         "hybrid_physical_default_drain_wait_ms", "hybrid_default_drain_completed",

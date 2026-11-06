@@ -365,6 +365,10 @@ final class TranslatorEngine: ObservableObject {
     private var modeRevision = 0
     private var modeLastIdentity = ""
     private var modeMemoryOrigins: [String: String] = [:]
+    /// v2.0.0 G6: the SQLite outcome of the first-sighting probe, reused by the
+    /// confirmation probe of the same key moments later (RAM is still checked
+    /// live first). Timeouts are never reused.
+    private var recentSQLiteProbes: [String: (hit: MemoryLookupResult, at: Double, context: Int, session: UUID)] = [:]
     private var modePlans: [String: ([[CaptionTranslationUnit]], Packet, ModeCaption)] = [:]
     private struct ModeLayout: Equatable {
         let text: String
@@ -712,7 +716,19 @@ final class TranslatorEngine: ObservableObject {
                 return [hit]
             }
             guard canReadPersistent else { return [nil] }
-            let hit = await memoryStore.lookup(key: key)
+            let hit: MemoryLookupResult
+            let uptime = ProcessInfo.processInfo.systemUptime
+            if let recent = recentSQLiteProbes[key], recent.context == context,
+               recent.session == caption.session, uptime - recent.at < 3 {
+                hit = recent.hit
+                noteModeEvent(caption, reason: "memory_probe_reused", duration: nil)
+            } else {
+                hit = await memoryStore.lookup(key: key)
+                if hit.outcome != "timeout" {
+                    if recentSQLiteProbes.count >= 64 { recentSQLiteProbes.removeAll() }
+                    recentSQLiteProbes[key] = (hit, ProcessInfo.processInfo.systemUptime, context, caption.session)
+                }
+            }
             guard context == contextRevision, caption.session == modeSessionID else {
                 return [nil]
             }
