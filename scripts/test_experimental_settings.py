@@ -34,6 +34,7 @@ for key, names in owners.items():
 expected = {
     "ExperimentalFeaturesView.swift": {
         "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard",
+        "pixelConfirmation", "eventDrivenOCR", "fastOCR",
         "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
         "adaptiveConfirmation", "confirmationDeadline", "continuousRotation",
     },
@@ -113,6 +114,10 @@ assert '.onChange(of: directPiPBuffer) { _, _ in engine.applyStyle() }' in extra
 assert '"hybridSwitchGuard": true' in engine
 assert 'modeCoordinator.hybridSwitchGuard = flag("hybridSwitchGuard", true)' in engine
 assert '@AppStorage("hybridSwitchGuard") private var hybridSwitchGuard = true' in extra
+# v2.0.0 G1/G2 are measured defaults; Fast OCR is an off-by-default experiment.
+assert '"pixelConfirmation": true, "eventDrivenOCR": true, "fastOCR": false' in engine
+assert 'pixelConfirmation: flag("pixelConfirmation", true)' in engine
+assert 'fastOCR: flag("fastOCR", false)' in engine
 
 # Ensure the data controls and their destructive confirmation live in History
 # rather than the unrelated Home appearance or feedback screens.

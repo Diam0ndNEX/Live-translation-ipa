@@ -427,7 +427,7 @@ actor DiagnosticExportWriter {
             "skipUnchanged", "idleBackoff", "adaptiveConfirmation", "subtitleTracking",
             "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest",
             "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
-            "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard",
+            "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR",
             "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
             "deduplicateCopies", "contextualLanguage", "languageRecovery",
             "continuousRotation", "smartCool", "persistDiagnosticSessions",
@@ -468,7 +468,8 @@ actor DiagnosticExportWriter {
             "supersededSpeculativePipelines", "confirmedCandidatePackets",
             "deferredEarlyCandidates", "supersededUnpresentedConfirmed",
             "enqueuedCandidateFrames", "unchangedSkippedFrames",
-            "cadenceSkippedFrames", "earlyVisualWakes", "largePackets", "packetSendErrors", "pausedSkippedFrames", "emptyReads",
+            "cadenceSkippedFrames", "earlyVisualWakes", "largePackets", "packetSendErrors",
+            "pixelConfirmations", "pixelRejections", "watchSkippedOCR", "watchTriggeredOCR", "pausedSkippedFrames", "emptyReads",
             "contrastRetries", "emptyOCRPasses"
         ]
         let allowedCounters = DiagnosticIntervalBucket.allowedCounters
@@ -675,6 +676,11 @@ actor DiagnosticExportWriter {
             - Confirmed model, other session's call running or ended < 1.5 s: \(metric("legacyConfirmedAfterSessionSwitchMs"))
             - Confirmed model, no other session nearby: \(metric("legacyConfirmedNoSwitchMs"))
             - Speculative sessions created: \(count("speculativeSessionsCreated"))
+
+            ## OCR (v2.0.0)
+            - Pixel-verified confirmations / fell back to OCR: \(count("pixelConfirmations")) / \(count("pixelRejections"))
+            - OCR passes skipped while the caption was unchanged: \(count("watchSkippedOCR"))
+            - OCR passes started at once on a caption change: \(count("watchTriggeredOCR"))
 
             ## Subtitle lifecycle (candidates, not sentences)
             - Confirmed packets: \(count("confirmedCandidatePackets"))
@@ -1348,8 +1354,8 @@ enum CombinedDiagnosticReport {
         out.append("")
         out.append("## 1. Sessions")
         out.append("")
-        out.append("| | mode | started | min | device | iOS | pair | preset | speed | memory | RAM at start | rapid/join/focus | switch guard |")
-        out.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+        out.append("| | mode | started | min | device | iOS | pair | preset | speed | memory | RAM at start | rapid/join/focus | switch guard | pixel/watch/fast OCR |")
+        out.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         for (i, session) in selected.enumerated() {
             let s = session.settings
             let pair = session.translationModes?.events.first.map { "\($0.source)>\($0.target)" } ??
@@ -1358,7 +1364,7 @@ enum CombinedDiagnosticReport {
             let ram = Int(s["startingRAMEntries"] ?? "") ?? 0
             let switches = ["effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus"]
                 .map { s[$0] ?? "?" }.joined(separator: "/")
-            out.append("| \(labels[i]) | \(session.translationModes?.active ?? "unknown") | \(session.startedAt.ISO8601Format()) | \(String(format: "%.1f", minutes)) | \(session.hardwareModel ?? "?") | \(session.systemVersion) | \(pair) | \(s["mode"] ?? "?") | \(s["speed"] ?? "?") | \(s["translationTestMode"] ?? "?") | \(ram)\(ram > 0 ? " ⚠️" : "") | \(switches) | \(s["hybridSwitchGuard"] ?? "default") |")
+            out.append("| \(labels[i]) | \(session.translationModes?.active ?? "unknown") | \(session.startedAt.ISO8601Format()) | \(String(format: "%.1f", minutes)) | \(session.hardwareModel ?? "?") | \(session.systemVersion) | \(pair) | \(s["mode"] ?? "?") | \(s["speed"] ?? "?") | \(s["translationTestMode"] ?? "?") | \(ram)\(ram > 0 ? " ⚠️" : "") | \(switches) | \(s["hybridSwitchGuard"] ?? "default") | \(s["pixelConfirmation"] ?? "-")/\(s["eventDrivenOCR"] ?? "-")/\(s["fastOCR"] ?? "-") |")
         }
         if selected.count >= 2 {
             out.append("")

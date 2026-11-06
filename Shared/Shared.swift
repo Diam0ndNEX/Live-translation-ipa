@@ -107,6 +107,13 @@ struct Packet: Codable {
     /// Diagnostics can show whether large UDP datagrams are being lost.
     var largePackets: Int? = nil
     var sendErrors: Int? = nil
+    /// v2.0.0: pixel-verified confirmations, pixel checks that fell back to
+    /// OCR, OCR passes skipped while a confirmed caption was unchanged, and
+    /// OCR passes started immediately because its text pixels changed.
+    var pixelConfirmations: Int? = nil
+    var pixelRejections: Int? = nil
+    var watchSkippedOCR: Int? = nil
+    var watchTriggeredOCR: Int? = nil
 }
 
 /// App → extension (sent back over the same localhost link)
@@ -143,6 +150,10 @@ struct Config: Codable, Equatable {
     var appInterfaceVisible: Bool? = nil
     var focusedCaptionOCR: Bool? = nil
     var strictCaptionIdentity: Bool? = nil
+    /// v2.0.0 G1/G2/G3. Nil (older app) means off.
+    var pixelConfirmation: Bool? = nil
+    var eventDrivenOCR: Bool? = nil
+    var fastOCR: Bool? = nil
 }
 
 /// Keeps the old memory context exactly unchanged unless a genuinely

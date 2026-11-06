@@ -1182,3 +1182,35 @@ for replacement in ["I have 10 cats!", "i have 10 cats.", "I have 20 cats.", "I 
     check(confirmedCorrection.ready && !confirmedCorrection.duplicate, "Genuine source correction remains displayable")
 }
 print("v1.9 strict source confirmation and meaningful correction checks passed")
+
+// v2.0.0 G1/G2: pixel fingerprint of caption text strokes.
+do {
+    // A white caption on a grey background: 1 in 4 points are strokes.
+    var stroke = [UInt8](repeating: 110, count: PixelConfirmation.columns * PixelConfirmation.rows)
+    for index in stroke.indices where index % 4 == 0 { stroke[index] = 235 }
+    guard let print0 = PixelConfirmation.fingerprint(stroke) else { fatalError("Clear text must fingerprint") }
+    check(print0.inkBright && print0.inkCount == stroke.count / 4, "Bright strokes are recognized as ink")
+    check(PixelConfirmation.matches(print0, stroke), "Identical pixels confirm")
+    var background = stroke
+    for index in background.indices where index % 4 != 0 { background[index] = 140 }
+    check(PixelConfirmation.matches(print0, background), "Background change between strokes is tolerated")
+    var lostGlyph = stroke
+    for index in stride(from: 0, to: 40, by: 4) { lostGlyph[index] = 110 }
+    check(!PixelConfirmation.matches(print0, lostGlyph), "Removed strokes (changed glyph) must not confirm")
+    var newGlyph = stroke
+    for index in stride(from: 1, to: 40, by: 4) { newGlyph[index] = 235 }
+    check(!PixelConfirmation.matches(print0, newGlyph), "New strokes (added text) must not confirm")
+    check(!PixelConfirmation.matches(print0, Array(stroke.dropLast())), "Different sample size must not confirm")
+    let blank = [UInt8](repeating: 120, count: stroke.count)
+    check(PixelConfirmation.fingerprint(blank) == nil, "No text strokes means no pixel confirmation")
+    check(PixelConfirmation.samplePoints(lines: []) == nil, "No lines -> OCR")
+    let five = Array(repeating: (x: 0.5, y: 0.2, w: 0.6, h: 0.05), count: 5)
+    check(PixelConfirmation.samplePoints(lines: five) == nil, "More than four lines -> OCR")
+    let points = PixelConfirmation.samplePoints(lines: [(x: 0.5, y: 0.1, w: 0.6, h: 0.05)]) ?? []
+    check(points.count == PixelConfirmation.columns * PixelConfirmation.rows &&
+          points.allSatisfy { $0.x >= 0 && $0.x <= 1 && $0.y >= 0 && $0.y <= 1 }, "Sample grid stays inside the frame")
+    check(!PixelConfirmation.dwellSatisfied(sinceFirstReadStart: 0.09, interval: 0.05), "Minimum dwell is 100 ms")
+    check(PixelConfirmation.dwellSatisfied(sinceFirstReadStart: 0.2, interval: 0.2), "Dwell equals the OCR interval")
+    check(!PixelConfirmation.dwellSatisfied(sinceFirstReadStart: .nan, interval: 0.2), "Invalid time never confirms")
+}
+print("v2.0.0 pixel-verified confirmation checks passed")

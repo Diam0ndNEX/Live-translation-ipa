@@ -24,6 +24,9 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("incrementalBatchRecovery") private var incrementalBatchRecovery = false
     @AppStorage("directPiPBuffer") private var directPiPBuffer = false
     @AppStorage("hybridSwitchGuard") private var hybridSwitchGuard = true
+    @AppStorage("pixelConfirmation") private var pixelConfirmation = true
+    @AppStorage("eventDrivenOCR") private var eventDrivenOCR = true
+    @AppStorage("fastOCR") private var fastOCR = false
     @AppStorage("subtitleAwareChangeDetection") private var subtitleAwareChangeDetection = false
     @AppStorage("preserveRelatedMovieGroups") private var preserveRelatedMovieGroups = false
 
@@ -34,7 +37,7 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("skipUnchanged") private var skipUnchanged = true
 
     private var pipelineSignature: String {
-        "\(incrementalBatchRecovery)|\(subtitleAwareChangeDetection)|\(preserveRelatedMovieGroups)|\(adaptiveConfirmation)|\(confirmationDeadline)|\(continuousRotation)"
+        "\(incrementalBatchRecovery)|\(pixelConfirmation)|\(eventDrivenOCR)|\(fastOCR)|\(subtitleAwareChangeDetection)|\(preserveRelatedMovieGroups)|\(adaptiveConfirmation)|\(confirmationDeadline)|\(continuousRotation)"
     }
 
     var body: some View {
@@ -58,6 +61,21 @@ struct ExperimentalFeaturesView: View {
                     explanation: "On (default): Hybrid Recovery recovers with Apple Default while an Apple Default call is running or ended less than 1.5 s ago, and waits for a matching prediction instead of starting a second model beside it. Turn off to compare with the 1.9.9 behavior on the same video. Applies from the next subtitle.",
                     enabled: $hybridSwitchGuard)
             } header: { Text("Translation experiments") }
+
+            Section {
+                ExperimentalOption(
+                    title: "Pixel-verified confirmation",
+                    explanation: "On (default): after the first read, a subtitle is confirmed when its text pixels stay unchanged for the normal confirmation time, instead of waiting for a second full OCR read. Any pixel change falls back to OCR. Off: two OCR reads as in 1.9.9.",
+                    enabled: $pixelConfirmation)
+                ExperimentalOption(
+                    title: "Event-driven OCR",
+                    explanation: "On (default): while a shown subtitle's text pixels are unchanged, OCR pauses (rechecking at least every 0.55 s); when they change, OCR runs at once. Fewer reads, less heat. Off: fixed cadence.",
+                    enabled: $eventDrivenOCR)
+                ExperimentalOption(
+                    title: "Fast OCR",
+                    explanation: "Uses Vision's fast recognizer without language correction. Much faster per read, but may miss accents or non-Latin text. Compare on the same video before keeping it.",
+                    enabled: $fastOCR)
+            } header: { Text("OCR (2.0.0)") }
 
             Section {
                 ExperimentalOption(
@@ -115,6 +133,7 @@ struct ExperimentalFeaturesView: View {
 
             ResetSection(keys: [
                 "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard",
+                "pixelConfirmation", "eventDrivenOCR", "fastOCR",
                 "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
                 "adaptiveConfirmation", "confirmationDeadline", "continuousRotation"
             ])
