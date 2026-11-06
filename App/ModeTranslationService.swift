@@ -20,7 +20,16 @@ final class ModeTranslationService {
         var lastFinishedPair = ""
         var completedCalls = 0
         var sharedDefaultLease = AppleDefaultLeaseState()
+        /// v2.0.0 H3: the confirmed lane keeps one idle session for the other
+        /// strategy of the same language pair, so Hybrid recoveries that
+        /// alternate Default and Low Latency do not recreate sessions.
+        var spareSession: TranslationSession?
+        var spareKey = ""
+        var spareCreatedAt: Double?
     }
+    /// Physical return time of the last Apple Default call per language pair,
+    /// on any lane. Used only by the Hybrid switch guard.
+    private var lastAppleDefaultReturn: [String: Double] = [:]
     private var hostedIsSpeculative = false
     private var hostedTask: Task<[String]?, Never>?
     private var hostedActivityID: UUID?
@@ -46,6 +55,23 @@ final class ModeTranslationService {
     var hasConfirmedLowLatencyDemand: Bool {
         confirmedDemand > 0 || confirmed.busy
     }
+    private static func pairKey(_ source: String, _ target: String) -> String {
+        "\(Locale.Language(identifier: source).minimalIdentifier)>\(Locale.Language(identifier: target).minimalIdentifier)"
+    }
+
+    /// For the v2.0.0 Hybrid switch guard: 0 while any lane runs a real Apple
+    /// Default call, otherwise milliseconds since the last Default call for
+    /// this pair returned, or nil when none is recorded. Logical lane state,
+    /// not proof of Apple's physical model residency.
+    func appleDefaultGapMs(source: String, target: String) -> Double? {
+        for lane in [speculative, confirmed, warmupLane]
+            where lane.busy && lane.requestedStrategy == .appleDefault { return 0 }
+        if hostedTask != nil { return 0 }
+        guard let returned = lastAppleDefaultReturn[Self.pairKey(source, target)] else { return nil }
+        let gap = (ProcessInfo.processInfo.systemUptime - returned) * 1000
+        return gap.isFinite && gap >= 0 ? gap : nil
+    }
+
     private let installedCheckTTL: Double = 30
     var warmupEvent: ((InitialWarmupEvent) -> Void)?
     var modelRequestCompleted: ((String, String, RequestedTranslationStrategy, Double) -> Void)?
@@ -99,6 +125,8 @@ final class ModeTranslationService {
             if #available(iOS 26.0, *) { lane.session?.cancel() }
             lane.invalidated = true
             if let id = lane.activityID { activity.advance(id, to: .cancelling) }
+            if #available(iOS 26.0, *) { lane.spareSession?.cancel() }
+            lane.spareSession = nil; lane.spareKey = ""; lane.spareCreatedAt = nil
             if !lane.busy {
                 lane.session = nil; lane.key = ""
                 lane.createdAt = nil; lane.completedCalls = 0
@@ -225,6 +253,29 @@ final class ModeTranslationService {
                          strategy: RequestedTranslationStrategy) {
         let key = "\(source.minimalIdentifier)>\(target.minimalIdentifier)|\(strategy.rawValue)"
         guard lane.session == nil || lane.key != key || lane.invalidated else { return }
+        if lane === confirmed {
+            let pair = "\(source.minimalIdentifier)>\(target.minimalIdentifier)|"
+            // A spare for another language pair is never reused.
+            if lane.spareSession != nil && !lane.spareKey.hasPrefix(pair) {
+                lane.spareSession?.cancel()
+                lane.spareSession = nil; lane.spareKey = ""; lane.spareCreatedAt = nil
+            }
+            let outgoing = !lane.invalidated && lane.key.hasPrefix(pair) ? lane.session : nil
+            let outgoingKey = lane.key, outgoingCreated = lane.createdAt
+            if lane.spareKey == key, let spare = lane.spareSession {
+                // H3: reuse the idle session of the requested strategy.
+                lane.session = spare; lane.key = key; lane.invalidated = false
+                lane.createdAt = lane.spareCreatedAt
+                lane.spareSession = outgoing; lane.spareKey = outgoing == nil ? "" : outgoingKey
+                lane.spareCreatedAt = outgoing == nil ? nil : outgoingCreated
+                lane.completedCalls = 0
+                return
+            }
+            if let outgoing {
+                lane.spareSession?.cancel()
+                lane.spareSession = outgoing; lane.spareKey = outgoingKey; lane.spareCreatedAt = outgoingCreated
+            }
+        }
         if strategy == .lowLatency {
             guard #available(iOS 26.4, *) else { return }
             lane.session = TranslationSession(installedSource: source, target: target, preferredStrategy: .lowLatency)
@@ -429,7 +480,9 @@ final class ModeTranslationService {
            speculative.busy && speculative.requestedStrategy == .appleDefault {
             report("hybrid_default_reentered_during_settlement", nil)
         }
-        let warm = lane.session != nil && !lane.invalidated && lane.key == "\(caption.source)>\(caption.target)|\(strategy.rawValue)"
+        let requestedKey = "\(caption.source)>\(caption.target)|\(strategy.rawValue)"
+        let warm = (lane.session != nil && !lane.invalidated && lane.key == requestedKey) ||
+            (lane === confirmed && lane.spareSession != nil && lane.spareKey == requestedKey)
         let competingDefault = caption.system == .hybridRecovery && !speculation && strategy == .lowLatency &&
             speculative.busy && speculative.requestedStrategy == .appleDefault
         let previousDefaultGap: Double? = competingDefault ? nil : gapBeforeSettlement
@@ -494,6 +547,7 @@ final class ModeTranslationService {
                     }
                     timeout.cancel()
                     let finishedAt = ProcessInfo.processInfo.systemUptime
+                    if strategy == .appleDefault { self.lastAppleDefaultReturn[languagePairKey] = finishedAt }
                     let serviceMs = (finishedAt - start) * 1000
                     report("backend_apple_call_returned", serviceMs)
                     if let previousDefaultGap {

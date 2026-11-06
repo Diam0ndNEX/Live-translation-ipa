@@ -92,10 +92,10 @@ final class TranslatorEngine: ObservableObject {
         "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode", "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "smartCool", "steadyCaptions", "languageRecovery", "deduplicateCopies", "continuousRotation", "contextualLanguage"
     ]
     /// App look & behaviour that presets do not touch.
-    static let interfaceKeys = ["memoryRAMCapacity", "memorySoftLimit", "persistDiagnosticSessions", "suppressOwnInterface", "directPiPBuffer", "legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "temporaryMemoryTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
+    static let interfaceKeys = ["memoryRAMCapacity", "memorySoftLimit", "persistDiagnosticSessions", "suppressOwnInterface", "directPiPBuffer", "hybridSwitchGuard", "legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "temporaryMemoryTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
     static var settingKeys: [String] { presetKeys + interfaceKeys }
     static let defaults: [String: Any] = [
-        "suppressOwnInterface": true, "memoryRAMCapacity": 3000, "memorySoftLimit": 100000, "persistDiagnosticSessions": false, "directPiPBuffer": false,
+        "suppressOwnInterface": true, "memoryRAMCapacity": 3000, "memorySoftLimit": 100000, "persistDiagnosticSessions": false, "directPiPBuffer": false, "hybridSwitchGuard": true,
         "source": "auto", "target": "en", "mode": "movie", "area": "smart", "customY0": 0.0, "customY1": 0.5,
         "speed": "balanced", "stability": 2, "minTextH": 0.0, "ignoreList": "", "frameRot": "auto",
         "dropNoise": true, "boost": 1, "skipUnchanged": true, "subtitleAwareChangeDetection": false, "preserveRelatedMovieGroups": false, "rapidTextTracking": true, "joinAdjacentText": true, "activeTextFocus": true, "cleanOCR": true, "slang": true,
@@ -666,6 +666,7 @@ final class TranslatorEngine: ObservableObject {
         let fastPackKnownMissing = fastPack == .supported || fastPack == .unsupported
         modeCoordinator.fastRecoveryInstalled = !fastPackKnownMissing
         modeCoordinator.adaptiveHybrid = flag("adaptiveSpeculation", true) && !fastPackKnownMissing
+        modeCoordinator.hybridSwitchGuard = flag("hybridSwitchGuard", true)
         if confirmed, activeTranslationSystem != .legacy {
             let pair = source + ">" + caption.target + "|" + activeTranslationSystem.rawValue
             let needsCheck = modelReadiness.source != source || modelReadiness.target != caption.target ||
@@ -1052,6 +1053,9 @@ final class TranslatorEngine: ObservableObject {
             case .reference195: return self.modeService.mayAdmitReferenceHybridSpeculation
             case .recoveryFirst, .evidenceBounded: return self.modeService.mayAdmitHybridSpeculation
             }
+        }
+        modeCoordinator.appleDefaultGapMs = { [weak self] caption in
+            self?.modeService.appleDefaultGapMs(source: caption.source, target: caption.target)
         }
         modeService.mayStartModel = { [weak self] caption, speculative in
             guard let self, self.modeCoordinator.shouldStartModel(caption, speculative: speculative) else { return false }

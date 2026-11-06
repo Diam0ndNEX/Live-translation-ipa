@@ -845,6 +845,76 @@ final class Harness {
         precondition(pressure.selected.count == 1 && pressure.events.contains("memory_pressure"))
         pressure.coordinator.reset()
 
+        // v2.0.0 H1: Hybrid recovers with Apple Default inside the switch window.
+        precondition(HybridSchedulingPolicy.recoveryStrategy(gapMs: 0, fastRecoveryInstalled: true, guardEnabled: true) == .appleDefault)
+        precondition(HybridSchedulingPolicy.recoveryStrategy(gapMs: 1499, fastRecoveryInstalled: true, guardEnabled: true) == .appleDefault)
+        precondition(HybridSchedulingPolicy.recoveryStrategy(gapMs: 1500, fastRecoveryInstalled: true, guardEnabled: true) == .lowLatency)
+        precondition(HybridSchedulingPolicy.recoveryStrategy(gapMs: nil, fastRecoveryInstalled: true, guardEnabled: true) == .lowLatency)
+        precondition(HybridSchedulingPolicy.recoveryStrategy(gapMs: .nan, fastRecoveryInstalled: true, guardEnabled: true) == .lowLatency)
+        precondition(HybridSchedulingPolicy.recoveryStrategy(gapMs: 0, fastRecoveryInstalled: true, guardEnabled: false) == .lowLatency,
+            "Guard off must keep the v1.9.9 Low Latency recovery")
+        precondition(HybridSchedulingPolicy.recoveryStrategy(gapMs: nil, fastRecoveryInstalled: false, guardEnabled: true) == .appleDefault)
+        precondition(HybridSchedulingPolicy.suppressedHedgeWait(elapsed: 0.2) == 1.0)
+        precondition(HybridSchedulingPolicy.suppressedHedgeWait(elapsed: 2) == 0)
+        precondition(HybridSchedulingPolicy.suppressedHedgeWait(elapsed: .nan) == 0)
+
+        let guardDefault = Harness(); guardDefault.coordinator.system = .hybridRecovery
+        guardDefault.coordinator.hybridSwitchGuard = true
+        guardDefault.coordinator.appleDefaultGapMs = { _ in 300 }
+        guardDefault.coordinator.observe(guardDefault.caption(id: "guard-default"), confirmed: true, speculate: false)
+        await guardDefault.settle()
+        precondition(guardDefault.calls.count == 1 && guardDefault.calls[0].strategy == .appleDefault,
+            "Recent Default work must keep recovery on Apple Default")
+        precondition(guardDefault.events.contains("hybrid_switch_guard_default"))
+        guardDefault.reply(0, ["Default recovery"]); await guardDefault.settle()
+        precondition(guardDefault.selected.count == 1 && guardDefault.selected[0].2 == "recovery_success")
+        guardDefault.coordinator.reset()
+
+        let guardFast = Harness(); guardFast.coordinator.system = .hybridRecovery
+        guardFast.coordinator.hybridSwitchGuard = true
+        guardFast.coordinator.appleDefaultGapMs = { _ in nil }
+        guardFast.coordinator.observe(guardFast.caption(id: "guard-fast"), confirmed: true, speculate: false)
+        await guardFast.settle()
+        precondition(guardFast.calls.count == 1 && guardFast.calls[0].strategy == .lowLatency,
+            "Isolated recoveries keep the fast Low Latency path")
+        precondition(guardFast.events.contains("hybrid_switch_guard_low_latency"))
+        guardFast.reply(0, nil); await guardFast.settle()
+        // Same-strategy retry, then the one Default fallback still exist.
+        precondition(guardFast.calls.count == 2 && guardFast.calls[1].strategy == .lowLatency)
+        guardFast.reply(1, nil); await guardFast.settle()
+        precondition(guardFast.calls.count == 3 && guardFast.calls[2].strategy == .appleDefault)
+        precondition(guardFast.events.contains("hybrid_default_fallback"))
+        guardFast.reply(2, ["Fallback"]); await guardFast.settle()
+        precondition(guardFast.selected.count == 1)
+        guardFast.coordinator.reset()
+
+        // v2.0.0 H2: no parallel Low Latency hedge beside matching Default work.
+        let noHedge = Harness(); noHedge.coordinator.system = .hybridRecovery
+        noHedge.coordinator.hybridSwitchGuard = true
+        noHedge.coordinator.coldSpeculationCeiling = 0
+        noHedge.coordinator.appleDefaultGapMs = { _ in 0 }
+        noHedge.coordinator.observe(noHedge.caption(), confirmed: false, speculate: true); await noHedge.settle()
+        noHedge.coordinator.observe(noHedge.caption(), confirmed: true, speculate: true); await noHedge.settle()
+        precondition(noHedge.calls.count == 1 && noHedge.calls[0].strategy == .appleDefault,
+            "Guard must not start a second model beside the matching Default call")
+        precondition(noHedge.events.contains("hybrid_hedge_suppressed") && !noHedge.events.contains("hybrid_hedged_recovery"))
+        noHedge.reply(0, ["Default prediction"]); await noHedge.settle()
+        precondition(noHedge.selected.count == 1 && noHedge.selected[0].1.values == ["Default prediction"])
+        precondition(noHedge.cancellations.isEmpty)
+        noHedge.coordinator.reset()
+
+        // A failed matching prediction recovers through the guard, i.e. Default.
+        let failedMatch = Harness(); failedMatch.coordinator.system = .hybridRecovery
+        failedMatch.coordinator.hybridSwitchGuard = true
+        failedMatch.coordinator.appleDefaultGapMs = { _ in 10 }
+        failedMatch.coordinator.observe(failedMatch.caption(), confirmed: false, speculate: true); await failedMatch.settle()
+        failedMatch.coordinator.observe(failedMatch.caption(), confirmed: true, speculate: true); await failedMatch.settle()
+        failedMatch.reply(0, nil); await failedMatch.settle()
+        precondition(failedMatch.calls.count == 2 && failedMatch.calls[1].strategy == .appleDefault && !failedMatch.calls[1].speculative)
+        failedMatch.reply(1, ["Recovered"]); await failedMatch.settle()
+        precondition(failedMatch.selected.count == 1 && failedMatch.selected[0].1.values == ["Recovered"])
+        failedMatch.coordinator.reset()
+
         precondition(abs(SpeculationWaitPolicy.remaining(elapsed: 0.4, ordinary: [], recovery: [], coldCeiling: 0.7) - 0.05) < 0.0001)
         precondition(SpeculationWaitPolicy.remaining(elapsed: 0.8, ordinary: [], recovery: [], coldCeiling: 0.7) == 0)
         precondition(abs(SpeculationWaitPolicy.remaining(elapsed: 0.2, ordinary: [0.5, 0.5, 0.5, 0.5, 0.5], recovery: [0.1, 0.1, 0.1, 0.1, 0.1], coldCeiling: 0.7) - 0.1) < 0.0001)

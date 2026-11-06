@@ -33,7 +33,7 @@ for key, names in owners.items():
 
 expected = {
     "ExperimentalFeaturesView.swift": {
-        "incrementalBatchRecovery", "directPiPBuffer",
+        "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard",
         "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
         "adaptiveConfirmation", "confirmationDeadline", "continuousRotation",
     },
@@ -109,6 +109,10 @@ assert 'movieMode: flag("rapidTextTracking", true)' in engine
 assert '@AppStorage("lowLatencyTranslation")' not in extra
 assert '.onChange(of: pipelineSignature) { _, _ in engine.pipelineSettingsChanged() }' in extra
 assert '.onChange(of: directPiPBuffer) { _, _ in engine.applyStyle() }' in extra
+# v2.0.0: the Hybrid switch guard is the measured default; off is the A/B reference.
+assert '"hybridSwitchGuard": true' in engine
+assert 'modeCoordinator.hybridSwitchGuard = flag("hybridSwitchGuard", true)' in engine
+assert '@AppStorage("hybridSwitchGuard") private var hybridSwitchGuard = true' in extra
 
 # Ensure the data controls and their destructive confirmation live in History
 # rather than the unrelated Home appearance or feedback screens.

@@ -23,6 +23,7 @@ struct ExperimentalFeaturesView: View {
     @EnvironmentObject private var engine: TranslatorEngine
     @AppStorage("incrementalBatchRecovery") private var incrementalBatchRecovery = false
     @AppStorage("directPiPBuffer") private var directPiPBuffer = false
+    @AppStorage("hybridSwitchGuard") private var hybridSwitchGuard = true
     @AppStorage("subtitleAwareChangeDetection") private var subtitleAwareChangeDetection = false
     @AppStorage("preserveRelatedMovieGroups") private var preserveRelatedMovieGroups = false
 
@@ -52,6 +53,10 @@ struct ExperimentalFeaturesView: View {
                     title: "Incremental translation recovery",
                     explanation: "Retains completed speculative sentence results for exact temporary reuse, even when their batch is interrupted. Never displays incomplete captions.",
                     enabled: $incrementalBatchRecovery)
+                ExperimentalOption(
+                    title: "Hybrid model switch guard",
+                    explanation: "On (default): Hybrid Recovery recovers with Apple Default while an Apple Default call is running or ended less than 1.5 s ago, and waits for a matching prediction instead of starting a second model beside it. Turn off to compare with the 1.9.9 behavior on the same video. Applies from the next subtitle.",
+                    enabled: $hybridSwitchGuard)
             } header: { Text("Translation experiments") }
 
             Section {
@@ -109,7 +114,7 @@ struct ExperimentalFeaturesView: View {
             } header: { Text("Automatic optimizations") }
 
             ResetSection(keys: [
-                "incrementalBatchRecovery", "directPiPBuffer",
+                "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard",
                 "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
                 "adaptiveConfirmation", "confirmationDeadline", "continuousRotation"
             ])

@@ -720,7 +720,7 @@ final class Diagnostics: ObservableObject {
                     "selectiveSpeculation", "speculationConfidence", "confirmationDeadline",
                     "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest",
                     "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
-                    "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer",
+                    "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard",
                     "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
                     "deduplicateCopies", "contextualLanguage", "languageRecovery",
                     "continuousRotation", "smartCool", "persistDiagnosticSessions",
