@@ -27,6 +27,7 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("pixelConfirmation") private var pixelConfirmation = true
     @AppStorage("eventDrivenOCR") private var eventDrivenOCR = true
     @AppStorage("fastOCR") private var fastOCR = false
+    @AppStorage("legacySharedSession") private var legacySharedSession = true
     @AppStorage("subtitleAwareChangeDetection") private var subtitleAwareChangeDetection = false
     @AppStorage("preserveRelatedMovieGroups") private var preserveRelatedMovieGroups = false
 
@@ -60,6 +61,10 @@ struct ExperimentalFeaturesView: View {
                     title: "Hybrid model switch guard",
                     explanation: "On (default): Hybrid Recovery recovers with Apple Default while an Apple Default call is running or ended less than 1.5 s ago, and waits for a matching prediction instead of starting a second model beside it. Turn off to compare with the 1.9.9 behavior on the same video. Applies from the next subtitle.",
                     enabled: $hybridSwitchGuard)
+                ExperimentalOption(
+                    title: "Legacy shared session",
+                    explanation: "On (default): Legacy confirmed translations reuse the warm prediction session when it is idle, so consecutive model calls stay on one session. Off: separate sessions as in 1.9.9.",
+                    enabled: $legacySharedSession)
             } header: { Text("Translation experiments") }
 
             Section {
@@ -133,7 +138,7 @@ struct ExperimentalFeaturesView: View {
 
             ResetSection(keys: [
                 "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard",
-                "pixelConfirmation", "eventDrivenOCR", "fastOCR",
+                "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
                 "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
                 "adaptiveConfirmation", "confirmationDeadline", "continuousRotation"
             ])

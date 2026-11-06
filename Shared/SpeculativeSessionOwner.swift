@@ -25,6 +25,8 @@ final class SpeculativeSessionOwner<Session: AnyObject> {
     private var sharedLease = AppleDefaultLeaseState()
     private var idle: (key: String, session: Session)?
     private var active: Lease?
+    /// v2.0.0 G5: the idle session is lent to one confirmed request.
+    private var lent = false
     private let cancel: @MainActor (Session) -> Void
 
     init(cancel: @escaping @MainActor (Session) -> Void) { self.cancel = cancel }
@@ -32,7 +34,8 @@ final class SpeculativeSessionOwner<Session: AnyObject> {
     func begin(key: String, make: () -> Session) -> Lease {
         precondition(active == nil, "Speculative requests must remain serialized")
         guard let ticket = sharedLease.begin() else { preconditionFailure("Actual Apple Default call still owns the speculative session") }
-        let session = idle?.key == key ? idle!.session : make()
+        // Never start a prediction on a session lent to a confirmed request.
+        let session = !lent && idle?.key == key ? idle!.session : make()
         idle = nil
         let lease = Lease(session: session, key: key, epoch: epoch, ticket: ticket)
         active = lease
@@ -59,12 +62,28 @@ final class SpeculativeSessionOwner<Session: AnyObject> {
         }
     }
 
+    /// v2.0.0 G5: lend the idle, uncancelled session to a confirmed request
+    /// so consecutive model calls stay on one session. Ownership does not
+    /// change and cancelActive() never reaches a lent session.
+    func lendIdle(key: String) -> Session? {
+        guard active == nil, !lent, let idle, idle.key == key else { return nil }
+        lent = true
+        return idle.session
+    }
+
+    /// A failed borrowed call may leave the session unusable: drop it.
+    func returnLent(usable: Bool) {
+        lent = false
+        if !usable { idle = nil }
+    }
+
     /// Context changes discard idle state and prevent late completions from
     /// restoring a previous language/model session into the reusable slot.
     func reset() {
         epoch = UUID()
         sharedLease.reset()
         idle = nil
+        lent = false
         cancelActive()
     }
 }

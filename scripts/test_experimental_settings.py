@@ -34,7 +34,7 @@ for key, names in owners.items():
 expected = {
     "ExperimentalFeaturesView.swift": {
         "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard",
-        "pixelConfirmation", "eventDrivenOCR", "fastOCR",
+        "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
         "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
         "adaptiveConfirmation", "confirmationDeadline", "continuousRotation",
     },

@@ -480,7 +480,7 @@ final class Diagnostics: ObservableObject {
             "warmup_source_unresolved", "warmup_predicted_source", "warmup_preempted",
             "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started",
             "legacy_idle_completed", "legacy_idle_deferred",
-            "legacy_confirmed_after_switch", "legacy_confirmed_no_switch"
+            "legacy_confirmed_after_switch", "legacy_confirmed_no_switch", "legacy_shared_session_used"
         ]
         guard allowed.contains(reason) else { return }
         if modeActiveSystem == "legacy", let candidate {
@@ -724,7 +724,7 @@ final class Diagnostics: ObservableObject {
                     "selectiveSpeculation", "speculationConfidence", "confirmationDeadline",
                     "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest",
                     "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
-                    "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR",
+                    "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
                     "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
                     "deduplicateCopies", "contextualLanguage", "languageRecovery",
                     "continuousRotation", "smartCool", "persistDiagnosticSessions",
@@ -1321,6 +1321,7 @@ final class Diagnostics: ObservableObject {
             "cancelledModelBatches": eventTotals["model_batch_cancelled", default: 0],
             "speculativeStopRequests": eventTotals["speculative_stop_requested", default: 0],
             "speculativeSessionsCreated": eventTotals["speculative_session_created", default: 0],
+            "legacySharedSessionCalls": eventTotals["legacy_shared_session_used", default: 0],
             "handoffReplayed": eventTotals["handoff_replayed", default: 0],
             "handoffExpired": eventTotals["handoff_expired", default: 0],
             "enqueueFailed": eventTotals["enqueue_failed", default: 0],

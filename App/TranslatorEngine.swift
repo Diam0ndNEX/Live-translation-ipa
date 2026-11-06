@@ -92,11 +92,11 @@ final class TranslatorEngine: ObservableObject {
         "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode", "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "smartCool", "steadyCaptions", "languageRecovery", "deduplicateCopies", "continuousRotation", "contextualLanguage"
     ]
     /// App look & behaviour that presets do not touch.
-    static let interfaceKeys = ["memoryRAMCapacity", "memorySoftLimit", "persistDiagnosticSessions", "suppressOwnInterface", "directPiPBuffer", "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "temporaryMemoryTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
+    static let interfaceKeys = ["memoryRAMCapacity", "memorySoftLimit", "persistDiagnosticSessions", "suppressOwnInterface", "directPiPBuffer", "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession", "legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "temporaryMemoryTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
     static var settingKeys: [String] { presetKeys + interfaceKeys }
     static let defaults: [String: Any] = [
         "suppressOwnInterface": true, "memoryRAMCapacity": 3000, "memorySoftLimit": 100000, "persistDiagnosticSessions": false, "directPiPBuffer": false, "hybridSwitchGuard": true,
-        "pixelConfirmation": true, "eventDrivenOCR": true, "fastOCR": false,
+        "pixelConfirmation": true, "eventDrivenOCR": true, "fastOCR": false, "legacySharedSession": true,
         "source": "auto", "target": "en", "mode": "movie", "area": "smart", "customY0": 0.0, "customY1": 0.5,
         "speed": "balanced", "stability": 2, "minTextH": 0.0, "ignoreList": "", "frameRot": "auto",
         "dropNoise": true, "boost": 1, "skipUnchanged": true, "subtitleAwareChangeDetection": false, "preserveRelatedMovieGroups": false, "rapidTextTracking": true, "joinAdjacentText": true, "activeTextFocus": true, "cleanOCR": true, "slang": true,
@@ -3072,6 +3072,20 @@ final class TranslatorEngine: ObservableObject {
                         durationMs: max(0, ProcessInfo.processInfo.systemUptime - requested) * 1000)
                 }
                 return result
+            }
+            // v2.0.0 G5: Legacy model calls are serialized. Reuse the idle,
+            // warm prediction session for confirmed work so consecutive calls
+            // stay on one session; fall back to the direct session on failure.
+            if activeTranslationSystem == .legacy, flag("legacySharedSession", true),
+               let shared = speculativeSessions.lendIdle(key: k) {
+                if modelReadiness.source != source.minimalIdentifier || modelReadiness.target != target.minimalIdentifier {
+                    modelReadiness = TranslationReadiness(source: source.minimalIdentifier, target: target.minimalIdentifier)
+                }
+                diag.noteModelState("legacy_shared_session_used")
+                let shared_result = await runBatch(shared, texts, speculative: false, partial: partial, observeReadiness: true)
+                speculativeSessions.returnLent(usable: shared_result != nil)
+                if shared_result != nil { warmupStatus = "Ready"; return shared_result }
+                if Task.isCancelled { return nil }
             }
             if directSession == nil || directKey != k {
                 diag.noteModelState("model_session_created")

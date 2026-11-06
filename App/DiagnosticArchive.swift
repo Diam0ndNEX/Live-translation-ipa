@@ -136,7 +136,7 @@ struct DiagnosticIntervalBucket: Codable {
         "specPreemptionRequested", "specMatchingConfirmation",
         "specRetainedUnits", "completedConfirmedUnitsRetained", "temporaryMemoryHits",
         "uncachedUnits", "bypassedLookups", "temporaryMemoryMisses",
-        "speculativeStopRequests", "speculativeSessionsCreated", "memoryAwareSpeculationSkipped", "ramCaptionBypasses", "exactCaptionHits", "exactUnitsCoalesced", "sharedConfirmedInFlightUnits", "sharedInFlightUnits", "speculativeUnitsRetained",
+        "speculativeStopRequests", "speculativeSessionsCreated", "legacySharedSessionCalls", "memoryAwareSpeculationSkipped", "ramCaptionBypasses", "exactCaptionHits", "exactUnitsCoalesced", "sharedConfirmedInFlightUnits", "sharedInFlightUnits", "speculativeUnitsRetained",
         "speculativeUnitsReused", "speculativeUnitsEvictedUnused",
         "handoffDeferred", "slowTailEnqueues", "handoffReplayed", "handoffExpired", "enqueueFailed",
         "actualModelBatches", "confirmedModelBatches", "speculativeModelBatches",
@@ -427,7 +427,7 @@ actor DiagnosticExportWriter {
             "skipUnchanged", "idleBackoff", "adaptiveConfirmation", "subtitleTracking",
             "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest",
             "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
-            "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR",
+            "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
             "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
             "deduplicateCopies", "contextualLanguage", "languageRecovery",
             "continuousRotation", "smartCool", "persistDiagnosticSessions",
@@ -676,6 +676,7 @@ actor DiagnosticExportWriter {
             - Confirmed model, other session's call running or ended < 1.5 s: \(metric("legacyConfirmedAfterSessionSwitchMs"))
             - Confirmed model, no other session nearby: \(metric("legacyConfirmedNoSwitchMs"))
             - Speculative sessions created: \(count("speculativeSessionsCreated"))
+            - Confirmed calls on the shared prediction session: \(count("legacySharedSessionCalls"))
 
             ## OCR (v2.0.0)
             - Pixel-verified confirmations / fell back to OCR: \(count("pixelConfirmations")) / \(count("pixelRejections"))

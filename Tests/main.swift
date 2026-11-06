@@ -1145,6 +1145,33 @@ await MainActor.run {
 }
 print("v1.7.2 speculative model ownership, explicit preemption and warm reuse checks passed")
 
+// v2.0.0 G5: Legacy confirmed work borrows the idle warm prediction session.
+await MainActor.run {
+    let owner = SpeculativeSessionOwner<TestModelHandle> { $0.cancellationCount += 1 }
+    precondition(owner.lendIdle(key: "pt>en|default") == nil, "Nothing idle to lend")
+    let warm = owner.begin(key: "pt>en|default", make: { TestModelHandle() })
+    precondition(owner.lendIdle(key: "pt>en|default") == nil, "An active prediction is never lent")
+    owner.finish(warm, reusable: true)
+    precondition(owner.lendIdle(key: "de>en|default") == nil, "Another pair never borrows the session")
+    let lent = owner.lendIdle(key: "pt>en|default")
+    precondition(lent === warm.session, "Confirmed work reuses the warm prediction session")
+    precondition(owner.lendIdle(key: "pt>en|default") == nil, "One borrower at a time")
+    let during = owner.begin(key: "pt>en|default", make: { TestModelHandle() })
+    precondition(during.session !== warm.session, "A prediction never starts on a lent session")
+    precondition(owner.cancelActive(now: 1) && warm.session.cancellationCount == 0, "Preemption cannot cancel the lent session")
+    owner.finish(during, reusable: false)
+    owner.returnLent(usable: false)
+    precondition(owner.lendIdle(key: "pt>en|default") == nil, "A failed borrowed session is dropped")
+    let next = owner.begin(key: "pt>en|default", make: { TestModelHandle() })
+    owner.finish(next, reusable: true)
+    _ = owner.lendIdle(key: "pt>en|default")
+    owner.returnLent(usable: true)
+    let again = owner.begin(key: "pt>en|default", make: { TestModelHandle() })
+    precondition(again.session === next.session, "A successful borrowed call keeps the session warm for predictions")
+    owner.finish(again, reusable: true)
+}
+print("v2.0.0 Legacy shared-session lending checks passed")
+
 let contextIndexedPlan = TranslationBatchPlan(["Zqa arrived.", "Zqa arrived.", "Zqa arrived."],
     contexts: ["speaker=Maria", "speaker=Joana", "speaker=Maria"])
 check(contextIndexedPlan.uniqueContexts == ["speaker=Maria", "speaker=Joana"],
