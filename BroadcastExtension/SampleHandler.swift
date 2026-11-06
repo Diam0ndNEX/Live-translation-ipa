@@ -10,6 +10,10 @@ import os.signpost
 class SampleHandler: RPBroadcastSampleHandler {
     private var conn: NWConnection?
     private let recognitionLock = NSLock()
+    // Send completions run on the connection queue; guard the counters.
+    private let sendStatsLock = NSLock()
+    private var largePacketCount = 0
+    private var sendErrorCount = 0
     private var frames = 0
     private var passes = 0
     private var skipped = 0
@@ -118,21 +122,20 @@ class SampleHandler: RPBroadcastSampleHandler {
         let rapidText = cfg.rapidTextTracking ?? cfg.movieMode ?? false
         let idleFactor = SubtitleAcquisitionPolicy.idleMultiplier(rapidTextTracking: rapidText,
             enabled: cfg.idleBackoff ?? true, secondsSinceText: now.timeIntervalSince(lastUsefulText))
+        // Evaluated once per frame; used for both the interval and early wake.
+        let pressure = cfg.confirmationBurst == false || (cfg.pressure ?? false) ||
+            (cfg.smartCool ?? false) || ProcessInfo.processInfo.isLowPowerModeEnabled ||
+            ThermalPerformancePolicy.automaticPressure(for: ProcessInfo.processInfo.thermalState)
         let interval = SubtitlePerformancePolicy.confirmationInterval(
             planned: plan.interval * idleFactor, pending: candidateCount > 0,
             rapidTextTracking: rapidText,
-            pressure: cfg.confirmationBurst == false || (cfg.pressure ?? false) || (cfg.smartCool ?? false) ||
-                ProcessInfo.processInfo.isLowPowerModeEnabled ||
-                ThermalPerformancePolicy.automaticPressure(for: ProcessInfo.processInfo.thermalState),
+            pressure: pressure,
             processingMs: lastOcrMs)
         effectiveOCRIntervalMs = interval * 1000
         guard !cfg.paused && cfg.appInterfaceVisible != true else { pausedSkipped += 1; return }
         let elapsed = now.timeIntervalSince(lastRun)
         let ordinaryDue = CaptureCadence.remaining(startedAt: lastRun.timeIntervalSince1970,
                                                     now: now.timeIntervalSince1970, interval: interval) <= 0
-        let pressure = cfg.confirmationBurst == false || (cfg.pressure ?? false) ||
-            (cfg.smartCool ?? false) || ProcessInfo.processInfo.isLowPowerModeEnabled ||
-            ThermalPerformancePolicy.automaticPressure(for: ProcessInfo.processInfo.thermalState)
         #if SCREENLINGO_REFERENCE_CAPTURE_CADENCE
         let mayProbeEarly = false
         #else
@@ -422,6 +425,9 @@ class SampleHandler: RPBroadcastSampleHandler {
 
     // MARK: Send
     private func send(kind: String, lines: [OCRLine], stable: Bool? = nil, revision: Int? = nil, closeConnection: Bool = false) {
+        sendStatsLock.lock()
+        let largeSoFar = largePacketCount, errorsSoFar = sendErrorCount
+        sendStatsLock.unlock()
         func encode(_ l: [OCRLine]) -> Data? {
             try? JSONEncoder().encode(Packet(kind: kind, version: AppVersion.version, frames: frames, lines: l,
                                              ocrMs: lastOcrMs, memFreeMB: freeMB(),
@@ -441,13 +447,20 @@ class SampleHandler: RPBroadcastSampleHandler {
                                              effectiveOCRIntervalMs: effectiveOCRIntervalMs,
                                              captureSessionID: captureID,
                                              firstSeenMonotonic: kind == "ocr" && config.strictCaptionIdentity == true ? candidateStartedMonotonic : nil,
-                                             sentMonotonic: ProcessInfo.processInfo.systemUptime))
+                                             sentMonotonic: ProcessInfo.processInfo.systemUptime,
+                                             largePackets: largeSoFar, sendErrors: errorsSoFar))
         }
         var data = encode(lines)
         if let d = data, d.count > 60000 { data = encode(Array(lines.prefix(30))) }
         guard let d = data else { return }
+        if d.count > 8000 {
+            sendStatsLock.lock(); largePacketCount += 1; sendStatsLock.unlock()
+        }
         let connection = conn
-        connection?.send(content: d, completion: .contentProcessed { _ in
+        connection?.send(content: d, completion: .contentProcessed { [weak self] error in
+            if error != nil, let self {
+                self.sendStatsLock.lock(); self.sendErrorCount += 1; self.sendStatsLock.unlock()
+            }
             if closeConnection { connection?.cancel() }
         })
     }

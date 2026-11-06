@@ -103,6 +103,10 @@ struct Packet: Codable {
     var captureSessionID: String? = nil
     var firstSeenMonotonic: Double? = nil
     var sentMonotonic: Double? = nil
+    /// v2.0.0: packets over 8,000 bytes and failed loopback sends, so
+    /// Diagnostics can show whether large UDP datagrams are being lost.
+    var largePackets: Int? = nil
+    var sendErrors: Int? = nil
 }
 
 /// App → extension (sent back over the same localhost link)

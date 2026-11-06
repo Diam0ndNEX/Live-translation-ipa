@@ -178,6 +178,7 @@ struct Stats {
     var supersededUnpresentedConfirmed = 0, enqueuedCandidateFrames = 0
     var movieSelections = 0, movieTemporalOverrides = 0, movieRejectedSmall = 0
     var queueReplacements = 0, visualChanges = 0, earlyVisualWakes = 0, emptyOCRPasses = 0
+    var largePackets = 0, packetSendErrors = 0
     var firstSightVisualChangeLagMs = 0.0
     var effectiveOCRIntervalMs = 0.0
 }
@@ -786,6 +787,8 @@ final class Diagnostics: ObservableObject {
         counters["queueReplacements"] = s.queueReplacements
         counters["visualChanges"] = s.visualChanges
         counters["earlyVisualWakes"] = s.earlyVisualWakes
+        counters["largePackets"] = s.largePackets
+        counters["packetSendErrors"] = s.packetSendErrors
         counters["legacyAdaptiveLowYieldSkips"] = s.legacyAdaptiveLowYieldSkips
         counters["legacyAdaptiveSavedSkips"] = s.legacyAdaptiveSavedSkips
         counters["legacyLowConfidenceSkips"] = s.legacyLowConfidenceSkips
@@ -1097,6 +1100,8 @@ final class Diagnostics: ObservableObject {
         s.retryCount = p.retryCount ?? s.retryCount
         s.visualChanges = p.visualChanges ?? s.visualChanges
         s.earlyVisualWakes = p.earlyVisualWakes ?? s.earlyVisualWakes
+        s.largePackets = p.largePackets ?? s.largePackets
+        s.packetSendErrors = p.sendErrors ?? s.packetSendErrors
         s.emptyOCRPasses = p.totalEmptyOCRPasses ?? s.emptyOCRPasses
         s.effectiveOCRIntervalMs = p.effectiveOCRIntervalMs ?? s.effectiveOCRIntervalMs
         if let first = p.firstSeenAt, let visual = p.lastVisualChangeAt,
@@ -2735,6 +2740,7 @@ private struct DiagnosticsBody: View {
             }
             Text("Skipped frames · unchanged \(s.unchangedSkipped) · cadence \(s.cadenceSkipped) · paused \(s.pausedSkipped)").font(.caption)
             Text("Early OCR visual-change wakes: \(s.earlyVisualWakes) · derived from visual motion only, not confirmed text.").font(.caption).foregroundStyle(.secondary)
+            Text("Capture packets over 8 KB: \(s.largePackets) · failed sends: \(s.packetSendErrors)").font(.caption).foregroundStyle(.secondary)
             Text("Recorder self-time · simple \(String(format: "%.1f", diag.recorderCosts.simpleMs)) ms · detailed \(String(format: "%.1f", diag.recorderCosts.detailedMs)) ms. Excludes chart drawing and model work; these are different workloads.").font(.caption).foregroundStyle(.secondary)
         }.card()
     }

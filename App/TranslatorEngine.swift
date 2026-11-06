@@ -802,11 +802,23 @@ final class TranslatorEngine: ObservableObject {
         }
         // LL values never enter the shared preferred namespace, even in RAM.
         if memoryTestMode.allowsReuse {
+            // The caption text is the same for every unit: evaluate language
+            // evidence at most once per caption, not once per Default unit.
+            var captionConfidence: Double?
             for i in output.values.indices where output.strategies[i] == .appleDefault {
                 ram.values[caption.keys[i]] = output.values[i]; touchCache(caption.keys[i])
-                let confidence = sourceCode == "auto" ? (languageEvidence(caption.text, limit: 5).1.filter {
-                    SourceLanguageRouter.sameLanguage($0.key.rawValue, caption.source)
-                }.values.max() ?? 0) : 1
+                let confidence: Double
+                if sourceCode != "auto" {
+                    confidence = 1
+                } else if let known = captionConfidence {
+                    confidence = known
+                } else {
+                    let measured = languageEvidence(caption.text, limit: 5).1.filter {
+                        SourceLanguageRouter.sameLanguage($0.key.rawValue, caption.source)
+                    }.values.max() ?? 0
+                    captionConfidence = measured
+                    confidence = measured
+                }
                 if TranslationUnitPlanning.mayRemember(caption.units[i], confirmed: true),
                    MemoryRetentionPolicy.mayPersist(privateSession: flag("privateSession", false), selectedSource: sourceCode != "auto", confidence: confidence, confirmed: true) {
                     queueMemory(caption.keys[i], output.values[i], independentlyConfirmed: output.origins[i] == "recovery", knownDefault: true)
@@ -3286,8 +3298,16 @@ final class TranslatorEngine: ObservableObject {
         // influence a future predictive model warm-up; never change Auto OCR.
         let sourceToRemember = sourceCode == "auto" ? detectedLang : sourceCode
         if sourceToRemember != "–", !sourceToRemember.isEmpty {
-            ud.set(sourceToRemember, forKey: "lastEffectiveSource")
-            ud.set(Date().timeIntervalSince1970, forKey: "lastEffectiveSourceAt")
+            // Two UserDefaults writes per subtitle were unnecessary: the source
+            // is written when it changes, the timestamp at most every 30 s
+            // (readers only use a 24 h freshness window).
+            let nowSeconds = Date().timeIntervalSince1970
+            if ud.string(forKey: "lastEffectiveSource") != sourceToRemember {
+                ud.set(sourceToRemember, forKey: "lastEffectiveSource")
+                ud.set(nowSeconds, forKey: "lastEffectiveSourceAt")
+            } else if nowSeconds - ud.double(forKey: "lastEffectiveSourceAt") >= 30 {
+                ud.set(nowSeconds, forKey: "lastEffectiveSourceAt")
+            }
         }
         replayDeferredConfirmedIfPossible()
         return true
