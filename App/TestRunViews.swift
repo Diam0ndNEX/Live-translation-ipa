@@ -1,4 +1,4 @@
-// ScreenLingo – App – Test Runs (2.0.0 build 86)
+// ScreenLingo – App – Test Runs (2.0.0 build 87)
 import SwiftUI
 
 // Test Runs UI (spec §11.6): Test card, Test Runs list and detail, report sheet.
@@ -84,18 +84,27 @@ private struct RunBadges: View {
 struct TestRunRow: View {
     let run: TestRunMeta
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: TestRunText.modeIcon(run.mode)).frame(width: 24).foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 3) {
-                Text(TestRunText.modeTitle(run.mode) + (run.label.isEmpty ? "" : " · " + run.label))
-                    .font(.subheadline.weight(.semibold))
+        HStack(alignment: .top, spacing: Space.m) {
+            Image(systemName: TestRunText.modeIcon(run.mode)).font(.body.weight(.semibold)).foregroundStyle(Color.accentColor)
+                .frame(width: 40, height: 40)
+                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: Space.xs) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(TestRunText.modeTitle(run.mode) + (run.label.isEmpty ? "" : " · " + run.label)).font(.headline)
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 0) {
+                        Text(TestRunText.ms(run.enqueueP50Ms)).font(.headline.monospacedDigit())
+                        Text("median").font(.caption2).foregroundStyle(.secondary)
+                    }
+                }
                 Text("\(run.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(TestRunText.duration(run.durationSeconds)) · \(run.captions) captions")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("OCR→PiP median \(TestRunText.ms(run.enqueueP50Ms)) · P95 \(TestRunText.ms(run.enqueueP95Ms)) · thermal \(run.thermal)")
-                    .font(.caption2).foregroundStyle(.secondary)
+                Text("P95 \(TestRunText.ms(run.enqueueP95Ms)) · thermal \(run.thermal)")
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 RunBadges(run: run)
             }
-        }
+        }.padding(.vertical, Space.xs)
     }
 }
 
@@ -153,20 +162,21 @@ struct TestCard: View {
             } else if saving == "off" {
                 Banner(text: "Saving test runs is off. Turn it on in Settings > Diagnostics & tests.", severity: .warning)
             }
-            VStack(alignment: .leading, spacing: Space.s) {
+            VStack(alignment: .leading, spacing: Space.m) {
                 SectionHeader(title: "Three systems, same content")
-                ForEach(TestRunText.modes, id: \.self) { mode in
-                    HStack {
-                        Image(systemName: saved(mode) != nil ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(saved(mode) != nil ? Palette.success : Color.secondary)
-                            .accessibilityLabel(saved(mode) != nil ? "Saved" : "Not saved yet")
-                        Text(TestRunText.modeTitle(mode)).font(.body)
-                        Spacer()
-                        if let run = saved(mode) {
-                            Text("\(TestRunText.duration(run.durationSeconds)) · \(TestRunText.ms(run.enqueueP50Ms))")
-                                .font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
+                HStack(spacing: Space.s) {
+                    ForEach(TestRunText.modes, id: \.self) { mode in
+                        let run = saved(mode)
+                        VStack(spacing: Space.xs) {
+                            Image(systemName: run != nil ? "checkmark.circle.fill" : TestRunText.modeIcon(mode))
+                                .font(.title3).foregroundStyle(run != nil ? Palette.success : Color.secondary)
+                                .accessibilityLabel(run != nil ? "Saved" : "Not saved yet")
+                            Text(TestRunText.modeTitle(mode)).font(.footnote.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+                            Text(run.map { TestRunText.ms($0.enqueueP50Ms) } ?? "Not run").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                         }
-                    }.frame(minHeight: 36)
+                        .frame(maxWidth: .infinity, minHeight: 84)
+                        .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
+                    }
                 }
                 if let next = nextMode {
                     Text("Next: \(TestRunText.modeTitle(next))").font(.footnote).foregroundStyle(.secondary)
