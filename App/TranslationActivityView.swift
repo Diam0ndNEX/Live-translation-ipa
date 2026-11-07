@@ -24,7 +24,7 @@ struct TranslationActivityView: View {
                     if activity.phase == .working, let since = activity.since {
                         TimelineView(.periodic(from: since, by: 1)) { context in
                             Text("Current step · \(max(0, Int(context.date.timeIntervalSince(since)))) s")
-                                .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -36,22 +36,22 @@ struct TranslationActivityView: View {
                 ReadinessStepView(title: "Model run", step: engine.displayedReadiness.execution)
             }
             Text(engine.modelReadiness.source.isEmpty ? "Selected: \(engine.sourceCode) → \(engine.targetCode)" : "Pair: \(engine.modelReadiness.source) → \(engine.modelReadiness.target)")
-                .font(.caption2).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(.secondary)
             if let completed = engine.modelReadiness.completedAt, let ms = engine.modelReadiness.durationMs {
                 TimelineView(.periodic(from: completed, by: 1)) { context in
                     Text("Last successful model request: \(Int(ms)) ms · \(max(0, Int(context.date.timeIntervalSince(completed)))) s ago")
-                        .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                        .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
                 Text("Historical response only. A completed request does not prove the model is still loaded.")
-                    .font(.caption2).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondary)
             } else if engine.activeTranslationSystem != .legacy {
                 Text("No model response recorded for this preparation yet. Session setup alone does not run the model.")
-                    .font(.caption2).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondary)
             }
             if let work = engine.modeWorkActivity, work.phase == .ready {
                 Text("Last caption: " + work.title).font(.caption)
             }
-            Text(engine.currentRuntimeConditions.isEmpty ? engine.translationConditions : engine.currentRuntimeConditions).font(.caption2).foregroundStyle(.secondary)
+            Text(engine.currentRuntimeConditions.isEmpty ? engine.translationConditions : engine.currentRuntimeConditions).font(.caption).foregroundStyle(.secondary)
             if engine.pendingTranslationSystem != engine.activeTranslationSystem {
                 Text("Next capture: \(engine.pendingTranslationSystem.title)").font(.caption)
             }
@@ -99,9 +99,9 @@ private struct ReadinessStepView: View {
             HStack(spacing: 4) {
                 if step == .working { ProgressView().controlSize(.mini) }
                 else { Image(systemName: step == .complete ? "checkmark.circle.fill" : (step == .blocked ? "exclamationmark.circle" : "circle")).foregroundStyle(color) }
-                Text(title).font(.caption2.weight(.semibold))
+                Text(title).font(.caption.weight(.semibold))
             }
-            Text(label).font(.caption2).foregroundStyle(.secondary)
+            Text(label).font(.caption).foregroundStyle(.secondary)
         }.frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .ignore).accessibilityLabel(title + ": " + label)
     }

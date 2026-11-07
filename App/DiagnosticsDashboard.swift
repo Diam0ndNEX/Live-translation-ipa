@@ -1,4 +1,4 @@
-// ScreenLingo – App – Diagnostics dashboard (2.0.0 build 88)
+// ScreenLingo – App – Diagnostics dashboard (2.0.0 build 89)
 import SwiftUI
 import Charts
 
@@ -110,8 +110,8 @@ private struct StatTile: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 4) {
-                if let icon { Image(systemName: icon).font(.caption2).foregroundStyle(tint) }
-                Text(title).font(.caption2).foregroundStyle(.secondary)
+                if let icon { Image(systemName: icon).font(.caption).foregroundStyle(tint) }
+                Text(title).font(.caption).foregroundStyle(.secondary)
             }
             Text(value)
                 .font(.title3.weight(.bold).monospacedDigit())
@@ -137,7 +137,7 @@ private struct HealthRing: View {
                 .rotationEffect(.degrees(-90))
             VStack(spacing: 0) {
                 Text("\(score)").font(.title.weight(.bold).monospacedDigit())
-                Text("health").font(.caption2).foregroundStyle(.secondary)
+                Text("health").font(.caption).foregroundStyle(.secondary)
             }
         }
         .frame(width: 96, height: 96)
@@ -155,7 +155,7 @@ private struct LineCard: View {
     private func stat(_ n: String, _ v: Double) -> some View {
         VStack(spacing: 1) {
             Text(fmt(v)).font(.caption.weight(.semibold).monospacedDigit())
-            Text(n).font(.caption2).foregroundStyle(.secondary)
+            Text(n).font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -303,7 +303,7 @@ private struct BarListCard: View {
                     BarMark(x: .value("Count", r.value), y: .value("Item", r.name))
                         .foregroundStyle(color.gradient)
                         .annotation(position: .trailing) {
-                            Text("\(r.value)").font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                            Text("\(r.value)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                         }
                 }
                 .chartYScale(domain: rows.map { $0.name })
@@ -796,7 +796,7 @@ private struct DiagnosticsBody: View {
     }
 
     private var arrow: some View {
-        Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.secondary)
+        Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
     }
 
     private func node(_ title: String, _ icon: String, _ value: String, _ color: Color) -> some View {
@@ -806,8 +806,8 @@ private struct DiagnosticsBody: View {
                 .foregroundStyle(color)
                 .frame(width: 34, height: 34)
                 .background(color.opacity(0.18), in: Circle())
-            Text(title).font(.caption2.weight(.semibold))
-            Text(value).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+            Text(title).font(.caption.weight(.semibold))
+            Text(value).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 .lineLimit(1).minimumScaleFactor(0.6)
         }
         .frame(maxWidth: .infinity)
@@ -874,7 +874,7 @@ private struct DiagnosticsBody: View {
                     Text("p95")
                     Text("max")
                 }
-                .font(.caption2)
+                .font(.caption)
                 .foregroundStyle(.secondary)
                 ForEach(rows, id: \.0) { r in
                     GridRow {
@@ -940,11 +940,11 @@ private struct DiagnosticsBody: View {
                             Text("Confirmed \(bucket.counters["candidateConfirmed", default: 0]) · enqueued \(bucket.counters["candidateEnqueued", default: 0])")
                                 .font(.caption)
                             Text("Superseded \(bucket.counters["unpresentedConfirmed", default: 0]) · enqueue failures \(bucket.counters["enqueueFailed", default: 0])")
-                                .font(.caption2).foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(.secondary)
                         }
                         Spacer(minLength: 2)
                         Text(String(format: "%.1f s", bucket.elapsedSeconds))
-                            .font(.caption2.monospacedDigit())
+                            .font(.caption.monospacedDigit())
                             .foregroundStyle(.secondary)
                     }
                 }
@@ -991,7 +991,7 @@ private struct DiagnosticsBody: View {
                     ForEach([EngineState.live, .paused, .frozen, .idle], id: \.rawValue) { st in
                         HStack(spacing: 4) {
                             Circle().fill(st.color).frame(width: 8, height: 8)
-                            Text(st.title).font(.caption2).foregroundStyle(.secondary)
+                            Text(st.title).font(.caption).foregroundStyle(.secondary)
                         }
                     }
                 }
@@ -1034,9 +1034,9 @@ private struct DiagnosticsBody: View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(e.time, format: .dateTime.hour().minute().second())
-                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 Text(elapsed(e.time))
-                    .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
+                    .font(.caption.monospacedDigit()).foregroundStyle(.tertiary)
             }
             .frame(width: 58, alignment: .leading)
             Image(systemName: e.kind.icon)
@@ -1047,7 +1047,7 @@ private struct DiagnosticsBody: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(e.text).font(.caption)
                 if let d = e.detail, !d.isEmpty {
-                    Text(d).font(.caption2).foregroundStyle(.secondary).lineLimit(2)
+                    Text(d).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
             }
             Spacer(minLength: 0)
@@ -1057,7 +1057,7 @@ private struct DiagnosticsBody: View {
     private func kindChip(_ title: String, _ icon: String, on: Bool, color: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Label(title, systemImage: icon)
-                .font(.caption2.weight(.semibold))
+                .font(.caption.weight(.semibold))
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .foregroundStyle(on ? Color.white : Color.secondary)
                 .background(on ? color.opacity(0.7) : Palette.surface, in: Capsule())
@@ -1107,7 +1107,7 @@ private struct DiagnosticsBody: View {
             ForEach(Array(diag.subtitleTraces.suffix(18))) { item in
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(String(item.candidate.suffix(12))) · \(item.stage) · \(item.time.formatted(date: .omitted, time: .standard))").font(.caption.monospaced())
-                    Text(item.detail).font(.caption2).foregroundStyle(.secondary)
+                    Text(item.detail).font(.caption).foregroundStyle(.secondary)
                 }
             }
             Text("Times measure app processing and frame enqueue, not physical screen presentation. Full bounded timeline is in CSV.").font(.caption).foregroundStyle(.secondary)
@@ -1210,12 +1210,12 @@ private struct DiagnosticsBody: View {
                                     Text(stage.stage.replacingOccurrences(of: "_", with: " "))
                                         .font(.caption.weight(.medium))
                                     Text(stage.reason.replacingOccurrences(of: "_", with: " "))
-                                        .font(.caption2).foregroundStyle(.secondary)
+                                        .font(.caption).foregroundStyle(.secondary)
                                 }
                                 Spacer()
                                 if let ms = stage.durationMs {
                                     Text(String(format: "%.2f ms", ms))
-                                        .font(.caption2.monospacedDigit())
+                                        .font(.caption.monospacedDigit())
                                 }
                             }
                         }
@@ -1335,7 +1335,7 @@ private struct DiagnosticsBody: View {
                         AxisValueLabel {
                             if let d = v.as(Double.self) {
                                 Text(["Normal", "Warm", "Hot", "Critical"][Swift.min(3, Swift.max(0, Int(d)))])
-                                    .font(.caption2)
+                                    .font(.caption)
                             }
                         }
                     }

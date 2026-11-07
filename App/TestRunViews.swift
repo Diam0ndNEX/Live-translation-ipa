@@ -1,4 +1,4 @@
-// ScreenLingo – App – Test Runs (2.0.0 build 88)
+// ScreenLingo – App – Test Runs (2.0.0 build 89)
 import SwiftUI
 
 // Test Runs UI (spec §11.6): Test card, Test Runs list and detail, report sheet.
@@ -72,7 +72,7 @@ private struct RunBadges: View {
         if !items.isEmpty {
             HStack(spacing: 4) {
                 ForEach(items, id: \.0) { item in
-                    Text(item.0).font(.caption2.weight(.semibold))
+                    Text(item.0).font(.caption.weight(.semibold))
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(item.1.opacity(0.2), in: Capsule())
                 }
@@ -95,7 +95,7 @@ struct TestRunRow: View {
                     Spacer()
                     VStack(alignment: .trailing, spacing: 0) {
                         Text(TestRunText.ms(run.enqueueP50Ms)).font(.headline.monospacedDigit())
-                        Text("median").font(.caption2).foregroundStyle(.secondary)
+                        Text("median").font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 Text("\(run.startedAt.formatted(date: .abbreviated, time: .shortened)) · \(TestRunText.duration(run.durationSeconds)) · \(run.captions) captions")
@@ -385,10 +385,7 @@ struct TestRunsScreen: View {
                     if let note = s.pruneNote { Banner(text: note, severity: .warning) }
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(Palette.background.ignoresSafeArea())
-            .navigationTitle("Test runs")
-            .navigationBarTitleDisplayMode(.inline)
+            .settingsPage("Test runs")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 ToolbarItem(placement: .primaryAction) {
@@ -459,8 +456,11 @@ struct TestRunDetailView: View {
     private func number(_ title: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.title3.weight(.semibold).monospacedDigit()).minimumScaleFactor(0.7).lineLimit(1)
-        }.frame(maxWidth: .infinity, alignment: .leading)
+            Text(value).font(.title3.weight(.bold).monospacedDigit()).minimumScaleFactor(0.7).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+        .padding(Space.s)
+        .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
     }
 
     var body: some View {
@@ -470,7 +470,7 @@ struct TestRunDetailView: View {
                 Section {
                     VStack(alignment: .leading, spacing: Space.m) {
                         TestRunRow(run: current)
-                        HStack(alignment: .top, spacing: Space.m) {
+                        HStack(alignment: .top, spacing: Space.s) {
                             number("Median", TestRunText.ms(current.enqueueP50Ms))
                             number("Slow tail · P95", TestRunText.ms(current.enqueueP95Ms))
                             number("Captions", "\(current.captions)")
@@ -558,10 +558,7 @@ struct TestRunDetailView: View {
                     if !differing.isEmpty { Hint("Settings above differ from other runs in this test.") }
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(Palette.background.ignoresSafeArea())
-            .navigationTitle(TestRunText.modeTitle(current.mode))
-            .navigationBarTitleDisplayMode(.inline)
+            .settingsPage(TestRunText.modeTitle(current.mode))
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } } }
             .alert("Run label", isPresented: $renaming) {
                 TextField("e.g. Video A", text: $label)
@@ -638,10 +635,7 @@ struct TestRunReportSheet: View {
                     Section { Hint(s.archive) }
                 }
             }
-            .scrollContentBackground(.hidden)
-            .background(Palette.background.ignoresSafeArea())
-            .navigationTitle("Test report")
-            .navigationBarTitleDisplayMode(.inline)
+            .settingsPage("Test report")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
                 ToolbarItem(placement: .confirmationAction) {

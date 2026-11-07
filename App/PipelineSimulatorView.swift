@@ -1,4 +1,4 @@
-// ScreenLingo – App – Pipeline simulator (2.0.0 build 88)
+// ScreenLingo – App – Pipeline simulator (2.0.0 build 89)
 import SwiftUI
 import Charts
 
@@ -25,6 +25,7 @@ struct PipelineSimulatorView: View {
     }
     var body: some View {
         List {
+            SettingsPageHeader(symbol: "point.3.connected.trianglepath.dotted", title: "Pipeline simulator", summary: "Plays out settings and timing on paper.")
             Section {
                 headline
                 Picker("Panel", selection: $panel) {
@@ -296,6 +297,7 @@ private struct SimulatorSettingEditor: View {
                 Text("Simulator only. Numeric values follow policy clamps; unsupported text values use the simulator's documented defaults. Rendering and interface preferences are inspected, not used to invent OCR/model timing benefits.").font(.footnote).foregroundStyle(.secondary)
             }
         }
+        .scrollContentBackground(.hidden).background(Palette.background.ignoresSafeArea())
         .navigationTitle(key).navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement:.topBarTrailing){Button("Done"){dismiss()}} }
     }

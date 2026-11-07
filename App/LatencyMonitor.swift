@@ -24,7 +24,7 @@ struct LatencyReadout: View {
             Text(title).font(.caption2.weight(.bold)).tracking(1).foregroundStyle(.secondary)
             HStack(alignment: .firstTextBaseline, spacing: 3) {
                 Text(value > 0 ? "\(Int(value))" : "—").font(.system(.title3, design: .rounded, weight: .semibold)).monospacedDigit()
-                Text("ms").font(.caption2).foregroundStyle(.secondary)
+                Text("ms").font(.caption).foregroundStyle(.secondary)
             }
         }
     }

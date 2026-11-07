@@ -1,4 +1,4 @@
-// ScreenLingo – App – Translation memory (2.0.0 build 88)
+// ScreenLingo – App – Translation memory (2.0.0 build 89)
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -76,6 +76,7 @@ struct MemoryManagementView: View {
 
     var body: some View {
         List {
+            SettingsPageHeader(symbol: "externaldrive", title: "Translation memory", summary: "Sentences ScreenLingo has already translated and can reuse.")
             Section {
                 MemorySummary(facts: facts)
                     .listRowInsets(EdgeInsets(top: Space.m, leading: Space.l, bottom: Space.m, trailing: Space.l))
@@ -192,15 +193,19 @@ struct MemoryManagementView: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Section("Export and import") {
-                Button(transferBusy ? "Preparing…" : "Export translation memory") {
-                    transferBusy = true
-                    Task {
-                        defer { transferBusy = false }
-                        do { transfer = MemoryTransferDocument(data: try await engine.memoryStore.exportData()); exporting = true }
-                        catch { message = "Export failed; memory unchanged" }
+                HStack(spacing: Space.s) {
+                    SecondaryButton(title: transferBusy ? "Preparing…" : "Export", symbol: "square.and.arrow.up", enabled: !(transferBusy || captureInProgress)) {
+                        transferBusy = true
+                        Task {
+                            defer { transferBusy = false }
+                            do { transfer = MemoryTransferDocument(data: try await engine.memoryStore.exportData()); exporting = true }
+                            catch { message = "Export failed; memory unchanged" }
+                        }
                     }
-                }.disabled(transferBusy || captureInProgress)
-                Button("Import translation memory") { importing = true }.disabled(transferBusy || captureInProgress)
+                    SecondaryButton(title: "Import", symbol: "square.and.arrow.down", enabled: !(transferBusy || captureInProgress)) { importing = true }
+                }
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: Space.s, leading: Space.l, bottom: Space.s, trailing: Space.l))
                 Text("Memory exports contain source and translated text. Choose where to save them.").font(.footnote)
             }
             AdvancedSwitchSection()
@@ -259,7 +264,7 @@ struct MemoryManagementView: View {
                     Text("Stop screen capture and PiP before running database maintenance.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-                if !message.isEmpty { Text(message) }
+                if !message.isEmpty { Banner(text: message, severity: .info) }
             }
             AdvancedSection(title: "Recovery copies") {
                 Button("Inspect saved recovery snapshots") {
@@ -311,7 +316,7 @@ struct MemoryManagementView: View {
                 }
             }
         }
-        .navigationTitle("Translation memory")
+        .settingsPage("Translation memory")
         .fileExporter(isPresented: $exporting, document: transfer, contentType: .json, defaultFilename: "screenlingo-memory") { result in
             switch result {
             case .success: message = "Memory exported"
