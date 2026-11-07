@@ -1,10 +1,10 @@
-// Screen Translator – App – v0.11.0
+// ScreenLingo – App
 import SwiftUI
 
 extension View {
     func settingsPage(_ title: String) -> some View {
         self.scrollContentBackground(.hidden)
-            .background(Theme.bg.ignoresSafeArea())
+            .background(Palette.background.ignoresSafeArea())
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
@@ -13,14 +13,18 @@ extension View {
 
 struct ResetSection: View {
     @EnvironmentObject var engine: TranslatorEngine
+    @EnvironmentObject private var feedback: FeedbackCenter
     let keys: [String]
     @State private var confirm = false
     var body: some View {
         Section {
+            // The dialog belongs to the button that opens it, not to the Section.
             Button("Reset this page to defaults", role: .destructive) { confirm = true }
-        }
-        .confirmationDialog("Reset every setting on this page?", isPresented: $confirm, titleVisibility: .visible) {
-            Button("Reset", role: .destructive) { engine.resetKeys(keys) }
+                .frame(minHeight: 44)
+                .confirmDestructive("Reset every setting on this page?", message: "Only this page's settings return to their defaults.",
+                                    isPresented: $confirm, button: "Reset") {
+                    engine.resetKeys(keys); feedback.show("Page reset to defaults", severity: .success)
+                }
         }
     }
 }
@@ -55,9 +59,9 @@ private struct SettingsNavRow<Destination: View>: View {
         } label: {
             HStack(spacing: 13) {
                 Image(systemName: symbol)
-                    .font(.system(size: 18, weight: .medium))
+                    .font(.title3.weight(.medium))
                     .foregroundStyle(Color.accentColor)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 44, height: 44)
                     .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title).font(.body.weight(.medium))
@@ -75,7 +79,9 @@ private struct SettingsNavRow<Destination: View>: View {
 /// Search includes previous page names so navigation remains discoverable.
 struct SettingsView: View {
     @EnvironmentObject var engine: TranslatorEngine
+    @EnvironmentObject private var router: AppRouter
     @State private var query = ""
+    private var chevron: some View { Image(systemName: "chevron.right").foregroundStyle(.tertiary) }
 
     private func matches(_ title: String, _ keywords: String) -> Bool {
         query.isEmpty || (title + " " + keywords).localizedCaseInsensitiveContains(query)
@@ -93,7 +99,7 @@ struct SettingsView: View {
         || matches("Feedback & sharing", "haptics speak copy clipboard voice vibration")
     }
     private var personalizeMatches: Bool {
-        matches("App appearance", "interface accent home layout customize cards")
+        matches("App appearance", "interface accent color dark light system theme haptics")
         || matches("Reader & photos", "workspace photo OCR reading")
         || matches("History & storage", "saved translations retention limit delete memory library")
     }
@@ -108,7 +114,11 @@ struct SettingsView: View {
         || matches("About & help", "version changelog guide")
     }
     private var anyMatch: Bool {
-        translateMatches || subtitleMatches || personalizeMatches || advancedMatches || supportMatches
+        testsMatch || translateMatches || subtitleMatches || personalizeMatches || advancedMatches || supportMatches
+    }
+
+    private var testsMatch: Bool {
+        matches("Tests & diagnostics", "test runs dashboard compare modes export zip report simulator memory management evidence")
     }
 
     var body: some View {
@@ -167,8 +177,8 @@ struct SettingsView: View {
 
                 if personalizeMatches {
                     Section("Personalize & library") {
-                        if matches("App appearance", "interface accent home layout customize cards") {
-                            SettingsNavRow(title: "App appearance", detail: "Colors and Home screen sections",
+                        if matches("App appearance", "interface accent color dark light system theme haptics") {
+                            SettingsNavRow(title: "App appearance", detail: "Light or dark, accent color and haptics",
                                            symbol: "paintpalette", destination: InterfaceSettings())
                         }
                         if matches("Reader & photos", "workspace photo OCR reading") {
@@ -193,9 +203,20 @@ struct SettingsView: View {
                                            symbol: "flask", destination: ExperimentalFeaturesView())
                         }
                         if matches("Diagnostics & tests", "metrics benchmark export sessions simulator validation fresh translation") {
-                            SettingsNavRow(title: "Diagnostics & tests", detail: "Collection, controlled comparisons and simulator",
+                            SettingsNavRow(title: "Diagnostics & tests", detail: "What is collected, test-run saving and the simulator",
                                            symbol: "waveform.path.ecg", destination: DiagnosticsSettings())
                         }
+                    }
+                }
+
+                if testsMatch {
+                    Section("Tests & diagnostics") {
+                        Button { router.present(.diagnostics) } label: {
+                            ListRow(title: "Live dashboard", subtitle: "Health, timing and exports while you translate", symbol: "waveform.path.ecg") { chevron }
+                        }.buttonStyle(.plain)
+                        Button { router.present(.testRuns) } label: {
+                            ListRow(title: "Test runs", subtitle: "Compare Legacy, Hybrid and Low Latency on the same content", symbol: "checklist") { chevron }
+                        }.buttonStyle(.plain)
                     }
                 }
 
@@ -228,7 +249,7 @@ struct SettingsView: View {
             .overlay { if !anyMatch { ContentUnavailableView.search(text: query) } }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
-            .background(Theme.bg.ignoresSafeArea())
+            .background(Palette.background.ignoresSafeArea())
             .searchable(text: $query, prompt: "Search settings and features")
             .navigationTitle("Settings")
         }
@@ -532,53 +553,41 @@ struct WindowSettings: View {
 struct InterfaceSettings: View {
     @EnvironmentObject var engine: TranslatorEngine
     @AppStorage("accent") private var accent = AccentChoice.blue.rawValue
-    @AppStorage("homePresets") private var homePresets = true
-    @AppStorage("homeTools") private var homeTools = true
-    @AppStorage("homeQuick") private var homeQuick = true
-    @AppStorage("homeStatus") private var homeStatus = true
-    @AppStorage("homeRecent") private var homeRecent = true
+    @AppStorage("appearance") private var appearance = Appearance.system.rawValue
     @AppStorage("homeMetrics") private var homeMetrics = true
-    @AppStorage("homeQuickExpanded") private var homeQuickExpanded = false
-    @AppStorage("homeDetailsExpanded") private var homeDetailsExpanded = false
     @AppStorage("uiHaptics") private var uiHaptics = true
 
     var body: some View {
         List {
+            Section {
+                Picker("Appearance", selection: $appearance) {
+                    ForEach(Appearance.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
+            } header: { Text("Light or dark") } footer: {
+                Text("System follows your iPhone's setting.")
+            }
             Section("Accent color") {
-                HStack(spacing: 14) {
+                HStack(spacing: Space.m) {
                     ForEach(AccentChoice.allCases) { color in
-                        Circle()
-                            .fill(LinearGradient(colors: [color.start, color.end],
-                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
-                            .frame(width: 34, height: 34)
-                            .overlay(Circle().stroke(Color.white, lineWidth: accent == color.rawValue ? 3 : 0))
-                            .onTapGesture { accent = color.rawValue; engine.tap() }
-                            .accessibilityLabel(color.title)
+                        Button { accent = color.rawValue; engine.tap() } label: {
+                            Circle()
+                                .fill(LinearGradient(colors: [color.start, color.end], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                .frame(width: 36, height: 36)
+                                .overlay(Circle().stroke(Color.primary, lineWidth: accent == color.rawValue ? 3 : 0))
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(color.title)
+                        .accessibilityAddTraits(accent == color.rawValue ? .isSelected : [])
                     }
-                }.padding(.vertical, 4)
+                }
             }
-            Section {
-                Toggle("Presets", isOn: $homePresets)
-                Toggle("Tools under preview", isOn: $homeTools)
-                Toggle("Quick settings", isOn: $homeQuick)
-                Toggle("Recent language pairs", isOn: $homeRecent)
-                Toggle("Status & diagnostics summary", isOn: $homeStatus)
-                Toggle("Show timing cards", isOn: $homeMetrics)
-            } header: { Text("Home screen sections") } footer: {
-                Text("Hide sections you rarely use for a simpler Home screen.")
+            Section("Feedback") {
+                LabeledToggleRow(title: "Haptic feedback for taps", detail: "A light tick when you press buttons.", isOn: $uiHaptics)
+                LabeledToggleRow(title: "Show timing details in Status", detail: "Adds the per-stage timing list to the Status sheet.", isOn: $homeMetrics)
             }
-            Section {
-                Toggle("Keep quick settings expanded", isOn: $homeQuickExpanded)
-                    .disabled(!homeQuick)
-                Toggle("Keep troubleshooting expanded", isOn: $homeDetailsExpanded)
-            } header: { Text("Default layout") }
-            Section("App interactions") {
-                Toggle("Haptic feedback for taps", isOn: $uiHaptics)
-            }
-            ResetSection(keys: [
-                "accent", "homePresets", "homeTools", "homeQuick", "homeStatus",
-                "homeRecent", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "uiHaptics"
-            ])
+            ResetSection(keys: ["accent", "appearance", "homeMetrics", "uiHaptics"])
         }
         .settingsPage("App appearance")
     }
@@ -689,7 +698,7 @@ struct AboutSettings: View {
                                value: engine.extensionVersion == "–" ? "not seen yet" : "v\(engine.extensionVersion)")
             }
             Section("How to use") {
-                Text("1. Languages tab → download your source and target packs.\n2. Home → tap the broadcast icon, choose ScreenLingo Capture, Start Broadcast.\n3. Switch to your app. If nothing shows, use Test on the Home screen and check the Diagnostics tab.")
+                Text("1. Languages tab: download your source and target packs.\n2. Live tab: tap the round broadcast button, choose ScreenLingo Capture, then Start Broadcast.\n3. Switch to your app. If nothing shows, open Status on the Live tab, or Settings → Tests & diagnostics.")
                     .font(.footnote)
                 Button("Show the welcome tour again") { onboarded = false }
             }

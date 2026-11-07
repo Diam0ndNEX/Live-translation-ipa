@@ -156,7 +156,7 @@ struct HistoryStorageSettings: View {
 
 struct DiagnosticsSettings: View {
     @EnvironmentObject private var engine: TranslatorEngine
-    @Environment(\.selectTab) private var selectTab
+    @EnvironmentObject private var router: AppRouter
     @AppStorage("diagSamples") private var samples = 600
     @AppStorage("testRunSaving") private var testRunSaving = "automatic"
     @State private var confirmDeleteRuns = false
@@ -168,7 +168,7 @@ struct DiagnosticsSettings: View {
             Section {
                 LabeledContent("Session started", value: engine.diag.started.formatted(date: .abbreviated, time: .shortened))
                 Button {
-                    selectTab(3)
+                    router.present(.diagnostics)
                 } label: {
                     Label("Open live diagnostics dashboard", systemImage: "chart.xyaxis.line")
                 }

@@ -42,7 +42,7 @@ expected = {
         "adaptiveOCR", "subtitleTracking", "deduplicateCopies",
         "rapidTextTracking", "joinAdjacentText", "activeTextFocus",
         "contextualLanguage", "languageRecovery", "smartCool", "keepAwake",
-        "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded",
+        "homeMetrics",
     },
     "SettingsCategories.swift": {
         "translationSystem", "translateAhead", "keepWarm", "remember", "predictiveWarmup",

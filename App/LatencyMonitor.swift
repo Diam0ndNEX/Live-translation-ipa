@@ -16,7 +16,7 @@ struct LatencyReadout: View {
             metric("TOTAL", monitor.last.total)
         }
         .padding(.horizontal, 18).padding(.vertical, 14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 18))
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
         .accessibilityElement(children: .combine)
     }
     private func metric(_ title: String, _ value: Double) -> some View {
@@ -76,7 +76,7 @@ struct PairedTimingCard: View {
                 Text("Averages use \(samples.count) matched displayed results. Confirmation includes earlier OCR passes and spacing between them. Translation-ahead can overlap confirmation. This replaces the old residual ‘Waiting & display’ estimate.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-        }.card()
+        }.infoCard()
     }
     private func stage(_ title: String, _ value: Double) -> some View {
         HStack { Text(title); Spacer(); Text("\(Int(value)) ms").monospacedDigit() }.font(.footnote)

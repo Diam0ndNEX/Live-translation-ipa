@@ -1,6 +1,6 @@
 import SwiftUI
 
-// Test Runs UI (v2.0.0 build 84, spec §11.6): Home Test card, Test Runs list and detail, report sheet.
+// Test Runs UI (v2.0.0 build 84, spec §11.6): Test card, Test Runs list and detail, report sheet.
 
 enum TestRunText {
     static func modeTitle(_ mode: String) -> String {
@@ -51,7 +51,7 @@ private struct RunBadges: View {
         if !items.isEmpty {
             HStack(spacing: 4) {
                 ForEach(items, id: \.0) { item in
-                    Text(item.0).font(.system(size: 10, weight: .semibold))
+                    Text(item.0).font(.caption2.weight(.semibold))
                         .padding(.horizontal, 6).padding(.vertical, 2)
                         .background(item.1.opacity(0.2), in: Capsule())
                 }
@@ -78,7 +78,7 @@ struct TestRunRow: View {
     }
 }
 
-// MARK: Home card
+// MARK: Test card (shown in the Live Test sheet)
 
 struct HomeTestCard: View {
     @ObservedObject var diag: Diagnostics
@@ -165,7 +165,7 @@ struct HomeTestCard: View {
             }
         }
         .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .task { await diag.refreshRuns() }
         .sheet(isPresented: $showRuns) { TestRunsScreen(diag: diag) }
         .sheet(isPresented: $showReport) { TestRunReportSheet(diag: diag) }

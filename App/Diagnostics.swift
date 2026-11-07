@@ -1,5 +1,5 @@
 import CryptoKit
-// Screen Translator – App – v0.11.0
+// ScreenLingo – App
 import SwiftUI
 import Charts
 import os
@@ -107,7 +107,7 @@ enum Fix: String {
         case .fixedRotation: "Turn off auto-rotation"
         case .narrowArea: "Read the bottom third only"
         case .openLanguages: "Open Languages"
-        case .startCapture: "Go to Home"
+        case .startCapture: "Go to Live"
         case .translateAhead: "Turn on translate-ahead"
         }
     }
@@ -1630,10 +1630,10 @@ final class Diagnostics: ObservableObject {
         let trS = Diagnostics.summarize(Array(translate.suffix(30)))
 
         if !alive {
-            flag(2, "Capture isn't running", "Open Home, tap the broadcast button and choose Translator Capture.", .startCapture)
+            flag(2, "Capture isn't running", "Open the Live tab, tap the round broadcast button and choose ScreenLingo Capture.", .startCapture)
             score -= 45
         } else {
-            if paused { flag(0, "Translating is paused", "Turn Pause off on the Home screen to continue."); score -= 5 }
+            if paused { flag(0, "Translating is paused", "Turn Pause off on the Live tab to continue."); score -= 5 }
             if ocrS.n >= 3 {
                 if ocrS.avg > 500 {
                     flag(2, "Reading the screen is slow (\(Int(ocrS.avg)) ms)", "A smaller area or the Fast speed makes it quicker.", .fastSpeed); score -= 20
@@ -1849,7 +1849,7 @@ private struct StatTile: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
@@ -1883,7 +1883,7 @@ private struct LineCard: View {
     private func stat(_ n: String, _ v: Double) -> some View {
         VStack(spacing: 1) {
             Text(fmt(v)).font(.caption.weight(.semibold).monospacedDigit())
-            Text(n).font(.system(size: 9)).foregroundStyle(.secondary)
+            Text(n).font(.caption2).foregroundStyle(.secondary)
         }
     }
 
@@ -1946,7 +1946,7 @@ private struct LineCard: View {
                 }
             }
         }
-        .card()
+        .infoCard()
     }
 }
 
@@ -1988,7 +1988,7 @@ private struct HistogramCard: View {
                 .frame(height: 120)
             }
         }
-        .card()
+        .infoCard()
     }
 }
 
@@ -2012,7 +2012,7 @@ private struct DonutCard: View {
                 .frame(height: 210)
             }
         }
-        .card()
+        .infoCard()
     }
 }
 
@@ -2038,7 +2038,7 @@ private struct BarListCard: View {
                 .frame(height: CGFloat(rows.count) * 34 + 20)
             }
         }
-        .card()
+        .infoCard()
     }
 }
 
@@ -2124,14 +2124,14 @@ struct DiagnosticsView: View {
 
 private struct DiagnosticsBody: View {
     @EnvironmentObject var engine: TranslatorEngine
-    @Environment(\.selectTab) private var selectTab
+    @EnvironmentObject private var router: AppRouter
+    @Environment(\.dismiss) private var dismiss
     @ObservedObject var diag: Diagnostics
     @AppStorage("diagDetailed") private var detailed = false
     @AppStorage("diagnosticsEnabled") private var collectionEnabled = true
     @AppStorage("detailedCollection") private var collectDetails = false
     @AppStorage("diagPage") private var pageRaw = DiagPage.overview.rawValue
     @AppStorage("diagRange") private var rangeRaw = DiagRange.fiveMin.rawValue
-    @State private var visible = false
     @State private var kinds: Set<EventKind> = []
     @State private var query = ""
     @State private var confirmReset = false
@@ -2156,7 +2156,7 @@ private struct DiagnosticsBody: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                if visible {
+                Group {
                     VStack(spacing: 14) {
                         VStack(alignment: .leading, spacing: 6) {
                             LabeledContent("Active system", value: engine.activeTranslationSystem.title)
@@ -2166,14 +2166,14 @@ private struct DiagnosticsBody: View {
                             Text(engine.modeAvailability).font(.footnote).foregroundStyle(.secondary)
                             Text("Legacy reference: 1.7.2 (58), e94542ce. Apple default does not identify an effective model.")
                                 .font(.caption).foregroundStyle(.secondary)
-                        }.card()
+                        }.infoCard()
                         if collectionEnabled {
                         if detailed { detailedBody } else { simpleBody }
                         if detailed && !collectDetails {
                             Text("Graphs and events are off. Language counters and session speaker labels still work. Enable Detailed diagnostics in the toolbar settings menu to collect graph samples.").font(.footnote).foregroundStyle(.secondary)
                         }
                         } else {
-                            Text("Diagnostics collection is off. Translation and capture continue.").foregroundStyle(.secondary).card()
+                            Text("Diagnostics collection is off. Translation and capture continue.").foregroundStyle(.secondary).infoCard()
                         }
                     }
                     .padding(.horizontal, 16)
@@ -2182,9 +2182,10 @@ private struct DiagnosticsBody: View {
                 }
             }
             .scrollIndicators(.hidden)
-            .background(Theme.bg.ignoresSafeArea())
+            .background(Palette.background.ignoresSafeArea())
             .navigationTitle("Diagnostics")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Done") { dismiss() } }
                 ToolbarItem(placement: .topBarLeading) {
                     Button { Sharer.shareFile(text: diag.report(engine: engine), name: "translator-report-\(Sharer.stamp()).txt") } label: {
                         Image(systemName: "square.and.arrow.up")
@@ -2230,8 +2231,6 @@ private struct DiagnosticsBody: View {
             }
             .sheet(isPresented: $showSimulator) { NavigationStack { PipelineSimulatorView().environmentObject(engine) } }
             .sheet(isPresented: $showTestReport) { TestRunReportSheet(diag: diag) }
-            .onAppear { visible = true }
-            .onDisappear { visible = false }
             .onChange(of: collectionEnabled) { _, _ in engine.diagnosticsSettingsChanged() }
             .onChange(of: collectDetails) { _, _ in engine.diagnosticsSettingsChanged() }
             .confirmationDialog("Delete all unpinned test runs? Pinned runs, translation memory, history and settings are not changed.", isPresented: $confirmDeleteSessions, titleVisibility: .visible) {
@@ -2264,11 +2263,11 @@ private struct DiagnosticsBody: View {
                                 translate: diag.translate.filter { $0.t > cutoff },
                                 delay: diag.latency.filter { $0.t > cutoff })
             }
-            .card()
+            .infoCard()
             recentEvents
             }
             if !collectDetails {
-                Text("Summary collection is active. Timing history and events are off.").font(.footnote).foregroundStyle(.secondary).card()
+                Text("Summary collection is active. Timing history and events are off.").font(.footnote).foregroundStyle(.secondary).infoCard()
             }
         }
     }
@@ -2352,7 +2351,7 @@ private struct DiagnosticsBody: View {
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .font(.footnote)
-        .card()
+        .infoCard()
     }
 
     private var statusLine: String {
@@ -2371,7 +2370,7 @@ private struct DiagnosticsBody: View {
         return VStack(spacing: 14) {
             HStack(spacing: 16) {
                 if collectDetails { HealthRing(score: a.score) }
-                else { Image(systemName: "waveform.path.ecg").font(.largeTitle).foregroundStyle(Theme.accent.start) }
+                else { Image(systemName: "waveform.path.ecg").font(.largeTitle).foregroundStyle(Color.accentColor) }
                 VStack(alignment: .leading, spacing: 6) {
                     Text(collectDetails ? a.headline : "Summary only").font(.title3.weight(.bold))
                     Text(statusLine).font(.footnote).foregroundStyle(.secondary)
@@ -2400,7 +2399,7 @@ private struct DiagnosticsBody: View {
             Text("Latency covers successful frame enqueues. Replaced work is excluded, so lower latency alone does not establish better subtitle continuity. Counts are candidates, not unique subtitle lines.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .card()
+        .infoCard()
     }
 
     private func apply(_ f: Fix) {
@@ -2413,8 +2412,8 @@ private struct DiagnosticsBody: View {
             ud.set("0", forKey: "frameRot")
             engine.rotationSettingChanged()
         case .narrowArea: ud.set("bottom", forKey: "area")
-        case .openLanguages: selectTab(1); return
-        case .startCapture: selectTab(0); return
+        case .openLanguages: router.go(.languages); return
+        case .startCapture: router.go(.live); return
         case .translateAhead: ud.set(true, forKey: "translateAhead")
         }
         engine.syncConfig()
@@ -2444,12 +2443,12 @@ private struct DiagnosticsBody: View {
                 }
             }
         }
-        .card()
+        .infoCard()
     }
 
     private func feedRow(_ icon: String, _ title: String, _ text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon).frame(width: 20).foregroundStyle(Theme.accent.start)
+            Image(systemName: icon).frame(width: 20).foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.caption2).foregroundStyle(.secondary)
                 Text(text).font(.footnote).lineLimit(3)
@@ -2465,7 +2464,7 @@ private struct DiagnosticsBody: View {
             Text("Translator: " + engine.translationActivity.title).font(.caption2).foregroundStyle(.secondary)
             Text(engine.status).font(.caption2).foregroundStyle(.secondary)
         }
-        .card()
+        .infoCard()
     }
 
     private var recentEvents: some View {
@@ -2483,7 +2482,7 @@ private struct DiagnosticsBody: View {
                 Label("Open the full timeline", systemImage: "timeline.selection").font(.footnote.weight(.semibold))
             }
         }
-        .card()
+        .infoCard()
     }
 
     // MARK: Detailed
@@ -2493,7 +2492,7 @@ private struct DiagnosticsBody: View {
                 .font(.caption.weight(.semibold))
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .foregroundStyle(page == p ? Color.white : Color.secondary)
-                .background(page == p ? Theme.accent.start.opacity(0.85) : Theme.card, in: Capsule())
+                .background(page == p ? Color.accentColor.opacity(0.85) : Palette.surface, in: Capsule())
         }
     }
 
@@ -2546,11 +2545,11 @@ private struct DiagnosticsBody: View {
                 LabeledContent(outcome.rawValue, value: String(diag.memoryOutcomesForUI(outcome)))
             }
             Text(diag.archiveStatus).font(.caption).foregroundStyle(.secondary)
-        }.card()
+        }.infoCard()
     }
 
     private var sessionsPage: some View {
-        TestRunsPage(diag: diag, showReport: $showTestReport, confirmDeleteUnpinned: $confirmDeleteSessions).card()
+        TestRunsPage(diag: diag, showReport: $showTestReport, confirmDeleteUnpinned: $confirmDeleteSessions).infoCard()
     }
 
     // MARK: Overview
@@ -2583,12 +2582,12 @@ private struct DiagnosticsBody: View {
     private func node(_ title: String, _ icon: String, _ value: String, _ color: Color) -> some View {
         VStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(color)
                 .frame(width: 34, height: 34)
                 .background(color.opacity(0.18), in: Circle())
-            Text(title).font(.system(size: 9, weight: .semibold))
-            Text(value).font(.system(size: 9).monospacedDigit()).foregroundStyle(.secondary)
+            Text(title).font(.caption2.weight(.semibold))
+            Text(value).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                 .lineLimit(1).minimumScaleFactor(0.6)
         }
         .frame(maxWidth: .infinity)
@@ -2615,7 +2614,7 @@ private struct DiagnosticsBody: View {
                 node("Show", "rectangle.on.rectangle", engine.pipActive ? (d.n > 0 ? "\(Int(d.avg)) ms" : "–") : "closed", showColor)
             }
         }
-        .card()
+        .infoCard()
     }
 
     private var sessionGrid: some View {
@@ -2669,7 +2668,7 @@ private struct DiagnosticsBody: View {
                 }
             }
         }
-        .card()
+        .infoCard()
     }
 
     // MARK: Speed
@@ -2686,7 +2685,7 @@ private struct DiagnosticsBody: View {
             HistogramCard(title: "How long the total delay is", values: slice(diag.latency).map { $0.v }, color: Color.orange)
             if engine.activeTranslationSystem != .legacy {
                 Text("Model-inference timings include successful backend requests even if an obsolete result was not displayed. Memory-only translations add no model sample. Total delay ends at PiP buffer enqueue.")
-                    .font(.caption).foregroundStyle(.secondary).card()
+                    .font(.caption).foregroundStyle(.secondary).infoCard()
             }
             PairedTimingCard(samples: diag.pipeline.filter { $0.date >= rangeStart })
             granularityCard
@@ -2733,7 +2732,7 @@ private struct DiagnosticsBody: View {
             Text("Buckets use actual elapsed time. For precise event order and durations, export events.csv; for longer sessions, use 15-second intervals. Individual buckets may have too few timings for useful P95.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .card()
+        .infoCard()
     }
 
     // MARK: Timeline
@@ -2778,7 +2777,7 @@ private struct DiagnosticsBody: View {
                 }
             }
         }
-        .card()
+        .infoCard()
     }
 
     private var perMinuteCard: some View {
@@ -2800,7 +2799,7 @@ private struct DiagnosticsBody: View {
                 .frame(height: 120)
             }
         }
-        .card()
+        .infoCard()
     }
 
     private var timelinePage: some View {
@@ -2815,13 +2814,13 @@ private struct DiagnosticsBody: View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(e.time, format: .dateTime.hour().minute().second())
-                    .font(.system(size: 10).monospacedDigit()).foregroundStyle(.secondary)
+                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                 Text(elapsed(e.time))
-                    .font(.system(size: 9).monospacedDigit()).foregroundStyle(.tertiary)
+                    .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
             }
             .frame(width: 58, alignment: .leading)
             Image(systemName: e.kind.icon)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(e.kind.color)
                 .frame(width: 24, height: 24)
                 .background(e.kind.color.opacity(0.16), in: Circle())
@@ -2841,7 +2840,7 @@ private struct DiagnosticsBody: View {
                 .font(.caption2.weight(.semibold))
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .foregroundStyle(on ? Color.white : Color.secondary)
-                .background(on ? color.opacity(0.7) : Theme.card, in: Capsule())
+                .background(on ? color.opacity(0.7) : Palette.surface, in: Capsule())
         }
     }
 
@@ -2877,7 +2876,7 @@ private struct DiagnosticsBody: View {
             }
             ForEach(Array(shown.prefix(limit))) { e in eventRow(e) }
         }
-        .card()
+        .infoCard()
     }
 
     // MARK: Pipeline
@@ -2892,7 +2891,7 @@ private struct DiagnosticsBody: View {
                 }
             }
             Text("Times measure app processing and frame enqueue, not physical screen presentation. Full bounded timeline is in CSV.").font(.caption).foregroundStyle(.secondary)
-        }.card()
+        }.infoCard()
     }
 
     private var adaptivePipelineCard: some View {
@@ -2917,7 +2916,7 @@ private struct DiagnosticsBody: View {
             Text("Capture packets over 8 KB: \(s.largePackets) · failed sends: \(s.packetSendErrors)").font(.caption).foregroundStyle(.secondary)
             Text("Pixel-verified confirmations: \(s.pixelConfirmations) · fell back to OCR: \(s.pixelRejections) · OCR skipped while caption unchanged: \(s.watchSkippedOCR) · OCR started on caption change: \(s.watchTriggeredOCR)").font(.caption).foregroundStyle(.secondary)
             Text("Recorder self-time · simple \(String(format: "%.1f", diag.recorderCosts.simpleMs)) ms · detailed \(String(format: "%.1f", diag.recorderCosts.detailedMs)) ms. Excludes chart drawing and model work; these are different workloads.").font(.caption).foregroundStyle(.secondary)
-        }.card()
+        }.infoCard()
     }
 
     private var pipelinePage: some View {
@@ -2961,7 +2960,7 @@ private struct DiagnosticsBody: View {
                 LabeledContent("Unchanged frames skipped", value: "\(s.skippedFrames)")
             }
             .font(.footnote)
-            .card()
+            .infoCard()
             if diag.detailedCollection {
                 candidateTraceCard
             }
@@ -3005,7 +3004,7 @@ private struct DiagnosticsBody: View {
                 }
             }
         }
-        .card()
+        .infoCard()
     }
 
     // MARK: Language
@@ -3034,7 +3033,7 @@ private struct DiagnosticsBody: View {
                     .font(.subheadline.weight(.semibold))
                 Text(engine.sourceCode == "auto" ? "With language lock enabled, four confident matching detections within six qualifying readings lock the source. Clear language changes translate immediately; three mismatches release the lock. The target language is never locked." : "Automatic detection is off. Selected-language inputs still count in the graph.")
                     .font(.caption).foregroundStyle(.secondary)
-            }.card()
+            }.infoCard()
             BarListCard(title: "Source languages used · session", rows: Array(counts), color: Color.purple)
             BarListCard(title: "How the source was chosen", rows: SourceLanguageOrigin.allCases.map {
                 BarRow(name: $0.title, value: diag.sourceUsage.origins[$0, default: 0])
@@ -3052,12 +3051,12 @@ private struct DiagnosticsBody: View {
                         ForEach(diag.names, id: \.self) { n in
                             Text(n).font(.caption.weight(.semibold))
                                 .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(Theme.accent.start.opacity(0.25), in: Capsule())
+                                .background(Color.accentColor.opacity(0.25), in: Capsule())
                         }
                     }
                 }
             }
-            .card()
+            .infoCard()
         }
     }
 
@@ -3116,7 +3115,7 @@ private struct DiagnosticsBody: View {
                         AxisValueLabel {
                             if let d = v.as(Double.self) {
                                 Text(["Normal", "Warm", "Hot", "Critical"][Swift.min(3, Swift.max(0, Int(d)))])
-                                    .font(.system(size: 9))
+                                    .font(.caption2)
                             }
                         }
                     }
@@ -3124,7 +3123,7 @@ private struct DiagnosticsBody: View {
                 .frame(height: 110)
             }
         }
-        .card()
+        .infoCard()
     }
 
     private var devicePage: some View {
@@ -3147,7 +3146,7 @@ private struct DiagnosticsBody: View {
                 LabeledContent("Battery now", value: b < 0 ? "–" : "\(Int(b * 100))%")
             }
             .font(.footnote)
-            .card()
+            .infoCard()
         }
     }
 
@@ -3164,7 +3163,7 @@ private struct DiagnosticsBody: View {
                 }
             }
             .padding(12)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             eventListCard(limit: 400)
         }
     }
