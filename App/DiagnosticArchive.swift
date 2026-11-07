@@ -194,7 +194,7 @@ struct TranslationModeReport: Codable {
     let pending: String
     let referenceSHA: String
     let migration: String
-    let events: [TranslationModeTrace]
+    var events: [TranslationModeTrace]
     let distributions: [String: DiagnosticDistribution]
     let counters: [String: Int]
 
@@ -361,7 +361,7 @@ struct DiagnosticSessionExport: Codable, Identifiable {
     let health: MemoryDiagnosticHealth
     let counters: [String: Int]
     let distributions: [String: DiagnosticDistribution]
-    let events: [StructuredDiagnosticEvent]
+    var events: [StructuredDiagnosticEvent]
     /// Optional for backwards-compatible import of 1.4.0/early 1.4.1 bundles.
     var intervals: [DiagnosticIntervalBucket]? = nil
     /// Recent high-resolution data. Optional so pre-v1.5 archives still decode.
@@ -521,6 +521,19 @@ actor DiagnosticExportWriter {
             measurementBoundary: safeBoundary, textCapture: false)
     }
 
+    /// Redacted copy for on-device storage (same allowlists as every export).
+    func redactedForStorage(_ snapshot: DiagnosticSessionExport) -> DiagnosticSessionExport { redact(snapshot) }
+    /// Compact (not pretty-printed) JSON of an already redacted snapshot, for Test Run files.
+    nonisolated func encodeCompact(_ snapshot: DiagnosticSessionExport) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        return try encoder.encode(snapshot)
+    }
+    nonisolated func decodeCompact(_ data: Data) throws -> DiagnosticSessionExport {
+        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(DiagnosticSessionExport.self, from: data)
+    }
     func encode(_ snapshot: DiagnosticSessionExport) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
