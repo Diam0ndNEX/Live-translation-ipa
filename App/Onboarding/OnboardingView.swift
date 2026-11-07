@@ -1,4 +1,4 @@
-// ScreenLingo – App – Guided setup (2.0.0 build 86)
+// ScreenLingo – App – Guided setup (2.0.0 build 87)
 import SwiftUI
 import Translation
 
@@ -23,10 +23,19 @@ struct OnboardingView: View {
 
     var body: some View {
         VStack(spacing: Space.l) {
-            HStack {
-                Text("Step \(step + 1) of 3").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
-                Spacer()
-                Button("Skip for now") { setupState = "skipped"; done = true }.foregroundStyle(.secondary).frame(minHeight: 44)
+            VStack(spacing: Space.s) {
+                HStack(spacing: Space.xs) {
+                    ForEach(0..<3, id: \.self) { i in
+                        Capsule().fill(i <= step ? Color.accentColor : Palette.surfaceRaised).frame(height: 6)
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Step \(step + 1) of 3")
+                HStack {
+                    Text("Step \(step + 1) of 3").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
+                    Spacer()
+                    Button("Skip for now") { setupState = "skipped"; done = true }.foregroundStyle(.secondary).frame(minHeight: 44)
+                }
             }
             ScrollView {
                 VStack(spacing: Space.xl) {
@@ -50,7 +59,10 @@ struct OnboardingView: View {
 
     private func header(_ symbol: String, _ title: String, _ text: String) -> some View {
         VStack(spacing: Space.m) {
-            Image(systemName: symbol).font(.largeTitle).foregroundStyle(Color.accentColor).accessibilityHidden(true)
+            Image(systemName: symbol).font(.system(.largeTitle, design: .rounded).weight(.semibold)).foregroundStyle(Color.accentColor)
+                .frame(width: 88, height: 88)
+                .background(Color.accentColor.opacity(0.12), in: Circle())
+                .accessibilityHidden(true)
             Text(title).font(.title2.bold()).multilineTextAlignment(.center)
             Text(text).font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }

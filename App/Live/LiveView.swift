@@ -1,4 +1,4 @@
-// ScreenLingo – App – Live tab (2.0.0 build 86)
+// ScreenLingo – App – Live tab (2.0.0 build 87)
 import SwiftUI
 
 /// Capture, language pair and the three controls that matter. Everything else is in More and Status.
@@ -28,25 +28,23 @@ struct LiveView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: Space.m) {
+                VStack(spacing: Space.l) {
                     if setupState == "skipped" {
                         Banner(text: "Setup isn't finished. A short check makes sure translation works.", severity: .info,
                                actionTitle: "Finish setup") { onboarded = false }
                     }
-                    LiveHero(engine: engine, capture: capture.value, openStatus: { router.present(.status) })
+                    LiveStage(engine: engine, capture: capture.value, openStatus: { router.present(.status) })
                     PairSection(engine: engine, pair: pair.value)
                     controls
                     testRow
                 }
-                .padding(.horizontal, Space.l).padding(.vertical, Space.s)
+                .padding(.horizontal, Space.l).padding(.vertical, Space.m)
             }
             .scrollBounceBehavior(.basedOnSize)
             .background(Palette.background.ignoresSafeArea())
-            .navigationTitle("ScreenLingo").navigationBarTitleDisplayMode(.inline)
+            .navigationTitle("Live").navigationBarTitleDisplayMode(.large)
             .toolbar {
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { router.present(.status) } label: { Image(systemName: "waveform.path.ecg") }
-                        .accessibilityLabel("Status and session")
+                ToolbarItem(placement: .topBarTrailing) {
                     Button { router.present(.more) } label: { Image(systemName: "ellipsis.circle") }
                         .accessibilityLabel("More options")
                 }
@@ -57,19 +55,28 @@ struct LiveView: View {
         }
     }
 
+    private func modeNote(_ s: TranslationSystem) -> String {
+        if s == .legacy { return "The proven original pipeline." }
+        if s == .hybridRecovery { return "Apple Default translates early; Low Latency steps in when that guess is wrong or missing." }
+        return "Low Latency translates both the early guess and the confirmed text."
+    }
+
     private var controls: some View {
-        VStack(alignment: .leading, spacing: Space.s) {
+        VStack(alignment: .leading, spacing: Space.m) {
+            SectionHeader(title: "Translation mode")
             Picker("Translation system", selection: $translationSystem) {
                 Text("Legacy").tag(TranslationSystem.legacy.rawValue)
                 Text("Hybrid").tag(TranslationSystem.hybridRecovery.rawValue)
                 Text("Low Latency").tag(TranslationSystem.lowLatency.rawValue)
             }
             .pickerStyle(.segmented)
-            Text(system.value.changePending
-                 ? "Running: \(system.value.active.title). \(system.value.pending.title) starts when the broadcast stops."
-                 : "Running: \(system.value.active.title)")
-                .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
-            HStack(spacing: Space.s) {
+            Text(modeNote(TranslationSystem(rawValue: translationSystem) ?? .legacy))
+                .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if system.value.changePending {
+                Banner(text: "Running \(system.value.active.title). \(system.value.pending.title) starts when the broadcast stops.", severity: .info)
+            }
+            Divider()
+            HStack(spacing: Space.m) {
                 menuPicker("Content", selection: $mode) { ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) } }
                 menuPicker("Reading speed", selection: $speed) { ForEach(SpeedPreset.allCases) { Text($0.title).tag($0.rawValue) } }
             }
@@ -87,7 +94,7 @@ struct LiveView: View {
     private var testRow: some View {
         Button { router.present(.test) } label: {
             ListRow(title: "\(test.value.name) · \(test.value.savedModes) of 3 modes saved",
-                    subtitle: test.value.recording ? "Recording this run" : "Compare the three systems on the same content",
+                    subtitle: test.value.recording ? "Recording this run" : "Run the same content through all three modes",
                     symbol: "checklist") {
                 Image(systemName: "chevron.right").foregroundStyle(.tertiary)
             }
@@ -96,8 +103,9 @@ struct LiveView: View {
     }
 }
 
-// MARK: - Hero
-private struct LiveHero: View {
+// MARK: - Stage
+/// The preview, one big start button, and the three things you do next.
+private struct LiveStage: View {
     let engine: TranslatorEngine
     let capture: CaptureSnapshot
     let openStatus: () -> Void
@@ -109,46 +117,59 @@ private struct LiveHero: View {
     }
 
     var body: some View {
-        VStack(spacing: Space.m) {
-            HStack {
+        VStack(spacing: Space.l) {
+            ZStack(alignment: .topLeading) {
+                PiPPreview(layer: engine.pip.displayLayer)
+                    .aspectRatio(previewRatio, contentMode: .fit)
+                    .frame(maxHeight: 190)
+                    .frame(maxWidth: .infinity)
+                    .background(Palette.surfaceRaised)
+                    .clipShape(RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
+                    .overlay {
+                        if !capture.hasOutput && !capture.alive {
+                            Text("Your live translation appears here.")
+                                .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                                .padding(Space.l).frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
+                    .accessibilityLabel("Floating window preview")
                 Button(action: openStatus) {
                     StatusPill(text: capture.status.title, symbol: capture.status.symbol, severity: capture.severity)
-                }.buttonStyle(.plain).accessibilityHint("Opens status and session")
-                Spacer()
-            }
-            PiPPreview(layer: engine.pip.displayLayer)
-                .aspectRatio(previewRatio, contentMode: .fit)
-                .frame(maxHeight: 170)
-                .clipShape(RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
-                .overlay {
-                    if !capture.hasOutput && !capture.alive {
-                        Text("Your live translation appears here.")
-                            .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                            .padding(Space.l).frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
-                    }
                 }
-                .accessibilityLabel("Floating window preview")
-            HStack(spacing: Space.l) {
+                .buttonStyle(.plain).padding(Space.s).accessibilityHint("Opens status and session")
+            }
+            VStack(spacing: Space.s) {
                 BroadcastPicker(onTap: { engine.captureRequested(); if !engine.pipActive { engine.startPiP() } })
-                    .frame(width: 56, height: 56)
+                    .frame(width: 76, height: 76)
                     .background(Color.accentColor, in: Circle())
                     .accessibilityLabel(capture.alive ? "Open screen broadcast controls" : "Start screen capture")
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(capture.alive ? capture.headline : "Start live translation").font(.headline)
-                    Text(capture.alive ? Strings.switchApps : Strings.startHelp)
-                        .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                Text(capture.alive ? capture.headline : "Start live translation").font(.title3.weight(.semibold))
+                Text(capture.alive ? Strings.switchApps : Strings.startHelp)
+                    .font(.subheadline).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center).fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: Space.s) {
+                action(capture.paused ? "play.fill" : "pause.fill", capture.paused ? "Resume" : "Pause", enabled: capture.alive) {
+                    engine.paused.toggle()
                 }
-                Spacer(minLength: 0)
-                IconButton(symbol: capture.alive ? (capture.paused ? "play.fill" : "pause.fill") : "pip.enter",
-                           label: capture.alive ? (capture.paused ? "Resume translation" : "Pause translation") : "Open or close floating window") {
-                    if capture.alive { engine.paused.toggle() }
-                    else if capture.pipActive { engine.pip.stop() }
-                    else { engine.startPiP() }
-                    Feedback.tap()
+                action(capture.pipActive ? "pip.exit" : "pip.enter", capture.pipActive ? "Close window" : "Floating window") {
+                    if capture.pipActive { engine.pip.stop() } else { engine.startPiP() }
                 }
+                action("list.bullet.rectangle", "Status", run: openStatus)
             }
         }.infoCard()
+    }
+
+    private func action(_ symbol: String, _ title: String, enabled: Bool = true, run: @escaping () -> Void) -> some View {
+        Button { Feedback.tap(); run() } label: {
+            VStack(spacing: Space.xs) {
+                Image(systemName: symbol).font(.title3.weight(.semibold))
+                Text(title).font(.caption.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity, minHeight: 64)
+            .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
+        }
+        .buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.4)
     }
 }
 

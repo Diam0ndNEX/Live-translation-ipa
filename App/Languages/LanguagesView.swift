@@ -1,4 +1,4 @@
-// ScreenLingo – App – Languages tab (2.0.0 build 86)
+// ScreenLingo – App – Languages tab (2.0.0 build 87)
 import SwiftUI
 import Translation
 
@@ -29,16 +29,22 @@ struct LanguagesView: View {
             List {
                 Section {
                     VStack(alignment: .leading, spacing: Space.m) {
-                        HStack(spacing: Space.s) {
-                            Text(name(pair.value.source)).font(.headline).frame(maxWidth: .infinity)
+                        HStack(alignment: .top, spacing: Space.s) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("FROM").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                Text(name(pair.value.source)).font(.title3.weight(.semibold)).lineLimit(2).minimumScaleFactor(0.8)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
                             IconButton(symbol: "arrow.left.arrow.right", label: "Swap source and target languages", enabled: pair.value.source != "auto") {
                                 engine.swapLanguages(); Feedback.tap()
                             }
-                            Text(name(pair.value.target)).font(.headline).frame(maxWidth: .infinity)
+                            VStack(alignment: .trailing, spacing: 2) {
+                                Text("INTO").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                                Text(name(pair.value.target)).font(.title3.weight(.semibold)).lineLimit(2).minimumScaleFactor(0.8)
+                            }.frame(maxWidth: .infinity, alignment: .trailing)
                         }
                         StatusPill(text: pair.value.packState.title, symbol: pair.value.packState.symbol, severity: pair.value.packState.severity)
                     }.padding(.vertical, Space.xs)
-                } header: { Text("Current pair") } footer: { Text("Tap a language to choose what to do with it.") }
+                } header: { Text("Current pair") } footer: { Text("Tap a language to use it as the source or target. Tap Download to get a pack.") }
 
                 if !pair.value.downloadMessage.isEmpty {
                     Section { Banner(text: pair.value.downloadMessage, severity: .info) }.listRowBackground(Color.clear)
@@ -89,18 +95,36 @@ struct LanguagesView: View {
     }
 
     private func row(_ l: LangItem) -> some View {
-        Button { chosen = l; Feedback.tap() } label: {
-            ListRow(title: l.name, subtitle: tags(l)) {
-                switch state(l) {
-                case .installed: Image(systemName: "checkmark.circle.fill").foregroundStyle(Palette.success).accessibilityLabel("Ready")
-                case .supported:
-                    if downloading[l.code] != nil { ProgressView().accessibilityLabel("Downloading") }
-                    else { Image(systemName: "arrow.down.circle").accessibilityLabel("Needs download") }
-                case .unsupported: Image(systemName: "nosign").foregroundStyle(.secondary).accessibilityLabel("Not supported")
-                default: ProgressView().accessibilityLabel("Checking")
+        HStack(spacing: Space.m) {
+            Button { chosen = l; Feedback.tap() } label: {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(l.name).font(.body)
+                    if let t = tags(l) { Text(t).font(.footnote.weight(.medium)).foregroundStyle(Color.accentColor) }
                 }
+                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                .contentShape(Rectangle())
             }
-        }.buttonStyle(.plain)
+            .buttonStyle(.plain)
+            trailing(l)
+        }
+    }
+
+    @ViewBuilder private func trailing(_ l: LangItem) -> some View {
+        switch state(l) {
+        case .installed:
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(Palette.success).accessibilityLabel("Ready")
+        case .supported:
+            if downloading[l.code] != nil {
+                ProgressView().accessibilityLabel("Downloading")
+            } else {
+                Button("Download") { startDownload(l) }
+                    .buttonStyle(.bordered).controlSize(.small)
+            }
+        case .unsupported:
+            Image(systemName: "nosign").foregroundStyle(.secondary).accessibilityLabel("Not supported")
+        default:
+            ProgressView().accessibilityLabel("Checking")
+        }
     }
 
     private func tags(_ l: LangItem) -> String? {
