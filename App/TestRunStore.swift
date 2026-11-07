@@ -11,6 +11,20 @@ enum TestRunSkipReason: String, Codable, Equatable {
 enum TestRunFailReason: String, Codable, Equatable {
     case diskFull, encodeFailed, writeFailed
 }
+/// Pure save policy (spec §11.3) so it can be tested without the UI layer.
+enum TestRunPolicy {
+    static func skipReason(meta: TestRunMeta, privateSession: Bool, savingMode: String,
+                           diagnosticsEnabled: Bool) -> (TestRunSkipReason, String)? {
+        if privateSession { return (.privateSession, "Private session – runs are not saved") }
+        if savingMode == "off" { return (.savingOff, "Saving test runs is off") }
+        if !diagnosticsEnabled { return (.noData, "Diagnostics collection is off") }
+        if meta.durationSeconds < TestRunMeta.minimumSeconds {
+            return (.tooShort, "Run too short to save – \(Int(meta.durationSeconds)) s")
+        }
+        if meta.captions == 0 { return (.noData, "Run has no captions to save") }
+        return nil
+    }
+}
 enum TestRunSaveResult: Equatable {
     case saved(TestRunMeta)
     case skipped(TestRunSkipReason, detail: String)
@@ -91,18 +105,23 @@ private struct StoredTestRun: Codable {
 }
 
 actor TestRunStore {
-    static let maximumRunBytes = 8 * 1024 * 1024
     static let keepUnpinned = 40
-    static let maximumTotalBytes = 100 * 1024 * 1024
     static let importedMarker = "migrated-diagnostic-sessions-v1"
 
     private let directory: URL
+    private let maximumRunBytes: Int
+    private let maximumTotalBytes: Int
     private let writer = DiagnosticExportWriter()
     private var cache: TestRunIndex?
     /// Test hook: pretend the volume is full.
     private var simulateDiskFull = false
 
-    init(directory: URL) { self.directory = directory }
+    /// The limits are parameters only so tests can exercise trimming and size pruning with small data.
+    init(directory: URL, maximumRunBytes: Int = 8 * 1024 * 1024, maximumTotalBytes: Int = 100 * 1024 * 1024) {
+        self.directory = directory
+        self.maximumRunBytes = maximumRunBytes
+        self.maximumTotalBytes = maximumTotalBytes
+    }
 
     static func defaultDirectory() -> URL {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
@@ -110,6 +129,7 @@ actor TestRunStore {
         return base.appendingPathComponent("TestRuns", isDirectory: true)
     }
 
+    func directoryPath() -> String { directory.path }
     func setSimulatedDiskFull(_ value: Bool) { simulateDiskFull = value }
 
     // MARK: files
@@ -209,7 +229,7 @@ actor TestRunStore {
             packed = try pack(StoredTestRun(meta: meta, snapshot: snapshot))
             var step = 0
             var attempts = 0
-            while packed.count > Self.maximumRunBytes && attempts < 40 {
+            while packed.count > maximumRunBytes && attempts < 40 {
                 attempts += 1
                 if let (smaller, what) = Self.trim(snapshot, step: step) {
                     snapshot = smaller
@@ -245,7 +265,7 @@ actor TestRunStore {
         do {
             var small = meta; small.completeness = "recovered"; small.endReason = "recovered"
             let packed = try pack(StoredTestRun(meta: small, snapshot: snapshot))
-            guard packed.count <= Self.maximumRunBytes else { return false }
+            guard packed.count <= maximumRunBytes else { return false }
             try write(packed, to: partialURL(meta.id))
             return true
         } catch { return false }
@@ -338,7 +358,7 @@ actor TestRunStore {
         var kept = unpinned
         while kept.count > Self.keepUnpinned { removed.append(kept.removeLast()) }
         func total() -> Int { value.runs.reduce(0) { $0 + $1.bytes } - removed.reduce(0) { $0 + $1.bytes } }
-        while total() > Self.maximumTotalBytes, let oldest = kept.popLast() { removed.append(oldest) }
+        while total() > maximumTotalBytes, let oldest = kept.popLast() { removed.append(oldest) }
         guard !removed.isEmpty else { return value }
         for run in removed { try? FileManager.default.removeItem(at: runURL(run.id)) }
         let ids = Set(removed.map(\.id))

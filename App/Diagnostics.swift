@@ -999,14 +999,8 @@ final class Diagnostics: ObservableObject {
 
     /// Why a run would not be saved right now, or nil. Fixed reason codes plus a human detail.
     private func skipReason(for meta: TestRunMeta) -> (TestRunSkipReason, String)? {
-        if privateSessionOn { return (.privateSession, "Private session – runs are not saved") }
-        if runSavingMode == "off" { return (.savingOff, "Saving test runs is off") }
-        if !enabled { return (.noData, "Diagnostics collection is off") }
-        if meta.durationSeconds < TestRunMeta.minimumSeconds {
-            return (.tooShort, "Run too short to save – \(Int(meta.durationSeconds)) s")
-        }
-        if meta.captions == 0 { return (.noData, "Run has no captions to save") }
-        return nil
+        TestRunPolicy.skipReason(meta: meta, privateSession: privateSessionOn, savingMode: runSavingMode,
+                                 diagnosticsEnabled: enabled)
     }
 
     /// The run is over (stop packet, heartbeat timeout, new session, mode change, reset, new run).
