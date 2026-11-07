@@ -808,7 +808,7 @@ final class Diagnostics: ObservableObject {
             pending: modePendingSystem, referenceSHA: TranslationSystem.referenceSHA,
             migration: modeMigration, events: exportModeEventWindow(),
             distributions: modeTimingSamples.mapValues(DiagnosticDistribution.init),
-            counters: modeEventCounts).sanitized(), id: diagnosticSessionID, startedAt: started, endedAt: Date(),
+            counters: modeEventCounts), id: diagnosticSessionID, startedAt: started, endedAt: Date(),
             appVersion: AppVersion.full, systemVersion: UIDevice.current.systemVersion,
             hardwareModel: Self.hardwareModelCode, settings: settings, health: currentHealth, counters: counters,
             distributions: ["memoryLookupMs": DiagnosticDistribution(lookupSamples), "memoryWriteMs": DiagnosticDistribution(writeSamples),

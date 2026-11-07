@@ -494,7 +494,9 @@ actor DiagnosticExportWriter {
             "modePlanBuiltMs", "modePlanReusedMs", "modeCommitToPiPMs",
             "modeConfirmationToPiPMs", "modeReadyToPiPMs", "hybridMatchingWaitMs",
             "speculativeStopReleaseMs", "queueBehindSpeculationMs", "queueBehindConfirmedMs", "queueSchedulingMs",
-            "legacyConfirmedAfterSessionSwitchMs", "legacyConfirmedNoSwitchMs"
+            "legacyConfirmedAfterSessionSwitchMs", "legacyConfirmedNoSwitchMs",
+            "hybridUnsubmittedHedgeMs", "hybridPreviousDefaultExitGapMs", "hybridPostDefaultRecoveryServiceMs",
+            "hybridNoOverlapRecoveryServiceMs", "hybridUnexplainedSlowRecoveryMs"
         ]
         let safeMetrics = snapshot.distributions.filter { key, value in
             allowedMetrics.contains(key) && value.count >= 0 &&
