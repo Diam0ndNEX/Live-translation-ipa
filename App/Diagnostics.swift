@@ -1105,6 +1105,19 @@ final class Diagnostics: ObservableObject {
         }
     }
 
+    /// Build 84, once: rows of the old diagnostic_sessions table become runs marked
+    /// "Imported (mode may be mixed)". The table and its rows are left in place and never written again.
+    func migrateOldSessions() async {
+        guard let store = memoryStore else { return }
+        if await runStore.migrationDone { return }
+        do {
+            let payloads = try await store.loadDiagnosticSessions()
+            let imported = await runStore.migrate(payloads: payloads)
+            if imported > 0 { archiveStatus = "Imported \(imported) earlier diagnostic session(s) as test runs" }
+            await refreshRuns()
+        } catch { /* marker stays unset; retried at the next launch */ }
+    }
+
     func deleteRuns(_ ids: [UUID]) async { await runStore.delete(ids: ids); await refreshRuns() }
     func deleteAllUnpinnedRuns() async { _ = await runStore.deleteAllUnpinned(); await refreshRuns() }
     func setRunPinned(_ id: UUID, _ pinned: Bool) async { await runStore.setPinned(id: id, pinned); await refreshRuns() }

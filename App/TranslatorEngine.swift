@@ -3408,6 +3408,7 @@ final class TranslatorEngine: ObservableObject {
                 self.memoryReady = true
                 self.applyMemoryHealth(health)
                 self.saveMemory(force: true)
+                await self.diag.migrateOldSessions()
             } catch {
                 self.memoryFailure = "Memory unavailable; fresh translation remains available"
                 self.diag.log("Memory initialization failed; preserved data requires recovery")
