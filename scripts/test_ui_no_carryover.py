@@ -130,6 +130,23 @@ for p, t in files.items():
     if "toastText" in t and p.name not in ("ScreenTranslatorApp.swift", "TranslatorEngine.swift"):
         fail("U23", f"{rel(p)} reads engine.toastText instead of the feedback queue")
 
+# U3: Settings pages that only call engine methods must not subscribe to the whole engine
+for name, structs in {"SettingsViews.swift": ["ReadingSettings", "IntelligenceSettings", "WindowSettings", "InterfaceSettings",
+                                              "PerformanceSettings", "BackupSettings", "AboutSettings", "PrivacySettings"],
+                      "CustomizationViews.swift": ["CaptionAppearanceSettings", "ReaderWorkspaceSettings", "FeedbackStorageSettings"],
+                      "ExperimentalFeaturesView.swift": ["ExperimentalFeaturesView"]}.items():
+    text = (app / name).read_text()
+    for st in structs:
+        i = text.index(f"struct {st}")
+        j = text.find("\nstruct ", i + 1)
+        body = text[i:j if j > 0 else len(text)]
+        if re.search(r"@EnvironmentObject[^\n]*TranslatorEngine", body):
+            fail("U3", f"{st} still observes the whole engine")
+
+# U2: deep links
+if "screenlingo" not in (root / "project.yml").read_text() or "onOpenURL" not in root_src:
+    fail("U2", "deep links are not wired")
+
 # Tests are wired into CI
 ci = (root / ".github/workflows/build.yml").read_text()
 if "test_ui_no_carryover.py" not in ci or "Tests/Navigation/main.swift" not in ci:

@@ -48,5 +48,20 @@ final class AppRouter: ObservableObject {
         }
     }
 
+    /// screenlingo://live | library | languages | settings | more | status | test | reader | capture-area | text-photos | diagnostics | test-runs
+    @discardableResult
+    func open(_ url: URL) -> Bool {
+        guard url.scheme == "screenlingo" else { return false }
+        let target = (url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))).lowercased()
+        if let tab = AppTab(rawValue: target) { go(tab); return true }
+        let sheets: [String: AppSheet] = ["more": .more, "status": .status, "test": .test, "reader": .reader,
+                                          "capture-area": .captureArea, "text-photos": .workspace,
+                                          "diagnostics": .diagnostics, "test-runs": .testRuns]
+        guard let sheet = sheets[target] else { return false }
+        if sheet == .more || sheet == .status || sheet == .test { tab = .live }
+        present(sheet)
+        return true
+    }
+
     func dismissSheet() { pendingSheet?.cancel(); sheet = nil }
 }

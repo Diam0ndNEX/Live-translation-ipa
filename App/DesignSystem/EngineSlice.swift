@@ -83,3 +83,47 @@ struct TestSnapshot: Equatable {
         return TestSnapshot(name: d.currentTestName, savedModes: modes.count, recording: d.activeRun != nil)
     }
 }
+
+/// Typed language-pack state with its message and next action (replaces ad-hoc strings in three screens).
+enum PackState: Equatable {
+    case checking, autoDetect, ready, needsDownload, unsupported
+    var title: String {
+        switch self {
+        case .checking: Strings.packChecking
+        case .autoDetect: Strings.packAuto
+        case .ready: Strings.packReady
+        case .needsDownload: Strings.packNeeds
+        case .unsupported: Strings.packUnsupported
+        }
+    }
+    var symbol: String {
+        switch self {
+        case .checking: "arrow.triangle.2.circlepath"
+        case .autoDetect: "sparkle.magnifyingglass"
+        case .ready: "checkmark.shield.fill"
+        case .needsDownload: "arrow.down.circle.fill"
+        case .unsupported: "xmark.octagon.fill"
+        }
+    }
+    var severity: Severity {
+        switch self {
+        case .checking, .autoDetect: .info
+        case .ready: .success
+        case .needsDownload: .warning
+        case .unsupported: .error
+        }
+    }
+}
+
+extension PairSnapshot {
+    var packState: PackState {
+        if checking || statuses.isEmpty { return .checking }
+        if source == "auto", detected == "–" { return .autoDetect }
+        switch statuses[sourcePackCode] {
+        case .installed: return .ready
+        case .supported: return .needsDownload
+        case .unsupported: return .unsupported
+        default: return .checking
+        }
+    }
+}

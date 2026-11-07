@@ -19,15 +19,6 @@ struct OnboardingView: View {
         _capture = StateObject(wrappedValue: EngineSlice(engine) { CaptureSnapshot.read($0) })
     }
 
-    private var packState: (text: String, symbol: String, severity: Severity) {
-        if pair.value.source == "auto" { return ("Auto-detect needs no download now", "sparkle.magnifyingglass", .info) }
-        switch pair.value.statuses[pair.value.source] {
-        case .installed: return ("Language pack ready", "checkmark.circle.fill", .success)
-        case .supported: return ("Download needed", "arrow.down.circle.fill", .warning)
-        case .unsupported: return ("This language isn't supported", "xmark.octagon.fill", .error)
-        default: return ("Checking…", "arrow.triangle.2.circlepath", .info)
-        }
-    }
     private var windowOpen: Bool { capture.value.alive || capture.value.pipActive }
 
     var body: some View {
@@ -73,7 +64,7 @@ struct OnboardingView: View {
                 target: Binding(get: { pair.value.target }, set: { engine.targetCode = $0 }),
                 items: pair.value.languages, swapDisabled: pair.value.source == "auto"
             ) { engine.swapLanguages() }
-            StatusPill(text: packState.text, symbol: packState.symbol, severity: packState.severity)
+            StatusPill(text: pair.value.packState.title, symbol: pair.value.packState.symbol, severity: pair.value.packState.severity)
             if pair.value.source != "auto", pair.value.statuses[pair.value.source] == .supported {
                 PrimaryButton(title: "Download language pack", symbol: "arrow.down.circle") { engine.download(pair.value.source) }
             }
@@ -83,7 +74,7 @@ struct OnboardingView: View {
 
     private var start: some View {
         VStack(spacing: Space.l) {
-            header("play.rectangle.fill", "Start a test broadcast", "Tap the round button, choose ScreenLingo Capture, then Start Broadcast.")
+            header("play.rectangle.fill", "Start a test broadcast", Strings.startHelp)
             BroadcastPicker(onTap: { engine.captureRequested(); if !engine.pipActive { engine.startPiP() } })
                 .frame(width: 84, height: 84)
                 .background(Color.accentColor, in: Circle())

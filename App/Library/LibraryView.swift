@@ -77,11 +77,11 @@ struct LibraryView: View {
             .background(Palette.background.ignoresSafeArea())
             .overlay {
                 if items.isEmpty {
-                    EmptyState(title: query.isEmpty && filter == .all ? "Your library is empty" : "No matching translations",
+                    EmptyState(title: query.isEmpty && filter == .all ? Strings.emptyLibraryTitle : Strings.noMatches,
                                symbol: "text.book.closed",
                                message: query.isEmpty && filter == .all
-                               ? "Translations you keep appear here. Nothing is saved during a private session."
-                               : "Try a different search or filter.")
+                               ? Strings.emptyLibraryMessage
+                               : Strings.noMatchesMessage)
                 }
             }
             .searchable(text: $query, prompt: "Search original, translation or notes")

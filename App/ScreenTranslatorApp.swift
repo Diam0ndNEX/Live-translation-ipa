@@ -41,11 +41,13 @@ struct RootView: View {
 
     var body: some View {
         RootContent(model: model, onboarded: $onboarded)
+            .environment(\.engineRef, model.engine)
             .environmentObject(model.engine)
             .environmentObject(model.router)
             .environmentObject(model.feedback)
             .environmentObject(model.theme)
             .environmentObject(model.advanced)
+            .onOpenURL { model.router.open($0) }
             .task {
                 let engine = model.engine
                 engine.diag.noteExecutionPhase(phase == .active ? "active" : (phase == .background ? "background" : "inactive"), pipActive: engine.pipActive)

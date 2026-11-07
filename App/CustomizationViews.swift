@@ -60,7 +60,7 @@ struct ResponsivenessSettings: View {
 }
 
 struct CaptionAppearanceSettings: View {
-    @EnvironmentObject private var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("pipWeight") private var weight = "bold"
     @AppStorage("pipAlignment") private var alignment = "left"
     @AppStorage("pipLineSpacing") private var spacing = 0.0
@@ -103,7 +103,7 @@ struct CaptionAppearanceSettings: View {
 }
 
 struct ReaderWorkspaceSettings: View {
-    @EnvironmentObject private var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("readerFont") private var font = "rounded"
     @AppStorage("readerSpacing") private var spacing = 8.0
     @AppStorage("readerWidth") private var width = "full"
@@ -143,7 +143,7 @@ struct ReaderWorkspaceSettings: View {
 }
 
 struct FeedbackStorageSettings: View {
-    @EnvironmentObject private var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("haptics") private var haptics = false
     @AppStorage("hapticStrength") private var hapticStrength = "light"
     @AppStorage("autoCopy") private var autoCopy = false

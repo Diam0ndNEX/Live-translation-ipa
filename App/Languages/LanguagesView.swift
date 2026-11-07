@@ -24,16 +24,6 @@ struct LanguagesView: View {
     }
     private func state(_ l: LangItem) -> LanguageAvailability.Status? { pair.value.statuses[l.code] }
 
-    private var pairStatus: (text: String, symbol: String, severity: Severity) {
-        if pair.value.source == "auto" { return ("Auto-detect needs the detected language's pack", "sparkle.magnifyingglass", .info) }
-        switch pair.value.statuses[pair.value.source] {
-        case .installed: return ("Ready, works offline", "checkmark.shield.fill", .success)
-        case .supported: return ("Needs a download", "arrow.down.circle.fill", .warning)
-        case .unsupported: return ("This pair isn't supported", "xmark.octagon.fill", .error)
-        default: return ("Checking…", "arrow.triangle.2.circlepath", .info)
-        }
-    }
-
     var body: some View {
         NavigationStack {
             List {
@@ -46,7 +36,7 @@ struct LanguagesView: View {
                             }
                             Text(name(pair.value.target)).font(.headline).frame(maxWidth: .infinity)
                         }
-                        StatusPill(text: pairStatus.text, symbol: pairStatus.symbol, severity: pairStatus.severity)
+                        StatusPill(text: pair.value.packState.title, symbol: pair.value.packState.symbol, severity: pair.value.packState.severity)
                     }.padding(.vertical, Space.xs)
                 } header: { Text("Current pair") } footer: { Text("Tap a language to choose what to do with it.") }
 

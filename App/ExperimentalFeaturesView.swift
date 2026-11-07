@@ -10,17 +10,15 @@ private struct ExperimentalOption: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
-            Toggle(title, isOn: $enabled).disabled(!available)
-            Text(explanation)
-                .font(.footnote).foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            Toggle(title, isOn: $enabled).disabled(!available).frame(minHeight: 44)
+            Hint(explanation)
         }
         .padding(.vertical, 3)
     }
 }
 
 struct ExperimentalFeaturesView: View {
-    @EnvironmentObject private var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("incrementalBatchRecovery") private var incrementalBatchRecovery = false
     @AppStorage("directPiPBuffer") private var directPiPBuffer = false
     @AppStorage("hybridSwitchGuard") private var hybridSwitchGuard = true
@@ -44,97 +42,97 @@ struct ExperimentalFeaturesView: View {
     var body: some View {
         List {
             Section {
-                Text("Try features that still need device testing. New experiments start off and your established settings remain unchanged.")
+                Text("Optional features that are still being tested. New ones start switched off and your normal settings are never changed for you.")
                     .font(.subheadline)
-                Text("Test one switch at a time on the same video. Switch it off if subtitles become slower, less complete or less accurate.")
+                Text("Try one switch at a time on the same video. Switch it off again if captions get slower, less complete or less accurate.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Section {
                 NavigationLink("Translation system") { TranslationSettings() }
-                Text("Choose Legacy, Hybrid Recovery or Low Latency in Translation & memory.")
+                Text("Pick Legacy, Hybrid or Low Latency in Translation & memory, or on the Live tab.")
                     .font(.footnote).foregroundStyle(.secondary)
                 ExperimentalOption(
                     title: "Incremental translation recovery",
-                    explanation: "Retains completed speculative sentence results for exact temporary reuse, even when their batch is interrupted. Never displays incomplete captions.",
+                    explanation: "Keeps sentences that were already translated ahead of time, even if the rest of the batch was interrupted, so they can be reused. Never shows an unfinished caption.",
                     enabled: $incrementalBatchRecovery)
                 ExperimentalOption(
                     title: "Hybrid model switch guard",
-                    explanation: "On (default): Hybrid Recovery recovers with Apple Default while an Apple Default call is running or ended less than 1.5 s ago, and waits for a matching prediction instead of starting a second model beside it. Turn off to compare with the 1.9.9 behavior on the same video. Applies from the next subtitle.",
+                    explanation: "On (default): Hybrid avoids starting a second translation model while the first is busy or just finished. Turn off to compare with the older 1.9.9 behavior on the same video. Applies from the next subtitle.",
                     enabled: $hybridSwitchGuard)
                 ExperimentalOption(
                     title: "Legacy shared session",
-                    explanation: "On (default): Legacy confirmed translations reuse the warm prediction session when it is idle, so consecutive model calls stay on one session. Off: separate sessions as in 1.9.9.",
+                    explanation: "On (default): Legacy reuses its already warmed-up translation session when it is free. Off: uses separate sessions like 1.9.9.",
                     enabled: $legacySharedSession)
             } header: { Text("Translation experiments") }
 
             Section {
                 ExperimentalOption(
                     title: "Pixel-verified confirmation",
-                    explanation: "On (default): after the first read, a subtitle is confirmed when its text pixels stay unchanged for the normal confirmation time, instead of waiting for a second full OCR read. Any pixel change falls back to OCR. Off: two OCR reads as in 1.9.9.",
+                    explanation: "On (default): a subtitle counts as confirmed when its pixels stay the same for the normal waiting time, instead of reading it a second time. Any change falls back to reading again. Off: two reads, like 1.9.9.",
                     enabled: $pixelConfirmation)
                 ExperimentalOption(
                     title: "Event-driven OCR",
-                    explanation: "On (default): while a shown subtitle's text pixels are unchanged, OCR pauses (rechecking at least every 0.55 s); when they change, OCR runs at once. Fewer reads, less heat. Off: fixed cadence.",
+                    explanation: "On (default): while the shown subtitle does not change, reading pauses (it still checks at least every 0.55 s) and restarts the moment it changes. Fewer reads and less heat. Off: reads at a fixed rhythm.",
                     enabled: $eventDrivenOCR)
                 ExperimentalOption(
                     title: "Fast OCR",
-                    explanation: "Uses Vision's fast recognizer without language correction. Much faster per read, but may miss accents or non-Latin text. Compare on the same video before keeping it.",
+                    explanation: "Reads text faster but without spelling correction. It may miss accents or non-Latin text. Compare on the same video before keeping it.",
                     enabled: $fastOCR)
-            } header: { Text("OCR (2.0.0)") }
+            } header: { Text("Text reading") }
 
             Section {
                 ExperimentalOption(
                     title: "Subtitle-area change detection",
-                    explanation: "Samples more of the selected subtitle region to catch small changes. Rotated video uses the standard full-frame detector.",
+                    explanation: "Looks at more of the chosen subtitle area to notice small changes. Rotated video uses the normal whole-screen check.",
                     enabled: $subtitleAwareChangeDetection, available: skipUnchanged)
                 if !skipUnchanged {
-                    Text("First enable Skip unchanged frames in Reading & OCR.")
+                    Text("Turn on Skip unchanged frames in Reading & OCR first.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 ExperimentalOption(
                     title: "Multiple nearby text groups",
-                    explanation: "When active-text focus is enabled, keeps additional nearby aligned lyric or dialogue rows in any preset. May sometimes include unrelated text.",
+                    explanation: "Keeps extra nearby lines of lyrics or dialogue together. It may sometimes include text that does not belong.",
                     enabled: $preserveRelatedMovieGroups)
-            } header: { Text("Recognition & lyrics experiments") }
+            } header: { Text("Lyrics and dialogue") }
 
             Section {
                 ExperimentalOption(
                     title: "Direct PiP pixel-buffer rendering",
-                    explanation: "Avoids an intermediate image while drawing floating subtitles. Compare appearance and smoothness before keeping it enabled.",
+                    explanation: "Draws the floating captions directly instead of through an extra image. Check how it looks and moves before keeping it on.",
                     enabled: $directPiPBuffer)
-            } header: { Text("Rendering experiment") }
+            } header: { Text("Floating window") }
 
             Section {
                 ExperimentalOption(
                     title: "Confidence-aware OCR confirmation",
-                    explanation: "Confirms exceptionally clear text sooner, and may spend extra reads on uncertain text. Off preserves the fixed stability setting.",
+                    explanation: "Confirms very clear text sooner and may read unclear text more times. Off keeps the fixed stability setting.",
                     enabled: $adaptiveConfirmation)
                 VStack(alignment: .leading, spacing: 5) {
                     LabeledContent("Confirmation deadline",
                                    value: String(format: "%.2f s", confirmationDeadline))
                     Slider(value: $confirmationDeadline, in: 0.2...1.2, step: 0.05)
                         .disabled(!adaptiveConfirmation)
-                    Text("Caps adaptive confirmation timing; it does not force unreliable words through.")
+                    Text("Sets the longest wait. It never lets unreliable words through.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 ExperimentalOption(
                     title: "Continuous rotation recalibration",
-                    explanation: "Rechecks settled automatic rotation if reading order later appears reversed. May cause additional recalibration.",
+                    explanation: "Checks the detected screen rotation again if the reading order later looks reversed. May cause extra re-checks.",
                     enabled: $continuousRotation)
-            } header: { Text("Existing optional experiments") }
+            } header: { Text("Older optional experiments") }
 
             Section {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Pipeline profiling").font(.subheadline.weight(.medium))
-                    Text("Automatically records numeric OCR, model and PiP timing markers for Instruments. No subtitle text is included.")
+                    Text("Always on: records timing numbers for Xcode Instruments. No caption text is included.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 VStack(alignment: .leading, spacing: 5) {
                     Text("PiP heartbeat backpressure").font(.subheadline.weight(.medium))
-                    Text("Automatically avoids redundant idle frames if the PiP renderer is busy; new subtitles still enqueue immediately.")
+                    Text("Always on: skips needless idle frames when the floating window is busy. New captions still appear at once.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
-            } header: { Text("Automatic optimizations") }
+            } header: { Text("Always on") }
 
             ResetSection(keys: [
                 "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard",

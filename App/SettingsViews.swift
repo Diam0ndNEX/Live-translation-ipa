@@ -12,7 +12,7 @@ extension View {
 }
 
 struct ResetSection: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @EnvironmentObject private var feedback: FeedbackCenter
     let keys: [String]
     @State private var confirm = false
@@ -258,7 +258,7 @@ struct SettingsView: View {
 
 // MARK: - Reading & OCR
 struct ReadingSettings: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("mode") private var mode = TranslateMode.movie.rawValue
     @AppStorage("area") private var area = OCRArea.smart.rawValue
     @AppStorage("customY0") private var customY0 = 0.0
@@ -394,7 +394,7 @@ struct ReadingSettings: View {
 
 // MARK: - Understanding & rules
 struct IntelligenceSettings: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("cleanOCR") private var cleanOCR = true
     @AppStorage("slang") private var slang = true
     @AppStorage("speakerDetect") private var speakerDetect = true
@@ -460,7 +460,7 @@ struct IntelligenceSettings: View {
 
 // MARK: - Floating window
 struct WindowSettings: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("winSize") private var winSize = WindowSize.normal.rawValue
     @AppStorage("theme") private var theme = PiPTheme.dark.rawValue
     @AppStorage("textSize") private var textSize = PiPTextSize.auto.rawValue
@@ -543,7 +543,7 @@ struct WindowSettings: View {
 
 // MARK: - Interface
 struct InterfaceSettings: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("accent") private var accent = AccentChoice.blue.rawValue
     @AppStorage("appearance") private var appearance = Appearance.system.rawValue
     @AppStorage("homeMetrics") private var homeMetrics = true
@@ -587,7 +587,7 @@ struct InterfaceSettings: View {
 
 // MARK: - Performance
 struct PerformanceSettings: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("suppressOwnInterface") private var suppressOwnInterface = true
     @AppStorage("coolMode") private var coolMode = false
     @AppStorage("smartCool") private var smartCool = true
@@ -638,7 +638,7 @@ struct PerformanceSettings: View {
 
 // MARK: - Backup & reset
 struct BackupSettings: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @State private var message = ""
     @State private var confirmReset = false
 
@@ -678,7 +678,7 @@ struct BackupSettings: View {
 
 // MARK: - About
 struct AboutSettings: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("onboarded") private var onboarded = true
 
     var body: some View {
@@ -715,7 +715,7 @@ struct AboutSettings: View {
 }
 
 struct PrivacySettings: View {
-    @EnvironmentObject private var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("privateSession") private var privateSession = false
     @AppStorage("diagIncludeText") private var includeText = false
     @AppStorage("showSessionSpeakers") private var showSpeakers = true
@@ -752,7 +752,7 @@ struct PrivacySettings: View {
 
 /// Collection is independent of which diagnostics page happens to be visible.
 struct DiagnosticsCollectionControls: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("diagnosticsEnabled") private var enabled = true
     @AppStorage("detailedCollection") private var detailed = false
     var body: some View {

@@ -50,6 +50,13 @@ struct NavigationTests {
         router.dismissSheet()
         check(router.sheet == nil, "dismissSheet closes")
 
+        // Deep links.
+        check(router.open(URL(string: "screenlingo://library")!) && router.tab == .library, "deep link opens a tab")
+        check(router.open(URL(string: "screenlingo://status")!) && router.tab == .live && router.sheet == .status, "deep link opens a sheet on Live")
+        router.dismissSheet()
+        check(!router.open(URL(string: "screenlingo://nowhere")!), "unknown deep link is rejected")
+        check(!router.open(URL(string: "https://example.com/live")!), "other schemes are rejected")
+
         // A pending replacement is cancelled by go().
         router.present(.status)
         router.present(.reader)

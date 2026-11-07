@@ -136,7 +136,7 @@ private struct LiveHero: View {
                     .accessibilityLabel(capture.alive ? "Open screen broadcast controls" : "Start screen capture")
                 VStack(alignment: .leading, spacing: 2) {
                     Text(capture.alive ? capture.headline : "Start live translation").font(.headline)
-                    Text(capture.alive ? "Switch to your video or app." : "Tap the round button, choose ScreenLingo Capture, then Start Broadcast.")
+                    Text(capture.alive ? Strings.switchApps : Strings.startHelp)
                         .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
@@ -158,12 +158,6 @@ private struct PairSection: View {
     let pair: PairSnapshot
     @EnvironmentObject private var router: AppRouter
 
-    private var pill: (text: String, symbol: String, severity: Severity) {
-        if pair.checking { return ("Checking language packs", "arrow.triangle.2.circlepath", .info) }
-        if pair.source == "auto", pair.detected == "–" { return ("Auto-detect", "sparkle.magnifyingglass", .info) }
-        return pair.packReady ? ("Ready offline", "checkmark.shield.fill", .success) : ("Needs download", "arrow.down.circle.fill", .warning)
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
             LanguagePairBar(
@@ -173,7 +167,7 @@ private struct PairSection: View {
             ) { engine.swapLanguages(); Feedback.tap() }
             HStack {
                 Button { router.go(.languages) } label: {
-                    StatusPill(text: pill.text, symbol: pill.symbol, severity: pill.severity)
+                    StatusPill(text: pair.packState.title, symbol: pair.packState.symbol, severity: pair.packState.severity)
                 }.buttonStyle(.plain).accessibilityHint("Opens Languages")
                 Spacer()
                 if !pair.recent.isEmpty {
