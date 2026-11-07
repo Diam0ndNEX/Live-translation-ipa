@@ -36,7 +36,7 @@ enum TestRunText {
 
 private struct RunBadges: View {
     let run: TestRunMeta
-    var body: some View {
+    private var items: [(String, Color)] {
         var items: [(String, Color)] = []
         if run.pinned { items.append(("Pinned", .yellow)) }
         if run.completeness == "recovered" { items.append(("Recovered", .orange)) }
@@ -44,6 +44,10 @@ private struct RunBadges: View {
         if !run.trimmed.isEmpty { items.append(("Trimmed", .orange)) }
         if run.startingRAMEntries > 0 { items.append(("Memory filled at start", .orange)) }
         if run.mixedMode { items.append(("Mixed mode", .red)) }
+        return items
+    }
+
+    var body: some View {
         if !items.isEmpty {
             HStack(spacing: 4) {
                 ForEach(items, id: \.0) { item in
