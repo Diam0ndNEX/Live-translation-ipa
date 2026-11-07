@@ -21,6 +21,19 @@ struct MoreSheet: View {
     var body: some View {
         SheetScaffold(title: "More") {
             List {
+                Section { {
+                    HStack(spacing: Space.s) {
+                        tool("doc.on.doc", "Copy", enabled: capture.value.hasOutput) {
+                            UIPasteboard.general.string = engine.translated; feedback.show("Translation copied", severity: .success)
+                        }
+                        tool(capture.value.frozen ? "play.fill" : "pause.rectangle", capture.value.frozen ? "Unfreeze" : "Freeze", enabled: capture.value.hasOutput) { engine.toggleFrozenOutput() }
+                        tool("arrow.clockwise", "Retry", enabled: capture.value.hasOriginal) { engine.retranslate() }
+                        tool("square.and.arrow.up", "Share", enabled: capture.value.hasOutput) { Sharer.shareImage(engine.snapshotImage()) }
+                    }.listRowInsets(EdgeInsets(top: Space.s, leading: Space.m, bottom: Space.s, trailing: Space.m))
+                        .listRowBackground(Color.clear)
+                } header: { Text("Current translation") } footer: {
+                    Text(capture.value.hasOutput ? "Acts on the translation on screen right now." : "Available once something has been translated.")
+                }
                 Section("Reading") {
                     Picker("Area to read", selection: $area) { ForEach(OCRArea.allCases) { Text($0.title).tag($0.rawValue) } }
                     Button { router.present(.captureArea) } label: { ListRow(title: "Choose capture area", symbol: "viewfinder") { chevron } }
@@ -30,16 +43,6 @@ struct MoreSheet: View {
                 }
                 Section("Presets") {
                     PresetChips(store: engine.presets, onNew: { editor = .new }, onEdit: { editor = .edit($0) })
-                }
-                Section("Current translation") {
-                    HStack(spacing: Space.s) {
-                        tool("doc.on.doc", "Copy", enabled: capture.value.hasOutput) {
-                            UIPasteboard.general.string = engine.translated; feedback.show("Translation copied", severity: .success)
-                        }
-                        tool(capture.value.frozen ? "play.fill" : "pause.rectangle", capture.value.frozen ? "Unfreeze" : "Freeze", enabled: capture.value.hasOutput) { engine.toggleFrozenOutput() }
-                        tool("arrow.clockwise", "Retry", enabled: capture.value.hasOriginal) { engine.retranslate() }
-                        tool("square.and.arrow.up", "Share", enabled: capture.value.hasOutput) { Sharer.shareImage(engine.snapshotImage()) }
-                    }.listRowInsets(EdgeInsets(top: Space.s, leading: Space.m, bottom: Space.s, trailing: Space.m))
                 }
                 Section("Open") {
                     Button { router.present(.reader) } label: { ListRow(title: "Focus reader", subtitle: "Large, distraction-free text", symbol: "text.book.closed") { chevron } }
@@ -62,8 +65,9 @@ struct MoreSheet: View {
             VStack(spacing: Space.xs) {
                 Image(systemName: symbol).font(.body.weight(.medium))
                 Text(title).font(.caption.weight(.medium))
-            }.frame(maxWidth: .infinity, minHeight: 56)
-        }.buttonStyle(.bordered).disabled(!enabled)
+            }.frame(maxWidth: .infinity, minHeight: 64)
+            .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
+        }.buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.4)
     }
 }
 
@@ -87,17 +91,42 @@ struct StatusSheet: View {
         _session = StateObject(wrappedValue: EngineSlice(engine) { SessionSnapshot.read($0) })
     }
 
+    private func quick(_ symbol: String, _ title: String, perform: @escaping () -> Void) -> some View {
+        Button { Feedback.tap(); perform() } label: {
+            VStack(spacing: Space.xs) {
+                Image(systemName: symbol).font(.body.weight(.semibold))
+                Text(title).font(.caption.weight(.semibold))
+            }
+            .frame(maxWidth: .infinity, minHeight: 64)
+            .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
+        }.buttonStyle(.plain)
+    }
+
     var body: some View {
         SheetScaffold(title: "Status") {
             List {
                 Section {
-                    StatusPill(text: capture.value.status.title, symbol: capture.value.status.symbol, severity: capture.value.severity)
-                        .listRowBackground(Color.clear)
-                    Text(system.value.status).font(.footnote).textSelection(.enabled)
-                    if !system.value.lastRaw.isEmpty {
-                        Text("Last text read: \(system.value.lastRaw)").font(.footnote).foregroundStyle(.secondary)
-                    }
+                    VStack(alignment: .leading, spacing: Space.m) {
+                        Text(capture.value.headline).font(.title2.bold())
+                        StatusPill(text: capture.value.status.title, symbol: capture.value.status.symbol, severity: capture.value.severity)
+                        Text(system.value.status).font(.subheadline).foregroundStyle(.secondary).textSelection(.enabled)
+                        if !system.value.lastRaw.isEmpty {
+                            Text("Last text read: \(system.value.lastRaw)").font(.footnote).foregroundStyle(.tertiary).lineLimit(3)
+                        }
+                    }.padding(.vertical, Space.xs)
                     TranslationActivityView()
+                }
+                Section {
+                    HStack(spacing: Space.s) {
+                        quick(capture.value.paused ? "play.fill" : "pause.fill", capture.value.paused ? "Resume" : "Pause") { engine.paused = !capture.value.paused }
+                        quick("pip", "Window") { engine.startPiP() }
+                        quick("checkmark.circle", "Test pair") { engine.runTest() }
+                        quick("doc.on.clipboard", "Report") {
+                            UIPasteboard.general.string = engine.diag.report(engine: engine); feedback.show("Report copied", severity: .success)
+                        }
+                    }
+                    .listRowInsets(EdgeInsets(top: Space.s, leading: Space.m, bottom: Space.s, trailing: Space.m))
+                    .listRowBackground(Color.clear)
                 }
                 if showTiming { LatencyDetail(monitor: engine.latency) }
                 Section("This session") {
@@ -114,11 +143,6 @@ struct StatusSheet: View {
                 }
                 Section("If something is wrong") {
                     Button("Refresh language readiness") { Task { await engine.refreshStatus() } }
-                    Button("Reopen floating window") { engine.startPiP() }
-                    Button("Test the language pair") { engine.runTest() }
-                    Button("Copy diagnostic report") {
-                        UIPasteboard.general.string = engine.diag.report(engine: engine); feedback.show("Report copied", severity: .success)
-                    }
                     Button("Open Diagnostics") { router.go(.diagnostics) }
                 }
             }
