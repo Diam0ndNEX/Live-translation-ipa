@@ -1002,7 +1002,7 @@ final class Diagnostics: ObservableObject {
         var changes = run.modeChanges
         if modeActiveSystem != run.mode { changes.append(modeActiveSystem) }
         let meta = TestRunMeta.make(snapshot: snapshot, testID: currentTestID, testName: currentTestName,
-            endReason: reason, startingRAMEntries: run.startingRAMEntries, modeChanges: changes, completeness: "complete")
+            endReason: reason, startingRAMEntries: startingRAMEntries, modeChanges: changes, completeness: "complete")
         clearCollection()
         let store = runStore
         if let (code, detail) = skipReason(for: meta) {
@@ -1033,7 +1033,7 @@ final class Diagnostics: ObservableObject {
             var changes = run.modeChanges
             if modeActiveSystem != run.mode { changes.append(modeActiveSystem) }
             let meta = TestRunMeta.make(snapshot: snapshot, testID: currentTestID, testName: currentTestName,
-                endReason: "savedWhileRecording", startingRAMEntries: run.startingRAMEntries, modeChanges: changes, completeness: "complete")
+                endReason: "savedWhileRecording", startingRAMEntries: startingRAMEntries, modeChanges: changes, completeness: "complete")
             mode = meta.mode; seconds = meta.durationSeconds
             if let (code, detail) = skipReason(for: meta) { result = .skipped(code, detail: detail) }
             else { result = await runStore.save(meta: meta, snapshot: snapshot) }
@@ -1066,7 +1066,7 @@ final class Diagnostics: ObservableObject {
         var changes = run.modeChanges
         if modeActiveSystem != run.mode { changes.append(modeActiveSystem) }
         let meta = TestRunMeta.make(snapshot: snapshot, testID: currentTestID, testName: currentTestName,
-            endReason: "recovered", startingRAMEntries: run.startingRAMEntries, modeChanges: changes, completeness: "recovered")
+            endReason: "recovered", startingRAMEntries: startingRAMEntries, modeChanges: changes, completeness: "recovered")
         activeRun?.lastCheckpointAt = Date()
         checkpointInFlight = true
         let store = runStore

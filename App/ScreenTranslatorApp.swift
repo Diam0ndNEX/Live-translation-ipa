@@ -65,6 +65,7 @@ struct RootView: View {
             engine.diag.noteExecutionPhase(p == .active ? "active" : (p == .background ? "background" : "inactive"), pipActive: engine.pipActive)
             if p == .active { engine.server.start() }
             if p == .background {
+                engine.diag.checkpointRun() // Test Run crash safety if iOS ends the app in the background
                 engine.saveMemory(force: true)
                 let backgroundTask = MemoryBackgroundTask()
                 backgroundTask.begin()

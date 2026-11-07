@@ -453,6 +453,7 @@ final class TranslatorEngine: ObservableObject {
             invalidatePending()
             directSession = nil; directKey = ""; availCache.removeAll()
         }
+        if activeTranslationSystem != selection.0 { diag.endRun(reason: "modeChanged"); refreshModeDiagnosticEpoch() } // a run never mixes modes
         activeTranslationSystem = selection.0
         modeCoordinator.system = selection.0
         diag.modeActiveSystem = selection.0.rawValue
@@ -1079,6 +1080,7 @@ final class TranslatorEngine: ObservableObject {
             guard let self, self.memoryTestMode.allowsReuse else { return 0 }
             return self.ram.values.count
         }
+        Task { [weak diag] in await diag?.recoverRuns() } // leftover checkpoints become "Recovered (incomplete)" runs
         modeDiagnosticEpochs[modeSessionID] = diag.started
         modeCoordinator.system = activeTranslationSystem
         modeCoordinator.hybridSpeculationPermitted = { [weak self] in
@@ -1200,6 +1202,7 @@ final class TranslatorEngine: ObservableObject {
             status = "Capture stopped – iOS may have closed the capture extension. Tap the broadcast icon again (try Speed: Fast)."
             diag.log("Capture stopped")
             diag.noteRuntimeState("heartbeat_timeout")
+            diag.endRun(reason: "heartbeatTimeout"); refreshModeDiagnosticEpoch()
             if activeTranslationSystem != .legacy { invalidatePending() }
         }
         if captureAlive != alive { captureAlive = alive }
@@ -1321,6 +1324,10 @@ final class TranslatorEngine: ObservableObject {
             diag.s.calibrated = calibrated && !rotationBudget.exhausted
         }
     }
+
+    /// Run boundaries clear the diagnostic collection and move `diag.started`; mode events are
+    /// accepted only for the epoch of their session, so refresh it for the current session.
+    private func refreshModeDiagnosticEpoch() { modeDiagnosticEpochs[modeSessionID] = diag.started }
 
     func resetDiagnostics() {
         diag.reset()
@@ -1690,13 +1697,14 @@ final class TranslatorEngine: ObservableObject {
             captureAlive = false; lastPacketDate = .distantPast
             invalidatePending()
             diag.noteRuntimeState("heartbeat_timeout")
+            diag.endRun(reason: "captureStopped"); refreshModeDiagnosticEpoch()
             return
         }
         let captureAdmission = captureIdentity.admit(p.captureSessionID)
         guard captureAdmission != .rejected else { return }
         captureReadiness.receive(frames: p.frames, session: p.captureSessionID, stopped: false, at: ProcessInfo.processInfo.systemUptime)
         publishCaptureStatus()
-        if captureAdmission == .newSession, captureAlive { invalidatePending(); captureAlive = false }
+        if captureAdmission == .newSession, captureAlive { invalidatePending(); captureAlive = false; diag.endRun(reason: "newCaptureSession"); refreshModeDiagnosticEpoch() }
         let wasAlive = captureAlive
         lastPacketDate = now
         if !captureAlive { captureAlive = true }
@@ -1712,6 +1720,7 @@ final class TranslatorEngine: ObservableObject {
 
         if !wasAlive {
             activateTranslationSystem()
+            diag.beginRun(); refreshModeDiagnosticEpoch() // v2.0.0 build 84: one Test Run per broadcast, after the active mode is known
             interruptWarmupForLiveWork()
             startupWarmupTask?.cancel() // Live capture takes priority over idle prewarming.
             startupWarmupTask = nil
