@@ -45,6 +45,10 @@ struct TestRunMeta: Codable, Identifiable, Equatable {
     var modeChanges: [String]
     var bytes: Int
 
+    var reportInfo: RunReportInfo {
+        RunReportInfo(id: id, testName: testName, label: label, endReason: endReason,
+                      completeness: completeness, trimmed: trimmed, mixedMode: mixedMode)
+    }
     var mixedMode: Bool { !modeChanges.isEmpty || completeness == "imported" }
 
     static let minimumSeconds = 30.0

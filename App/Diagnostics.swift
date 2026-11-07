@@ -214,8 +214,32 @@ final class Diagnostics: ObservableObject {
     @Published private(set) var subtitleTraces: [SubtitleTrace] = []
     @Published var memoryHealth = MemoryDiagnosticHealth()
     @Published private(set) var structuredEvents: [StructuredDiagnosticEvent] = []
-    @Published private(set) var archivedSessions: [DiagnosticSessionExport] = []
     @Published private(set) var archiveStatus = "Not saved"
+    // v2.0.0 build 84 Test Runs (spec §11): runs are stored by TestRunStore, not in the memory database.
+    struct ActiveRun {
+        let id: UUID
+        let startedAt: Date
+        let mode: String
+        var modeChanges: [String] = []
+        var startingRAMEntries: Int
+        var lastCheckpointAt: Date
+    }
+    struct RunBanner: Identifiable {
+        let id = UUID()
+        let result: TestRunSaveResult
+        let mode: String
+        let seconds: Double
+        let at = Date()
+    }
+    @Published private(set) var activeRun: ActiveRun?
+    @Published private(set) var testRuns: [TestRunMeta] = []
+    @Published private(set) var runPruneNote: String?
+    @Published private(set) var lastRunBanner: RunBanner?
+    @Published private(set) var lastCheckpointCaptureMs: Double?
+    let runStore = TestRunStore(directory: TestRunStore.defaultDirectory())
+    private var unsavedEndedRun: (meta: TestRunMeta, snapshot: DiagnosticSessionExport)?
+    private var checkpointInFlight = false
+    private var checkpointCaptureMicros = 0
     @Published private(set) var exportInProgress = false
     var memoryStore: TranslationMemoryStore?
     private let exportWriter = DiagnosticExportWriter()
@@ -272,7 +296,6 @@ final class Diagnostics: ObservableObject {
     private var completedWorkRecoveredUnits = 0
     private var lookupSamples: [Double] = []
     private var writeSamples: [Double] = []
-    private var archiveInProgress = false
     private(set) var recorderCosts = RecorderCosts()
     private var recorderDepth = 0
     private struct CostToken { let start: Double; let outer: Bool; let detailed: Bool }
@@ -727,7 +750,7 @@ final class Diagnostics: ObservableObject {
                     "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
                     "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
                     "deduplicateCopies", "contextualLanguage", "languageRecovery",
-                    "continuousRotation", "smartCool", "persistDiagnosticSessions",
+                    "continuousRotation", "smartCool", "testRunSaving",
                     "diagSamples", "heartbeatInterval", "keepAwake", "suppressOwnInterface", "temporaryMemoryTest",
                     "rapidTextTracking", "joinAdjacentText", "activeTextFocus"]
         var settings: [String: String] = [:]
@@ -802,6 +825,7 @@ final class Diagnostics: ObservableObject {
         counters["legacyBusySpeculationSkips"] = s.legacyBusySpeculationSkips
         counters["legacyDuplicateSpeculationSkips"] = s.legacyDuplicateSpeculationSkips
         counters["emptyOCRPasses"] = s.emptyOCRPasses
+        counters["runCheckpointCaptureMicros"] = checkpointCaptureMicros
         var currentHealth = memoryHealth
         currentHealth.ramEntries = ramEntryCount?() ?? memoryHealth.ramEntries
         return DiagnosticSessionExport(translationModes: TranslationModeReport(warmups: initialWarmupTrace, active: modeActiveSystem,
@@ -906,75 +930,198 @@ final class Diagnostics: ObservableObject {
         }
     }
 
-    /// v2.0.0: the newest saved session of each translation system,
-    /// newest first; the default selection for the combined test report.
-    var defaultReportSelection: [UUID] {
-        var seen = Set<String>(), ids: [UUID] = []
-        for session in archivedSessions.sorted(by: { $0.endedAt > $1.endedAt }) {
-            let mode = session.translationModes?.active ?? "unknown"
-            if seen.insert(mode).inserted { ids.append(session.id) }
+    // MARK: Test Runs (v2.0.0 build 84, spec §11)
+
+    /// "automatic" (default) | "manual" | "off". Replaces persistDiagnosticSessions.
+    var runSavingMode: String {
+        let value = UserDefaults.standard.string(forKey: "testRunSaving") ?? "automatic"
+        return ["automatic", "manual", "off"].contains(value) ? value : "automatic"
+    }
+    private var privateSessionOn: Bool { UserDefaults.standard.bool(forKey: "privateSession") }
+
+    var currentTestID: UUID {
+        if let text = UserDefaults.standard.string(forKey: "testRunCurrentID"), let id = UUID(uuidString: text) { return id }
+        let id = UUID()
+        UserDefaults.standard.set(id.uuidString, forKey: "testRunCurrentID")
+        return id
+    }
+    var currentTestName: String {
+        if let name = UserDefaults.standard.string(forKey: "testRunCurrentName"), !name.isEmpty { return name }
+        return nextTestName()
+    }
+    private func nextTestName() -> String {
+        let existing = Set(testRuns.filter { $0.appVersion.contains(AppVersion.version) }.map(\.testID)).count
+        return "\(AppVersion.version) test \(existing + 1)"
+    }
+    func startNewTest(named name: String? = nil) {
+        let id = UUID()
+        UserDefaults.standard.set(id.uuidString, forKey: "testRunCurrentID")
+        let clean = TestRunMeta.cleanLabel(name ?? "")
+        UserDefaults.standard.set(clean.isEmpty ? nextTestName() : clean, forKey: "testRunCurrentName")
+        objectWillChange.send()
+    }
+    func renameCurrentTest(_ name: String) {
+        let clean = TestRunMeta.cleanLabel(name)
+        guard !clean.isEmpty else { return }
+        UserDefaults.standard.set(clean, forKey: "testRunCurrentName")
+        let id = currentTestID
+        Task { await runStore.renameTest(testID: id, name: clean); await refreshRuns() }
+    }
+
+    /// Capture connected: a run starts. Keeps the opening warm-up trace already collected for this broadcast.
+    func beginRun() {
+        if activeRun != nil { endRun(reason: "newRunStarted") }
+        started = Date()
+        startingRAMEntries = ramEntryCount?() ?? 0
+        startRunState()
+    }
+    private func startRunState() {
+        activeRun = ActiveRun(id: diagnosticSessionID, startedAt: started, mode: modeActiveSystem,
+                              startingRAMEntries: startingRAMEntries, lastCheckpointAt: Date())
+    }
+
+    /// Why a run would not be saved right now, or nil. Fixed reason codes plus a human detail.
+    private func skipReason(for meta: TestRunMeta) -> (TestRunSkipReason, String)? {
+        if privateSessionOn { return (.privateSession, "Private session – runs are not saved") }
+        if runSavingMode == "off" { return (.savingOff, "Saving test runs is off") }
+        if !enabled { return (.noData, "Diagnostics collection is off") }
+        if meta.durationSeconds < TestRunMeta.minimumSeconds {
+            return (.tooShort, "Run too short to save – \(Int(meta.durationSeconds)) s")
         }
+        if meta.captions == 0 { return (.noData, "Run has no captions to save") }
+        return nil
+    }
+
+    /// The run is over (stop packet, heartbeat timeout, new session, mode change, reset, new run).
+    /// The snapshot is taken here, synchronously; encoding and writing happen on the store actor.
+    func endRun(reason: String) {
+        guard let run = activeRun else { return }
+        activeRun = nil
+        unsavedEndedRun = nil
+        let snapshot = sessionSnapshot()
+        var changes = run.modeChanges
+        if modeActiveSystem != run.mode { changes.append(modeActiveSystem) }
+        let meta = TestRunMeta.make(snapshot: snapshot, testID: currentTestID, testName: currentTestName,
+            endReason: reason, startingRAMEntries: run.startingRAMEntries, modeChanges: changes, completeness: "complete")
+        clearCollection()
+        let store = runStore
+        if let (code, detail) = skipReason(for: meta) {
+            lastRunBanner = RunBanner(result: .skipped(code, detail: detail), mode: meta.mode, seconds: meta.durationSeconds)
+            Task { await store.discardCheckpoint(id: meta.id) }
+            return
+        }
+        if runSavingMode == "manual" {
+            unsavedEndedRun = (meta, snapshot)
+            lastRunBanner = RunBanner(result: .skipped(.savingOff, detail: "Manual mode – tap Save run to keep it"),
+                                      mode: meta.mode, seconds: meta.durationSeconds)
+            return
+        }
+        Task {
+            let result = await store.save(meta: meta, snapshot: snapshot)
+            lastRunBanner = RunBanner(result: result, mode: meta.mode, seconds: meta.durationSeconds)
+            await refreshRuns()
+        }
+    }
+
+    /// Save run: the current run (as a checkpoint, the run continues) or the last ended run that was not saved.
+    @discardableResult
+    func saveRunNow() async -> TestRunSaveResult {
+        let result: TestRunSaveResult
+        let mode: String, seconds: Double
+        if let run = activeRun {
+            let snapshot = sessionSnapshot()
+            var changes = run.modeChanges
+            if modeActiveSystem != run.mode { changes.append(modeActiveSystem) }
+            let meta = TestRunMeta.make(snapshot: snapshot, testID: currentTestID, testName: currentTestName,
+                endReason: "savedWhileRecording", startingRAMEntries: run.startingRAMEntries, modeChanges: changes, completeness: "complete")
+            mode = meta.mode; seconds = meta.durationSeconds
+            if let (code, detail) = skipReason(for: meta) { result = .skipped(code, detail: detail) }
+            else { result = await runStore.save(meta: meta, snapshot: snapshot) }
+        } else if let pending = unsavedEndedRun {
+            mode = pending.meta.mode; seconds = pending.meta.durationSeconds
+            if privateSessionOn { result = .skipped(.privateSession, detail: "Private session – runs are not saved") }
+            else if runSavingMode == "off" { result = .skipped(.savingOff, detail: "Saving test runs is off") }
+            else {
+                result = await runStore.save(meta: pending.meta, snapshot: pending.snapshot)
+                if case .saved = result { unsavedEndedRun = nil }
+            }
+        } else {
+            mode = modeActiveSystem; seconds = 0
+            result = .skipped(.noData, detail: "No run to save")
+        }
+        lastRunBanner = RunBanner(result: result, mode: mode, seconds: seconds)
+        await refreshRuns()
+        return result
+    }
+
+    /// Crash-safety checkpoint. Only the snapshot copy runs on the main actor (its cost is recorded);
+    /// redaction, encoding, compression and the write run on the store actor.
+    func checkpointRun() {
+        guard let run = activeRun, !checkpointInFlight, runSavingMode != "off", !privateSessionOn, enabled else { return }
+        let begin = ProcessInfo.processInfo.systemUptime
+        let snapshot = sessionSnapshot()
+        let spent = ProcessInfo.processInfo.systemUptime - begin
+        lastCheckpointCaptureMs = spent * 1000
+        checkpointCaptureMicros = Int(spent * 1_000_000)
+        var changes = run.modeChanges
+        if modeActiveSystem != run.mode { changes.append(modeActiveSystem) }
+        let meta = TestRunMeta.make(snapshot: snapshot, testID: currentTestID, testName: currentTestName,
+            endReason: "recovered", startingRAMEntries: run.startingRAMEntries, modeChanges: changes, completeness: "recovered")
+        activeRun?.lastCheckpointAt = Date()
+        checkpointInFlight = true
+        let store = runStore
+        Task { _ = await store.checkpoint(meta: meta, snapshot: snapshot); checkpointInFlight = false }
+    }
+
+    func refreshRuns() async {
+        let index = await runStore.index()
+        testRuns = index.runs.sorted { $0.endedAt > $1.endedAt }
+        runPruneNote = index.pruneNote
+    }
+
+    /// Launch: leftover checkpoints become runs marked "Recovered (incomplete)".
+    func recoverRuns() async {
+        let recovered = await runStore.recover()
+        await refreshRuns()
+        if let last = recovered.last {
+            lastRunBanner = RunBanner(result: .saved(last), mode: last.mode, seconds: last.durationSeconds)
+        }
+    }
+
+    func deleteRuns(_ ids: [UUID]) async { await runStore.delete(ids: ids); await refreshRuns() }
+    func deleteAllUnpinnedRuns() async { _ = await runStore.deleteAllUnpinned(); await refreshRuns() }
+    func setRunPinned(_ id: UUID, _ pinned: Bool) async { await runStore.setPinned(id: id, pinned); await refreshRuns() }
+    func renameRun(_ id: UUID, label: String) async { await runStore.rename(id: id, label: label); await refreshRuns() }
+    func moveRun(_ id: UUID, toTest testID: UUID, name: String) async { await runStore.move(id: id, toTest: testID, name: name); await refreshRuns() }
+    func clearRunPruneNote() async { await runStore.clearPruneNote(); await refreshRuns() }
+
+    /// The newest saved run of each translation system in the current test, newest first.
+    /// Falls back to all saved runs when the current test has none.
+    var defaultReportSelection: [UUID] {
+        let current = testRuns.filter { $0.testID == currentTestID }
+        let pool = current.isEmpty ? testRuns : current
+        var seen = Set<String>(), ids: [UUID] = []
+        for run in pool.sorted(by: { $0.endedAt > $1.endedAt }) where seen.insert(run.mode).inserted { ids.append(run.id) }
         return ids
     }
 
-    /// v2.0.0: one Markdown file for up to six saved sessions.
+    /// One Markdown file for up to six saved runs.
     func exportTestReport(ids: [UUID]) async {
         guard !exportInProgress else { return }
-        let chosen = archivedSessions.filter { ids.contains($0.id) }
-        guard !chosen.isEmpty else { archiveStatus = "Select at least one saved session"; return }
+        let ordered = Array(ids.prefix(CombinedDiagnosticReport.maximumSessions))
+        let snapshots = await runStore.loadSnapshots(ids: ordered)
+        guard !snapshots.isEmpty else { archiveStatus = "Select at least one saved run"; return }
         exportInProgress = true
         defer { exportInProgress = false }
         do {
-            let url = try await exportWriter.exportCombinedReport(
-                Array(chosen.prefix(CombinedDiagnosticReport.maximumSessions)),
-                version: AppVersion.version, build: AppVersion.build)
+            let url = try await exportWriter.exportCombinedReport(snapshots,
+                version: AppVersion.version, build: AppVersion.build,
+                runs: testRuns.filter { ordered.contains($0.id) }.map(\.reportInfo))
             Sharer.present([url])
             archiveStatus = "Test report ready"
         } catch {
             archiveStatus = "Test report export failed; no file was shared"
         }
-    }
-
-    func persistSession() {
-        guard enabled, UserDefaults.standard.bool(forKey: "persistDiagnosticSessions"),
-              !UserDefaults.standard.bool(forKey: "privateSession"), !archiveInProgress,
-              let store = memoryStore else { return }
-        archiveInProgress = true
-        let snapshot = sessionSnapshot()
-        Task {
-            defer { archiveInProgress = false }
-            do {
-                let data = try await exportWriter.encode(snapshot)
-                let indexedEvents = try await exportWriter.encodeIndexedEvents(snapshot.events)
-                // Check privacy again after encoding, before submitting a durable write.
-                guard UserDefaults.standard.bool(forKey: "persistDiagnosticSessions"),
-                      !UserDefaults.standard.bool(forKey: "privateSession") else { return }
-                try await store.saveDiagnosticSession(id: snapshot.id.uuidString, startedAt: snapshot.startedAt,
-                    endedAt: snapshot.endedAt, payload: data, events: indexedEvents)
-                archiveStatus = "Session saved"
-            } catch { archiveStatus = "Session could not be saved" }
-        }
-    }
-
-    func loadSessions() async {
-        guard let store = memoryStore else { archiveStatus = "Memory database unavailable"; return }
-        do {
-            let records = try await store.loadDiagnosticSessions()
-            var decoded: [DiagnosticSessionExport] = []
-            for record in records { decoded.append(try await exportWriter.decode(record)) }
-            archivedSessions = decoded.sorted { $0.endedAt > $1.endedAt }
-            archiveStatus = "Loaded \(decoded.count) sessions"
-        } catch { archiveStatus = "Sessions could not be loaded" }
-    }
-
-    func deleteSessions() async {
-        guard let store = memoryStore else { archiveStatus = "Memory database unavailable"; return }
-        // Stop automatic re-creation; only diagnostics are removed.
-        UserDefaults.standard.set(false, forKey: "persistDiagnosticSessions")
-        do {
-            try await store.clearDiagnosticSessions()
-            archivedSessions = []; archiveStatus = "Saved sessions deleted"
-        } catch { archiveStatus = "Saved sessions could not be deleted" }
     }
 
     @Published var sourceUsage = SourceLanguageUsage()
@@ -1092,8 +1239,14 @@ final class Diagnostics: ObservableObject {
         if pipeline.count > limit { pipeline.removeFirst(pipeline.count - limit) }
     }
 
+    /// A reset during a run ends that run (reason diagnosticsReset) and starts a new one.
     func reset() {
-        persistSession()
+        let wasRecording = activeRun != nil
+        if wasRecording { endRun(reason: "diagnosticsReset") } else { clearCollection() }
+        if wasRecording { startRunState() }
+    }
+
+    private func clearCollection() {
         modeTrace.removeAll(); openingModeTrace.removeAll()
         modeTimingSamples.removeAll(); modeEventCounts.removeAll()
         initialWarmupTrace.removeAll(); legacyModeContexts.removeAll(); lastLegacySpeculation = nil
@@ -1194,7 +1347,7 @@ final class Diagnostics: ObservableObject {
         let recorderToken = beginRecorder(); defer { endRecorder(recorderToken) }
         guard enabled else { return }
         tickN += 1
-        if tickN % 30 == 0 { persistSession() }
+        if let run = activeRun, Date().timeIntervalSince(run.lastCheckpointAt) >= 60 { checkpointRun() }
         let st: EngineState = !alive ? .idle : (paused ? .paused : (frozen ? .frozen : .live))
         if st != lastState {
             if let i = spans.indices.last { spans[i].end = Date() }
@@ -1910,7 +2063,7 @@ private struct MultiSpeedChart: View {
 enum DiagPage: String, CaseIterable, Identifiable {
     case overview, speed, timeline, pipeline, language, device, memory, sessions, log
     var id: String { rawValue }
-    var title: String { rawValue.capitalized }
+    var title: String { self == .sessions ? "Test runs" : rawValue.capitalized }
     var icon: String {
         switch self {
         case .overview: "square.grid.2x2"
@@ -1961,7 +2114,6 @@ private struct DiagnosticsBody: View {
     @State private var showSimulator = false
     @State private var confirmDeleteSessions = false
     @State private var bucketSeconds = 1
-    @AppStorage("persistDiagnosticSessions") private var persistSessions = false
     @State private var showTestReport = false
 
     private var page: DiagPage { DiagPage(rawValue: pageRaw) ?? .overview }
@@ -2025,7 +2177,6 @@ private struct DiagnosticsBody: View {
                             }
                         }
                         Section("Collection") {
-                            Toggle("Save diagnostic sessions on this device", isOn: $persistSessions)
                             Toggle("Simple diagnostics", isOn: $collectionEnabled)
                             Toggle("Detailed diagnostics", isOn: $collectDetails).disabled(!collectionEnabled)
                         }
@@ -2054,13 +2205,13 @@ private struct DiagnosticsBody: View {
                 }
             }
             .sheet(isPresented: $showSimulator) { NavigationStack { PipelineSimulatorView().environmentObject(engine) } }
-            .sheet(isPresented: $showTestReport) { TestReportSheet(diag: diag) }
+            .sheet(isPresented: $showTestReport) { TestRunReportSheet(diag: diag) }
             .onAppear { visible = true }
             .onDisappear { visible = false }
             .onChange(of: collectionEnabled) { _, _ in engine.diagnosticsSettingsChanged() }
             .onChange(of: collectDetails) { _, _ in engine.diagnosticsSettingsChanged() }
-            .confirmationDialog("Delete saved diagnostic sessions? Translation memory and history are preserved.", isPresented: $confirmDeleteSessions, titleVisibility: .visible) {
-                Button("Delete saved sessions", role: .destructive) { Task { await diag.deleteSessions() } }
+            .confirmationDialog("Delete all unpinned test runs? Pinned runs, translation memory, history and settings are not changed.", isPresented: $confirmDeleteSessions, titleVisibility: .visible) {
+                Button("Delete unpinned runs", role: .destructive) { Task { await diag.deleteAllUnpinnedRuns() } }
             }
             .confirmationDialog("Clear all graphs, counters and the timeline?", isPresented: $confirmReset,
                                 titleVisibility: .visible) {
@@ -2375,78 +2526,10 @@ private struct DiagnosticsBody: View {
     }
 
     private var sessionsPage: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Toggle("Save sessions on this device", isOn: $persistSessions)
-            Text("Opt-in metadata only. Up to 20 sessions, 7 days and 10 MB. No screen images or recognized text. Private sessions are not saved. Only instrumented boundaries are recorded.").font(.caption).foregroundStyle(.secondary)
-            HStack {
-                Button("Save now") { diag.persistSession() }.disabled(!persistSessions)
-                Button("Refresh") { Task { await diag.loadSessions() } }
-            }
-            Button { showTestReport = true } label: {
-                Label("Export test report", systemImage: "doc.text")
-            }
-            Text("One Markdown file comparing saved sessions (newest of each mode preselected). Metadata only.")
-                .font(.caption).foregroundStyle(.secondary)
-            Text(diag.archiveStatus).font(.caption)
-            ForEach(diag.archivedSessions) { session in
-                DisclosureGroup(session.startedAt.formatted()) {
-                    Text("\(session.appVersion) · \(session.events.count) retained events")
-                    Text("Measured through \(session.endedAt.formatted())")
-                    Text(session.measurementBoundary).font(.caption)
-                    let findings = DiagnosticIssueDetector.assess(session)
-                    if findings.isEmpty {
-                        Text("No evidence-based issues detected in this retained session.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Text("Evidence-based issues").font(.subheadline.weight(.semibold))
-                        ForEach(findings) { finding in
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(finding.code.replacingOccurrences(of: "_", with: " ").capitalized)
-                                    .font(.caption.weight(.semibold))
-                                Text(finding.classification.capitalized + " · " + String(finding.occurrences) + " recorded")
-                                    .font(.caption2).foregroundStyle(.secondary)
-                                Text(finding.explanation)
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        Text("Suspected issues are heuristics, not verified translation errors.")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            if diag.archivedSessions.count >= 2 {
-                let baseline = diag.archivedSessions[1]
-                let current = diag.archivedSessions[0]
-                let comparison = DiagnosticPerformanceComparison(baseline: baseline, current: current)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Recent session timing comparison").font(.subheadline.weight(.semibold))
-                    if comparison.comparable {
-                        ForEach(comparison.p95Changes.keys.sorted(), id: \.self) { metric in
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(metric).font(.caption.weight(.semibold))
-                                Text(comparisonTiming(comparison, metric: metric))
-                                    .font(.caption).monospacedDigit()
-                            }
-                        }
-                        Text("Indicative only: different subtitle workloads can change latency.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Text(comparison.reason).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            Button("Delete saved diagnostic sessions", role: .destructive) { confirmDeleteSessions = true }
-        }.card()
+        TestRunsPage(diag: diag, showReport: $showTestReport, confirmDeleteUnpinned: $confirmDeleteSessions).card()
     }
 
     // MARK: Overview
-    private func comparisonTiming(_ comparison: DiagnosticPerformanceComparison, metric: String) -> String {
-        [("Median", comparison.medianChanges), ("Mean", comparison.meanChanges),
-         ("P90", comparison.p90Changes), ("P95", comparison.p95Changes)]
-            .compactMap { label, values in values[metric].map { label + String(format: " %+.1f%%", $0) } }
-            .joined(separator: " · ")
-    }
-
     private var liveFraction: Double {
         let now = Date()
         let total = now.timeIntervalSince(diag.started)
@@ -3059,79 +3142,6 @@ private struct DiagnosticsBody: View {
             .padding(12)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             eventListCard(limit: 400)
-        }
-    }
-}
-
-
-
-/// v2.0.0: choose up to six saved sessions and export one Markdown report.
-/// The newest saved session of each translation system is preselected.
-struct TestReportSheet: View {
-    @ObservedObject var diag: Diagnostics
-    @Environment(\.dismiss) private var dismiss
-    @State private var selection: Set<UUID> = []
-    @State private var loaded = false
-
-    private func title(_ session: DiagnosticSessionExport) -> String {
-        let mode: String
-        switch session.translationModes?.active {
-        case "legacy": mode = "Legacy"
-        case "hybridRecovery": mode = "Hybrid"
-        case "lowLatency": mode = "Low Latency"
-        default: mode = "Unknown mode"
-        }
-        return mode + " · " + session.startedAt.formatted(date: .abbreviated, time: .shortened)
-    }
-
-    var body: some View {
-        NavigationStack {
-            List {
-                Section {
-                    if !loaded {
-                        ProgressView()
-                    } else if diag.archivedSessions.isEmpty {
-                        Text("No saved sessions. Turn on Save sessions, run each mode, then tap Save run.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    }
-                    ForEach(diag.archivedSessions) { session in
-                        Button {
-                            if selection.contains(session.id) { selection.remove(session.id) }
-                            else if selection.count < CombinedDiagnosticReport.maximumSessions { selection.insert(session.id) }
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(title(session)).font(.subheadline)
-                                    Text("\(Int(session.endedAt.timeIntervalSince(session.startedAt) / 60)) min · \(session.appVersion)")
-                                        .font(.caption).foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                Image(systemName: selection.contains(session.id) ? "checkmark.circle.fill" : "circle")
-                                    .foregroundStyle(selection.contains(session.id) ? Color.accentColor : Color.secondary)
-                            }
-                        }.buttonStyle(.plain)
-                    }
-                } footer: {
-                    Text("Up to \(CombinedDiagnosticReport.maximumSessions) sessions. Metadata only: no subtitle, OCR or translated text.")
-                }
-                if !diag.archiveStatus.isEmpty {
-                    Section { Text(diag.archiveStatus).font(.caption).foregroundStyle(.secondary) }
-                }
-            }
-            .navigationTitle("Test report")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) { Button("Close") { dismiss() } }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Export") { Task { await diag.exportTestReport(ids: Array(selection)) } }
-                        .disabled(selection.isEmpty || diag.exportInProgress)
-                }
-            }
-            .task {
-                await diag.loadSessions()
-                selection = Set(diag.defaultReportSelection)
-                loaded = true
-            }
         }
     }
 }

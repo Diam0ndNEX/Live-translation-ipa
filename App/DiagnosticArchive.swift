@@ -371,6 +371,17 @@ struct DiagnosticSessionExport: Codable, Identifiable {
     let textCapture: Bool
 }
 
+/// Run-level facts for the combined report (metadata only). Defined here so this file stays standalone.
+struct RunReportInfo: Equatable {
+    var id: UUID
+    var testName: String
+    var label: String
+    var endReason: String
+    var completeness: String
+    var trimmed: [String]
+    var mixedMode: Bool
+}
+
 /// Encoding, disk I/O and decode validation run away from the UI actor.
 actor DiagnosticExportWriter {
     /// Defense in depth: diagnostic event labels are fixed reason codes, never
@@ -462,7 +473,7 @@ actor DiagnosticExportWriter {
         // currently uses fixed keys, but the archive boundary must not rely
         // on future callers never accidentally supplying a source-text key.
         let extraCounters: Set<String> = [
-            "legacyInventoryPending", "legacyInventoryOtherTarget", "legacyInventoryOtherSource",
+            "runCheckpointCaptureMicros", "legacyInventoryPending", "legacyInventoryOtherTarget", "legacyInventoryOtherSource",
             "legacyInventoryOutsideLength", "legacyInventoryCandidates", "legacySkipKeyContext",
             "legacySkipCleanup", "legacySkipSegmentation", "legacySkipModel",
             "sessionCacheHits", "savedMemoryHits", "speculativeModelRequests",
@@ -1359,7 +1370,7 @@ enum CombinedDiagnosticReport {
     }
 
     static func markdown(_ sessions: [DiagnosticSessionExport], version: String, build: Int,
-                         generatedAt: Date) -> String {
+                         generatedAt: Date, runs: [RunReportInfo] = []) -> String {
         let selected = Array(sessions.sorted { $0.startedAt < $1.startedAt }.prefix(maximumSessions))
         let labels = selected.indices.map { "S\($0 + 1)" }
         let parsed = selected.indices.map { parse(selected[$0].translationModes, label: labels[$0]) }
@@ -1382,6 +1393,22 @@ enum CombinedDiagnosticReport {
             let switches = ["effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus"]
                 .map { s[$0] ?? "?" }.joined(separator: "/")
             out.append("| \(labels[i]) | \(session.translationModes?.active ?? "unknown") | \(session.startedAt.ISO8601Format()) | \(String(format: "%.1f", minutes)) | \(session.hardwareModel ?? "?") | \(session.systemVersion) | \(pair) | \(s["mode"] ?? "?") | \(s["speed"] ?? "?") | \(s["translationTestMode"] ?? "?") | \(ram)\(ram > 0 ? " ⚠️" : "") | \(switches) | \(s["hybridSwitchGuard"] ?? "default") | \(s["pixelConfirmation"] ?? "-")/\(s["eventDrivenOCR"] ?? "-")/\(s["fastOCR"] ?? "-") |")
+        }
+        if !runs.isEmpty {
+            // Run facts (v2.0.0 build 84): metadata only, matched to sessions by id.
+            func clean(_ text: String) -> String {
+                String(text.unicodeScalars.filter { $0.value >= 32 && $0 != "|" }.map(Character.init).prefix(40))
+            }
+            out.append("")
+            out.append("| | test | run label | end reason | completeness | notes |")
+            out.append("|---|---|---|---|---|---|")
+            for (i, session) in selected.enumerated() {
+                guard let run = runs.first(where: { $0.id == session.id }) else { continue }
+                var notes: [String] = []
+                if run.mixedMode { notes.append("⚠️ mode may be mixed") }
+                if !run.trimmed.isEmpty { notes.append("trimmed: " + run.trimmed.map(clean).joined(separator: ", ")) }
+                out.append("| \(labels[i]) | \(clean(run.testName)) | \(clean(run.label)) | \(clean(run.endReason)) | \(clean(run.completeness)) | \(notes.joined(separator: "; ")) |")
+            }
         }
         if selected.count >= 2 {
             out.append("")
@@ -1498,11 +1525,12 @@ enum CombinedDiagnosticReport {
 
 extension DiagnosticExportWriter {
     /// Writes one Markdown report for up to six sessions, each redacted first.
-    func exportCombinedReport(_ snapshots: [DiagnosticSessionExport], version: String, build: Int) throws -> URL {
+    func exportCombinedReport(_ snapshots: [DiagnosticSessionExport], version: String, build: Int,
+                              runs: [RunReportInfo] = []) throws -> URL {
         guard !snapshots.isEmpty else { throw CocoaError(.fileWriteUnknown) }
         let safe = snapshots.prefix(CombinedDiagnosticReport.maximumSessions).map { redact($0) }
         let now = Date()
-        let text = CombinedDiagnosticReport.markdown(Array(safe), version: version, build: build, generatedAt: now)
+        let text = CombinedDiagnosticReport.markdown(Array(safe), version: version, build: build, generatedAt: now, runs: runs)
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(CombinedDiagnosticReport.fileName(version: version, build: build, at: now))
         try Data(text.utf8).write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])
