@@ -1,4 +1,4 @@
-// ScreenLingo – App – Focus reader (2.0.0 build 86)
+// ScreenLingo – App – Focus reader (2.0.0 build 87)
 import SwiftUI
 
 /// Large, calm text. All reading options live in one controls sheet.
@@ -25,19 +25,26 @@ struct ReaderView: View {
         switch font { case "serif": return .serif; case "mono": return .monospaced; case "standard": return .default; default: return .rounded }
     }
 
+    private var hasText: Bool { !output.value.translated.isEmpty }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: centered ? .center : .leading, spacing: Space.xl) {
-                    if output.value.translated.isEmpty {
+                    if !hasText {
                         EmptyState(title: "Ready to read", symbol: "text.book.closed", message: "Start a live translation, or translate text in Text & photos.")
                     } else {
-                        Text(output.value.translated).font(.system(size: size * scale, weight: .medium, design: design))
+                        StatusPill(text: output.value.frozen ? "Held" : (output.value.translating ? "Translating" : "Live"),
+                                   symbol: output.value.frozen ? "pause.circle.fill" : "dot.radiowaves.left.and.right",
+                                   severity: output.value.frozen ? .warning : .info)
+                        Text(output.value.translated).font(.system(size: size * scale, weight: .semibold, design: design))
                             .lineSpacing(max(0, min(16, spacing))).textSelection(.enabled)
                         if showOriginal, !output.value.original.isEmpty {
-                            Divider()
-                            Text(output.value.original).font(.system(size: max(15, size * 0.65) * scale))
-                                .foregroundStyle(.secondary).textSelection(.enabled)
+                            VStack(alignment: centered ? .center : .leading, spacing: Space.s) {
+                                SectionHeader(title: "Original")
+                                Text(output.value.original).font(.system(size: max(15, size * 0.6) * scale, design: design))
+                                    .foregroundStyle(.secondary).textSelection(.enabled)
+                            }.infoCard()
                         }
                     }
                 }
@@ -49,18 +56,12 @@ struct ReaderView: View {
             .navigationTitle("Focus reader").navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Done") { dismiss() } }
-                ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { engine.toggleFrozenOutput() } label: { Image(systemName: output.value.frozen ? "play.fill" : "pause.fill") }
-                        .accessibilityLabel(output.value.frozen ? "Resume live text" : "Freeze current text")
-                    Button { showControls = true } label: { Image(systemName: "textformat.size") }
-                        .accessibilityLabel("Reading options")
-                    Menu {
-                        Button { engine.speak(output.value.translated) } label: { Label("Listen", systemImage: "speaker.wave.2") }
-                        Button { UIPasteboard.general.string = output.value.translated; feedback.show("Copied", severity: .success) } label: { Label("Copy translation", systemImage: "doc.on.doc") }
-                        ShareLink(item: output.value.translated) { Label("Share text", systemImage: "square.and.arrow.up") }
-                    } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("More")
+                ToolbarItem(placement: .topBarTrailing) {
+                    ShareLink(item: output.value.translated) { Image(systemName: "square.and.arrow.up") }
+                        .disabled(!hasText).accessibilityLabel("Share text")
                 }
             }
+            .safeAreaInset(edge: .bottom) { controlBar }
             .sheet(isPresented: $showControls) {
                 SheetScaffold(title: "Reading options") {
                     Form {
@@ -81,5 +82,33 @@ struct ReaderView: View {
                 .presentationDetents([.medium, .large])
             }
         }
+    }
+
+    /// The four things you do while reading, always in reach.
+    private var controlBar: some View {
+        HStack(spacing: Space.s) {
+            barButton(output.value.frozen ? "play.fill" : "pause.fill", output.value.frozen ? "Resume" : "Hold", enabled: hasText) {
+                engine.toggleFrozenOutput()
+            }
+            barButton("speaker.wave.2", "Listen", enabled: hasText) { engine.speak(output.value.translated) }
+            barButton("doc.on.doc", "Copy", enabled: hasText) {
+                UIPasteboard.general.string = output.value.translated; feedback.show("Copied", severity: .success)
+            }
+            barButton("textformat.size", "Text") { showControls = true }
+        }
+        .padding(.horizontal, Space.l).padding(.vertical, Space.s)
+        .background(.regularMaterial)
+    }
+
+    private func barButton(_ symbol: String, _ title: String, enabled: Bool = true, run: @escaping () -> Void) -> some View {
+        Button { Feedback.tap(); run() } label: {
+            VStack(spacing: Space.xs) {
+                Image(systemName: symbol).font(.title3.weight(.semibold))
+                Text(title).font(.caption.weight(.semibold))
+            }
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
+        }
+        .buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.4)
     }
 }

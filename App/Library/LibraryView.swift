@@ -1,4 +1,4 @@
-// ScreenLingo – App – Library tab (2.0.0 build 86)
+// ScreenLingo – App – Library tab (2.0.0 build 87)
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -52,8 +52,11 @@ struct LibraryView: View {
         NavigationStack(path: $router.libraryPath) {
             List(selection: $selection) {
                 Section {
+                    Picker("Show", selection: $filter) { ForEach(LibraryFilter.allCases) { Text($0.rawValue).tag($0) } }
+                        .pickerStyle(.segmented)
+                        .listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: Space.s, leading: Space.l, bottom: Space.s, trailing: Space.l))
                     Button { router.present(.workspace) } label: {
-                        ListRow(title: "Text & photos", subtitle: "Translate typed text, a photo or a file", symbol: "text.viewfinder") {
+                        ListRow(title: "Translate text, a photo or a file", subtitle: "Text & photos", symbol: "text.viewfinder") {
                             Image(systemName: "chevron.right").foregroundStyle(.tertiary)
                         }
                     }.buttonStyle(.plain)
@@ -99,10 +102,6 @@ struct LibraryView: View {
                 }
                 ToolbarItemGroup(placement: .topBarTrailing) {
                     Menu {
-                        Picker("Show", selection: $filter) { ForEach(LibraryFilter.allCases) { Text($0.rawValue).tag($0) } }
-                    } label: { Image(systemName: filter == .all ? "line.3.horizontal.decrease" : "line.3.horizontal.decrease.circle.fill") }
-                        .accessibilityLabel("Filter: \(filter.rawValue)")
-                    Menu {
                         Button("Export as text") { Sharer.shareFile(text: exportItems.map { "\($0.original)\n→ \($0.translated)" }.joined(separator: "\n\n"), name: "screenlingo-history.txt") }
                         Button("Export as CSV") { Sharer.shareFile(text: engine.historyCSV(exportItems), name: "screenlingo-history.csv") }
                         Button("Export as JSON backup") { Sharer.shareFile(text: engine.historyJSON(exportItems), name: "screenlingo-history.json") }
@@ -144,17 +143,20 @@ struct LibraryView: View {
 
     /// Translation first, original second, metadata third.
     private func row(_ item: HistoryItem) -> some View {
-        VStack(alignment: .leading, spacing: Space.xs) {
-            HStack(alignment: .top) {
-                Text(item.translated).font(.body.weight(.medium)).lineLimit(3)
+        VStack(alignment: .leading, spacing: Space.s) {
+            Text(item.translated).font(.headline).lineLimit(3)
+            Text(item.original).font(.subheadline).foregroundStyle(.secondary).lineLimit(2)
+            HStack(spacing: Space.s) {
+                if let from = item.sourceLanguage, let to = item.targetLanguage {
+                    Text("\(from.uppercased()) → \(to.uppercased())")
+                        .font(.caption2.weight(.bold))
+                        .padding(.horizontal, Space.s).padding(.vertical, 3)
+                        .background(Palette.surfaceRaised, in: Capsule())
+                }
+                Text(item.date.formatted(date: .omitted, time: .shortened)).font(.caption).foregroundStyle(.tertiary)
                 Spacer()
                 if item.starred { Image(systemName: "star.fill").foregroundStyle(.yellow).accessibilityLabel("Saved") }
             }
-            Text(item.original).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
-            HStack {
-                Text(item.date.formatted(date: .omitted, time: .shortened))
-                if let from = item.sourceLanguage, let to = item.targetLanguage { Text("· \(from.uppercased()) → \(to.uppercased())") }
-            }.font(.caption).foregroundStyle(.tertiary)
         }.padding(.vertical, Space.xs)
     }
 }
@@ -175,8 +177,14 @@ struct HistoryDetail: View {
 
     var body: some View {
         ScreenScaffold {
-            Text(current.translated).font(.title2.weight(.medium)).textSelection(.enabled)
-            Text(current.original).font(.body).foregroundStyle(.secondary).textSelection(.enabled)
+            VStack(alignment: .leading, spacing: Space.s) {
+                SectionHeader(title: "Translation")
+                Text(current.translated).font(.title2.weight(.semibold)).textSelection(.enabled)
+            }.infoCard(raised: true)
+            VStack(alignment: .leading, spacing: Space.s) {
+                SectionHeader(title: "Original")
+                Text(current.original).font(.body).foregroundStyle(.secondary).textSelection(.enabled)
+            }.infoCard()
             HStack(spacing: Space.s) {
                 SecondaryButton(title: current.starred ? "Saved" : "Save", symbol: current.starred ? "star.fill" : "star") { engine.toggleStar(item.id) }
                 SecondaryButton(title: "Listen", symbol: "speaker.wave.2") { engine.speak(current.translated) }

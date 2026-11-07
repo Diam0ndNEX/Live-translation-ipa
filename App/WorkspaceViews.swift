@@ -1,3 +1,4 @@
+// ScreenLingo – App – Text & photos and Capture area (2.0.0 build 87)
 import SwiftUI
 import PhotosUI
 import Vision
@@ -28,30 +29,32 @@ struct TranslationWorkspace: View {
     var body: some View {
         SheetScaffold(title: "Text & photos") {
             ScreenScaffold {
-                Text("Translate typed text, a photo, a screenshot or a file. Live screen reading continues when you close this.")
-                    .font(.subheadline).foregroundStyle(.secondary)
                 LanguagePairBar(source: Binding(get: { pair.value.source }, set: { engine.sourceCode = $0 }),
                                 target: Binding(get: { pair.value.target }, set: { engine.targetCode = $0 }),
                                 items: pair.value.languages, swapDisabled: pair.value.source == "auto") { engine.swapLanguages() }
-                HStack(spacing: Space.s) {
-                    PhotosPicker(selection: $photo, matching: .images) {
-                        Label("Photo", systemImage: "photo").frame(maxWidth: .infinity, minHeight: 44)
-                    }
-                    Button { importing = true } label: { Label("File", systemImage: "folder").frame(maxWidth: .infinity, minHeight: 44) }
-                    Button { input = String((UIPasteboard.general.string ?? "").prefix(12000)) } label: {
-                        Label("Paste", systemImage: "doc.on.clipboard").frame(maxWidth: .infinity, minHeight: 44)
-                    }
-                }
-                .buttonStyle(.bordered)
-                .disabled(recognizing)
                 VStack(alignment: .leading, spacing: Space.s) {
-                    TextEditor(text: $input).frame(minHeight: 160).scrollContentBackground(.hidden)
-                        .accessibilityLabel("Text to translate")
                     HStack {
-                        Text("\(input.count) / 12,000 characters").font(.footnote).foregroundStyle(.secondary)
+                        SectionHeader(title: "Original")
                         Spacer()
-                        Button("Clear", role: .destructive) { input = "" }.disabled(input.isEmpty).frame(minHeight: 44)
+                        Text("\(input.count) / 12,000").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                     }
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: $input).frame(minHeight: 170).scrollContentBackground(.hidden)
+                            .accessibilityLabel("Text to translate")
+                        if input.isEmpty {
+                            Text("Type or paste text, or add a photo or file…")
+                                .foregroundStyle(.tertiary).padding(.top, 8).padding(.leading, 5).allowsHitTesting(false)
+                        }
+                    }
+                    Divider()
+                    HStack(spacing: Space.s) {
+                        PhotosPicker(selection: $photo, matching: .images) { inputTool("photo", "Photo") }
+                        Button { importing = true } label: { inputTool("folder", "File") }
+                        Button { input = String((UIPasteboard.general.string ?? "").prefix(12000)) } label: { inputTool("doc.on.clipboard", "Paste") }
+                        Button(role: .destructive) { input = "" } label: { inputTool("xmark.circle", "Clear") }.disabled(input.isEmpty)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(recognizing)
                 }.infoCard()
                 if recognizing { ProgressRow(title: "Reading the image on your device…") }
                 if let errorText { Banner(text: errorText, severity: .error) }
@@ -62,13 +65,13 @@ struct TranslationWorkspace: View {
                 if !output.value.translated.isEmpty {
                     VStack(alignment: .leading, spacing: Space.m) {
                         SectionHeader(title: "Translation")
-                        Text(output.value.translated).font(.title3).textSelection(.enabled)
+                        Text(output.value.translated).font(.title2.weight(.semibold)).textSelection(.enabled)
                         HStack(spacing: Space.s) {
                             SecondaryButton(title: "Copy", symbol: "doc.on.doc") { UIPasteboard.general.string = output.value.translated; feedback.show("Copied", severity: .success) }
                             SecondaryButton(title: "Listen", symbol: "speaker.wave.2") { engine.speak(output.value.translated) }
                             ShareLink(item: output.value.translated) { Label("Share", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity, minHeight: 44) }.buttonStyle(.bordered)
                         }
-                    }.infoCard()
+                    }.infoCard(raised: true)
                 }
                 Text(output.value.status).font(.footnote).foregroundStyle(.secondary)
             }
@@ -109,6 +112,15 @@ struct TranslationWorkspace: View {
                 }
             } catch { errorText = error.localizedDescription }
         }
+    }
+
+    private func inputTool(_ symbol: String, _ title: String) -> some View {
+        VStack(spacing: Space.xs) {
+            Image(systemName: symbol).font(.body.weight(.semibold))
+            Text(title).font(.caption.weight(.semibold))
+        }
+        .frame(maxWidth: .infinity, minHeight: 52)
+        .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
     }
 
     @MainActor private func readImage(_ data: Data, requestID: UUID) async {
@@ -176,7 +188,7 @@ struct CaptureAreaEditor: View {
     @State private var landscape = false
     @State private var pickerItem: PhotosPickerItem?
     @State private var photo: UIImage?
-    private var previewSize: CGSize { landscape ? CGSize(width: 340, height: 190) : CGSize(width: 150, height: 300) }
+    private var previewSize: CGSize { landscape ? CGSize(width: 340, height: 200) : CGSize(width: 170, height: 340) }
     private var range: ClosedRange<Double> { ExportFormat.normalizedArea(lower, upper) }
 
     private func clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { min(max(v, lo), hi) }
@@ -184,14 +196,10 @@ struct CaptureAreaEditor: View {
     var body: some View {
         SheetScaffold(title: "Capture area") {
             ScreenScaffold {
-                Text("The highlighted band is the part of the screen ScreenLingo reads. Move it away from player controls, or shrink it to the subtitles.")
-                    .font(.subheadline).foregroundStyle(.secondary)
-                Banner(text: "This is a preview, not your live screen. iOS gives capture only to the broadcast extension.", severity: .info)
                 Picker("Preview shape", selection: $landscape) {
                     Text("Portrait").tag(false)
                     Text("Landscape").tag(true)
                 }.pickerStyle(.segmented)
-                Hint("The area is a share of the screen height, counted from the bottom, and follows the screen's orientation. The same band works in portrait and landscape.")
                 GeometryReader { geo in
                     let h = geo.size.height
                     let top = h * (1 - range.upperBound)
@@ -231,6 +239,17 @@ struct CaptureAreaEditor: View {
                             .accessibilityHidden(true)
                     }
                 }.frame(width: previewSize.width, height: previewSize.height).frame(maxWidth: .infinity)
+                VStack(spacing: Space.xs) {
+                    Text("Reads \(Int(range.lowerBound * 100))% to \(Int(range.upperBound * 100))% of the screen height")
+                        .font(.headline)
+                    Hint("Counted from the bottom, in the screen's own orientation. The same band works in portrait and landscape. Drag the band or its handles.")
+                }.frame(maxWidth: .infinity)
+                HStack(spacing: Space.s) {
+                    SecondaryButton(title: "Full screen") { lower = 0; upper = 1 }
+                    SecondaryButton(title: "Subtitles") { lower = 0; upper = 0.35 }
+                    SecondaryButton(title: "Middle") { lower = 0.3; upper = 0.7 }
+                }
+                Banner(text: "This is a preview, not your live screen. iOS gives capture only to the broadcast extension.", severity: .info)
                 HStack(spacing: Space.s) {
                     PhotosPicker(selection: $pickerItem, matching: .images) {
                         Label(photo == nil ? "Use my own screenshot" : "Choose another", systemImage: "photo")
@@ -241,22 +260,23 @@ struct CaptureAreaEditor: View {
                     }
                 }
                 Hint("Your picture stays on this screen as a guide. It is not saved or uploaded.")
-                VStack(alignment: .leading, spacing: Space.s) {
-                    Text("Top edge: \(Int(range.upperBound * 100))% from the bottom")
-                    Slider(value: $upper, in: 0.1...1).accessibilityLabel("Top edge of the capture area")
-                    Text("Bottom edge: \(Int(range.lowerBound * 100))% from the bottom")
-                    Slider(value: $lower, in: 0...0.9).accessibilityLabel("Bottom edge of the capture area")
+                DisclosureGroup("Fine-tune with sliders") {
+                    VStack(alignment: .leading, spacing: Space.s) {
+                        Text("Top edge: \(Int(range.upperBound * 100))% from the bottom")
+                        Slider(value: $upper, in: 0.1...1).accessibilityLabel("Top edge of the capture area")
+                        Text("Bottom edge: \(Int(range.lowerBound * 100))% from the bottom")
+                        Slider(value: $lower, in: 0...0.9).accessibilityLabel("Bottom edge of the capture area")
+                    }.padding(.top, Space.s)
                 }.infoCard()
-                HStack(spacing: Space.s) {
-                    SecondaryButton(title: "Full screen") { lower = 0; upper = 1 }
-                    SecondaryButton(title: "Subtitles") { lower = 0; upper = 0.35 }
-                    SecondaryButton(title: "Middle") { lower = 0.3; upper = 0.7 }
-                }
+            }
+            .safeAreaInset(edge: .bottom) {
                 PrimaryButton(title: "Use this area") {
                     let selection = range
                     lower = selection.lowerBound; upper = selection.upperBound; area = "custom"
                     engine.syncConfig(); feedback.show("Capture area updated", severity: .success); dismiss()
                 }
+                .padding(.horizontal, Space.l).padding(.vertical, Space.s)
+                .background(.regularMaterial)
             }
         }
         .onChange(of: pickerItem) { _, item in
