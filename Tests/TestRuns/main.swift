@@ -80,7 +80,7 @@ import Foundation
             let loaded = try await store.load(id: snapshot.id)
             precondition(loaded.1.events.count == 2400 && loaded.1.translationModes?.events.count == 2400)
             precondition(loaded.1.oneSecondIntervals?.count == 300 && loaded.1.fiveSecondIntervals?.count == 180)
-            precondition(loaded.0.mode == "legacy" && loaded.0.captions == 54)
+            precondition(loaded.0.mode == "legacy" && loaded.0.captions >= 54, "captions = max(enqueued counter, enqueue samples)")
             let index = await store.index()
             precondition(index.runs.count == 1 && index.runs[0].id == snapshot.id)
         }
