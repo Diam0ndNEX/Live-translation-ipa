@@ -1,5 +1,5 @@
 import CryptoKit
-// Screen Translator – App – v0.11.0
+// ScreenLingo – App
 import SwiftUI
 import Charts
 import os
@@ -107,7 +107,7 @@ enum Fix: String {
         case .fixedRotation: "Turn off auto-rotation"
         case .narrowArea: "Read the bottom third only"
         case .openLanguages: "Open Languages"
-        case .startCapture: "Go to Home"
+        case .startCapture: "Go to Live"
         case .translateAhead: "Turn on translate-ahead"
         }
     }
@@ -178,6 +178,8 @@ struct Stats {
     var supersededUnpresentedConfirmed = 0, enqueuedCandidateFrames = 0
     var movieSelections = 0, movieTemporalOverrides = 0, movieRejectedSmall = 0
     var queueReplacements = 0, visualChanges = 0, earlyVisualWakes = 0, emptyOCRPasses = 0
+    var largePackets = 0, packetSendErrors = 0
+    var pixelConfirmations = 0, pixelRejections = 0, watchSkippedOCR = 0, watchTriggeredOCR = 0
     var firstSightVisualChangeLagMs = 0.0
     var effectiveOCRIntervalMs = 0.0
 }
@@ -212,8 +214,32 @@ final class Diagnostics: ObservableObject {
     @Published private(set) var subtitleTraces: [SubtitleTrace] = []
     @Published var memoryHealth = MemoryDiagnosticHealth()
     @Published private(set) var structuredEvents: [StructuredDiagnosticEvent] = []
-    @Published private(set) var archivedSessions: [DiagnosticSessionExport] = []
     @Published private(set) var archiveStatus = "Not saved"
+    // v2.0.0 build 84 Test Runs (spec §11): runs are stored by TestRunStore, not in the memory database.
+    struct ActiveRun {
+        let id: UUID
+        let startedAt: Date
+        let mode: String
+        var modeChanges: [String] = []
+        var startingRAMEntries: Int
+        var lastCheckpointAt: Date
+    }
+    struct RunBanner: Identifiable {
+        let id = UUID()
+        let result: TestRunSaveResult
+        let mode: String
+        let seconds: Double
+        let at = Date()
+    }
+    @Published private(set) var activeRun: ActiveRun?
+    @Published private(set) var testRuns: [TestRunMeta] = []
+    @Published private(set) var runPruneNote: String?
+    @Published private(set) var lastRunBanner: RunBanner?
+    @Published private(set) var lastCheckpointCaptureMs: Double?
+    let runStore = TestRunStore(directory: TestRunStore.defaultDirectory())
+    private var unsavedEndedRun: (meta: TestRunMeta, snapshot: DiagnosticSessionExport)?
+    private var checkpointInFlight = false
+    private var checkpointCaptureMicros = 0
     @Published private(set) var exportInProgress = false
     var memoryStore: TranslationMemoryStore?
     private let exportWriter = DiagnosticExportWriter()
@@ -270,7 +296,6 @@ final class Diagnostics: ObservableObject {
     private var completedWorkRecoveredUnits = 0
     private var lookupSamples: [Double] = []
     private var writeSamples: [Double] = []
-    private var archiveInProgress = false
     private(set) var recorderCosts = RecorderCosts()
     private var recorderDepth = 0
     private struct CostToken { let start: Double; let outer: Bool; let detailed: Bool }
@@ -477,7 +502,8 @@ final class Diagnostics: ObservableObject {
             "speculative_session_created", "speculative_stop_requested", "speculative_stop_released",
             "warmup_source_unresolved", "warmup_predicted_source", "warmup_preempted",
             "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started",
-            "legacy_idle_completed", "legacy_idle_deferred"
+            "legacy_idle_completed", "legacy_idle_deferred",
+            "legacy_confirmed_after_switch", "legacy_confirmed_no_switch", "legacy_shared_session_used"
         ]
         guard allowed.contains(reason) else { return }
         if modeActiveSystem == "legacy", let candidate {
@@ -489,7 +515,8 @@ final class Diagnostics: ObservableObject {
             if reason == "confirmed_model_completed" { legacyModeEvent(candidate, reason: "recovery_service_ms", duration: durationMs) }
             if reason == "speculative_model_completed" { legacyModeEvent(candidate, reason: "speculative_service_ms", duration: durationMs) }
         }
-        if ["model_batch_completed", "confirmed_model_completed", "speculative_model_completed", "speculative_stop_released"].contains(reason),
+        if ["model_batch_completed", "confirmed_model_completed", "speculative_model_completed", "speculative_stop_released",
+            "legacy_confirmed_after_switch", "legacy_confirmed_no_switch"].contains(reason),
            let durationMs, durationMs.isFinite, durationMs >= 0 {
             modelTimingSamples[reason, default: []].append(durationMs)
             if modelTimingSamples[reason, default: []].count > 1200 {
@@ -720,10 +747,10 @@ final class Diagnostics: ObservableObject {
                     "selectiveSpeculation", "speculationConfidence", "confirmationDeadline",
                     "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest",
                     "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
-                    "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer",
+                    "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
                     "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
                     "deduplicateCopies", "contextualLanguage", "languageRecovery",
-                    "continuousRotation", "smartCool", "persistDiagnosticSessions",
+                    "continuousRotation", "smartCool", "testRunSaving",
                     "diagSamples", "heartbeatInterval", "keepAwake", "suppressOwnInterface", "temporaryMemoryTest",
                     "rapidTextTracking", "joinAdjacentText", "activeTextFocus"]
         var settings: [String: String] = [:]
@@ -786,19 +813,26 @@ final class Diagnostics: ObservableObject {
         counters["queueReplacements"] = s.queueReplacements
         counters["visualChanges"] = s.visualChanges
         counters["earlyVisualWakes"] = s.earlyVisualWakes
+        counters["largePackets"] = s.largePackets
+        counters["packetSendErrors"] = s.packetSendErrors
+        counters["pixelConfirmations"] = s.pixelConfirmations
+        counters["pixelRejections"] = s.pixelRejections
+        counters["watchSkippedOCR"] = s.watchSkippedOCR
+        counters["watchTriggeredOCR"] = s.watchTriggeredOCR
         counters["legacyAdaptiveLowYieldSkips"] = s.legacyAdaptiveLowYieldSkips
         counters["legacyAdaptiveSavedSkips"] = s.legacyAdaptiveSavedSkips
         counters["legacyLowConfidenceSkips"] = s.legacyLowConfidenceSkips
         counters["legacyBusySpeculationSkips"] = s.legacyBusySpeculationSkips
         counters["legacyDuplicateSpeculationSkips"] = s.legacyDuplicateSpeculationSkips
         counters["emptyOCRPasses"] = s.emptyOCRPasses
+        counters["runCheckpointCaptureMicros"] = checkpointCaptureMicros
         var currentHealth = memoryHealth
         currentHealth.ramEntries = ramEntryCount?() ?? memoryHealth.ramEntries
         return DiagnosticSessionExport(translationModes: TranslationModeReport(warmups: initialWarmupTrace, active: modeActiveSystem,
             pending: modePendingSystem, referenceSHA: TranslationSystem.referenceSHA,
             migration: modeMigration, events: exportModeEventWindow(),
             distributions: modeTimingSamples.mapValues(DiagnosticDistribution.init),
-            counters: modeEventCounts).sanitized(), id: diagnosticSessionID, startedAt: started, endedAt: Date(),
+            counters: modeEventCounts), id: diagnosticSessionID, startedAt: started, endedAt: Date(),
             appVersion: AppVersion.full, systemVersion: UIDevice.current.systemVersion,
             hardwareModel: Self.hardwareModelCode, settings: settings, health: currentHealth, counters: counters,
             distributions: ["memoryLookupMs": DiagnosticDistribution(lookupSamples), "memoryWriteMs": DiagnosticDistribution(writeSamples),
@@ -819,6 +853,8 @@ final class Diagnostics: ObservableObject {
                 "speculativeModelMs": DiagnosticDistribution(modelTimingSamples["speculative_model_completed", default: []]),
                 "confirmedModelMs": DiagnosticDistribution(modelTimingSamples["confirmed_model_completed", default: []]),
                 "modelBatchMs": DiagnosticDistribution(modelTimingSamples["model_batch_completed", default: []]),
+                "legacyConfirmedAfterSessionSwitchMs": DiagnosticDistribution(modelTimingSamples["legacy_confirmed_after_switch", default: []]),
+                "legacyConfirmedNoSwitchMs": DiagnosticDistribution(modelTimingSamples["legacy_confirmed_no_switch", default: []]),
                 "modeAvailabilityCheckMs": DiagnosticDistribution(modeTimingSamples["backend_availability_ms", default: []]),
                 "modeTaskDispatchMs": DiagnosticDistribution(modeTimingSamples["backend_task_dispatch_ms", default: []]),
                 "modeSpeculativeQueueMs": DiagnosticDistribution(modeTimingSamples["speculative_queue_ms", default: []]),
@@ -880,6 +916,23 @@ final class Diagnostics: ObservableObject {
         } catch { archiveStatus = "Export failed; no file was shared" }
     }
 
+    /// Evidence ZIP for one saved run (pretty JSON stays inside the ZIP only).
+    func exportRunZIP(_ id: UUID) async {
+        guard !exportInProgress else { return }
+        exportInProgress = true
+        defer { exportInProgress = false }
+        guard let snapshot = (try? await runStore.load(id: id))?.1 else {
+            archiveStatus = "Run could not be loaded"; return
+        }
+        do {
+            let url = try await exportWriter.exportZIP(snapshot)
+            Sharer.present([url])
+            archiveStatus = "ZIP diagnostic bundle ready"
+        } catch {
+            archiveStatus = "ZIP export failed; no file was shared"
+        }
+    }
+
     func exportZIP() async {
         guard !exportInProgress else { return }
         exportInProgress = true
@@ -894,46 +947,205 @@ final class Diagnostics: ObservableObject {
         }
     }
 
-    func persistSession() {
-        guard enabled, UserDefaults.standard.bool(forKey: "persistDiagnosticSessions"),
-              !UserDefaults.standard.bool(forKey: "privateSession"), !archiveInProgress,
-              let store = memoryStore else { return }
-        archiveInProgress = true
+    // MARK: Test Runs (v2.0.0 build 84, spec §11)
+
+    /// "automatic" (default) | "manual" | "off". Replaces persistDiagnosticSessions.
+    var runSavingMode: String {
+        let value = UserDefaults.standard.string(forKey: "testRunSaving") ?? "automatic"
+        return ["automatic", "manual", "off"].contains(value) ? value : "automatic"
+    }
+    private var privateSessionOn: Bool { UserDefaults.standard.bool(forKey: "privateSession") }
+
+    var currentTestID: UUID {
+        if let text = UserDefaults.standard.string(forKey: "testRunCurrentID"), let id = UUID(uuidString: text) { return id }
+        let id = UUID()
+        UserDefaults.standard.set(id.uuidString, forKey: "testRunCurrentID")
+        return id
+    }
+    var currentTestName: String {
+        if let name = UserDefaults.standard.string(forKey: "testRunCurrentName"), !name.isEmpty { return name }
+        return nextTestName()
+    }
+    private func nextTestName() -> String {
+        let existing = Set(testRuns.filter { $0.appVersion.contains(AppVersion.version) }.map(\.testID)).count
+        return "\(AppVersion.version) test \(existing + 1)"
+    }
+    func startNewTest(named name: String? = nil) {
+        let id = UUID()
+        UserDefaults.standard.set(id.uuidString, forKey: "testRunCurrentID")
+        let clean = TestRunMeta.cleanLabel(name ?? "")
+        UserDefaults.standard.set(clean.isEmpty ? nextTestName() : clean, forKey: "testRunCurrentName")
+        objectWillChange.send()
+    }
+    func renameCurrentTest(_ name: String) {
+        let clean = TestRunMeta.cleanLabel(name)
+        guard !clean.isEmpty else { return }
+        UserDefaults.standard.set(clean, forKey: "testRunCurrentName")
+        let id = currentTestID
+        Task { await runStore.renameTest(testID: id, name: clean); await refreshRuns() }
+    }
+
+    /// Capture connected: a run starts. Keeps the opening warm-up trace already collected for this broadcast.
+    func beginRun() {
+        if activeRun != nil { endRun(reason: "newRunStarted") }
+        started = Date()
+        startingRAMEntries = ramEntryCount?() ?? 0
+        startRunState()
+    }
+    private func startRunState() {
+        activeRun = ActiveRun(id: diagnosticSessionID, startedAt: started, mode: modeActiveSystem,
+                              startingRAMEntries: startingRAMEntries, lastCheckpointAt: Date())
+    }
+
+    /// Why a run would not be saved right now, or nil. Fixed reason codes plus a human detail.
+    private func skipReason(for meta: TestRunMeta) -> (TestRunSkipReason, String)? {
+        TestRunPolicy.skipReason(meta: meta, privateSession: privateSessionOn, savingMode: runSavingMode,
+                                 diagnosticsEnabled: enabled)
+    }
+
+    /// The run is over (stop packet, heartbeat timeout, new session, mode change, reset, new run).
+    /// The snapshot is taken here, synchronously; encoding and writing happen on the store actor.
+    func endRun(reason: String) {
+        guard let run = activeRun else { return }
+        activeRun = nil
+        unsavedEndedRun = nil
         let snapshot = sessionSnapshot()
+        var changes = run.modeChanges
+        if modeActiveSystem != run.mode { changes.append(modeActiveSystem) }
+        let meta = TestRunMeta.make(snapshot: snapshot, testID: currentTestID, testName: currentTestName,
+            endReason: reason, startingRAMEntries: startingRAMEntries, modeChanges: changes, completeness: "complete")
+        clearCollection()
+        let store = runStore
+        if let (code, detail) = skipReason(for: meta) {
+            lastRunBanner = RunBanner(result: .skipped(code, detail: detail), mode: meta.mode, seconds: meta.durationSeconds)
+            Task { await store.discardCheckpoint(id: meta.id) }
+            return
+        }
+        if runSavingMode == "manual" {
+            unsavedEndedRun = (meta, snapshot)
+            lastRunBanner = RunBanner(result: .skipped(.savingOff, detail: "Manual mode – tap Save run to keep it"),
+                                      mode: meta.mode, seconds: meta.durationSeconds)
+            return
+        }
         Task {
-            defer { archiveInProgress = false }
-            do {
-                let data = try await exportWriter.encode(snapshot)
-                let indexedEvents = try await exportWriter.encodeIndexedEvents(snapshot.events)
-                // Check privacy again after encoding, before submitting a durable write.
-                guard UserDefaults.standard.bool(forKey: "persistDiagnosticSessions"),
-                      !UserDefaults.standard.bool(forKey: "privateSession") else { return }
-                try await store.saveDiagnosticSession(id: snapshot.id.uuidString, startedAt: snapshot.startedAt,
-                    endedAt: snapshot.endedAt, payload: data, events: indexedEvents)
-                archiveStatus = "Session saved"
-            } catch { archiveStatus = "Session could not be saved" }
+            let result = await store.save(meta: meta, snapshot: snapshot)
+            lastRunBanner = RunBanner(result: result, mode: meta.mode, seconds: meta.durationSeconds)
+            await refreshRuns()
         }
     }
 
-    func loadSessions() async {
-        guard let store = memoryStore else { archiveStatus = "Memory database unavailable"; return }
-        do {
-            let records = try await store.loadDiagnosticSessions()
-            var decoded: [DiagnosticSessionExport] = []
-            for record in records { decoded.append(try await exportWriter.decode(record)) }
-            archivedSessions = decoded.sorted { $0.endedAt > $1.endedAt }
-            archiveStatus = "Loaded \(decoded.count) sessions"
-        } catch { archiveStatus = "Sessions could not be loaded" }
+    /// Save run: the current run (as a checkpoint, the run continues) or the last ended run that was not saved.
+    @discardableResult
+    func saveRunNow() async -> TestRunSaveResult {
+        let result: TestRunSaveResult
+        let mode: String, seconds: Double
+        if let run = activeRun {
+            let snapshot = sessionSnapshot()
+            var changes = run.modeChanges
+            if modeActiveSystem != run.mode { changes.append(modeActiveSystem) }
+            let meta = TestRunMeta.make(snapshot: snapshot, testID: currentTestID, testName: currentTestName,
+                endReason: "savedWhileRecording", startingRAMEntries: startingRAMEntries, modeChanges: changes, completeness: "complete")
+            mode = meta.mode; seconds = meta.durationSeconds
+            if let (code, detail) = skipReason(for: meta) { result = .skipped(code, detail: detail) }
+            else { result = await runStore.save(meta: meta, snapshot: snapshot) }
+        } else if let pending = unsavedEndedRun {
+            mode = pending.meta.mode; seconds = pending.meta.durationSeconds
+            if privateSessionOn { result = .skipped(.privateSession, detail: "Private session – runs are not saved") }
+            else if runSavingMode == "off" { result = .skipped(.savingOff, detail: "Saving test runs is off") }
+            else {
+                result = await runStore.save(meta: pending.meta, snapshot: pending.snapshot)
+                if case .saved = result { unsavedEndedRun = nil }
+            }
+        } else {
+            mode = modeActiveSystem; seconds = 0
+            result = .skipped(.noData, detail: "No run to save")
+        }
+        lastRunBanner = RunBanner(result: result, mode: mode, seconds: seconds)
+        await refreshRuns()
+        return result
     }
 
-    func deleteSessions() async {
-        guard let store = memoryStore else { archiveStatus = "Memory database unavailable"; return }
-        // Stop automatic re-creation; only diagnostics are removed.
-        UserDefaults.standard.set(false, forKey: "persistDiagnosticSessions")
+    /// Crash-safety checkpoint. Only the snapshot copy runs on the main actor (its cost is recorded);
+    /// redaction, encoding, compression and the write run on the store actor.
+    func checkpointRun() {
+        guard let run = activeRun, !checkpointInFlight, runSavingMode != "off", !privateSessionOn, enabled else { return }
+        let begin = ProcessInfo.processInfo.systemUptime
+        let snapshot = sessionSnapshot()
+        let spent = ProcessInfo.processInfo.systemUptime - begin
+        lastCheckpointCaptureMs = spent * 1000
+        checkpointCaptureMicros = Int(spent * 1_000_000)
+        var changes = run.modeChanges
+        if modeActiveSystem != run.mode { changes.append(modeActiveSystem) }
+        let meta = TestRunMeta.make(snapshot: snapshot, testID: currentTestID, testName: currentTestName,
+            endReason: "recovered", startingRAMEntries: startingRAMEntries, modeChanges: changes, completeness: "recovered")
+        activeRun?.lastCheckpointAt = Date()
+        checkpointInFlight = true
+        let store = runStore
+        Task { _ = await store.checkpoint(meta: meta, snapshot: snapshot); checkpointInFlight = false }
+    }
+
+    func refreshRuns() async {
+        let index = await runStore.index()
+        testRuns = index.runs.sorted { $0.endedAt > $1.endedAt }
+        runPruneNote = index.pruneNote
+    }
+
+    /// Launch: leftover checkpoints become runs marked "Recovered (incomplete)".
+    func recoverRuns() async {
+        let recovered = await runStore.recover()
+        await refreshRuns()
+        if let last = recovered.last {
+            lastRunBanner = RunBanner(result: .saved(last), mode: last.mode, seconds: last.durationSeconds)
+        }
+    }
+
+    /// Build 84, once: rows of the old diagnostic_sessions table become runs marked
+    /// "Imported (mode may be mixed)". The table and its rows are left in place and never written again.
+    func migrateOldSessions() async {
+        guard let store = memoryStore else { return }
+        if await runStore.migrationDone { return }
         do {
-            try await store.clearDiagnosticSessions()
-            archivedSessions = []; archiveStatus = "Saved sessions deleted"
-        } catch { archiveStatus = "Saved sessions could not be deleted" }
+            let payloads = try await store.loadDiagnosticSessions()
+            let imported = await runStore.migrate(payloads: payloads)
+            if imported > 0 { archiveStatus = "Imported \(imported) earlier diagnostic session(s) as test runs" }
+            await refreshRuns()
+        } catch { /* marker stays unset; retried at the next launch */ }
+    }
+
+    func deleteRuns(_ ids: [UUID]) async { await runStore.delete(ids: ids); await refreshRuns() }
+    func deleteAllUnpinnedRuns() async { _ = await runStore.deleteAllUnpinned(); await refreshRuns() }
+    func setRunPinned(_ id: UUID, _ pinned: Bool) async { await runStore.setPinned(id: id, pinned); await refreshRuns() }
+    func renameRun(_ id: UUID, label: String) async { await runStore.rename(id: id, label: label); await refreshRuns() }
+    func moveRun(_ id: UUID, toTest testID: UUID, name: String) async { await runStore.move(id: id, toTest: testID, name: name); await refreshRuns() }
+    func clearRunPruneNote() async { await runStore.clearPruneNote(); await refreshRuns() }
+
+    /// The newest saved run of each translation system in the current test, newest first.
+    /// Falls back to all saved runs when the current test has none.
+    var defaultReportSelection: [UUID] {
+        let current = testRuns.filter { $0.testID == currentTestID }
+        let pool = current.isEmpty ? testRuns : current
+        var seen = Set<String>(), ids: [UUID] = []
+        for run in pool.sorted(by: { $0.endedAt > $1.endedAt }) where seen.insert(run.mode).inserted { ids.append(run.id) }
+        return ids
+    }
+
+    /// One Markdown file for up to six saved runs.
+    func exportTestReport(ids: [UUID]) async {
+        guard !exportInProgress else { return }
+        let ordered = Array(ids.prefix(CombinedDiagnosticReport.maximumSessions))
+        let snapshots = await runStore.loadSnapshots(ids: ordered)
+        guard !snapshots.isEmpty else { archiveStatus = "Select at least one saved run"; return }
+        exportInProgress = true
+        defer { exportInProgress = false }
+        do {
+            let url = try await exportWriter.exportCombinedReport(snapshots,
+                version: AppVersion.version, build: AppVersion.build,
+                runs: testRuns.filter { ordered.contains($0.id) }.map(\.reportInfo))
+            Sharer.present([url])
+            archiveStatus = "Test report ready"
+        } catch {
+            archiveStatus = "Test report export failed; no file was shared"
+        }
     }
 
     @Published var sourceUsage = SourceLanguageUsage()
@@ -1051,8 +1263,14 @@ final class Diagnostics: ObservableObject {
         if pipeline.count > limit { pipeline.removeFirst(pipeline.count - limit) }
     }
 
+    /// A reset during a run ends that run (reason diagnosticsReset) and starts a new one.
     func reset() {
-        persistSession()
+        let wasRecording = activeRun != nil
+        if wasRecording { endRun(reason: "diagnosticsReset") } else { clearCollection() }
+        if wasRecording { startRunState() }
+    }
+
+    private func clearCollection() {
         modeTrace.removeAll(); openingModeTrace.removeAll()
         modeTimingSamples.removeAll(); modeEventCounts.removeAll()
         initialWarmupTrace.removeAll(); legacyModeContexts.removeAll(); lastLegacySpeculation = nil
@@ -1097,6 +1315,12 @@ final class Diagnostics: ObservableObject {
         s.retryCount = p.retryCount ?? s.retryCount
         s.visualChanges = p.visualChanges ?? s.visualChanges
         s.earlyVisualWakes = p.earlyVisualWakes ?? s.earlyVisualWakes
+        s.largePackets = p.largePackets ?? s.largePackets
+        s.packetSendErrors = p.sendErrors ?? s.packetSendErrors
+        s.pixelConfirmations = p.pixelConfirmations ?? s.pixelConfirmations
+        s.pixelRejections = p.pixelRejections ?? s.pixelRejections
+        s.watchSkippedOCR = p.watchSkippedOCR ?? s.watchSkippedOCR
+        s.watchTriggeredOCR = p.watchTriggeredOCR ?? s.watchTriggeredOCR
         s.emptyOCRPasses = p.totalEmptyOCRPasses ?? s.emptyOCRPasses
         s.effectiveOCRIntervalMs = p.effectiveOCRIntervalMs ?? s.effectiveOCRIntervalMs
         if let first = p.firstSeenAt, let visual = p.lastVisualChangeAt,
@@ -1147,7 +1371,7 @@ final class Diagnostics: ObservableObject {
         let recorderToken = beginRecorder(); defer { endRecorder(recorderToken) }
         guard enabled else { return }
         tickN += 1
-        if tickN % 30 == 0 { persistSession() }
+        if let run = activeRun, Date().timeIntervalSince(run.lastCheckpointAt) >= 60 { checkpointRun() }
         let st: EngineState = !alive ? .idle : (paused ? .paused : (frozen ? .frozen : .live))
         if st != lastState {
             if let i = spans.indices.last { spans[i].end = Date() }
@@ -1274,6 +1498,7 @@ final class Diagnostics: ObservableObject {
             "cancelledModelBatches": eventTotals["model_batch_cancelled", default: 0],
             "speculativeStopRequests": eventTotals["speculative_stop_requested", default: 0],
             "speculativeSessionsCreated": eventTotals["speculative_session_created", default: 0],
+            "legacySharedSessionCalls": eventTotals["legacy_shared_session_used", default: 0],
             "handoffReplayed": eventTotals["handoff_replayed", default: 0],
             "handoffExpired": eventTotals["handoff_expired", default: 0],
             "enqueueFailed": eventTotals["enqueue_failed", default: 0],
@@ -1405,10 +1630,10 @@ final class Diagnostics: ObservableObject {
         let trS = Diagnostics.summarize(Array(translate.suffix(30)))
 
         if !alive {
-            flag(2, "Capture isn't running", "Open Home, tap the broadcast button and choose Translator Capture.", .startCapture)
+            flag(2, "Capture isn't running", "Open the Live tab, tap the round broadcast button and choose ScreenLingo Capture.", .startCapture)
             score -= 45
         } else {
-            if paused { flag(0, "Translating is paused", "Turn Pause off on the Home screen to continue."); score -= 5 }
+            if paused { flag(0, "Translating is paused", "Turn Pause off on the Live tab to continue."); score -= 5 }
             if ocrS.n >= 3 {
                 if ocrS.avg > 500 {
                     flag(2, "Reading the screen is slow (\(Int(ocrS.avg)) ms)", "A smaller area or the Fast speed makes it quicker.", .fastSpeed); score -= 20
@@ -1508,6 +1733,22 @@ final class Diagnostics: ObservableObject {
         return rows.joined(separator: "\n")
     }
 
+    /// v2.0.0 L1/L3/L2 one-line view of where confirmed sentences came from,
+    /// how often new speculative sessions were created, and confirmed model
+    /// time split by a nearby call on another session. Diagnostics only.
+    var servedByLine: String {
+        let total = s.specHits + s.cacheHits + s.savedHits + s.cacheMisses
+        func share(_ n: Int) -> String { total == 0 ? "–" : "\(Int((Double(n) / Double(total) * 100).rounded()))%" }
+        let minutes = max(1.0 / 60, Date().timeIntervalSince(started) / 60)
+        let created = eventTotals["speculative_session_created", default: 0]
+        func median(_ key: String) -> String {
+            let values = (modelTimingSamples[key] ?? []).sorted()
+            guard !values.isEmpty else { return "– (0)" }
+            return "\(Int(values[values.count / 2])) ms (\(values.count))"
+        }
+        return "Served by (sentences): speculation \(share(s.specHits)), session RAM \(share(s.cacheHits)), saved memory \(share(s.savedHits)), model \(share(s.cacheMisses)) of \(total). Speculative sessions created \(created) (\(String(format: "%.1f", Double(created) / minutes))/min). Legacy confirmed model median: other session nearby \(median("legacy_confirmed_after_switch")), no switch \(median("legacy_confirmed_no_switch"))."
+    }
+
     func report(engine: TranslatorEngine) -> String {
         let a = assessment(alive: engine.captureAlive, paused: engine.paused)
         let o = Diagnostics.summarize(ocr), t = Diagnostics.summarize(translate)
@@ -1530,6 +1771,7 @@ final class Diagnostics: ObservableObject {
         l.append("Translations \(s.translations), sentences \(s.sentences), cache \(s.cacheHits + s.savedHits)/\(s.cacheHits + s.savedHits + s.specHits + s.cacheMisses) (pre-translated \(s.specHits)), failures \(s.failures), engine \(s.sessionKind)")
         l.append("Configured source \(engine.sourceCode), last source used \(s.sourceUsed) (\(s.sourceOrigin)), automatic detector \(engine.sourceCode == "auto" ? "enabled" : "off – source selected"), locked \(s.lockedLang).")
         l.append("Cache origins: session \(s.cacheHits), saved memory \(s.savedHits), speculative \(s.specHits), fresh requests \(s.cacheMisses).")
+        l.append(servedByLine)
         l.append("Speculative model requests \(s.specModelRequests); pipeline attempts \(s.specStarted), completed \(s.specCompleted), superseded/cancelled \(s.specDiscarded), declined \(s.specSkipped), unconsumed results \(engine.unconsumedSpeculation); processing \(Int(s.specProcessingMs)) ms, discarded work \(Int(s.specDiscardedMs)) ms. Attempts count pipeline jobs; cache hits count sentences.")
         l.append("Idle validation: selected \(s.legacyBatchEntries), verified \(s.legacyBatchVerified), skipped \(s.legacyBatchSkipped); peak workers \(s.legacyBatchPeakWorkers); model + commit wall time \(Int(s.legacyBatchElapsedMs)) ms.")
         l.append("v1.4.5: deferred confirmed handoffs \(s.confirmedHandoffDeferred); adaptive speculative skips \(s.adaptiveSpeculationSkipped); slow (>1200 ms) PiP enqueues \(s.slowTailEnqueues).")
@@ -1607,7 +1849,7 @@ private struct StatTile: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
@@ -1641,7 +1883,7 @@ private struct LineCard: View {
     private func stat(_ n: String, _ v: Double) -> some View {
         VStack(spacing: 1) {
             Text(fmt(v)).font(.caption.weight(.semibold).monospacedDigit())
-            Text(n).font(.system(size: 9)).foregroundStyle(.secondary)
+            Text(n).font(.caption2).foregroundStyle(.secondary)
         }
     }
 
@@ -1704,7 +1946,7 @@ private struct LineCard: View {
                 }
             }
         }
-        .card()
+        .infoCard()
     }
 }
 
@@ -1746,7 +1988,7 @@ private struct HistogramCard: View {
                 .frame(height: 120)
             }
         }
-        .card()
+        .infoCard()
     }
 }
 
@@ -1770,7 +2012,7 @@ private struct DonutCard: View {
                 .frame(height: 210)
             }
         }
-        .card()
+        .infoCard()
     }
 }
 
@@ -1796,7 +2038,7 @@ private struct BarListCard: View {
                 .frame(height: CGFloat(rows.count) * 34 + 20)
             }
         }
-        .card()
+        .infoCard()
     }
 }
 
@@ -1845,7 +2087,7 @@ private struct MultiSpeedChart: View {
 enum DiagPage: String, CaseIterable, Identifiable {
     case overview, speed, timeline, pipeline, language, device, memory, sessions, log
     var id: String { rawValue }
-    var title: String { rawValue.capitalized }
+    var title: String { self == .sessions ? "Test runs" : rawValue.capitalized }
     var icon: String {
         switch self {
         case .overview: "square.grid.2x2"
@@ -1882,21 +2124,21 @@ struct DiagnosticsView: View {
 
 private struct DiagnosticsBody: View {
     @EnvironmentObject var engine: TranslatorEngine
-    @Environment(\.selectTab) private var selectTab
+    @EnvironmentObject private var router: AppRouter
+    @Environment(\.dismiss) private var dismiss
     @ObservedObject var diag: Diagnostics
     @AppStorage("diagDetailed") private var detailed = false
     @AppStorage("diagnosticsEnabled") private var collectionEnabled = true
     @AppStorage("detailedCollection") private var collectDetails = false
     @AppStorage("diagPage") private var pageRaw = DiagPage.overview.rawValue
     @AppStorage("diagRange") private var rangeRaw = DiagRange.fiveMin.rawValue
-    @State private var visible = false
     @State private var kinds: Set<EventKind> = []
     @State private var query = ""
     @State private var confirmReset = false
     @State private var showSimulator = false
     @State private var confirmDeleteSessions = false
     @State private var bucketSeconds = 1
-    @AppStorage("persistDiagnosticSessions") private var persistSessions = false
+    @State private var showTestReport = false
 
     private var page: DiagPage { DiagPage(rawValue: pageRaw) ?? .overview }
     private var range: DiagRange { DiagRange(rawValue: rangeRaw) ?? .fiveMin }
@@ -1914,7 +2156,7 @@ private struct DiagnosticsBody: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                if visible {
+                Group {
                     VStack(spacing: 14) {
                         VStack(alignment: .leading, spacing: 6) {
                             LabeledContent("Active system", value: engine.activeTranslationSystem.title)
@@ -1924,14 +2166,14 @@ private struct DiagnosticsBody: View {
                             Text(engine.modeAvailability).font(.footnote).foregroundStyle(.secondary)
                             Text("Legacy reference: 1.7.2 (58), e94542ce. Apple default does not identify an effective model.")
                                 .font(.caption).foregroundStyle(.secondary)
-                        }.card()
+                        }.infoCard()
                         if collectionEnabled {
                         if detailed { detailedBody } else { simpleBody }
                         if detailed && !collectDetails {
                             Text("Graphs and events are off. Language counters and session speaker labels still work. Enable Detailed diagnostics in the toolbar settings menu to collect graph samples.").font(.footnote).foregroundStyle(.secondary)
                         }
                         } else {
-                            Text("Diagnostics collection is off. Translation and capture continue.").foregroundStyle(.secondary).card()
+                            Text("Diagnostics collection is off. Translation and capture continue.").foregroundStyle(.secondary).infoCard()
                         }
                     }
                     .padding(.horizontal, 16)
@@ -1940,9 +2182,10 @@ private struct DiagnosticsBody: View {
                 }
             }
             .scrollIndicators(.hidden)
-            .background(Theme.bg.ignoresSafeArea())
+            .background(Palette.background.ignoresSafeArea())
             .navigationTitle("Diagnostics")
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) { Button("Done") { dismiss() } }
                 ToolbarItem(placement: .topBarLeading) {
                     Button { Sharer.shareFile(text: diag.report(engine: engine), name: "translator-report-\(Sharer.stamp()).txt") } label: {
                         Image(systemName: "square.and.arrow.up")
@@ -1959,7 +2202,6 @@ private struct DiagnosticsBody: View {
                             }
                         }
                         Section("Collection") {
-                            Toggle("Save diagnostic sessions on this device", isOn: $persistSessions)
                             Toggle("Simple diagnostics", isOn: $collectionEnabled)
                             Toggle("Detailed diagnostics", isOn: $collectDetails).disabled(!collectionEnabled)
                         }
@@ -1988,12 +2230,11 @@ private struct DiagnosticsBody: View {
                 }
             }
             .sheet(isPresented: $showSimulator) { NavigationStack { PipelineSimulatorView().environmentObject(engine) } }
-            .onAppear { visible = true }
-            .onDisappear { visible = false }
+            .sheet(isPresented: $showTestReport) { TestRunReportSheet(diag: diag) }
             .onChange(of: collectionEnabled) { _, _ in engine.diagnosticsSettingsChanged() }
             .onChange(of: collectDetails) { _, _ in engine.diagnosticsSettingsChanged() }
-            .confirmationDialog("Delete saved diagnostic sessions? Translation memory and history are preserved.", isPresented: $confirmDeleteSessions, titleVisibility: .visible) {
-                Button("Delete saved sessions", role: .destructive) { Task { await diag.deleteSessions() } }
+            .confirmationDialog("Delete all unpinned test runs? Pinned runs, translation memory, history and settings are not changed.", isPresented: $confirmDeleteSessions, titleVisibility: .visible) {
+                Button("Delete unpinned runs", role: .destructive) { Task { await diag.deleteAllUnpinnedRuns() } }
             }
             .confirmationDialog("Clear all graphs, counters and the timeline?", isPresented: $confirmReset,
                                 titleVisibility: .visible) {
@@ -2022,11 +2263,11 @@ private struct DiagnosticsBody: View {
                                 translate: diag.translate.filter { $0.t > cutoff },
                                 delay: diag.latency.filter { $0.t > cutoff })
             }
-            .card()
+            .infoCard()
             recentEvents
             }
             if !collectDetails {
-                Text("Summary collection is active. Timing history and events are off.").font(.footnote).foregroundStyle(.secondary).card()
+                Text("Summary collection is active. Timing history and events are off.").font(.footnote).foregroundStyle(.secondary).infoCard()
             }
         }
     }
@@ -2110,7 +2351,7 @@ private struct DiagnosticsBody: View {
                 .font(.caption2).foregroundStyle(.secondary)
         }
         .font(.footnote)
-        .card()
+        .infoCard()
     }
 
     private var statusLine: String {
@@ -2129,7 +2370,7 @@ private struct DiagnosticsBody: View {
         return VStack(spacing: 14) {
             HStack(spacing: 16) {
                 if collectDetails { HealthRing(score: a.score) }
-                else { Image(systemName: "waveform.path.ecg").font(.largeTitle).foregroundStyle(Theme.accent.start) }
+                else { Image(systemName: "waveform.path.ecg").font(.largeTitle).foregroundStyle(Color.accentColor) }
                 VStack(alignment: .leading, spacing: 6) {
                     Text(collectDetails ? a.headline : "Summary only").font(.title3.weight(.bold))
                     Text(statusLine).font(.footnote).foregroundStyle(.secondary)
@@ -2158,7 +2399,7 @@ private struct DiagnosticsBody: View {
             Text("Latency covers successful frame enqueues. Replaced work is excluded, so lower latency alone does not establish better subtitle continuity. Counts are candidates, not unique subtitle lines.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .card()
+        .infoCard()
     }
 
     private func apply(_ f: Fix) {
@@ -2171,8 +2412,8 @@ private struct DiagnosticsBody: View {
             ud.set("0", forKey: "frameRot")
             engine.rotationSettingChanged()
         case .narrowArea: ud.set("bottom", forKey: "area")
-        case .openLanguages: selectTab(1); return
-        case .startCapture: selectTab(0); return
+        case .openLanguages: router.go(.languages); return
+        case .startCapture: router.go(.live); return
         case .translateAhead: ud.set(true, forKey: "translateAhead")
         }
         engine.syncConfig()
@@ -2202,12 +2443,12 @@ private struct DiagnosticsBody: View {
                 }
             }
         }
-        .card()
+        .infoCard()
     }
 
     private func feedRow(_ icon: String, _ title: String, _ text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: icon).frame(width: 20).foregroundStyle(Theme.accent.start)
+            Image(systemName: icon).frame(width: 20).foregroundStyle(Color.accentColor)
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.caption2).foregroundStyle(.secondary)
                 Text(text).font(.footnote).lineLimit(3)
@@ -2223,7 +2464,7 @@ private struct DiagnosticsBody: View {
             Text("Translator: " + engine.translationActivity.title).font(.caption2).foregroundStyle(.secondary)
             Text(engine.status).font(.caption2).foregroundStyle(.secondary)
         }
-        .card()
+        .infoCard()
     }
 
     private var recentEvents: some View {
@@ -2241,7 +2482,7 @@ private struct DiagnosticsBody: View {
                 Label("Open the full timeline", systemImage: "timeline.selection").font(.footnote.weight(.semibold))
             }
         }
-        .card()
+        .infoCard()
     }
 
     // MARK: Detailed
@@ -2251,7 +2492,7 @@ private struct DiagnosticsBody: View {
                 .font(.caption.weight(.semibold))
                 .padding(.horizontal, 12).padding(.vertical, 8)
                 .foregroundStyle(page == p ? Color.white : Color.secondary)
-                .background(page == p ? Theme.accent.start.opacity(0.85) : Theme.card, in: Capsule())
+                .background(page == p ? Color.accentColor.opacity(0.85) : Palette.surface, in: Capsule())
         }
     }
 
@@ -2304,77 +2545,14 @@ private struct DiagnosticsBody: View {
                 LabeledContent(outcome.rawValue, value: String(diag.memoryOutcomesForUI(outcome)))
             }
             Text(diag.archiveStatus).font(.caption).foregroundStyle(.secondary)
-        }.card()
+        }.infoCard()
     }
 
     private var sessionsPage: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Toggle("Save sessions on this device", isOn: $persistSessions)
-            Text("Opt-in metadata only. Up to 20 sessions, 7 days and 10 MB. No screen images or recognized text. Private sessions are not saved. Only instrumented boundaries are recorded.").font(.caption).foregroundStyle(.secondary)
-            HStack {
-                Button("Save now") { diag.persistSession() }.disabled(!persistSessions)
-                Button("Refresh") { Task { await diag.loadSessions() } }
-            }
-            Text(diag.archiveStatus).font(.caption)
-            ForEach(diag.archivedSessions) { session in
-                DisclosureGroup(session.startedAt.formatted()) {
-                    Text("\(session.appVersion) · \(session.events.count) retained events")
-                    Text("Measured through \(session.endedAt.formatted())")
-                    Text(session.measurementBoundary).font(.caption)
-                    let findings = DiagnosticIssueDetector.assess(session)
-                    if findings.isEmpty {
-                        Text("No evidence-based issues detected in this retained session.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Text("Evidence-based issues").font(.subheadline.weight(.semibold))
-                        ForEach(findings) { finding in
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(finding.code.replacingOccurrences(of: "_", with: " ").capitalized)
-                                    .font(.caption.weight(.semibold))
-                                Text(finding.classification.capitalized + " · " + String(finding.occurrences) + " recorded")
-                                    .font(.caption2).foregroundStyle(.secondary)
-                                Text(finding.explanation)
-                                    .font(.caption).foregroundStyle(.secondary)
-                            }
-                        }
-                        Text("Suspected issues are heuristics, not verified translation errors.")
-                            .font(.caption2).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            if diag.archivedSessions.count >= 2 {
-                let baseline = diag.archivedSessions[1]
-                let current = diag.archivedSessions[0]
-                let comparison = DiagnosticPerformanceComparison(baseline: baseline, current: current)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text("Recent session timing comparison").font(.subheadline.weight(.semibold))
-                    if comparison.comparable {
-                        ForEach(comparison.p95Changes.keys.sorted(), id: \.self) { metric in
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(metric).font(.caption.weight(.semibold))
-                                Text(comparisonTiming(comparison, metric: metric))
-                                    .font(.caption).monospacedDigit()
-                            }
-                        }
-                        Text("Indicative only: different subtitle workloads can change latency.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    } else {
-                        Text(comparison.reason).font(.caption).foregroundStyle(.secondary)
-                    }
-                }
-            }
-            Button("Delete saved diagnostic sessions", role: .destructive) { confirmDeleteSessions = true }
-        }.card()
+        TestRunsPage(diag: diag, showReport: $showTestReport, confirmDeleteUnpinned: $confirmDeleteSessions).infoCard()
     }
 
     // MARK: Overview
-    private func comparisonTiming(_ comparison: DiagnosticPerformanceComparison, metric: String) -> String {
-        [("Median", comparison.medianChanges), ("Mean", comparison.meanChanges),
-         ("P90", comparison.p90Changes), ("P95", comparison.p95Changes)]
-            .compactMap { label, values in values[metric].map { label + String(format: " %+.1f%%", $0) } }
-            .joined(separator: " · ")
-    }
-
     private var liveFraction: Double {
         let now = Date()
         let total = now.timeIntervalSince(diag.started)
@@ -2404,12 +2582,12 @@ private struct DiagnosticsBody: View {
     private func node(_ title: String, _ icon: String, _ value: String, _ color: Color) -> some View {
         VStack(spacing: 4) {
             Image(systemName: icon)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.subheadline.weight(.semibold))
                 .foregroundStyle(color)
                 .frame(width: 34, height: 34)
                 .background(color.opacity(0.18), in: Circle())
-            Text(title).font(.system(size: 9, weight: .semibold))
-            Text(value).font(.system(size: 9).monospacedDigit()).foregroundStyle(.secondary)
+            Text(title).font(.caption2.weight(.semibold))
+            Text(value).font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                 .lineLimit(1).minimumScaleFactor(0.6)
         }
         .frame(maxWidth: .infinity)
@@ -2436,7 +2614,7 @@ private struct DiagnosticsBody: View {
                 node("Show", "rectangle.on.rectangle", engine.pipActive ? (d.n > 0 ? "\(Int(d.avg)) ms" : "–") : "closed", showColor)
             }
         }
-        .card()
+        .infoCard()
     }
 
     private var sessionGrid: some View {
@@ -2490,7 +2668,7 @@ private struct DiagnosticsBody: View {
                 }
             }
         }
-        .card()
+        .infoCard()
     }
 
     // MARK: Speed
@@ -2507,7 +2685,7 @@ private struct DiagnosticsBody: View {
             HistogramCard(title: "How long the total delay is", values: slice(diag.latency).map { $0.v }, color: Color.orange)
             if engine.activeTranslationSystem != .legacy {
                 Text("Model-inference timings include successful backend requests even if an obsolete result was not displayed. Memory-only translations add no model sample. Total delay ends at PiP buffer enqueue.")
-                    .font(.caption).foregroundStyle(.secondary).card()
+                    .font(.caption).foregroundStyle(.secondary).infoCard()
             }
             PairedTimingCard(samples: diag.pipeline.filter { $0.date >= rangeStart })
             granularityCard
@@ -2554,7 +2732,7 @@ private struct DiagnosticsBody: View {
             Text("Buckets use actual elapsed time. For precise event order and durations, export events.csv; for longer sessions, use 15-second intervals. Individual buckets may have too few timings for useful P95.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .card()
+        .infoCard()
     }
 
     // MARK: Timeline
@@ -2599,7 +2777,7 @@ private struct DiagnosticsBody: View {
                 }
             }
         }
-        .card()
+        .infoCard()
     }
 
     private var perMinuteCard: some View {
@@ -2621,7 +2799,7 @@ private struct DiagnosticsBody: View {
                 .frame(height: 120)
             }
         }
-        .card()
+        .infoCard()
     }
 
     private var timelinePage: some View {
@@ -2636,13 +2814,13 @@ private struct DiagnosticsBody: View {
         HStack(alignment: .top, spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(e.time, format: .dateTime.hour().minute().second())
-                    .font(.system(size: 10).monospacedDigit()).foregroundStyle(.secondary)
+                    .font(.caption2.monospacedDigit()).foregroundStyle(.secondary)
                 Text(elapsed(e.time))
-                    .font(.system(size: 9).monospacedDigit()).foregroundStyle(.tertiary)
+                    .font(.caption2.monospacedDigit()).foregroundStyle(.tertiary)
             }
             .frame(width: 58, alignment: .leading)
             Image(systemName: e.kind.icon)
-                .font(.system(size: 11, weight: .semibold))
+                .font(.caption.weight(.semibold))
                 .foregroundStyle(e.kind.color)
                 .frame(width: 24, height: 24)
                 .background(e.kind.color.opacity(0.16), in: Circle())
@@ -2662,7 +2840,7 @@ private struct DiagnosticsBody: View {
                 .font(.caption2.weight(.semibold))
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .foregroundStyle(on ? Color.white : Color.secondary)
-                .background(on ? color.opacity(0.7) : Theme.card, in: Capsule())
+                .background(on ? color.opacity(0.7) : Palette.surface, in: Capsule())
         }
     }
 
@@ -2698,7 +2876,7 @@ private struct DiagnosticsBody: View {
             }
             ForEach(Array(shown.prefix(limit))) { e in eventRow(e) }
         }
-        .card()
+        .infoCard()
     }
 
     // MARK: Pipeline
@@ -2713,7 +2891,7 @@ private struct DiagnosticsBody: View {
                 }
             }
             Text("Times measure app processing and frame enqueue, not physical screen presentation. Full bounded timeline is in CSV.").font(.caption).foregroundStyle(.secondary)
-        }.card()
+        }.infoCard()
     }
 
     private var adaptivePipelineCard: some View {
@@ -2735,8 +2913,10 @@ private struct DiagnosticsBody: View {
             }
             Text("Skipped frames · unchanged \(s.unchangedSkipped) · cadence \(s.cadenceSkipped) · paused \(s.pausedSkipped)").font(.caption)
             Text("Early OCR visual-change wakes: \(s.earlyVisualWakes) · derived from visual motion only, not confirmed text.").font(.caption).foregroundStyle(.secondary)
+            Text("Capture packets over 8 KB: \(s.largePackets) · failed sends: \(s.packetSendErrors)").font(.caption).foregroundStyle(.secondary)
+            Text("Pixel-verified confirmations: \(s.pixelConfirmations) · fell back to OCR: \(s.pixelRejections) · OCR skipped while caption unchanged: \(s.watchSkippedOCR) · OCR started on caption change: \(s.watchTriggeredOCR)").font(.caption).foregroundStyle(.secondary)
             Text("Recorder self-time · simple \(String(format: "%.1f", diag.recorderCosts.simpleMs)) ms · detailed \(String(format: "%.1f", diag.recorderCosts.detailedMs)) ms. Excludes chart drawing and model work; these are different workloads.").font(.caption).foregroundStyle(.secondary)
-        }.card()
+        }.infoCard()
     }
 
     private var pipelinePage: some View {
@@ -2780,7 +2960,7 @@ private struct DiagnosticsBody: View {
                 LabeledContent("Unchanged frames skipped", value: "\(s.skippedFrames)")
             }
             .font(.footnote)
-            .card()
+            .infoCard()
             if diag.detailedCollection {
                 candidateTraceCard
             }
@@ -2824,7 +3004,7 @@ private struct DiagnosticsBody: View {
                 }
             }
         }
-        .card()
+        .infoCard()
     }
 
     // MARK: Language
@@ -2853,7 +3033,7 @@ private struct DiagnosticsBody: View {
                     .font(.subheadline.weight(.semibold))
                 Text(engine.sourceCode == "auto" ? "With language lock enabled, four confident matching detections within six qualifying readings lock the source. Clear language changes translate immediately; three mismatches release the lock. The target language is never locked." : "Automatic detection is off. Selected-language inputs still count in the graph.")
                     .font(.caption).foregroundStyle(.secondary)
-            }.card()
+            }.infoCard()
             BarListCard(title: "Source languages used · session", rows: Array(counts), color: Color.purple)
             BarListCard(title: "How the source was chosen", rows: SourceLanguageOrigin.allCases.map {
                 BarRow(name: $0.title, value: diag.sourceUsage.origins[$0, default: 0])
@@ -2871,12 +3051,12 @@ private struct DiagnosticsBody: View {
                         ForEach(diag.names, id: \.self) { n in
                             Text(n).font(.caption.weight(.semibold))
                                 .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(Theme.accent.start.opacity(0.25), in: Capsule())
+                                .background(Color.accentColor.opacity(0.25), in: Capsule())
                         }
                     }
                 }
             }
-            .card()
+            .infoCard()
         }
     }
 
@@ -2935,7 +3115,7 @@ private struct DiagnosticsBody: View {
                         AxisValueLabel {
                             if let d = v.as(Double.self) {
                                 Text(["Normal", "Warm", "Hot", "Critical"][Swift.min(3, Swift.max(0, Int(d)))])
-                                    .font(.system(size: 9))
+                                    .font(.caption2)
                             }
                         }
                     }
@@ -2943,7 +3123,7 @@ private struct DiagnosticsBody: View {
                 .frame(height: 110)
             }
         }
-        .card()
+        .infoCard()
     }
 
     private var devicePage: some View {
@@ -2966,7 +3146,7 @@ private struct DiagnosticsBody: View {
                 LabeledContent("Battery now", value: b < 0 ? "–" : "\(Int(b * 100))%")
             }
             .font(.footnote)
-            .card()
+            .infoCard()
         }
     }
 
@@ -2983,9 +3163,8 @@ private struct DiagnosticsBody: View {
                 }
             }
             .padding(12)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             eventListCard(limit: 400)
         }
     }
 }
-

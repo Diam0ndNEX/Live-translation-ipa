@@ -27,7 +27,7 @@ struct MemoryManagementView: View {
 
     var body: some View {
         List {
-            Section("Storage") {
+            Section("What is remembered") {
                 LabeledContent("Committed entries", value: String(engine.memoryCount))
                 LabeledContent("Pending writes", value: String(engine.memoryPendingWrites))
                 if let h = engine.memoryHealth {
@@ -66,7 +66,7 @@ struct MemoryManagementView: View {
                 Text("Live validation uses independently confirmed model output; optional idle validation makes bounded on-device model requests when screen capture is stopped. Originals remain preserved.").font(.footnote)
                 Text("Thresholds do not delete translations. RAM eviction preserves committed entries.").font(.footnote)
             }
-            Section("Legacy memory review · optional") {
+            AdvancedSection(title: "Review old saved translations") {
                 Toggle("Automatically validate while idle", isOn: $legacyIdleValidationEnabled)
                 Text("Off by default. Automatic batches check up to 24 eligible entries every 8 seconds after the prior batch finishes (20 seconds when warm). Each model call translates up to 12 entries; up to 2 independent sessions operate concurrently (1 when warm). Only runs in the foreground without capture or PiP.")
                     .font(.footnote).foregroundStyle(.secondary)
@@ -142,7 +142,7 @@ struct MemoryManagementView: View {
                 Text("Similar text is a review suggestion only, not a trusted cache hit. Older answers are preserved, including alternative wording.")
                     .font(.footnote).foregroundStyle(.secondary)
             }
-            Section("Transfer") {
+            Section("Export and import") {
                 Button(transferBusy ? "Preparing…" : "Export translation memory") {
                     transferBusy = true
                     Task {
@@ -154,7 +154,8 @@ struct MemoryManagementView: View {
                 Button("Import translation memory") { importing = true }.disabled(transferBusy || captureInProgress)
                 Text("Memory exports contain source and translated text. Choose where to save them.").font(.footnote)
             }
-            Section("Conflicts") {
+            AdvancedSwitchSection()
+            AdvancedSection(title: "Conflicting translations") {
                 Button(showConflicts ? "Refresh conflict inspection" : "Inspect conflicting translations") {
                     Task {
                         do {
@@ -176,7 +177,7 @@ struct MemoryManagementView: View {
                 }
                 Text("Conflicting alternatives are preserved. Inspect them before removing any entry.").font(.footnote)
             }
-            Section("Maintenance") {
+            AdvancedSection(title: "Maintenance") {
                 Button(transferBusy ? "Preparing snapshot…" : "Create recovery snapshot") {
                     transferBusy = true
                     Task {
@@ -211,7 +212,7 @@ struct MemoryManagementView: View {
                 }
                 if !message.isEmpty { Text(message) }
             }
-            Section("Recovery snapshots") {
+            AdvancedSection(title: "Recovery copies") {
                 Button("Inspect saved recovery snapshots") {
                     Task {
                         do {
@@ -234,7 +235,7 @@ struct MemoryManagementView: View {
                 Text("If the database is healthy, recovery merges translations without replacing it. If the database cannot open, an explicit restore preserves its damaged files but may exclude newer translations not in the snapshot. Stop live translation before restoring.")
                     .font(.footnote)
             }
-            Section("Entries · up to 100 matches") {
+            AdvancedSection(title: "Browse entries (up to 100 matches)") {
                 ForEach(entries) { entry in
                     VStack(alignment: .leading) {
                         Text(entry.sourceText)

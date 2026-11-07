@@ -1,4 +1,4 @@
-// Screen Translator – App – v0.9.0
+// ScreenLingo – App
 // Custom presets: save the settings you're using, switch with one tap.
 import SwiftUI
 
@@ -269,7 +269,7 @@ final class PresetStore: ObservableObject {
     }
 }
 
-// MARK: - Home carousel
+// MARK: - Preset chips
 struct PresetChips: View {
     @EnvironmentObject var engine: TranslatorEngine
     @ObservedObject var store: PresetStore
@@ -323,13 +323,13 @@ struct PresetChips: View {
             engine.toast("\(p.name) applied")
         } label: {
             HStack(spacing: 6) {
-                Image(systemName: p.symbol).font(.system(size: 13, weight: .semibold))
+                Image(systemName: p.symbol).font(.footnote.weight(.semibold))
                 Text(p.name).font(.footnote.weight(.semibold)).lineLimit(1)
                 if isActive && store.isModified { Circle().fill(Color.orange).frame(width: 7, height: 7) }
             }
             .padding(.horizontal, 12).padding(.vertical, 9)
             .foregroundStyle(Color.white)
-            .background(isActive ? p.color.opacity(0.85) : Theme.card, in: Capsule())
+            .background(isActive ? p.color.opacity(0.85) : Palette.surface, in: Capsule())
             .overlay(Capsule().stroke(p.color.opacity(isActive ? 0 : 0.55), lineWidth: 1))
         }
         .contextMenu {
@@ -401,7 +401,7 @@ struct PresetEditor: View {
                         ForEach(PresetStore.symbols, id: \.self) { s in
                             Button { symbol = s } label: {
                                 Image(systemName: s)
-                                    .font(.system(size: 18))
+                                    .font(.title3)
                                     .frame(width: 40, height: 40)
                                     .foregroundStyle(symbol == s ? Color.white : Color.secondary)
                                     .background(symbol == s ? PresetStore.palette[colorIndex] : Color.clear,
@@ -530,7 +530,7 @@ struct PresetManagerView: View {
             }
         }
         .scrollContentBackground(.hidden)
-        .background(Theme.bg.ignoresSafeArea())
+        .background(Palette.background.ignoresSafeArea())
         .navigationTitle("Presets")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { EditButton() }
@@ -552,7 +552,7 @@ struct PresetManagerView: View {
                     }
                     if isActive {
                         Text(store.isModified ? "ACTIVE · MODIFIED" : "ACTIVE")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.caption2.weight(.bold))
                             .foregroundStyle(store.isModified ? Color.orange : Color.green)
                     }
                 }

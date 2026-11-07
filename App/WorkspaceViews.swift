@@ -6,7 +6,7 @@ import UniformTypeIdentifiers
 
 struct TranslationWorkspace: View {
     @EnvironmentObject private var engine: TranslatorEngine
-    @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var feedback: FeedbackCenter
     @State private var input = ""
     @State private var photo: PhotosPickerItem?
     @State private var importing = false
@@ -18,72 +18,51 @@ struct TranslationWorkspace: View {
     @AppStorage("photoAutoTranslate") private var photoAutoTranslate = false
 
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    HStack(spacing: 12) {
-                        BrandMark().frame(width: 44, height: 44)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Translate anything").font(.system(.title2, design: .rounded, weight: .bold))
-                            Text("Text · photos · screenshots").font(.caption).foregroundStyle(.secondary)
-                        }
+        SheetScaffold(title: "Text & photos") {
+            ScreenScaffold {
+                Text("Translate typed text, a photo, a screenshot or a file. Live screen reading continues when you close this.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                LanguagePairBar(source: $engine.sourceCode, target: $engine.targetCode, items: engine.languages,
+                                swapDisabled: engine.sourceCode == "auto") { engine.swapLanguages() }
+                HStack(spacing: Space.s) {
+                    PhotosPicker(selection: $photo, matching: .images) {
+                        Label("Photo", systemImage: "photo").frame(maxWidth: .infinity, minHeight: 44)
                     }
-                    Text("Translate a screenshot, a photo or your own text. Live screen reading resumes when you close this workspace.")
-                        .foregroundStyle(.secondary)
+                    Button { importing = true } label: { Label("File", systemImage: "folder").frame(maxWidth: .infinity, minHeight: 44) }
+                    Button { input = String((UIPasteboard.general.string ?? "").prefix(12000)) } label: {
+                        Label("Paste", systemImage: "doc.on.clipboard").frame(maxWidth: .infinity, minHeight: 44)
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(recognizing)
+                VStack(alignment: .leading, spacing: Space.s) {
+                    TextEditor(text: $input).frame(minHeight: 160).scrollContentBackground(.hidden)
+                        .accessibilityLabel("Text to translate")
                     HStack {
-                        LangMenu(code: $engine.sourceCode, items: engine.languages, allowAuto: true)
-                        Image(systemName: "arrow.right").foregroundStyle(.secondary)
-                        LangMenu(code: $engine.targetCode, items: engine.languages)
+                        Text("\(input.count) / 12,000 characters").font(.footnote).foregroundStyle(.secondary)
+                        Spacer()
+                        Button("Clear", role: .destructive) { input = "" }.disabled(input.isEmpty).frame(minHeight: 44)
                     }
-                    HStack {
-                        PhotosPicker(selection: $photo, matching: .images) { Label("Photo", systemImage: "photo") }
-                        Button { importing = true } label: { Label("File", systemImage: "folder") }
-                        Button { input = String((UIPasteboard.general.string ?? "").prefix(12000)) } label: {
-                            Label("Paste", systemImage: "doc.on.clipboard")
+                }.infoCard()
+                if recognizing { ProgressRow(title: "Reading the image on your device…") }
+                if let errorText { Banner(text: errorText, severity: .error) }
+                PrimaryButton(title: engine.isTranslating ? "Translating…" : "Translate", symbol: "sparkles",
+                              enabled: !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !recognizing && !engine.isTranslating) {
+                    engine.translateText(input)
+                }
+                if !engine.translated.isEmpty {
+                    VStack(alignment: .leading, spacing: Space.m) {
+                        SectionHeader(title: "Translation")
+                        Text(engine.translated).font(.title3).textSelection(.enabled)
+                        HStack(spacing: Space.s) {
+                            SecondaryButton(title: "Copy", symbol: "doc.on.doc") { UIPasteboard.general.string = engine.translated; feedback.show("Copied", severity: .success) }
+                            SecondaryButton(title: "Listen", symbol: "speaker.wave.2") { engine.speak(engine.translated) }
+                            ShareLink(item: engine.translated) { Label("Share", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity, minHeight: 44) }.buttonStyle(.bordered)
                         }
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(recognizing)
-                    VStack(alignment: .leading, spacing: 8) {
-                        TextEditor(text: $input).frame(minHeight: 180).scrollContentBackground(.hidden)
-                            .accessibilityLabel("Text to translate")
-                        HStack {
-                            Text("\(input.count) / 12,000 characters").font(.caption).foregroundStyle(.secondary)
-                            Spacer()
-                            Button("Clear", role: .destructive) { input = "" }
-                        }
-                    }.card()
-                    if recognizing { ProgressView("Reading image on your device…") }
-                    if let errorText { Label(errorText, systemImage: "exclamationmark.triangle").foregroundStyle(.orange) }
-                    Button {
-                        engine.translateText(input)
-                    } label: {
-                        HStack {
-                            if engine.isTranslating { ProgressView().tint(.white) }
-                            Label("Translate", systemImage: "sparkles").font(.headline)
-                        }
-                        .frame(maxWidth: .infinity).padding()
-                        .background(Theme.gradient, in: RoundedRectangle(cornerRadius: 18))
-                    }
-                    .foregroundStyle(.white)
-                    .disabled(input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || recognizing || engine.isTranslating)
-                    if !engine.translated.isEmpty {
-                        VStack(alignment: .leading, spacing: 14) {
-                            Label("YOUR TRANSLATION", systemImage: "sparkles").font(.caption.bold()).foregroundStyle(.mint)
-                            Text(engine.translated).font(.title3).textSelection(.enabled)
-                            HStack {
-                                Button { UIPasteboard.general.string = engine.translated; engine.toast("Copied") } label: { Label("Copy", systemImage: "doc.on.doc") }
-                                Button { engine.speak(engine.translated) } label: { Label("Listen", systemImage: "speaker.wave.2") }
-                                ShareLink(item: engine.translated) { Image(systemName: "square.and.arrow.up") }
-                            }.buttonStyle(.bordered)
-                        }.card()
-                    }
-                    Text(engine.status).font(.footnote).foregroundStyle(.secondary)
-                }.padding(20)
+                    }.infoCard()
+                }
+                Text(engine.status).font(.footnote).foregroundStyle(.secondary)
             }
-            .background(Theme.bg.ignoresSafeArea())
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }
         .onAppear { engine.beginWorkspace() }
         .onDisappear { ocrRequestID = UUID(); ocrTask?.cancel(); recognizing = false; engine.endWorkspace() }
@@ -172,92 +151,88 @@ struct TranslationWorkspace: View {
     }
 }
 
+/// Choose which part of the screen is read.
+/// The broadcast extension owns capture, so the app has no live frame to show. The box is drawn over an honest
+/// "Preview" placeholder, not over your screen. Drag the box or its handles, or use the sliders.
 struct CaptureAreaEditor: View {
     @EnvironmentObject private var engine: TranslatorEngine
+    @EnvironmentObject private var feedback: FeedbackCenter
     @Environment(\.dismiss) private var dismiss
     @AppStorage("customY0") private var lower = 0.0
     @AppStorage("customY1") private var upper = 0.5
     @AppStorage("area") private var area = "smart"
+    @State private var base: (Double, Double)?
     private var range: ClosedRange<Double> { ExportFormat.normalizedArea(lower, upper) }
 
+    private func clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { min(max(v, lo), hi) }
+
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
-                    Text("Choose where to read").font(.title.bold())
-                    Text("The highlighted band is the part of the screen ScreenLingo will read. Adjust it to avoid player controls or focus on subtitles.").foregroundStyle(.secondary)
-                    GeometryReader { geometry in
-                        ZStack(alignment: .top) {
-                            RoundedRectangle(cornerRadius: 22).fill(Theme.cardStrong)
-                            VStack { Text("TOP"); Spacer(); Text("BOTTOM") }
-                                .font(.caption.bold()).foregroundStyle(.secondary).padding()
-                            Rectangle().fill(Theme.accent.start.opacity(0.35))
-                                .frame(height: geometry.size.height * (range.upperBound - range.lowerBound))
-                                .overlay(Rectangle().stroke(Theme.accent.start, lineWidth: 2))
-                                .offset(y: geometry.size.height * (1 - range.upperBound))
-                        }.clipShape(RoundedRectangle(cornerRadius: 22))
-                    }.frame(height: 280).frame(maxWidth: 200).frame(maxWidth: .infinity)
-                    VStack(alignment: .leading) {
-                        Text("Lower edge · \(Int(range.lowerBound * 100))% from bottom")
-                        Slider(value: $lower, in: 0...0.9).accessibilityLabel("Lower capture edge")
-                        Text("Upper edge · \(Int(range.upperBound * 100))% from bottom")
-                        Slider(value: $upper, in: 0.1...1).accessibilityLabel("Upper capture edge")
+        SheetScaffold(title: "Capture area") {
+            ScreenScaffold {
+                Text("The highlighted band is the part of the screen ScreenLingo reads. Move it away from player controls, or shrink it to the subtitles.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                Banner(text: "This is a preview, not your live screen. iOS gives capture only to the broadcast extension.", severity: .info)
+                GeometryReader { geo in
+                    let h = geo.size.height
+                    let top = h * (1 - range.upperBound)
+                    let bottom = h * (1 - range.lowerBound)
+                    ZStack(alignment: .top) {
+                        RoundedRectangle(cornerRadius: Radius.m, style: .continuous).fill(Palette.surfaceRaised)
+                        VStack { Text("Top of screen"); Spacer(); Text("Bottom of screen") }
+                            .font(.caption.bold()).foregroundStyle(.secondary).padding(Space.m)
+                        Rectangle().fill(Color.accentColor.opacity(0.3))
+                            .overlay(Rectangle().stroke(Color.accentColor, lineWidth: 2))
+                            .frame(height: max(24, bottom - top)).offset(y: top)
+                            .gesture(DragGesture()
+                                .onChanged { v in
+                                    if base == nil { base = (lower, upper) }
+                                    guard let b = base else { return }
+                                    let span = b.1 - b.0
+                                    let lo = clamp(b.0 - Double(v.translation.height / h), 0, 1 - span)
+                                    lower = lo; upper = lo + span
+                                }.onEnded { _ in base = nil })
+                            .accessibilityHidden(true)
+                        handle.offset(y: top - 10)
+                            .gesture(DragGesture()
+                                .onChanged { v in
+                                    if base == nil { base = (lower, upper) }
+                                    guard let b = base else { return }
+                                    upper = clamp(b.1 - Double(v.translation.height / h), b.0 + 0.1, 1)
+                                }.onEnded { _ in base = nil })
+                            .accessibilityHidden(true)
+                        handle.offset(y: bottom - 10)
+                            .gesture(DragGesture()
+                                .onChanged { v in
+                                    if base == nil { base = (lower, upper) }
+                                    guard let b = base else { return }
+                                    lower = clamp(b.0 - Double(v.translation.height / h), 0, b.1 - 0.1)
+                                }.onEnded { _ in base = nil })
+                            .accessibilityHidden(true)
                     }
-                    HStack {
-                        Button("Full screen") { lower = 0; upper = 1 }
-                        Button("Subtitles") { lower = 0; upper = 0.35 }
-                        Button("Middle") { lower = 0.3; upper = 0.7 }
-                    }.buttonStyle(.bordered)
-                    Button("Use this area") {
-                        let selection = range
-                        lower = selection.lowerBound; upper = selection.upperBound; area = "custom"
-                        engine.syncConfig(); engine.toast("Capture area updated"); dismiss()
-                    }.buttonStyle(.borderedProminent).frame(maxWidth: .infinity)
-                }.padding(24)
-            }.background(Theme.bg.ignoresSafeArea())
-                .navigationTitle("Capture area").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+                }.frame(height: 300).frame(maxWidth: 220).frame(maxWidth: .infinity)
+                VStack(alignment: .leading, spacing: Space.s) {
+                    Text("Top edge: \(Int(range.upperBound * 100))% from the bottom")
+                    Slider(value: $upper, in: 0.1...1).accessibilityLabel("Top edge of the capture area")
+                    Text("Bottom edge: \(Int(range.lowerBound * 100))% from the bottom")
+                    Slider(value: $lower, in: 0...0.9).accessibilityLabel("Bottom edge of the capture area")
+                }.infoCard()
+                HStack(spacing: Space.s) {
+                    SecondaryButton(title: "Full screen") { lower = 0; upper = 1 }
+                    SecondaryButton(title: "Subtitles") { lower = 0; upper = 0.35 }
+                    SecondaryButton(title: "Middle") { lower = 0.3; upper = 0.7 }
+                }
+                PrimaryButton(title: "Use this area") {
+                    let selection = range
+                    lower = selection.lowerBound; upper = selection.upperBound; area = "custom"
+                    engine.syncConfig(); feedback.show("Capture area updated", severity: .success); dismiss()
+                }
+            }
         }
     }
-}
 
-struct SessionControls: View {
-    @EnvironmentObject private var engine: TranslatorEngine
-    @Environment(\.dismiss) private var dismiss
-    @AppStorage("sessionLimit") private var limit = 0
-    @AppStorage("privateSession") private var privateSession = false
-    @State private var confirmClear = false
-    var body: some View {
-        NavigationStack {
-            List {
-                Section("This session") {
-                    if let started = engine.sessionStarted { LabeledContent("Started", value: started.formatted(date: .omitted, time: .shortened)) }
-                    LabeledContent("Translations", value: "\(engine.sessionTranslations)")
-                    LabeledContent("Characters", value: "\(engine.sessionCharacters)")
-                    Text(engine.status).font(.footnote).foregroundStyle(.secondary)
-                }
-                LatencyDetail(monitor: engine.latency)
-                Section("Session controls") {
-                    Toggle("Pause live translation", isOn: $engine.paused)
-                    Toggle("Private session", isOn: $privateSession)
-                    Text("Private sessions skip new history entries and writing translation memory to disk.").font(.footnote).foregroundStyle(.secondary)
-                    Picker("Pause session after", selection: $limit) {
-                        Text("No limit").tag(0); Text("15 minutes").tag(15); Text("30 minutes").tag(30); Text("1 hour").tag(60)
-                    }
-                    Button("Restart session timer") { engine.resetSession() }
-                    Button("Clear current output", role: .destructive) { confirmClear = true }
-                }
-                Section("Recovery") {
-                    Button("Refresh language readiness") { Task { await engine.refreshStatus() } }
-                    Button("Reopen floating window") { engine.startPiP() }
-                    Button("Copy diagnostic report") { UIPasteboard.general.string = engine.diag.report(engine: engine); engine.toast("Report copied") }
-                }
-            }.scrollContentBackground(.hidden).background(Theme.bg.ignoresSafeArea())
-                .navigationTitle("Session").navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
-                .confirmationDialog("Clear the current output?", isPresented: $confirmClear) {
-                    Button("Clear output", role: .destructive) { engine.clearOutput() }
-                }
-        }
+    private var handle: some View {
+        Capsule().fill(Color.accentColor).frame(width: 64, height: 20)
+            .overlay(Image(systemName: "line.3.horizontal").font(.caption2).foregroundStyle(.white))
+            .frame(maxWidth: .infinity)
     }
 }

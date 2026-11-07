@@ -92,10 +92,11 @@ final class TranslatorEngine: ObservableObject {
         "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode", "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "smartCool", "steadyCaptions", "languageRecovery", "deduplicateCopies", "continuousRotation", "contextualLanguage"
     ]
     /// App look & behaviour that presets do not touch.
-    static let interfaceKeys = ["memoryRAMCapacity", "memorySoftLimit", "persistDiagnosticSessions", "suppressOwnInterface", "directPiPBuffer", "legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "temporaryMemoryTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
+    static let interfaceKeys = ["memoryRAMCapacity", "memorySoftLimit", "testRunSaving", "suppressOwnInterface", "directPiPBuffer", "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession", "legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "temporaryMemoryTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
     static var settingKeys: [String] { presetKeys + interfaceKeys }
     static let defaults: [String: Any] = [
-        "suppressOwnInterface": true, "memoryRAMCapacity": 3000, "memorySoftLimit": 100000, "persistDiagnosticSessions": false, "directPiPBuffer": false,
+        "suppressOwnInterface": true, "memoryRAMCapacity": 3000, "memorySoftLimit": 100000, "testRunSaving": "automatic", "directPiPBuffer": false, "hybridSwitchGuard": true,
+        "pixelConfirmation": true, "eventDrivenOCR": true, "fastOCR": false, "legacySharedSession": true,
         "source": "auto", "target": "en", "mode": "movie", "area": "smart", "customY0": 0.0, "customY1": 0.5,
         "speed": "balanced", "stability": 2, "minTextH": 0.0, "ignoreList": "", "frameRot": "auto",
         "dropNoise": true, "boost": 1, "skipUnchanged": true, "subtitleAwareChangeDetection": false, "preserveRelatedMovieGroups": false, "rapidTextTracking": true, "joinAdjacentText": true, "activeTextFocus": true, "cleanOCR": true, "slang": true,
@@ -242,6 +243,11 @@ final class TranslatorEngine: ObservableObject {
     private var initialWarmupTask: Task<Void, Never>?
     private var initialWarmupID = UUID()
     private var observedModelRuns: [String: (at: Date, milliseconds: Double?)] = [:]
+    /// v2.0.0 L2 (diagnostics only): Legacy model calls in flight per
+    /// TranslationSession and the last return, to split confirmed model time
+    /// by whether another session's call was running or ended < 1.5 s earlier.
+    private var legacyModelInFlight: [ObjectIdentifier: Int] = [:]
+    private var legacyLastModelReturn: (session: ObjectIdentifier, at: Double)?
 
     private func modelRunKey(_ source: String, _ target: String, _ strategy: RequestedTranslationStrategy) -> String {
         source + ">" + target + "|" + strategy.rawValue
@@ -359,6 +365,10 @@ final class TranslatorEngine: ObservableObject {
     private var modeRevision = 0
     private var modeLastIdentity = ""
     private var modeMemoryOrigins: [String: String] = [:]
+    /// v2.0.0 G6: the SQLite outcome of the first-sighting probe, reused by the
+    /// confirmation probe of the same key moments later (RAM is still checked
+    /// live first). Timeouts are never reused.
+    private var recentSQLiteProbes: [String: (hit: MemoryLookupResult, at: Double, context: Int, session: UUID)] = [:]
     private var modePlans: [String: ([[CaptionTranslationUnit]], Packet, ModeCaption)] = [:]
     private struct ModeLayout: Equatable {
         let text: String
@@ -443,6 +453,7 @@ final class TranslatorEngine: ObservableObject {
             invalidatePending()
             directSession = nil; directKey = ""; availCache.removeAll()
         }
+        if activeTranslationSystem != selection.0 { diag.endRun(reason: "modeChanged"); refreshModeDiagnosticEpoch() } // a run never mixes modes
         activeTranslationSystem = selection.0
         modeCoordinator.system = selection.0
         diag.modeActiveSystem = selection.0.rawValue
@@ -666,6 +677,7 @@ final class TranslatorEngine: ObservableObject {
         let fastPackKnownMissing = fastPack == .supported || fastPack == .unsupported
         modeCoordinator.fastRecoveryInstalled = !fastPackKnownMissing
         modeCoordinator.adaptiveHybrid = flag("adaptiveSpeculation", true) && !fastPackKnownMissing
+        modeCoordinator.hybridSwitchGuard = flag("hybridSwitchGuard", true)
         if confirmed, activeTranslationSystem != .legacy {
             let pair = source + ">" + caption.target + "|" + activeTranslationSystem.rawValue
             let needsCheck = modelReadiness.source != source || modelReadiness.target != caption.target ||
@@ -705,7 +717,19 @@ final class TranslatorEngine: ObservableObject {
                 return [hit]
             }
             guard canReadPersistent else { return [nil] }
-            let hit = await memoryStore.lookup(key: key)
+            let hit: MemoryLookupResult
+            let uptime = ProcessInfo.processInfo.systemUptime
+            if let recent = recentSQLiteProbes[key], recent.context == context,
+               recent.session == caption.session, uptime - recent.at < 3 {
+                hit = recent.hit
+                noteModeEvent(caption, reason: "memory_probe_reused", duration: nil)
+            } else {
+                hit = await memoryStore.lookup(key: key)
+                if hit.outcome != "timeout" {
+                    if recentSQLiteProbes.count >= 64 { recentSQLiteProbes.removeAll() }
+                    recentSQLiteProbes[key] = (hit, ProcessInfo.processInfo.systemUptime, context, caption.session)
+                }
+            }
             guard context == contextRevision, caption.session == modeSessionID else {
                 return [nil]
             }
@@ -801,11 +825,23 @@ final class TranslatorEngine: ObservableObject {
         }
         // LL values never enter the shared preferred namespace, even in RAM.
         if memoryTestMode.allowsReuse {
+            // The caption text is the same for every unit: evaluate language
+            // evidence at most once per caption, not once per Default unit.
+            var captionConfidence: Double?
             for i in output.values.indices where output.strategies[i] == .appleDefault {
                 ram.values[caption.keys[i]] = output.values[i]; touchCache(caption.keys[i])
-                let confidence = sourceCode == "auto" ? (languageEvidence(caption.text, limit: 5).1.filter {
-                    SourceLanguageRouter.sameLanguage($0.key.rawValue, caption.source)
-                }.values.max() ?? 0) : 1
+                let confidence: Double
+                if sourceCode != "auto" {
+                    confidence = 1
+                } else if let known = captionConfidence {
+                    confidence = known
+                } else {
+                    let measured = languageEvidence(caption.text, limit: 5).1.filter {
+                        SourceLanguageRouter.sameLanguage($0.key.rawValue, caption.source)
+                    }.values.max() ?? 0
+                    captionConfidence = measured
+                    confidence = measured
+                }
                 if TranslationUnitPlanning.mayRemember(caption.units[i], confirmed: true),
                    MemoryRetentionPolicy.mayPersist(privateSession: flag("privateSession", false), selectedSource: sourceCode != "auto", confidence: confidence, confirmed: true) {
                     queueMemory(caption.keys[i], output.values[i], independentlyConfirmed: output.origins[i] == "recovery", knownDefault: true)
@@ -1044,6 +1080,8 @@ final class TranslatorEngine: ObservableObject {
             guard let self, self.memoryTestMode.allowsReuse else { return 0 }
             return self.ram.values.count
         }
+        UserDefaults.standard.removeObject(forKey: "persistDiagnosticSessions") // migrated: saving is now testRunSaving (automatic)
+        Task { [weak diag] in await diag?.recoverRuns() } // leftover checkpoints become "Recovered (incomplete)" runs
         modeDiagnosticEpochs[modeSessionID] = diag.started
         modeCoordinator.system = activeTranslationSystem
         modeCoordinator.hybridSpeculationPermitted = { [weak self] in
@@ -1052,6 +1090,9 @@ final class TranslatorEngine: ObservableObject {
             case .reference195: return self.modeService.mayAdmitReferenceHybridSpeculation
             case .recoveryFirst, .evidenceBounded: return self.modeService.mayAdmitHybridSpeculation
             }
+        }
+        modeCoordinator.appleDefaultGapMs = { [weak self] caption in
+            self?.modeService.appleDefaultGapMs(source: caption.source, target: caption.target)
         }
         modeService.mayStartModel = { [weak self] caption, speculative in
             guard let self, self.modeCoordinator.shouldStartModel(caption, speculative: speculative) else { return false }
@@ -1162,6 +1203,7 @@ final class TranslatorEngine: ObservableObject {
             status = "Capture stopped – iOS may have closed the capture extension. Tap the broadcast icon again (try Speed: Fast)."
             diag.log("Capture stopped")
             diag.noteRuntimeState("heartbeat_timeout")
+            diag.endRun(reason: "heartbeatTimeout"); refreshModeDiagnosticEpoch()
             if activeTranslationSystem != .legacy { invalidatePending() }
         }
         if captureAlive != alive { captureAlive = alive }
@@ -1284,6 +1326,10 @@ final class TranslatorEngine: ObservableObject {
         }
     }
 
+    /// Run boundaries clear the diagnostic collection and move `diag.started`; mode events are
+    /// accepted only for the epoch of their session, so refresh it for the current session.
+    private func refreshModeDiagnosticEpoch() { modeDiagnosticEpochs[modeSessionID] = diag.started }
+
     func resetDiagnostics() {
         diag.reset()
         modeModelTimings.removeAll()
@@ -1375,7 +1421,10 @@ final class TranslatorEngine: ObservableObject {
                            confirmationBurst: !flag("coolMode", false),
                            appInterfaceVisible: appInterfaceVisible && flag("suppressOwnInterface", true),
                            focusedCaptionOCR: activeTranslationSystem != .legacy && flag("subtitleTracking", true),
-                           strictCaptionIdentity: activeTranslationSystem != .legacy))
+                           strictCaptionIdentity: activeTranslationSystem != .legacy,
+                           pixelConfirmation: flag("pixelConfirmation", true),
+                           eventDrivenOCR: flag("eventDrivenOCR", true),
+                           fastOCR: flag("fastOCR", false)))
     }
 
     // MARK: PiP
@@ -1394,7 +1443,7 @@ final class TranslatorEngine: ObservableObject {
             return
         }
         if n >= 8 {
-            status = "PiP couldn't start – stay on the Home tab and tap Start again"
+            status = "PiP couldn't start – stay on the Live tab and tap Start again"
             done(); return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.attemptPiP(n + 1, done) }
@@ -1649,13 +1698,14 @@ final class TranslatorEngine: ObservableObject {
             captureAlive = false; lastPacketDate = .distantPast
             invalidatePending()
             diag.noteRuntimeState("heartbeat_timeout")
+            diag.endRun(reason: "captureStopped"); refreshModeDiagnosticEpoch()
             return
         }
         let captureAdmission = captureIdentity.admit(p.captureSessionID)
         guard captureAdmission != .rejected else { return }
         captureReadiness.receive(frames: p.frames, session: p.captureSessionID, stopped: false, at: ProcessInfo.processInfo.systemUptime)
         publishCaptureStatus()
-        if captureAdmission == .newSession, captureAlive { invalidatePending(); captureAlive = false }
+        if captureAdmission == .newSession, captureAlive { invalidatePending(); captureAlive = false; diag.endRun(reason: "newCaptureSession"); refreshModeDiagnosticEpoch() }
         let wasAlive = captureAlive
         lastPacketDate = now
         if !captureAlive { captureAlive = true }
@@ -1671,6 +1721,7 @@ final class TranslatorEngine: ObservableObject {
 
         if !wasAlive {
             activateTranslationSystem()
+            diag.beginRun(); refreshModeDiagnosticEpoch() // v2.0.0 build 84: one Test Run per broadcast, after the active mode is known
             interruptWarmupForLiveWork()
             startupWarmupTask?.cancel() // Live capture takes priority over idle prewarming.
             startupWarmupTask = nil
@@ -3048,6 +3099,20 @@ final class TranslatorEngine: ObservableObject {
                 }
                 return result
             }
+            // v2.0.0 G5: Legacy model calls are serialized. Reuse the idle,
+            // warm prediction session for confirmed work so consecutive calls
+            // stay on one session; fall back to the direct session on failure.
+            if activeTranslationSystem == .legacy, flag("legacySharedSession", true),
+               let shared = speculativeSessions.lendIdle(key: k) {
+                if modelReadiness.source != source.minimalIdentifier || modelReadiness.target != target.minimalIdentifier {
+                    modelReadiness = TranslationReadiness(source: source.minimalIdentifier, target: target.minimalIdentifier)
+                }
+                diag.noteModelState("legacy_shared_session_used")
+                let shared_result = await runBatch(shared, texts, speculative: false, partial: partial, observeReadiness: true)
+                speculativeSessions.returnLent(usable: shared_result != nil)
+                if shared_result != nil { warmupStatus = "Ready"; return shared_result }
+                if Task.isCancelled { return nil }
+            }
             if directSession == nil || directKey != k {
                 diag.noteModelState("model_session_created")
                 if #available(iOS 26.4, *), (activeTranslationSystem == .lowLatency) {
@@ -3100,6 +3165,19 @@ final class TranslatorEngine: ObservableObject {
         let marker = modelPerf.beginInterval("TranslationBatch")
         defer { modelPerf.endInterval("TranslationBatch", marker) }
         let began = ProcessInfo.processInfo.systemUptime
+        let sessionID = ObjectIdentifier(session)
+        let measuresSwitch = !warmup && activeTranslationSystem == .legacy
+        let otherSessionNearby = measuresSwitch &&
+            (legacyModelInFlight.contains { $0.key != sessionID && $0.value > 0 } ||
+             (legacyLastModelReturn.map { $0.session != sessionID && began - $0.at < 1.5 } ?? false))
+        if measuresSwitch { legacyModelInFlight[sessionID, default: 0] += 1 }
+        defer {
+            if measuresSwitch {
+                let remaining = (legacyModelInFlight[sessionID] ?? 1) - 1
+                legacyModelInFlight[sessionID] = remaining > 0 ? remaining : nil
+                legacyLastModelReturn = (sessionID, ProcessInfo.processInfo.systemUptime)
+            }
+        }
         let modelCandidate = warmup ? nil : currentPacket?.candidateID
         let first30s = !warmup && sessionStarted.map {
             let age = Date().timeIntervalSince($0)
@@ -3137,6 +3215,10 @@ final class TranslatorEngine: ObservableObject {
                     (speculative ? "speculative_model_completed" : "confirmed_model_completed"),
                     durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000,
                     candidate: modelCandidate)
+                if measuresSwitch && !speculative {
+                    record(otherSessionNearby ? "legacy_confirmed_after_switch" : "legacy_confirmed_no_switch",
+                        durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
+                }
             }
             if first30s {
                 record("model_batch_first_30s",
@@ -3282,8 +3364,16 @@ final class TranslatorEngine: ObservableObject {
         // influence a future predictive model warm-up; never change Auto OCR.
         let sourceToRemember = sourceCode == "auto" ? detectedLang : sourceCode
         if sourceToRemember != "–", !sourceToRemember.isEmpty {
-            ud.set(sourceToRemember, forKey: "lastEffectiveSource")
-            ud.set(Date().timeIntervalSince1970, forKey: "lastEffectiveSourceAt")
+            // Two UserDefaults writes per subtitle were unnecessary: the source
+            // is written when it changes, the timestamp at most every 30 s
+            // (readers only use a 24 h freshness window).
+            let nowSeconds = Date().timeIntervalSince1970
+            if ud.string(forKey: "lastEffectiveSource") != sourceToRemember {
+                ud.set(sourceToRemember, forKey: "lastEffectiveSource")
+                ud.set(nowSeconds, forKey: "lastEffectiveSourceAt")
+            } else if nowSeconds - ud.double(forKey: "lastEffectiveSourceAt") >= 30 {
+                ud.set(nowSeconds, forKey: "lastEffectiveSourceAt")
+            }
         }
         replayDeferredConfirmedIfPossible()
         return true
@@ -3318,6 +3408,7 @@ final class TranslatorEngine: ObservableObject {
                 self.memoryReady = true
                 self.applyMemoryHealth(health)
                 self.saveMemory(force: true)
+                await self.diag.migrateOldSessions()
             } catch {
                 self.memoryFailure = "Memory unavailable; fresh translation remains available"
                 self.diag.log("Memory initialization failed; preserved data requires recovery")
@@ -3492,6 +3583,18 @@ final class TranslatorEngine: ObservableObject {
         segmentationCache.clear()
         // Temporary test entries are process-owned and are not reset by normal
         // memory maintenance, diagnostics reset, mode toggles or app switches.
+    }
+
+    /// v2.0.0 test helper: empties only process-owned Temporary Memory so the
+    /// next mode run cannot reuse the previous run's translations. Never
+    /// touches saved memory or normal RAM. Refused while capture is live.
+    @discardableResult
+    func clearTemporaryTestMemory() -> Bool {
+        guard !captureAlive else { return false }
+        invalidatePending()
+        processMemory.temporary.clear()
+        temporaryMemoryEntries = 0
+        return true
     }
 
     func deleteUnvalidatedLegacy() async throws -> Int {

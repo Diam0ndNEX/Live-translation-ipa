@@ -73,7 +73,7 @@ struct PipelineSimulatorView: View {
                 }
                 if let step = result.steps.first(where: { $0.id == cursor }) {
                     Text("\(step.id+1)/\(result.steps.count) · \(step.title)").font(.headline)
-                    Text("\(step.lane) · \(step.state)").font(.subheadline).foregroundStyle(Theme.accent.start)
+                    Text("\(step.lane) · \(step.state)").font(.subheadline).foregroundStyle(Color.accentColor)
                     Text(step.detail).font(.footnote)
                     if !step.settings.isEmpty {
                         DisclosureGroup("Settings at this stage") { ForEach(step.settings,id:\.self) { settingRow($0) } }
@@ -101,7 +101,7 @@ struct PipelineSimulatorView: View {
                     } label: {
                         HStack(alignment:.top,spacing:12) {
                             Image(systemName:step.id<cursor ? "checkmark.circle.fill" : (step.id==cursor ? "arrowtriangle.right.circle.fill" : "circle"))
-                                .foregroundStyle(step.id==cursor ? Theme.accent.start : .secondary)
+                                .foregroundStyle(step.id==cursor ? Color.accentColor : .secondary)
                             VStack(alignment:.leading,spacing:3) {
                                 Text(step.title).font(.subheadline.weight(.semibold))
                                 Text("\(step.lane) · \(step.state)").font(.caption).foregroundStyle(.secondary)
@@ -119,7 +119,7 @@ struct PipelineSimulatorView: View {
                     }
                     .frame(maxWidth:.infinity,alignment:alignment)
                     .padding(max(8,min(40,PipelineSimulation.number(options,"pipPadding",24))))
-                    .background(Theme.card,in:RoundedRectangle(cornerRadius:16))
+                    .background(Palette.surface,in:RoundedRectangle(cornerRadius:16))
                     Text("Illustrative caption placeholder. The real PiP renderer applies your complete font/theme/weight/scale settings; the inspector lists their values. No translated wording is generated here.").font(.caption).foregroundStyle(.secondary)
                 } else { Text("No replacement caption: follow the stopped or rejected stage above.").font(.footnote) }
             }

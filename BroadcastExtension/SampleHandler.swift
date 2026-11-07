@@ -10,6 +10,10 @@ import os.signpost
 class SampleHandler: RPBroadcastSampleHandler {
     private var conn: NWConnection?
     private let recognitionLock = NSLock()
+    // Send completions run on the connection queue; guard the counters.
+    private let sendStatsLock = NSLock()
+    private var largePacketCount = 0
+    private var sendErrorCount = 0
     private var frames = 0
     private var passes = 0
     private var skipped = 0
@@ -50,6 +54,28 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var feedback = RecognitionFeedback()
     private var lastChanged = Date()
     private var lastRecognizedKey = ""
+    /// v2.0.0 G1: a first read waiting for pixel-verified confirmation.
+    private struct PendingPixelRead {
+        let lines: [OCRLine]
+        let points: [(x: Double, y: Double)]
+        let fingerprint: PixelConfirmation.Fingerprint
+        var readStart: Double
+        let context: String
+    }
+    private var pendingPixelRead: PendingPixelRead?
+    private var lastPixelCheck = 0.0
+    private var pixelConfirmations = 0
+    private var pixelRejections = 0
+    /// v2.0.0 G2: the confirmed caption's text pixels, watched between reads.
+    private struct CaptionWatch {
+        let points: [(x: Double, y: Double)]
+        let fingerprint: PixelConfirmation.Fingerprint
+        let context: String
+    }
+    private var captionWatch: CaptionWatch?
+    private var lastWatchCheck = 0.0
+    private var watchSkippedOCR = 0
+    private var watchTriggeredOCR = 0
     private var info = (bw: 0, bh: 0, orient: 1, cw: 0, ch: 0)
 
     private let cfgLock = NSLock()
@@ -106,6 +132,8 @@ class SampleHandler: RPBroadcastSampleHandler {
             visualWakeWindowStart = .distantPast
             visualWakeWindowCount = 0
             tracker.reset(); candidateID = nil
+            pendingPixelRead = nil
+            captionWatch = nil
         }
         lastOCRConfig = cfg
         feedback.unchangedSeconds = now.timeIntervalSince(lastChanged)
@@ -118,21 +146,46 @@ class SampleHandler: RPBroadcastSampleHandler {
         let rapidText = cfg.rapidTextTracking ?? cfg.movieMode ?? false
         let idleFactor = SubtitleAcquisitionPolicy.idleMultiplier(rapidTextTracking: rapidText,
             enabled: cfg.idleBackoff ?? true, secondsSinceText: now.timeIntervalSince(lastUsefulText))
-        let interval = SubtitlePerformancePolicy.confirmationInterval(
-            planned: plan.interval * idleFactor, pending: candidateCount > 0,
-            rapidTextTracking: rapidText,
-            pressure: cfg.confirmationBurst == false || (cfg.pressure ?? false) || (cfg.smartCool ?? false) ||
-                ProcessInfo.processInfo.isLowPowerModeEnabled ||
-                ThermalPerformancePolicy.automaticPressure(for: ProcessInfo.processInfo.thermalState),
-            processingMs: lastOcrMs)
-        effectiveOCRIntervalMs = interval * 1000
-        guard !cfg.paused && cfg.appInterfaceVisible != true else { pausedSkipped += 1; return }
-        let elapsed = now.timeIntervalSince(lastRun)
-        let ordinaryDue = CaptureCadence.remaining(startedAt: lastRun.timeIntervalSince1970,
-                                                    now: now.timeIntervalSince1970, interval: interval) <= 0
+        // Evaluated once per frame; used for both the interval and early wake.
         let pressure = cfg.confirmationBurst == false || (cfg.pressure ?? false) ||
             (cfg.smartCool ?? false) || ProcessInfo.processInfo.isLowPowerModeEnabled ||
             ThermalPerformancePolicy.automaticPressure(for: ProcessInfo.processInfo.thermalState)
+        let interval = SubtitlePerformancePolicy.confirmationInterval(
+            planned: plan.interval * idleFactor, pending: candidateCount > 0,
+            rapidTextTracking: rapidText,
+            pressure: pressure,
+            processingMs: lastOcrMs)
+        effectiveOCRIntervalMs = interval * 1000
+        guard !cfg.paused && cfg.appInterfaceVisible != true else { pausedSkipped += 1; return }
+        // v2.0.0 G1: a pixel-identical frame after the confirmation dwell is
+        // the second identical read; it replaces a second OCR pass.
+        if cfg.pixelConfirmation == true, pendingPixelRead != nil,
+           pixelConfirm(sampleBuffer, cfg, interval: interval) {
+            lastRun = now
+            return
+        }
+        // v2.0.0 G2: while the confirmed caption's text pixels are unchanged,
+        // OCR is not needed except for a bounded heartbeat; when they change,
+        // read now instead of waiting for the next cadence slot.
+        var watchTriggered = false
+        if cfg.eventDrivenOCR == true, pendingPixelRead == nil, captionWatch != nil {
+            switch watchCaption(sampleBuffer, cfg) {
+            case .unchanged:
+                if now.timeIntervalSince(lastRun) <
+                    SubtitleAcquisitionPolicy.maximumUnchangedDelay(rapidTextTracking: rapidText) {
+                    watchSkippedOCR += 1
+                    return
+                }
+            case .changed:
+                watchTriggered = true
+                watchTriggeredOCR += 1
+            case .notChecked:
+                break
+            }
+        }
+        let elapsed = now.timeIntervalSince(lastRun)
+        let ordinaryDue = CaptureCadence.remaining(startedAt: lastRun.timeIntervalSince1970,
+                                                    now: now.timeIntervalSince1970, interval: interval) <= 0
         #if SCREENLINGO_REFERENCE_CAPTURE_CADENCE
         let mayProbeEarly = false
         #else
@@ -145,7 +198,7 @@ class SampleHandler: RPBroadcastSampleHandler {
                 elapsedSeconds: now.timeIntervalSince(visualWakeWindowStart)) &&
             now.timeIntervalSince(lastVisualWakeProbe) >= 0.065
         #endif
-        guard ordinaryDue || mayProbeEarly else { cadenceSkipped += 1; return }
+        guard ordinaryDue || mayProbeEarly || watchTriggered else { cadenceSkipped += 1; return }
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
         var orientation = CGImagePropertyOrientation.up
@@ -257,11 +310,15 @@ class SampleHandler: RPBroadcastSampleHandler {
     }
 
     private func makeRequest(_ cfg: Config, span: Double) -> VNRecognizeTextRequest {
-        let key = "\(cfg.lang)|\(cfg.correction ?? true)|\(span)"
+        let fast = cfg.fastOCR == true
+        let key = "\(cfg.lang)|\(cfg.correction ?? true)|\(span)|\(fast)"
         if key == cachedRequestKey, let request = cachedRequest { return request }
         let r = VNRecognizeTextRequest()
-        r.recognitionLevel = .accurate
-        r.usesLanguageCorrection = cfg.correction ?? true
+        // v2.0.0 G3 experiment: .fast without language correction. A report
+        // on Apple's forums describes an iOS 27 .accurate regression; .fast
+        // was unaffected there. Accuracy for each language is unverified.
+        r.recognitionLevel = fast ? .fast : .accurate
+        r.usesLanguageCorrection = fast ? false : (cfg.correction ?? true)
         r.minimumTextHeight = Float(min(0.1, 0.01 / max(0.1, span)))
         if let langs = visionLanguages(for: cfg.lang) {
             r.automaticallyDetectsLanguage = false
@@ -373,9 +430,32 @@ class SampleHandler: RPBroadcastSampleHandler {
                 if !sentKey.isEmpty { send(kind: "clear", lines: [], revision: cfg.rev) }
                 sentKey = ""; candidateKey = ""; candidateCount = 0; tracker.reset(); candidateID = nil
             }
+            pendingPixelRead = nil
+            captionWatch = nil
             return
         }
 
+        // v2.0.0 G1: remember the text boxes of an unconfirmed first read so
+        // a later pixel-identical frame can confirm it without another OCR pass.
+        let outcome = admit(lines, cfg)
+        if outcome == .pending, cfg.pixelConfirmation == true {
+            preparePixelConfirmation(pb, orientation, cfg, lines: lines)
+        } else {
+            pendingPixelRead = nil
+        }
+        switch outcome {
+        case .ready, .duplicate:
+            if cfg.eventDrivenOCR == true { startCaptionWatch(pb, orientation, cfg, lines: lines) }
+        case .pending:
+            captionWatch = nil
+        }
+    }
+
+    private enum Admission { case ready, pending, duplicate }
+
+    /// Confirmation decision for one read (OCR or pixel-verified).
+    @discardableResult
+    private func admit(_ lines: [OCRLine], _ cfg: Config) -> Admission {
         // Stability: send once the same text was read N times in a row (skips half-faded text).
         let need = max(1, cfg.stability ?? 2)
         let key = lines.map(\.t).joined(separator: "\n")
@@ -390,7 +470,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             candidateStartedAt = strict ? readStartedAt - max(0, readStartedMonotonic - decision.firstSeen) : decision.firstSeen
             candidateStartedMonotonic = strict ? decision.firstSeen : nil
             candidateCount = decision.ready || decision.duplicate ? 0 : 1
-            guard !decision.duplicate else { return }
+            guard !decision.duplicate else { return .duplicate }
             if decision.ready {
                 sentKey = key
                 send(kind: "ocr", lines: Array(lines.prefix(60)), stable: true, revision: cfg.rev)
@@ -399,11 +479,11 @@ class SampleHandler: RPBroadcastSampleHandler {
                 // Candidate notice is always sent, even when selective speculation later declines it.
                 send(kind: "ocr", lines: Array(lines.prefix(60)), stable: false, revision: cfg.rev)
             }
-            return
+            return decision.ready ? .ready : .pending
         }
         candidateID = nil
         confirmationReason = "fixed reads"
-        if PipelineSafety.isDuplicate(key.components(separatedBy: "\n"), previous: sentKey.components(separatedBy: "\n")) { candidateKey = key; candidateCount = 0; return }
+        if PipelineSafety.isDuplicate(key.components(separatedBy: "\n"), previous: sentKey.components(separatedBy: "\n")) { candidateKey = key; candidateCount = 0; return .duplicate }
         // A new confirmation run can resemble the previous subtitle. Reset timing
         // when the count restarts, even if the fuzzy comparison still matches.
         if candidateCount == 0 { candidateStartedAt = readStartedAt }
@@ -413,15 +493,159 @@ class SampleHandler: RPBroadcastSampleHandler {
             sentKey = key
             candidateCount = 0
             send(kind: "ocr", lines: Array(lines.prefix(60)), stable: true, revision: cfg.rev)
+            return .ready
         } else if candidateCount == 1, need > 1, cfg.speculate ?? true, !TextSim.similar(key, specKey) {
             // First sighting: the app starts translating right away but only shows it once the text is confirmed.
             specKey = key
             send(kind: "ocr", lines: Array(lines.prefix(60)), stable: false, revision: cfg.rev)
         }
+        return .pending
+    }
+
+    /// Fingerprints the text boxes of a first read on the frame that was read.
+    private func preparePixelConfirmation(_ pb: CVPixelBuffer, _ orientation: CGImagePropertyOrientation,
+                                          _ cfg: Config, lines: [OCRLine]) {
+        let boxes = lines.map { (x: $0.x, y: $0.y, w: $0.w ?? 0, h: $0.h) }
+        guard let points = PixelConfirmation.samplePoints(lines: boxes),
+              let luma = sampleLuma(pb, orientation: orientation, rot: cfg.rot ?? 0, points: points),
+              let fingerprint = PixelConfirmation.fingerprint(luma) else {
+            pendingPixelRead = nil
+            return
+        }
+        pendingPixelRead = PendingPixelRead(lines: lines, points: points, fingerprint: fingerprint,
+            readStart: readStartedMonotonic, context: pixelContext(orientation, cfg))
+    }
+
+    private func pixelContext(_ orientation: CGImagePropertyOrientation, _ cfg: Config) -> String {
+        "\(orientation.rawValue)|\(cfg.rot ?? 0)|\(cfg.rev ?? 0)|\(cfg.lang)|\(cfg.y0)|\(cfg.y1)"
+    }
+
+    /// Returns true when this frame was used (confirmed, or kept pending for a
+    /// stricter stability setting), so no OCR pass is needed on it.
+    private func pixelConfirm(_ sampleBuffer: CMSampleBuffer, _ cfg: Config, interval: Double) -> Bool {
+        guard var pending = pendingPixelRead else { return false }
+        let uptime = ProcessInfo.processInfo.systemUptime
+        guard uptime - lastPixelCheck >= 0.03 else { return false }
+        lastPixelCheck = uptime
+        guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return false }
+        var orientation = CGImagePropertyOrientation.up
+        if let n = CMGetAttachment(sampleBuffer, key: RPVideoSampleOrientationKey as CFString,
+                                   attachmentModeOut: nil) as? NSNumber,
+           let o = CGImagePropertyOrientation(rawValue: n.uint32Value) {
+            orientation = o
+        }
+        let frame = pb
+        guard pending.context == pixelContext(orientation, cfg),
+              let luma = sampleLuma(pb, orientation: orientation, rot: cfg.rot ?? 0, points: pending.points),
+              PixelConfirmation.matches(pending.fingerprint, luma) else {
+            // Changed or unverifiable: the normal OCR cadence decides.
+            pendingPixelRead = nil
+            pixelRejections += 1
+            return false
+        }
+        guard PixelConfirmation.dwellSatisfied(sinceFirstReadStart: uptime - pending.readStart,
+                                               interval: interval) else { return false }
+        readStartedAt = Date().timeIntervalSince1970
+        readStartedMonotonic = uptime
+        switch admit(pending.lines, cfg) {
+        case .ready:
+            pixelConfirmations += 1
+            confirmationReason = "pixel_verified"
+            pendingPixelRead = nil
+            if cfg.eventDrivenOCR == true { startCaptionWatch(frame, orientation, cfg, lines: pending.lines) }
+        case .pending:
+            pending.readStart = uptime
+            pendingPixelRead = pending
+        case .duplicate:
+            pendingPixelRead = nil
+        }
+        return true
+    }
+
+    private enum WatchResult { case unchanged, changed, notChecked }
+
+    private func startCaptionWatch(_ pb: CVPixelBuffer, _ orientation: CGImagePropertyOrientation,
+                                   _ cfg: Config, lines: [OCRLine]) {
+        let boxes = lines.map { (x: $0.x, y: $0.y, w: $0.w ?? 0, h: $0.h) }
+        guard let points = PixelConfirmation.samplePoints(lines: boxes),
+              let luma = sampleLuma(pb, orientation: orientation, rot: cfg.rot ?? 0, points: points),
+              let fingerprint = PixelConfirmation.fingerprint(luma) else {
+            captionWatch = nil
+            return
+        }
+        captionWatch = CaptionWatch(points: points, fingerprint: fingerprint, context: pixelContext(orientation, cfg))
+    }
+
+    private func watchCaption(_ sampleBuffer: CMSampleBuffer, _ cfg: Config) -> WatchResult {
+        guard let watch = captionWatch else { return .notChecked }
+        let uptime = ProcessInfo.processInfo.systemUptime
+        guard uptime - lastWatchCheck >= 0.03 else { return .notChecked }
+        lastWatchCheck = uptime
+        guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return .notChecked }
+        var orientation = CGImagePropertyOrientation.up
+        if let n = CMGetAttachment(sampleBuffer, key: RPVideoSampleOrientationKey as CFString,
+                                   attachmentModeOut: nil) as? NSNumber,
+           let o = CGImagePropertyOrientation(rawValue: n.uint32Value) {
+            orientation = o
+        }
+        guard watch.context == pixelContext(orientation, cfg),
+              let luma = sampleLuma(pb, orientation: orientation, rot: cfg.rot ?? 0, points: watch.points),
+              PixelConfirmation.matches(watch.fingerprint, luma) else {
+            captionWatch = nil
+            return .changed
+        }
+        return .unchanged
+    }
+
+    /// Luminance at normalized points of the oriented (OCR) image, read from
+    /// the raw buffer through the inverse of the same orientation transforms.
+    private func sampleLuma(_ pb: CVPixelBuffer, orientation: CGImagePropertyOrientation, rot: Int,
+                            points: [(x: Double, y: Double)]) -> [UInt8]? {
+        let raw = CIImage(cvPixelBuffer: pb)
+        let extra = [CGImagePropertyOrientation.up, .right, .down, .left][rot & 3]
+        let first = raw.orientationTransform(for: orientation)
+        let middle = raw.transformed(by: first)
+        let second = middle.orientationTransform(for: extra)
+        let transform = first.concatenating(second)
+        let extent = raw.extent.applying(transform)
+        let inverse = transform.inverted()
+        CVPixelBufferLockBaseAddress(pb, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pb, .readOnly) }
+        let planar = CVPixelBufferIsPlanar(pb)
+        guard let base = planar ? CVPixelBufferGetBaseAddressOfPlane(pb, 0) : CVPixelBufferGetBaseAddress(pb) else { return nil }
+        let w = planar ? CVPixelBufferGetWidthOfPlane(pb, 0) : CVPixelBufferGetWidth(pb)
+        let h = planar ? CVPixelBufferGetHeightOfPlane(pb, 0) : CVPixelBufferGetHeight(pb)
+        let stride = planar ? CVPixelBufferGetBytesPerRowOfPlane(pb, 0) : CVPixelBufferGetBytesPerRow(pb)
+        let bgra = !planar && CVPixelBufferGetPixelFormatType(pb) == kCVPixelFormatType_32BGRA
+        guard planar || bgra, w > 8, h > 8, extent.width > 0, extent.height > 0 else { return nil }
+        // Raw CI coordinates are in plane-0 pixels for 4:2:0 and BGRA buffers.
+        let scaleX = Double(w) / Double(raw.extent.width), scaleY = Double(h) / Double(raw.extent.height)
+        var out = [UInt8]()
+        out.reserveCapacity(points.count)
+        for point in points {
+            let oriented = CGPoint(x: extent.minX + point.x * extent.width, y: extent.minY + point.y * extent.height)
+            let source = oriented.applying(inverse)
+            let column = min(w - 1, max(0, Int((Double(source.x) - Double(raw.extent.minX)) * scaleX)))
+            let rowFromBottom = min(h - 1, max(0, Int((Double(source.y) - Double(raw.extent.minY)) * scaleY)))
+            let row = base.advanced(by: (h - 1 - rowFromBottom) * stride)
+            if bgra {
+                let offset = column * 4
+                let blue = Int(row.load(fromByteOffset: offset, as: UInt8.self))
+                let green = Int(row.load(fromByteOffset: offset + 1, as: UInt8.self))
+                let red = Int(row.load(fromByteOffset: offset + 2, as: UInt8.self))
+                out.append(UInt8((red * 77 + green * 150 + blue * 29) >> 8))
+            } else {
+                out.append(row.load(fromByteOffset: column, as: UInt8.self))
+            }
+        }
+        return out
     }
 
     // MARK: Send
     private func send(kind: String, lines: [OCRLine], stable: Bool? = nil, revision: Int? = nil, closeConnection: Bool = false) {
+        sendStatsLock.lock()
+        let largeSoFar = largePacketCount, errorsSoFar = sendErrorCount
+        sendStatsLock.unlock()
         func encode(_ l: [OCRLine]) -> Data? {
             try? JSONEncoder().encode(Packet(kind: kind, version: AppVersion.version, frames: frames, lines: l,
                                              ocrMs: lastOcrMs, memFreeMB: freeMB(),
@@ -441,13 +665,22 @@ class SampleHandler: RPBroadcastSampleHandler {
                                              effectiveOCRIntervalMs: effectiveOCRIntervalMs,
                                              captureSessionID: captureID,
                                              firstSeenMonotonic: kind == "ocr" && config.strictCaptionIdentity == true ? candidateStartedMonotonic : nil,
-                                             sentMonotonic: ProcessInfo.processInfo.systemUptime))
+                                             sentMonotonic: ProcessInfo.processInfo.systemUptime,
+                                             largePackets: largeSoFar, sendErrors: errorsSoFar,
+                                             pixelConfirmations: pixelConfirmations, pixelRejections: pixelRejections,
+                                             watchSkippedOCR: watchSkippedOCR, watchTriggeredOCR: watchTriggeredOCR))
         }
         var data = encode(lines)
         if let d = data, d.count > 60000 { data = encode(Array(lines.prefix(30))) }
         guard let d = data else { return }
+        if d.count > 8000 {
+            sendStatsLock.lock(); largePacketCount += 1; sendStatsLock.unlock()
+        }
         let connection = conn
-        connection?.send(content: d, completion: .contentProcessed { _ in
+        connection?.send(content: d, completion: .contentProcessed { [weak self] error in
+            if error != nil, let self {
+                self.sendStatsLock.lock(); self.sendErrorCount += 1; self.sendStatsLock.unlock()
+            }
             if closeConnection { connection?.cancel() }
         })
     }

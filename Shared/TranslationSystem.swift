@@ -237,6 +237,35 @@ enum HybridSchedulingPolicy {
         #endif
     }
 
+    /// v2.0.0 switch guard window. Device traces (builds 74-81) showed a
+    /// Low Latency recovery at ~40 ms alone but ~900-1200 ms while an Apple
+    /// Default call was running or had returned less than ~1.5 s earlier.
+    /// This is a measured correlation, not a proven Apple mechanism.
+    static let switchGuardWindowMs = 1500.0
+
+    /// Choose the confirmed Hybrid recovery strategy. `gapMs` is 0 while an
+    /// Apple Default call is in flight, the time since the last same-pair
+    /// Default return, or nil when none is known. Inside the window recover
+    /// with Apple Default instead of switching models; otherwise keep the fast
+    /// isolated Low Latency case. A missing fast pack always uses Default.
+    static func recoveryStrategy(gapMs: Double?, fastRecoveryInstalled: Bool,
+                                 guardEnabled: Bool) -> RequestedTranslationStrategy {
+        guard fastRecoveryInstalled else { return .appleDefault }
+        guard guardEnabled, let gapMs, gapMs.isFinite, gapMs >= 0,
+              gapMs < switchGuardWindowMs else { return .lowLatency }
+        return .appleDefault
+    }
+
+    /// v2.0.0: with the switch guard on, Hybrid does not start a parallel Low
+    /// Latency hedge beside a matching running Default call. It waits for that
+    /// call up to this ceiling, measured from speculation start.
+    static let suppressedHedgeCeiling = 1.2
+
+    static func suppressedHedgeWait(elapsed: Double) -> Double {
+        guard elapsed.isFinite else { return 0 }
+        return max(0, suppressedHedgeCeiling - max(0, elapsed))
+    }
+
     static func matchingWait(variant: HybridSchedulerVariant,
                              elapsed: Double, defaultSamples: [Double],
                              lowSamples: [Double], oldWait: Double,
@@ -343,6 +372,12 @@ final class ThreeModeCoordinator {
     var hybridVariant: HybridSchedulerVariant = HybridSchedulingPolicy.buildVariant
     var fastRecoveryInstalled = true
     var hybridSpeculationPermitted: () -> Bool = { true }
+    /// v2.0.0 switch guard (H1/H2). Off by default here so the reference
+    /// behaviour stays testable; the app sets it from `hybridSwitchGuard`.
+    var hybridSwitchGuard = false
+    /// 0 while an Apple Default call is in flight, ms since the last
+    /// same-pair Default return, or nil when none is known.
+    var appleDefaultGapMs: (ModeCaption) -> Double? = { _ in nil }
     var coldSpeculationCeiling = 0.7
     var matchingLowLatencyDeadline = 4.0
     private(set) var current: ModeCaption?
@@ -501,6 +536,12 @@ final class ThreeModeCoordinator {
                     let wait: Double
                     if self.system == .lowLatency {
                         wait = max(0, self.matchingLowLatencyDeadline - (self.clock() - self.speculativeStarted))
+                    } else if self.hybridSwitchGuard {
+                        // H2: a parallel LL hedge beside a running Default call
+                        // was the slowest recovery kind. Wait for the match.
+                        wait = HybridSchedulingPolicy.suppressedHedgeWait(
+                            elapsed: self.clock() - self.speculativeStarted)
+                        self.event(caption, "hybrid_hedge_suppressed", wait * 1000)
                     } else {
                         let ordinary = self.remainingWait(caption)
                         wait = HybridSchedulingPolicy.preflightWait(
@@ -516,7 +557,8 @@ final class ThreeModeCoordinator {
                         if self.system == .hybridRecovery {
                             // Hedge: the existing matching Apple Default request
                             // can still win, so its session must not be cancelled.
-                            self.event(caption, "hybrid_hedged_recovery", nil)
+                            self.event(caption, self.hybridSwitchGuard ?
+                                "hybrid_suppressed_hedge_deadline" : "hybrid_hedged_recovery", nil)
                         } else {
                             self.cancel(true)
                         }
@@ -712,8 +754,22 @@ final class ThreeModeCoordinator {
             guard let self else { return }
             // If Hybrid's optional fast language pack is known missing, do not
             // burn two failed Low Latency requests before Apple Default fallback.
-            let useLowLatency = self.system == .lowLatency || self.fastRecoveryInstalled
-            if !useLowLatency { self.event(caption, "hybrid_no_fast_pack_fallback", nil) }
+            let useLowLatency: Bool
+            if self.system == .lowLatency {
+                useLowLatency = true
+            } else if !self.fastRecoveryInstalled {
+                useLowLatency = false
+                self.event(caption, "hybrid_no_fast_pack_fallback", nil)
+            } else if self.hybridSwitchGuard {
+                // H1: avoid switching models right after or during Default work.
+                let gap = self.appleDefaultGapMs(caption)
+                useLowLatency = HybridSchedulingPolicy.recoveryStrategy(
+                    gapMs: gap, fastRecoveryInstalled: true, guardEnabled: true) == .lowLatency
+                self.event(caption, useLowLatency ? "hybrid_switch_guard_low_latency" :
+                    "hybrid_switch_guard_default", gap)
+            } else {
+                useLowLatency = true
+            }
             var result = await self.resolve(caption, strategy: useLowLatency ? .lowLatency : .appleDefault,
                                             speculative: false)
             // Hybrid alone permits one default fallback after bounded LL failure.

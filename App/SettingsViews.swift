@@ -1,10 +1,10 @@
-// Screen Translator – App – v0.11.0
+// ScreenLingo – App
 import SwiftUI
 
 extension View {
     func settingsPage(_ title: String) -> some View {
         self.scrollContentBackground(.hidden)
-            .background(Theme.bg.ignoresSafeArea())
+            .background(Palette.background.ignoresSafeArea())
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
@@ -12,15 +12,19 @@ extension View {
 }
 
 struct ResetSection: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
+    @EnvironmentObject private var feedback: FeedbackCenter
     let keys: [String]
     @State private var confirm = false
     var body: some View {
         Section {
+            // The dialog belongs to the button that opens it, not to the Section.
             Button("Reset this page to defaults", role: .destructive) { confirm = true }
-        }
-        .confirmationDialog("Reset every setting on this page?", isPresented: $confirm, titleVisibility: .visible) {
-            Button("Reset", role: .destructive) { engine.resetKeys(keys) }
+                .frame(minHeight: 44)
+                .confirmDestructive("Reset every setting on this page?", message: "Only this page's settings return to their defaults.",
+                                    isPresented: $confirm, button: "Reset") {
+                    engine.resetKeys(keys); feedback.show("Page reset to defaults", severity: .success)
+                }
         }
     }
 }
@@ -55,9 +59,9 @@ private struct SettingsNavRow<Destination: View>: View {
         } label: {
             HStack(spacing: 13) {
                 Image(systemName: symbol)
-                    .font(.system(size: 18, weight: .medium))
+                    .font(.title3.weight(.medium))
                     .foregroundStyle(Color.accentColor)
-                    .frame(width: 40, height: 40)
+                    .frame(width: 44, height: 44)
                     .background(Color.accentColor.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title).font(.body.weight(.medium))
@@ -75,7 +79,9 @@ private struct SettingsNavRow<Destination: View>: View {
 /// Search includes previous page names so navigation remains discoverable.
 struct SettingsView: View {
     @EnvironmentObject var engine: TranslatorEngine
+    @EnvironmentObject private var router: AppRouter
     @State private var query = ""
+    private var chevron: some View { Image(systemName: "chevron.right").foregroundStyle(.tertiary) }
 
     private func matches(_ title: String, _ keywords: String) -> Bool {
         query.isEmpty || (title + " " + keywords).localizedCaseInsensitiveContains(query)
@@ -93,7 +99,7 @@ struct SettingsView: View {
         || matches("Feedback & sharing", "haptics speak copy clipboard voice vibration")
     }
     private var personalizeMatches: Bool {
-        matches("App appearance", "interface accent home layout customize cards")
+        matches("App appearance", "interface accent color dark light system theme haptics")
         || matches("Reader & photos", "workspace photo OCR reading")
         || matches("History & storage", "saved translations retention limit delete memory library")
     }
@@ -108,7 +114,11 @@ struct SettingsView: View {
         || matches("About & help", "version changelog guide")
     }
     private var anyMatch: Bool {
-        translateMatches || subtitleMatches || personalizeMatches || advancedMatches || supportMatches
+        testsMatch || translateMatches || subtitleMatches || personalizeMatches || advancedMatches || supportMatches
+    }
+
+    private var testsMatch: Bool {
+        matches("Tests & diagnostics", "test runs dashboard compare modes export zip report simulator memory management evidence")
     }
 
     var body: some View {
@@ -167,8 +177,8 @@ struct SettingsView: View {
 
                 if personalizeMatches {
                     Section("Personalize & library") {
-                        if matches("App appearance", "interface accent home layout customize cards") {
-                            SettingsNavRow(title: "App appearance", detail: "Colors and Home screen sections",
+                        if matches("App appearance", "interface accent color dark light system theme haptics") {
+                            SettingsNavRow(title: "App appearance", detail: "Light or dark, accent color and haptics",
                                            symbol: "paintpalette", destination: InterfaceSettings())
                         }
                         if matches("Reader & photos", "workspace photo OCR reading") {
@@ -193,9 +203,20 @@ struct SettingsView: View {
                                            symbol: "flask", destination: ExperimentalFeaturesView())
                         }
                         if matches("Diagnostics & tests", "metrics benchmark export sessions simulator validation fresh translation") {
-                            SettingsNavRow(title: "Diagnostics & tests", detail: "Collection, controlled comparisons and simulator",
+                            SettingsNavRow(title: "Diagnostics & tests", detail: "What is collected, test-run saving and the simulator",
                                            symbol: "waveform.path.ecg", destination: DiagnosticsSettings())
                         }
+                    }
+                }
+
+                if testsMatch {
+                    Section("Tests & diagnostics") {
+                        Button { router.present(.diagnostics) } label: {
+                            ListRow(title: "Live dashboard", subtitle: "Health, timing and exports while you translate", symbol: "waveform.path.ecg") { chevron }
+                        }.buttonStyle(.plain)
+                        Button { router.present(.testRuns) } label: {
+                            ListRow(title: "Test runs", subtitle: "Compare Legacy, Hybrid and Low Latency on the same content", symbol: "checklist") { chevron }
+                        }.buttonStyle(.plain)
                     }
                 }
 
@@ -228,7 +249,7 @@ struct SettingsView: View {
             .overlay { if !anyMatch { ContentUnavailableView.search(text: query) } }
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
-            .background(Theme.bg.ignoresSafeArea())
+            .background(Palette.background.ignoresSafeArea())
             .searchable(text: $query, prompt: "Search settings and features")
             .navigationTitle("Settings")
         }
@@ -237,7 +258,7 @@ struct SettingsView: View {
 
 // MARK: - Reading & OCR
 struct ReadingSettings: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("mode") private var mode = TranslateMode.movie.rawValue
     @AppStorage("area") private var area = OCRArea.smart.rawValue
     @AppStorage("customY0") private var customY0 = 0.0
@@ -278,34 +299,40 @@ struct ReadingSettings: View {
 
     var body: some View {
         List {
-            Section("What to read") {
+            Section {
                 Picker("Content style defaults", selection: contentStyleSelection) {
                     ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) }
                 }
-                Text("Selecting a style sets recommended recognition switches. Adjust them below or save any combination as your own preset.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                Picker("OCR area", selection: $area) {
+                Hint("Pick what you usually watch. This chooses sensible reading options; you can still change them below.")
+                Picker("Speed", selection: $speed) {
+                    ForEach(SpeedPreset.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                Hint("Faster shows translations sooner. More careful avoids translating text that is still fading in.")
+                Picker("Area to read", selection: $area) {
                     ForEach(OCRArea.allCases) { Text($0.title).tag($0.rawValue) }
                 }
-                Button("Visual capture-area editor") { showAreaEditor = true }
+                Button { showAreaEditor = true } label: { Label("Choose area on a preview", systemImage: "viewfinder") }.frame(minHeight: 44)
                 if area == OCRArea.custom.rawValue {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("From \(Int(customY0 * 100))% to \(Int(customY1 * 100))% of the screen height (0% = bottom)")
+                        Text("Reads from \(Int(customY0 * 100))% to \(Int(customY1 * 100))% of the screen height (0% is the bottom)")
                             .font(.footnote).foregroundStyle(.secondary)
-                        Slider(value: $customY0, in: 0...0.9)
-                        Slider(value: $customY1, in: 0.1...1)
+                        Slider(value: $customY0, in: 0...0.9).accessibilityLabel("Lower edge of the reading area")
+                        Slider(value: $customY1, in: 0.1...1).accessibilityLabel("Upper edge of the reading area")
                     }
                 }
+                Toggle("Ignore numbers and symbols", isOn: $dropNoise)
+                Hint("Skips scores, timers and icons so they are not translated.")
+            } header: { Text("What to read") }
+
+            AdvancedSection(title: "Filtering", footer: "These decide which text on screen is ignored.") {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Ignore text smaller than \(Int(minTextH * 100))% of the screen").font(.subheadline)
-                    Slider(value: $minTextH, in: 0...0.08)
+                    Slider(value: $minTextH, in: 0...0.08).accessibilityLabel("Smallest text to read")
                 }
-                TextField("Ignore text containing… (comma separated)", text: $ignoreList, axis: .vertical)
-                    .lineLimit(1...3)
-                Toggle("Ignore numbers and symbols", isOn: $dropNoise)
+                TextField("Ignore text containing… (comma separated)", text: $ignoreList, axis: .vertical).lineLimit(1...3)
             }
 
-            Section {
+            AdvancedSection(title: "Text order", footer: "If sentences come out in the wrong order, the picture is probably rotated. Automatic checks which way the lines read. Pick a fixed rotation to force it.") {
                 Picker("Frame rotation", selection: $frameRot) {
                     Text("Automatic").tag("auto")
                     Text("None").tag("0")
@@ -313,16 +340,9 @@ struct ReadingSettings: View {
                     Text("180° (upside down)").tag("180")
                     Text("270° clockwise").tag("270")
                 }
-            } header: {
-                Text("Sentence order")
-            } footer: {
-                Text("If sentences come out in the wrong order, the capture is probably rotated. Automatic detects this by checking which direction the lines read naturally. Pick a fixed rotation to force it.")
             }
 
-            Section {
-                Picker("Speed", selection: $speed) {
-                    ForEach(SpeedPreset.allCases) { Text($0.title).tag($0.rawValue) }
-                }
+            AdvancedSection(title: "Accuracy and speed", footer: "Instant is fastest but may translate half-faded text. Always boosting contrast helps thin or outlined fonts but is slower.") {
                 Picker("Wait for stable text", selection: $stability) {
                     Text("Instant").tag(1)
                     Text("Normal").tag(2)
@@ -334,39 +354,31 @@ struct ReadingSettings: View {
                     Text("Always").tag(2)
                 }
                 Toggle("Skip unchanged frames", isOn: $skipUnchanged)
+                Hint("Does no reading while the picture stays the same. Saves battery.")
                 Toggle("OCR language correction", isOn: $correction)
                 VStack(alignment: .leading) {
-                    Text("Minimum OCR confidence · \(Int(confidence * 100))%")
-                    Slider(value: $confidence, in: 0.1...0.9, step: 0.05)
+                    Text("Minimum confidence · \(Int(confidence * 100))%")
+                    Slider(value: $confidence, in: 0.1...0.9, step: 0.05).accessibilityLabel("Minimum recognition confidence")
                 }
-            } header: {
-                Text("Speed & quality")
-            } footer: {
-                Text("Instant is fastest but may translate half-faded text. Always boosting contrast helps thin or outlined fonts but is slower.")
             }
 
-            Section {
+            AdvancedSection(title: "Smarter recognition") {
                 Toggle("Adaptive detail in Balanced", isOn: $adaptiveOCR)
-                Text("Adjusts OCR resolution for small or uncertain subtitles without reducing the base accuracy setting.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Hint("Reads small or unclear subtitles in more detail without lowering accuracy elsewhere.")
                 Toggle("Track subtitle position and lifetime", isOn: $subtitleTracking)
-                Text("Keeps moving and multi-line subtitles associated across nearby frames.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Hint("Keeps moving or multi-line subtitles together across frames.")
                 Toggle("Merge duplicate OCR copies", isOn: $deduplicateCopies)
-                Text("Removes shadow or overlapping copies of the same subtitle, but preserves genuine repeated lyrics.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            } header: { Text("Recognition intelligence") }
-            Section {
+                Hint("Removes shadow or overlapping copies of the same subtitle but keeps genuinely repeated lyrics.")
+            }
+            AdvancedSection(title: "Text behavior", footer: "Applies to every preset.") {
                 Toggle("React quickly to changing text", isOn: $rapidTextTracking)
-                Text("Short confirmation intervals and responsive idle/change detection when OCR is fast. Power and thermal safeguards remain active.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Hint("Confirms changing text sooner when reading is fast. Heat and power safeguards stay on.")
                 Toggle("Join neighboring text fragments", isOn: $joinAdjacentText)
-                Text("Merges adjacent words or subtitle boxes on the same line; turn off for distinct speech bubbles.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Hint("Merges words or boxes on the same line. Turn off for separate speech bubbles.")
                 Toggle("Prioritize the active text group", isOn: $activeTextFocus)
-                Text("Tracks the most relevant evolving text group instead of treating every text box equally. Enable for moving subtitles or lyric layouts.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            } header: { Text("Text behavior · every preset") }
+                Hint("Follows the text that is changing instead of treating every box equally. Good for moving subtitles and lyrics.")
+            }
+            AdvancedSwitchSection()
             ResetSection(keys: ["mode", "area", "customY0", "customY1", "frameRot", "speed", "stability",
                                 "minTextH", "ignoreList", "dropNoise", "boost", "skipUnchanged", "ocrConfidence", "ocrCorrection",
                                 "adaptiveOCR", "subtitleTracking", "deduplicateCopies",
@@ -382,7 +394,7 @@ struct ReadingSettings: View {
 
 // MARK: - Understanding & rules
 struct IntelligenceSettings: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("cleanOCR") private var cleanOCR = true
     @AppStorage("slang") private var slang = true
     @AppStorage("speakerDetect") private var speakerDetect = true
@@ -403,21 +415,11 @@ struct IntelligenceSettings: View {
     var body: some View {
         List {
             Section {
-                Toggle("Clean up OCR mistakes", isOn: $cleanOCR)
-                Toggle("Expand chat slang (pq, vc, tbm, idk…)", isOn: $slang)
+                Toggle("Clean up reading mistakes", isOn: $cleanOCR)
+                Hint("Fixes common mix-ups such as 0 and O before translating.")
                 Toggle("Recognize speakers (\"Name: text\")", isOn: $speakerDetect)
-                Toggle("Lock detected language", isOn: $langLock)
-                Toggle("Use recent context for ambiguous languages", isOn: $contextualLanguage)
-                Text("Recent confirmed subtitles can help Automatic recognize a short, ambiguous phrase.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                Toggle("Recover Automatic after repeated failures", isOn: $languageRecovery)
-                Text("Rechecks the source language if translation fails repeatedly.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            } header: {
-                Text("Understanding")
-            } footer: {
-                Text("Speaker names stay untranslated and each speaker gets their own line. Slang is spelled out before translating so it isn't misread. The language lock stops Automatic from flip-flopping between languages.")
-            }
+                Hint("Keeps names untranslated and puts each speaker on their own line.")
+            } header: { Text("Understanding") }
             Section {
                 editor($neverTranslate)
             } header: {
@@ -426,19 +428,26 @@ struct IntelligenceSettings: View {
                 Text("Words or names to keep exactly as written, separated by commas or new lines. Example: Subaru, Emilia")
             }
             Section {
-                editor($sourceFixes)
-            } header: {
-                Text("Fix the original text (before translating)")
-            } footer: {
-                Text("One per line: wrong=right. Example: Rern=Rem")
-            }
-            Section {
                 editor($glossary)
             } header: {
-                Text("Fix the translation (after translating)")
+                Text("Replace in the translation")
             } footer: {
                 Text("One per line: word=replacement. Example: Lord Subaru=Subaru")
             }
+            AdvancedSection(title: "Language detection", footer: "These help Automatic pick the right source language.") {
+                Toggle("Expand chat slang (pq, vc, tbm, idk…)", isOn: $slang)
+                Hint("Spells slang out before translating so it isn't misread.")
+                Toggle("Lock detected language", isOn: $langLock)
+                Hint("Stops Automatic from flipping between languages.")
+                Toggle("Use recent context for ambiguous languages", isOn: $contextualLanguage)
+                Hint("Recent subtitles can help Automatic recognize a short, ambiguous phrase.")
+                Toggle("Recover Automatic after repeated failures", isOn: $languageRecovery)
+                Hint("Rechecks the source language if translation keeps failing.")
+            }
+            AdvancedSection(title: "Fix the original text", footer: "One per line: wrong=right. Example: Rern=Rem. Applied before translating.") {
+                editor($sourceFixes)
+            }
+            AdvancedSwitchSection()
             ResetSection(keys: ["cleanOCR", "slang", "speakerDetect", "langLock", "contextualLanguage", "languageRecovery",
                                 "neverTranslate", "sourceFixes", "glossary"])
         }
@@ -451,7 +460,7 @@ struct IntelligenceSettings: View {
 
 // MARK: - Floating window
 struct WindowSettings: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("winSize") private var winSize = WindowSize.normal.rawValue
     @AppStorage("theme") private var theme = PiPTheme.dark.rawValue
     @AppStorage("textSize") private var textSize = PiPTextSize.auto.rawValue
@@ -482,7 +491,7 @@ struct WindowSettings: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                     .listRowInsets(EdgeInsets())
             }
-            Section("Appearance") {
+            Section("Look") {
                 Picker("Window size", selection: $winSize) {
                     ForEach(WindowSize.allCases) { Text($0.title).tag($0.rawValue) }
                 }
@@ -492,30 +501,34 @@ struct WindowSettings: View {
                 Picker("Text size", selection: $textSize) {
                     ForEach(PiPTextSize.allCases) { Text($0.title).tag($0.rawValue) }
                 }
-                Picker("Font", selection: $pipFont) {
-                    ForEach(PiPFont.allCases) { Text($0.title).tag($0.rawValue) }
-                }
-                Toggle("Colour speaker names", isOn: $highlightNames)
                 Toggle("Show original text", isOn: $showOriginal)
-                NavigationLink {
-                    CaptionAppearanceSettings()
-                } label: {
-                    Label("Advanced typography & layout", systemImage: "textformat.size")
-                }
+                Hint("Shows the source line under the translation.")
             }
             Section {
-                Toggle("Open PiP when capture starts", isOn: $autoOpenPiP)
+                Toggle("Open the floating window when capture starts", isOn: $autoOpenPiP)
                 Toggle("Clear subtitle when text ends", isOn: $autoClear)
                 if autoClear {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Keep text after it disappears · \(String(format: "%.1f", clearHold)) s")
                             .font(.subheadline)
-                        Slider(value: $clearHold, in: 0...5, step: 0.5)
+                        Slider(value: $clearHold, in: 0...5, step: 0.5).accessibilityLabel("How long to keep text after it disappears")
                     }
                 }
-            } header: { Text("Floating window behavior") } footer: {
-                Text("Subtitle timing and transitions are under Subtitle timing; speech, clipboard and vibration are under Feedback & sharing.")
+            } header: { Text("Behavior") } footer: {
+                Text("When captions appear is under Subtitle timing. Speech, copying and vibration are under Feedback & sharing.")
             }
+            AdvancedSection(title: "Typography") {
+                Picker("Font", selection: $pipFont) {
+                    ForEach(PiPFont.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                Toggle("Colour speaker names", isOn: $highlightNames)
+                NavigationLink {
+                    CaptionAppearanceSettings()
+                } label: {
+                    Label("Spacing and layout", systemImage: "textformat.size")
+                }
+            }
+            AdvancedSwitchSection()
             ResetSection(keys: [
                 "winSize", "theme", "textSize", "pipFont", "highlightNames",
                 "showOriginal", "autoOpenPiP", "autoClear", "clearHold"
@@ -530,55 +543,43 @@ struct WindowSettings: View {
 
 // MARK: - Interface
 struct InterfaceSettings: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("accent") private var accent = AccentChoice.blue.rawValue
-    @AppStorage("homePresets") private var homePresets = true
-    @AppStorage("homeTools") private var homeTools = true
-    @AppStorage("homeQuick") private var homeQuick = true
-    @AppStorage("homeStatus") private var homeStatus = true
-    @AppStorage("homeRecent") private var homeRecent = true
+    @AppStorage("appearance") private var appearance = Appearance.system.rawValue
     @AppStorage("homeMetrics") private var homeMetrics = true
-    @AppStorage("homeQuickExpanded") private var homeQuickExpanded = false
-    @AppStorage("homeDetailsExpanded") private var homeDetailsExpanded = false
     @AppStorage("uiHaptics") private var uiHaptics = true
 
     var body: some View {
         List {
+            Section {
+                Picker("Appearance", selection: $appearance) {
+                    ForEach(Appearance.allCases) { Text($0.title).tag($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
+            } header: { Text("Light or dark") } footer: {
+                Text("System follows your iPhone's setting.")
+            }
             Section("Accent color") {
-                HStack(spacing: 14) {
+                HStack(spacing: Space.m) {
                     ForEach(AccentChoice.allCases) { color in
-                        Circle()
-                            .fill(LinearGradient(colors: [color.start, color.end],
-                                                 startPoint: .topLeading, endPoint: .bottomTrailing))
-                            .frame(width: 34, height: 34)
-                            .overlay(Circle().stroke(Color.white, lineWidth: accent == color.rawValue ? 3 : 0))
-                            .onTapGesture { accent = color.rawValue; engine.tap() }
-                            .accessibilityLabel(color.title)
+                        Button { accent = color.rawValue; engine.tap() } label: {
+                            Circle()
+                                .fill(LinearGradient(colors: [color.start, color.end], startPoint: .topLeading, endPoint: .bottomTrailing))
+                                .frame(width: 36, height: 36)
+                                .overlay(Circle().stroke(Color.primary, lineWidth: accent == color.rawValue ? 3 : 0))
+                                .frame(minWidth: 44, minHeight: 44)
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel(color.title)
+                        .accessibilityAddTraits(accent == color.rawValue ? .isSelected : [])
                     }
-                }.padding(.vertical, 4)
+                }
             }
-            Section {
-                Toggle("Presets", isOn: $homePresets)
-                Toggle("Tools under preview", isOn: $homeTools)
-                Toggle("Quick settings", isOn: $homeQuick)
-                Toggle("Recent language pairs", isOn: $homeRecent)
-                Toggle("Status & diagnostics summary", isOn: $homeStatus)
-                Toggle("Show timing cards", isOn: $homeMetrics)
-            } header: { Text("Home screen sections") } footer: {
-                Text("Hide sections you rarely use for a simpler Home screen.")
+            Section("Feedback") {
+                LabeledToggleRow(title: "Haptic feedback for taps", detail: "A light tick when you press buttons.", isOn: $uiHaptics)
+                LabeledToggleRow(title: "Show timing details in Status", detail: "Adds the per-stage timing list to the Status sheet.", isOn: $homeMetrics)
             }
-            Section {
-                Toggle("Keep quick settings expanded", isOn: $homeQuickExpanded)
-                    .disabled(!homeQuick)
-                Toggle("Keep troubleshooting expanded", isOn: $homeDetailsExpanded)
-            } header: { Text("Default layout") }
-            Section("App interactions") {
-                Toggle("Haptic feedback for taps", isOn: $uiHaptics)
-            }
-            ResetSection(keys: [
-                "accent", "homePresets", "homeTools", "homeQuick", "homeStatus",
-                "homeRecent", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "uiHaptics"
-            ])
+            ResetSection(keys: ["accent", "appearance", "homeMetrics", "uiHaptics"])
         }
         .settingsPage("App appearance")
     }
@@ -586,7 +587,7 @@ struct InterfaceSettings: View {
 
 // MARK: - Performance
 struct PerformanceSettings: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("suppressOwnInterface") private var suppressOwnInterface = true
     @AppStorage("coolMode") private var coolMode = false
     @AppStorage("smartCool") private var smartCool = true
@@ -599,17 +600,12 @@ struct PerformanceSettings: View {
         List {
             Section {
                 Toggle("Adapt to device conditions", isOn: $adaptive)
-                Text("Reduces work when thermal pressure rises, memory is scarce or Low Power Mode is enabled.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Hint("Does less work when the phone gets hot, memory is low or Low Power Mode is on.")
                 Toggle("Cool mode", isOn: $coolMode)
-                Toggle("Smart Cool controller", isOn: $smartCool)
-                    .disabled(!coolMode)
-                Text("Smart Cool adapts OCR intervals to measured workload. Fixed Cool uses conservative timing instead. Both can delay very brief subtitles.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            } header: { Text("Heat & battery") }
-
+                Hint("Reads the screen less often to keep the phone cooler. Very short subtitles may be missed.")
+                Toggle("Keep screen awake during capture", isOn: $keepAwake)
+            } header: { Text("Heat and battery") }
             Section {
-                Toggle("Reduce OCR when no text is visible", isOn: $idleBackoff)
                 Picker("Pause after no text", selection: $idleMinutes) {
                     Text("Never").tag(0)
                     Text("1 minute").tag(1)
@@ -618,13 +614,17 @@ struct PerformanceSettings: View {
                     Text("10 minutes").tag(10)
                     Text("30 minutes").tag(30)
                 }
-                Toggle("Keep screen awake during capture", isOn: $keepAwake)
-                Toggle("Pause screen reading inside ScreenLingo", isOn: $suppressOwnInterface)
-                Text("Avoids translating this app's interface. Turn off to read a video floating over ScreenLingo. Text and photo translation still work.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            } header: { Text("Idle & screen") } footer: {
-                Text("Pausing and reducing OCR during idle periods save power, but can delay the next text detection.")
+                Toggle("Pause reading inside ScreenLingo", isOn: $suppressOwnInterface)
+                Hint("Avoids translating this app's own screens. Turn off to read a video floating over ScreenLingo. Text & photos still works.")
+            } header: { Text("When nothing is happening") } footer: {
+                Text("Pausing saves power but can delay the next detected text.")
             }
+            AdvancedSection(title: "Cooling and idle details") {
+                Toggle("Smart Cool controller", isOn: $smartCool).disabled(!coolMode)
+                Hint("Adjusts how often the screen is read to match the actual workload. Off uses fixed, conservative timing.")
+                Toggle("Reduce reading when no text is visible", isOn: $idleBackoff)
+            }
+            AdvancedSwitchSection()
             ResetSection(keys: ["suppressOwnInterface", "coolMode", "smartCool", "adaptive", "idleMinutes", "idleBackoff", "keepAwake"])
         }
         .settingsPage("Performance & battery")
@@ -638,7 +638,7 @@ struct PerformanceSettings: View {
 
 // MARK: - Backup & reset
 struct BackupSettings: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @State private var message = ""
     @State private var confirmReset = false
 
@@ -661,7 +661,7 @@ struct BackupSettings: View {
             } header: {
                 Text("Settings backup")
             } footer: {
-                Text("Export, copy the text somewhere safe, and import it again to restore. Presets have their own export on the Presets page.")
+                Text("Share or copy your settings as text, keep it somewhere safe, and import it later to restore. Backups from earlier builds still restore. Presets have their own export.")
             }
             Section {
                 Button("Reset every setting", role: .destructive) { confirmReset = true }
@@ -670,15 +670,15 @@ struct BackupSettings: View {
             }
         }
         .settingsPage("Backup & reset")
-        .confirmationDialog("Reset every setting to its default?", isPresented: $confirmReset, titleVisibility: .visible) {
-            Button("Reset every setting", role: .destructive) { engine.resetAllSettings() }
+        .confirmDestructive("Reset every setting to its default?", message: "Presets and history are kept.", isPresented: $confirmReset, button: "Reset every setting") {
+            engine.resetAllSettings()
         }
     }
 }
 
 // MARK: - About
 struct AboutSettings: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("onboarded") private var onboarded = true
 
     var body: some View {
@@ -689,16 +689,24 @@ struct AboutSettings: View {
                                value: engine.extensionVersion == "–" ? "not seen yet" : "v\(engine.extensionVersion)")
             }
             Section("How to use") {
-                Text("1. Languages tab → download your source and target packs.\n2. Home → tap the broadcast icon, choose ScreenLingo Capture, Start Broadcast.\n3. Switch to your app. If nothing shows, use Test on the Home screen and check the Diagnostics tab.")
+                Text("1. Languages tab: download your source and target packs.\n2. Live tab: tap the round broadcast button, choose ScreenLingo Capture, then Start Broadcast.\n3. Switch to your app. If nothing shows, open Status on the Live tab, or Settings → Tests & diagnostics.")
                     .font(.footnote)
                 Button("Show the welcome tour again") { onboarded = false }
             }
-            Section("Changelog") {
-                ForEach(AppVersion.changelog, id: \.1) { v in
+            Section("What's new") {
+                ForEach(Array(AppVersion.changelog.prefix(3)), id: \.1) { v in
                     VStack(alignment: .leading, spacing: 2) {
                         Text("v\(v.0)").bold()
                         Text(v.1).font(.footnote).foregroundStyle(.secondary)
                     }
+                }
+                NavigationLink("Full changelog") {
+                    List(AppVersion.changelog, id: \.1) { v in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("v\(v.0)").bold()
+                            Text(v.1).font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }.settingsPage("Changelog")
                 }
             }
         }
@@ -707,7 +715,7 @@ struct AboutSettings: View {
 }
 
 struct PrivacySettings: View {
-    @EnvironmentObject private var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("privateSession") private var privateSession = false
     @AppStorage("diagIncludeText") private var includeText = false
     @AppStorage("showSessionSpeakers") private var showSpeakers = true
@@ -716,16 +724,13 @@ struct PrivacySettings: View {
         List {
             Section {
                 Toggle("Private session", isOn: $privateSession)
-                Text("New translations are not added to History or persistent translation memory. Previously saved entries remain.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Hint("New translations are not added to your Library or saved translation memory. Things saved earlier stay.")
             } header: { Text("Translation privacy") }
             Section {
                 Toggle("Show recognized speaker labels", isOn: $showSpeakers)
-                Text("Only detects visible Name: labels; this does not identify voices or unnamed people.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                Toggle("Include recognized names and text in diagnostics", isOn: $includeText)
-                Text("Leave off unless you specifically need text in a troubleshooting export. OCR and translation run on-device.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Hint("Only reads visible \"Name:\" labels. It does not identify voices or people without a label.")
+                Toggle("Include recognized text in diagnostic exports", isOn: $includeText)
+                Hint("Leave off unless a troubleshooting export needs the text. Reading and translating happen on your phone.")
             } header: { Text("Personal content") }
             Section {
                 NavigationLink {
@@ -747,7 +752,7 @@ struct PrivacySettings: View {
 
 /// Collection is independent of which diagnostics page happens to be visible.
 struct DiagnosticsCollectionControls: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @AppStorage("diagnosticsEnabled") private var enabled = true
     @AppStorage("detailedCollection") private var detailed = false
     var body: some View {
