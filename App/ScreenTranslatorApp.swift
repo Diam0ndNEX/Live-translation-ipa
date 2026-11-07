@@ -16,6 +16,7 @@ final class AppModel: ObservableObject {
     let router = AppRouter()
     let feedback = FeedbackCenter()
     let theme = ThemeStore()
+    let advanced = AdvancedMode()
     private var bag = Set<AnyCancellable>()
 
     init() {
@@ -44,6 +45,7 @@ struct RootView: View {
             .environmentObject(model.router)
             .environmentObject(model.feedback)
             .environmentObject(model.theme)
+            .environmentObject(model.advanced)
             .task {
                 let engine = model.engine
                 engine.diag.noteExecutionPhase(phase == .active ? "active" : (phase == .background ? "background" : "inactive"), pipActive: engine.pipActive)
@@ -108,6 +110,7 @@ private struct RootContent: View {
                 .environmentObject(model.engine)
                 .environmentObject(model.router)
                 .environmentObject(model.feedback)
+                .environmentObject(model.advanced)
                 .preferredColorScheme(theme.appearance.scheme)
                 .tint(theme.tint)
         }

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ResponsivenessSettings: View {
     @EnvironmentObject private var engine: TranslatorEngine
+    @EnvironmentObject private var feedback: FeedbackCenter
     @AppStorage("displayPolicy") private var policy = "immediate"
     @AppStorage("minDisplay") private var minimum = 0.0
     @AppStorage("heartbeatInterval") private var heartbeat = 1.0
@@ -14,52 +15,45 @@ struct ResponsivenessSettings: View {
     var body: some View {
         List {
             Section {
-                Picker("When translation is ready", selection: $policy) {
+                Picker("When a translation is ready", selection: $policy) {
                     Text("Show immediately").tag("immediate")
                     Text("Keep results readable").tag("readable")
                 }
                 if policy == "readable" {
-                    Stepper("Minimum visible time · \(minimum, specifier: "%.1f") s",
+                    Stepper("Show for at least \(minimum, specifier: "%.1f") s",
                             value: $minimum, in: 0...4, step: 0.1)
                 }
-                Text("Immediate shows completed, confirmed translations as soon as they're ready. Readable can briefly hold an already translated caption.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            } header: { Text("Display timing") }
+                Hint("Immediately shows each confirmed translation as soon as it is ready. Readable can briefly keep the current caption on screen so it can be read.")
+            } header: { Text("When captions appear") }
 
             Section {
-                Toggle("Stable caption transitions", isOn: $steadyCaptions)
-                Text("Keeps a confirmed caption visible instead of replacing it with a tentative OCR reading.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                Toggle("Protect confirmed captions during handoff", isOn: $protectConfirmed)
+                Toggle("Keep captions steady", isOn: $steadyCaptions)
+                Hint("Keeps a confirmed caption on screen instead of replacing it with a first, uncertain reading.")
+            } header: { Text("Stability") }
+
+            AdvancedSection(title: "Caption handoff and floating window") {
+                Toggle("Let a confirmed caption finish before it is replaced", isOn: $protectConfirmed)
                     .disabled(!steadyCaptions)
-                Text("Allows an already-confirmed subtitle a short, bounded chance to complete before a newer confirmed subtitle replaces it.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            } header: { Text("Subtitle continuity") }
-
-            Section {
-                Picker("Idle PiP heartbeat", selection: $heartbeat) {
+                Hint("Gives an already confirmed subtitle a short, limited chance to finish before a newer one takes over.")
+                Picker("Refresh the idle floating window every", selection: $heartbeat) {
                     Text("0.5 seconds").tag(0.5)
                     Text("1 second").tag(1.0)
                     Text("2 seconds").tag(2.0)
                 }
-                Text("Repeats the current frame to keep PiP alive. New subtitles still submit immediately.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            } header: { Text("Floating window") }
+                Hint("Repeats the current frame so the floating window stays alive. New subtitles still appear at once.")
+            }
 
             LatencyDetail(monitor: engine.latency)
             Section {
                 Button("Copy timing report") {
                     UIPasteboard.general.string = engine.diag.report(engine: engine)
-                    engine.toast("Timing report copied")
-                }
-                Button("Reset subtitle timing", role: .destructive) {
-                    engine.resetKeys(["displayPolicy", "minDisplay", "heartbeatInterval",
-                                      "steadyCaptions", "protectConfirmedPresentation"])
-                }
+                    feedback.show("Timing report copied", severity: .success)
+                }.frame(minHeight: 44)
             }
+            AdvancedSwitchSection()
+            ResetSection(keys: ["displayPolicy", "minDisplay", "heartbeatInterval", "steadyCaptions", "protectConfirmedPresentation"])
         }
-        .navigationTitle("Subtitle timing")
-        .navigationBarTitleDisplayMode(.inline)
+        .settingsPage("Subtitle timing")
         .onChange(of: timingKey) { _, _ in engine.timingSettingsChanged() }
         .onChange(of: continuityKey) { _, _ in engine.pipelineSettingsChanged() }
     }
@@ -77,7 +71,7 @@ struct CaptionAppearanceSettings: View {
     private var key: String { "\(weight)|\(alignment)|\(spacing)|\(padding)|\(scale)|\(originalFraction)|\(accent)" }
     var body: some View {
         List {
-            Section("Typography") {
+            Section("Text") {
                 Picker("Weight", selection: $weight) {
                     Text("Regular").tag("regular"); Text("Medium").tag("medium"); Text("Bold").tag("bold")
                 }
@@ -86,26 +80,25 @@ struct CaptionAppearanceSettings: View {
                 }
                 VStack(alignment: .leading) {
                     Text("Text scale · \(Int(scale * 100))%")
-                    Slider(value: $scale, in: 0.75...1.5, step: 0.05)
+                    Slider(value: $scale, in: 0.75...1.5, step: 0.05).accessibilityLabel("Text scale")
                 }
-                Stepper("Line spacing · \(Int(spacing))", value: $spacing, in: 0...16, step: 1)
             }
-            Section("Layout") {
-                Stepper("Horizontal padding · \(Int(padding))", value: $padding, in: 12...48, step: 2)
+            AdvancedSection(title: "Spacing", footer: "These change how captions look only. They do not change reading, translation or language detection.") {
+                Stepper("Line spacing · \(Int(spacing))", value: $spacing, in: 0...16, step: 1)
+                Stepper("Side padding · \(Int(padding))", value: $padding, in: 12...48, step: 2)
                 VStack(alignment: .leading) {
                     Text("Space for original text · \(Int(originalFraction * 100))%")
-                    Slider(value: $originalFraction, in: 0.15...0.4, step: 0.01)
+                    Slider(value: $originalFraction, in: 0.15...0.4, step: 0.01).accessibilityLabel("Space for original text")
                 }
                 Picker("Speaker name colour", selection: $accent) {
                     Text("Blue").tag("blue"); Text("Mint").tag("mint"); Text("Purple").tag("purple"); Text("Amber").tag("amber")
                 }
             }
-            Section {
-                Text("These controls change how captions look. They do not change OCR text, translation wording, language detection or confirmation.").font(.footnote).foregroundStyle(.secondary)
-                Button("Reset caption layout", role: .destructive) { engine.resetKeys(["pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "pipScale", "originalFraction", "speakerAccent"]) }
-            }
-        }.navigationTitle("Caption layout").navigationBarTitleDisplayMode(.inline)
-            .onChange(of: key) { _, _ in engine.applyStyle() }
+            AdvancedSwitchSection()
+            ResetSection(keys: ["pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "pipScale", "originalFraction", "speakerAccent"])
+        }
+        .settingsPage("Caption layout")
+        .onChange(of: key) { _, _ in engine.applyStyle() }
     }
 }
 
@@ -123,29 +116,29 @@ struct ReaderWorkspaceSettings: View {
                 Picker("Reader font", selection: $font) {
                     ForEach(PiPFont.allCases) { Text($0.title).tag($0.rawValue) }
                 }
-                Stepper("Line spacing · \(Int(spacing))", value: $spacing, in: 0...16, step: 1)
                 Picker("Reading width", selection: $width) {
                     Text("Full width").tag("full")
                     Text("Narrow column").tag("narrow")
                 }
+                Stepper("Line spacing · \(Int(spacing))", value: $spacing, in: 0...16, step: 1)
             }
             Section {
-                Picker("Photo OCR resolution", selection: $edge) {
-                    Text("1600 px · lighter").tag(1600)
-                    Text("2400 px · standard").tag(2400)
-                    Text("3200 px · more small-text detail").tag(3200)
+                Toggle("Translate right after reading a photo", isOn: $autoTranslate)
+            } header: { Text("Photo translation") }
+            AdvancedSection(title: "Photo detail", footer: "More detail finds smaller text but uses more memory. It does not affect live screen reading.") {
+                Picker("Photo reading detail", selection: $edge) {
+                    Text("Lighter").tag(1600)
+                    Text("Standard").tag(2400)
+                    Text("Most detail").tag(3200)
                 }
-                Toggle("Translate after reading a photo", isOn: $autoTranslate)
-            } header: { Text("Photo translation") } footer: {
-                Text("Higher resolution can detect smaller text but use more memory. This does not affect live screen capture.")
             }
+            AdvancedSwitchSection()
             ResetSection(keys: [
                 "readerFont", "readerSpacing", "readerWidth",
                 "photoOCREdge", "photoAutoTranslate"
             ])
         }
-        .navigationTitle("Reader & photos")
-        .navigationBarTitleDisplayMode(.inline)
+        .settingsPage("Reader & photos")
     }
 }
 
@@ -177,8 +170,7 @@ struct FeedbackStorageSettings: View {
                     Text("Original").tag("original")
                     Text("Both").tag("bilingual")
                 }.disabled(!autoCopy)
-                Text("Automatic copying changes your clipboard whenever a translation is shown.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Hint("Replaces what is on your clipboard every time a translation appears.")
             } header: { Text("Clipboard") }
 
             Section {
@@ -186,7 +178,7 @@ struct FeedbackStorageSettings: View {
                 if speak {
                     VStack(alignment: .leading, spacing: 5) {
                         Text("Speech speed").font(.subheadline)
-                        Slider(value: $speechRate, in: 0.3...0.65)
+                        Slider(value: $speechRate, in: 0.3...0.65).accessibilityLabel("Speech speed")
                     }
                 }
                 Toggle("New speech interrupts previous speech", isOn: $interrupt)
@@ -198,7 +190,6 @@ struct FeedbackStorageSettings: View {
                 "speak", "speechRate", "interruptSpeech"
             ])
         }
-        .navigationTitle("Feedback & sharing")
-        .navigationBarTitleDisplayMode(.inline)
+        .settingsPage("Feedback & sharing")
     }
 }

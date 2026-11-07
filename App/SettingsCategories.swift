@@ -25,54 +25,48 @@ struct TranslationSettings: View {
                         Text(system.title).tag(system.rawValue)
                     }
                 }
-                Text((TranslationSystem(rawValue: translationSystem) ?? .legacy).explanation)
-                    .font(.footnote).foregroundStyle(.secondary)
-                LabeledContent("Active system", value: engine.activeTranslationSystem.title)
+                Hint((TranslationSystem(rawValue: translationSystem) ?? .legacy).explanation)
+                LabeledContent("Running now", value: engine.activeTranslationSystem.title)
                 if engine.activeTranslationSystem != engine.pendingTranslationSystem {
-                    LabeledContent("Next capture session", value: engine.pendingTranslationSystem.title)
-                    Text("Stop and restart capture to apply the selected system.").font(.footnote)
+                    LabeledContent("Starts next time", value: engine.pendingTranslationSystem.title)
+                    Hint("Stop the broadcast and start it again to switch.")
                 }
-            } header: { Text("Translation system") }
+            } header: { Text("How translation runs") }
 
             Section {
                 Toggle("Translate ahead", isOn: $translateAhead)
-                Text("Starts translating a promising first reading before OCR confirms it; shows results only after confirmation.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                Toggle("Keep the translator warm", isOn: $keepWarm)
-                Text("Hybrid initially exercises Apple default and low latency; Low Latency exercises only low latency. Successful warm-ups are reused per pair and strategy this launch. Interrupted attempts may retry after a short cooldown. No periodic sample loop; live capture has priority.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                Toggle("Predict the language for warm-up", isOn: $predictiveWarmup)
-                Text("Prepares a recently confirmed source language when Automatic hasn't resolved one yet. Live translation always has priority.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Hint("Starts translating a promising first reading early. It only appears on screen once the text is confirmed, so captions show sooner.")
+                Toggle("Remember translations", isOn: $remember)
+                Hint("Reuses earlier translations of the same text, even in later sessions. \(engine.memoryCount) remembered so far.")
+                NavigationLink("Manage translation memory") { MemoryManagementView() }
+            } header: { Text("Speed and reuse") }
+
+            Section {
                 TranslationActivityView()
                 if let ms = engine.warmupLastDurationMs {
                     LabeledContent("Last warm-up", value: "\(Int(ms)) ms")
                 }
-            } header: { Text("Model readiness") }
+            } header: { Text("Readiness") }
 
-            Section {
+            AdvancedSection(title: "Warm-up", footer: "Warm-up prepares the translator before the first caption. Live translation always has priority.") {
+                Toggle("Keep the translator warm", isOn: $keepWarm)
+                Hint("Hybrid prepares both models, Low Latency only its own. A successful warm-up is reused for the same languages during this launch.")
+                Toggle("Predict the language for warm-up", isOn: $predictiveWarmup)
+                Hint("Prepares a recently confirmed language when Automatic has not decided yet.")
+            }
+            AdvancedSection(title: "Early translation") {
                 Toggle("Selective early translation", isOn: $selectiveSpeculation)
-                Text("Skip uncertain early candidates instead of wasting model work. Confirmed subtitles always remain eligible.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Hint("Skips uncertain early readings instead of wasting work. Confirmed subtitles are always translated.")
                 if selectiveSpeculation {
                     VStack(alignment: .leading, spacing: 5) {
-                        LabeledContent("Early OCR confidence", value: "\(Int(speculationConfidence * 100))%")
-                        Slider(value: $speculationConfidence, in: 0.65...0.98, step: 0.01)
+                        LabeledContent("Minimum confidence for early translation", value: "\(Int(speculationConfidence * 100))%")
+                        Slider(value: $speculationConfidence, in: 0.65...0.98, step: 0.01).accessibilityLabel("Minimum confidence for early translation")
                     }
                 }
-                Toggle("Adapt early translation to usefulness", isOn: $adaptiveSpeculation)
-                Text("Reduces early model work when predictions are not useful. Hybrid also temporarily switches to direct Low Latency recovery when Apple Default speculation repeatedly wastes resources.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            } header: { Text("Translation scheduling") }
-
-            Section {
-                Toggle("Remember translations", isOn: $remember)
-                LabeledContent("Remembered units", value: "\(engine.memoryCount)")
-                NavigationLink("Manage translation memory") { MemoryManagementView() }
-                Text("Reuses compatible translations across sessions. Managing memory does not delete existing entries automatically.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            } header: { Text("Reuse & memory") }
-
+                Toggle("Adapt early translation to how useful it is", isOn: $adaptiveSpeculation)
+                Hint("Does less early work when predictions are not paying off. Hybrid may also switch to Low Latency recovery when Apple Default early work keeps being wasted.")
+            }
+            AdvancedSwitchSection()
             ResetSection(keys: [
                 "translationSystem", "translateAhead", "keepWarm", "predictiveWarmup", "remember",
                 "selectiveSpeculation", "adaptiveSpeculation", "speculationConfidence"
@@ -104,15 +98,15 @@ struct HistoryStorageSettings: View {
                     Text("30 days").tag(30)
                 }
                 .disabled(!saveHistory)
-                Picker("Maximum history entries", selection: $historyCapacity) {
+                Picker("Keep at most", selection: $historyCapacity) {
                     Text("100").tag(100)
                     Text("250").tag(250)
                     Text("500").tag(500)
                     Text("1,000").tag(1000)
                 }
                 .disabled(!saveHistory)
-            } header: { Text("Translation history") } footer: {
-                Text("History is separate from remembered translations. Changing history retention does not clear Translation Memory.")
+            } header: { Text("Library history") } footer: {
+                Text("Your Library is separate from remembered translations. Changing how long it is kept does not clear translation memory.")
             }
 
             Section {
@@ -132,7 +126,7 @@ struct HistoryStorageSettings: View {
             Section {
                 Button("Delete translation history", role: .destructive) { confirmClear = true }
             } header: { Text("Erase") } footer: {
-                Text("Deletes saved History entries, not the translation memory database.")
+                Text("Deletes everything in your Library. Translation memory stays.")
             }
             ResetSection(keys: ["saveHistory", "historyRetentionDays", "historyCapacity"])
         }
@@ -145,11 +139,9 @@ struct HistoryStorageSettings: View {
         }
         .onChange(of: retentionDays) { _, _ in engine.applyHistoryRetention() }
         .onChange(of: historyCapacity) { _, _ in engine.applyStorageSettings() }
-        .confirmationDialog("Delete every translation in History?", isPresented: $confirmClear, titleVisibility: .visible) {
-            Button("Delete history", role: .destructive) {
-                engine.eraseHistory()
-                engine.toast("History cleared")
-            }
+        .confirmDestructive("Delete every translation in your Library?", message: "This cannot be undone.", isPresented: $confirmClear, button: "Delete Library") {
+            engine.eraseHistory()
+            engine.toast("History cleared")
         }
     }
 }
@@ -166,33 +158,22 @@ struct DiagnosticsSettings: View {
     var body: some View {
         List {
             Section {
-                LabeledContent("Session started", value: engine.diag.started.formatted(date: .abbreviated, time: .shortened))
-                Button {
-                    router.present(.diagnostics)
-                } label: {
-                    Label("Open live diagnostics dashboard", systemImage: "chart.xyaxis.line")
-                }
+                Button { router.present(.diagnostics) } label: {
+                    Label("Open the live dashboard", systemImage: "chart.xyaxis.line")
+                }.frame(minHeight: 44)
+                Button { router.present(.testRuns) } label: {
+                    Label("Open test runs", systemImage: "checklist")
+                }.frame(minHeight: 44)
                 Button {
                     Task { await engine.diag.exportZIP() }
                 } label: {
-                    Label(engine.diag.exportInProgress ? "Preparing diagnostic ZIP…" : "Export complete diagnostic ZIP",
+                    Label(engine.diag.exportInProgress ? "Preparing the export…" : "Export everything as a ZIP",
                           systemImage: "archivebox")
                 }
-                .disabled(engine.diag.exportInProgress)
-                Text("ZIP v3 includes a readable summary, full-session counters, timed intervals, latency percentiles, a privacy-safe event timeline and experiment settings. Nothing is uploaded automatically.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                .disabled(engine.diag.exportInProgress).frame(minHeight: 44)
+                Hint("The ZIP has a readable summary, counters, timings and a timeline without screen text. Nothing is uploaded.")
                 Text(engine.diag.archiveStatus).font(.caption).foregroundStyle(.secondary)
-            } header: { Text("Review & export") }
-            Section {
-                DiagnosticsCollectionControls()
-                Text("Controls how much numeric performance evidence is retained; detailed collection can use extra memory and CPU.")
-                    .font(.footnote).foregroundStyle(.secondary)
-                Picker("Samples per chart", selection: $samples) {
-                    Text("300").tag(300)
-                    Text("600").tag(600)
-                    Text("1,200").tag(1200)
-                }
-            } header: { Text("Diagnostics collection") }
+            } header: { Text("Review and export") }
 
             Section {
                 Picker("Save test runs", selection: $testRunSaving) {
@@ -200,59 +181,57 @@ struct DiagnosticsSettings: View {
                     Text("Only when I tap Save").tag("manual")
                     Text("Off").tag("off")
                 }
-                Text("A run is one broadcast in one translation system. Automatic saves runs of 30 seconds or more with captions when they end. Metadata only; private sessions are never saved.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Hint("A run is one broadcast in one translation system. Automatic saves runs of 30 seconds or more when they end. Only numbers are saved, never screen text. Private sessions are never saved.")
                 let storage = engine.diag.testRuns.reduce(0) { $0 + $1.bytes }
                 LabeledContent("Saved runs", value: "\(engine.diag.testRuns.count) · \(ByteCountFormatter.string(fromByteCount: Int64(storage), countStyle: .file))")
                 Button("Delete all unpinned runs", role: .destructive) { confirmDeleteRuns = true }
-                    .disabled(engine.diag.testRuns.allSatisfy { $0.pinned })
-                Text("Pinned runs are never deleted automatically. Deleting runs does not change any setting, translation memory or history.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                    .disabled(engine.diag.testRuns.allSatisfy { $0.pinned }).frame(minHeight: 44)
+                    .confirmDestructive("Delete all unpinned test runs?", message: "Pinned runs, translation memory, Library and settings are not changed.",
+                                        isPresented: $confirmDeleteRuns, button: "Delete unpinned runs") {
+                        Task { await engine.diag.deleteAllUnpinnedRuns() }
+                    }
             } header: { Text("Test runs") }
 
-            Section {
+            AdvancedSection(title: "Collection", footer: "Detailed collection can use extra memory and processing.") {
+                DiagnosticsCollectionControls()
+                Picker("Samples per chart", selection: $samples) {
+                    Text("300").tag(300)
+                    Text("600").tag(600)
+                    Text("1,200").tag(1200)
+                }
+            }
+            AdvancedSection(title: "Controlled comparisons", footer: "Changing a test mode starts a new diagnostic session so results are not mixed. Turn these off after testing.") {
                 Toggle("Fresh requests only", isOn: Binding(get: { freshTranslationTest }, set: { enabled in
                     freshTranslationTest = enabled
                     if enabled { temporaryMemoryTest = false }
                     engine.testModeSettingsChanged()
                 }))
-                Text("For controlled comparisons, bypasses translation-memory reuse and pre-translation without deleting saved results. Turn off after testing.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Hint("Ignores remembered translations and early translation so every request is new. Saved results are not deleted.")
                 Toggle("Temporary-memory test", isOn: Binding(get: { temporaryMemoryTest }, set: { enabled in
                     temporaryMemoryTest = enabled
                     if enabled { freshTranslationTest = false }
                     engine.testModeSettingsChanged()
                 }))
-                Text("Uses an isolated RAM cache and your speculation settings. Saved translations and history are untouched. The cache survives app switches and toggle changes, and is lost when the app process terminates.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                Hint("Uses a throwaway cache in memory. Saved translations and your Library are untouched. It is lost when the app closes.")
                 if temporaryMemoryTest {
                     LabeledContent("Temporary entries", value: "\(engine.temporaryMemoryEntries)")
                 }
-                Text("Changing test mode starts a new diagnostic session so results are not mixed.")
-                    .font(.footnote).foregroundStyle(.secondary)
                 NavigationLink {
                     PipelineSimulatorView()
                 } label: {
                     Label("Pipeline simulator", systemImage: "point.3.connected.trianglepath.dotted")
                 }
-                Text("Simulates settings and timing assumptions without using the real on-device translation model.")
-                    .font(.footnote).foregroundStyle(.secondary)
-            } header: { Text("Testing tools") }
-
-            Section {
+                Hint("Plays out settings and timing on paper. It does not use the real translation model.")
                 Button("Reset diagnostic counters") {
                     engine.resetDiagnostics()
                     engine.toast("Counters reset")
                 }
             }
+            AdvancedSwitchSection()
             ResetSection(keys: ["diagSamples", "testRunSaving", "freshTranslationTest", "temporaryMemoryTest"])
         }
         .settingsPage("Diagnostics & tests")
         .task { await engine.diag.refreshRuns() }
-        .confirmationDialog("Delete all unpinned test runs? Pinned runs, translation memory, history and settings are not changed.",
-                            isPresented: $confirmDeleteRuns, titleVisibility: .visible) {
-            Button("Delete unpinned runs", role: .destructive) { Task { await engine.diag.deleteAllUnpinnedRuns() } }
-        }
         .onChange(of: samples) { _, _ in engine.applyStorageSettings() }
     }
 }

@@ -2,7 +2,13 @@
 import SwiftUI
 import UniformTypeIdentifiers
 
-extension HistoryItem: Equatable {}
+extension HistoryItem: Equatable {
+    static func == (a: HistoryItem, b: HistoryItem) -> Bool {
+        a.id == b.id && a.original == b.original && a.translated == b.translated && a.date == b.date
+            && a.starred == b.starred && a.sourceLanguage == b.sourceLanguage
+            && a.targetLanguage == b.targetLanguage && a.note == b.note
+    }
+}
 
 private enum LibraryFilter: String, CaseIterable, Identifiable {
     case all = "All", saved = "Saved", week = "Last 7 days"
