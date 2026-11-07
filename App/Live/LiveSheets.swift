@@ -1,4 +1,4 @@
-// ScreenLingo – App – Live sheets: More, Status (with session), Test (2.0.0 build 86)
+// ScreenLingo – App – Live sheets: More, Status (with session), Test (2.0.0 build 87)
 import SwiftUI
 
 // MARK: - More
@@ -44,7 +44,7 @@ struct MoreSheet: View {
                 Section("Open") {
                     Button { router.present(.reader) } label: { ListRow(title: "Focus reader", subtitle: "Large, distraction-free text", symbol: "text.book.closed") { chevron } }
                     Button { router.present(.workspace) } label: { ListRow(title: "Text & photos", subtitle: "Translate typed text, photos and files", symbol: "text.viewfinder") { chevron } }
-                    Button { router.present(.diagnostics) } label: { ListRow(title: "Tests & diagnostics", subtitle: "Live dashboard, test runs, exports", symbol: "waveform.path.ecg") { chevron } }
+                    Button { router.go(.diagnostics) } label: { ListRow(title: "Diagnostics", subtitle: "Live dashboard, test runs, exports", symbol: "waveform.path.ecg") { chevron } }
                 }
             }
             .scrollContentBackground(.hidden)
@@ -119,7 +119,7 @@ struct StatusSheet: View {
                     Button("Copy diagnostic report") {
                         UIPasteboard.general.string = engine.diag.report(engine: engine); feedback.show("Report copied", severity: .success)
                     }
-                    Button("Open tests & diagnostics") { router.present(.diagnostics) }
+                    Button("Open Diagnostics") { router.go(.diagnostics) }
                 }
             }
             .scrollContentBackground(.hidden)

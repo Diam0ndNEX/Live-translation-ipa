@@ -26,11 +26,15 @@ for p, t in files.items():
     if "selectTab" in t:
         fail("U1/U2", f"selectTab still used in {rel(p)}")
 
-# U2: five tabs / Activity tab
+# U2: five typed tabs, Diagnostics among them (build 87); the old Activity tab stays gone
 root_src = (app / "ScreenTranslatorApp.swift").read_text()
 tags = re.findall(r"\.tag\(AppTab\.\w+\)", root_src)
-if len(tags) != 4:
-    fail("U2", f"root TabView must have exactly 4 typed tabs, found {len(tags)}")
+if len(tags) != 5:
+    fail("U2", f"root TabView must have exactly 5 typed tabs, found {len(tags)}")
+if ".tag(AppTab.diagnostics)" not in root_src:
+    fail("U2", "Diagnostics is not a top-level tab")
+if "case .diagnostics: DiagnosticsView()" in root_src:
+    fail("U2", "Diagnostics is presented as a sheet again")
 if re.search(r'Label\("Activity"', root_src) or ".tag(3)" in root_src:
     fail("U2", "Activity tab is back in the tab bar")
 
@@ -161,8 +165,8 @@ dset = dset[dset.index("struct DiagnosticsSettings"):]
 dset = dset[:dset.find("\nstruct ", 10)] if "\nstruct " in dset[10:] else dset
 if re.search(r"@EnvironmentObject[^\n]*TranslatorEngine", dset):
     fail("U3", "DiagnosticsSettings observes the whole engine")
-if "AdvancedBlock" not in (app / "DiagnosticsDashboard.swift").read_text():
-    fail("U11", "dashboard has no Advanced disclosure")
+if "AdvancedBlock" in (app / "DiagnosticsDashboard.swift").read_text():
+    fail("U11", "the Diagnostics tab hides its numbers behind the Advanced switch again")
 
 # U2: deep links
 if "screenlingo" not in (root / "project.yml").read_text() or "onOpenURL" not in root_src:

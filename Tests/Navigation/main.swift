@@ -1,4 +1,4 @@
-// Navigation and narrow-observation tests (v2.0.0 build 86, spec §12.10).
+// Navigation and narrow-observation tests (v2.0.0 build 87, spec §12.10).
 // Compiled standalone on the macOS runner with:
 //   swiftc -parse-as-library App/DesignSystem/AppRouter.swift App/DesignSystem/ObjectSlice.swift Tests/Navigation/main.swift
 import Foundation
@@ -22,8 +22,8 @@ struct NavigationTests {
     static func main() async {
         UserDefaults.standard.removeObject(forKey: "appTab")
 
-        // Tabs: four, stable order, typed.
-        check(AppTab.allCases == [.live, .library, .languages, .settings], "four tabs in order Live, Library, Languages, Settings")
+        // Tabs: five, stable order, typed. Diagnostics is a tab, not a page inside Settings.
+        check(AppTab.allCases == [.live, .library, .languages, .diagnostics, .settings], "five tabs in order Live, Library, Languages, Diagnostics, Settings")
         check(AppTab.allCases.allSatisfy { !$0.title.isEmpty && !$0.symbol.isEmpty }, "every tab has a title and symbol")
 
         let router = AppRouter()
@@ -54,6 +54,7 @@ struct NavigationTests {
         check(router.open(URL(string: "screenlingo://library")!) && router.tab == .library, "deep link opens a tab")
         check(router.open(URL(string: "screenlingo://status")!) && router.tab == .live && router.sheet == .status, "deep link opens a sheet on Live")
         router.dismissSheet()
+        check(router.open(URL(string: "screenlingo://diagnostics")!) && router.tab == .diagnostics && router.sheet == nil, "deep link opens the Diagnostics tab")
         check(!router.open(URL(string: "screenlingo://nowhere")!), "unknown deep link is rejected")
         check(!router.open(URL(string: "https://example.com/live")!), "other schemes are rejected")
 

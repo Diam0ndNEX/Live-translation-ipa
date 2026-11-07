@@ -1,4 +1,4 @@
-// ScreenLingo – App – Diagnostics dashboard (2.0.0 build 86)
+// ScreenLingo – App – Diagnostics dashboard (2.0.0 build 87)
 import SwiftUI
 import Charts
 
@@ -359,7 +359,9 @@ private struct MultiSpeedChart: View {
 enum DiagPage: String, CaseIterable, Identifiable {
     case overview, speed, timeline, pipeline, language, device, memory, sessions, log
     var id: String { rawValue }
-    var title: String { self == .sessions ? "Test runs" : rawValue.capitalized }
+    var title: String {
+        switch self { case .overview: "Live"; case .sessions: "Test runs"; default: rawValue.capitalized }
+    }
     var icon: String {
         switch self {
         case .overview: "square.grid.2x2"
@@ -434,10 +436,8 @@ private struct DiagnosticsBody: View {
     @EngineHandle private var engine
     @EngineFacts(DashboardFacts.read) private var facts
     @EnvironmentObject private var router: AppRouter
-    @Environment(\.dismiss) private var dismiss
     let diag: Diagnostics
     @StateObject private var tick: ObjectSlice<Diagnostics, DiagTick>
-    @AppStorage("diagDetailed") private var detailed = false
     @AppStorage("diagnosticsEnabled") private var collectionEnabled = true
     @AppStorage("detailedCollection") private var collectDetails = false
     @AppStorage("diagPage") private var pageRaw = DiagPage.overview.rawValue
@@ -468,23 +468,27 @@ private struct DiagnosticsBody: View {
     }
 
     // MARK: Body
+    /// Live first: the headline numbers, then one row of pages. Nothing is hidden behind an Advanced switch here;
+    /// this tab exists to read the numbers.
     var body: some View {
         NavigationStack {
             ScreenScaffold {
-                systemCard
                 if collectionEnabled {
                     headline
-                    issuesSection
-                    evidenceCard
-                    LiveFeedSection()
-                    AdvancedBlock(title: "timing, pipeline and device") { advancedContent }
+                    pageBar
+                    if page == .speed || page == .timeline || page == .device { rangePicker }
+                    if page != .overview && !collectDetails {
+                        Banner(text: "Graphs and the event log need Detailed diagnostics.", severity: .warning,
+                               actionTitle: "Turn on") { collectDetails = true }
+                    }
+                    pageContent
                 } else {
-                    Banner(text: "Diagnostics collection is off. Translation and capture continue.", severity: .info)
+                    Banner(text: "Diagnostics collection is off. Translation and capture continue.", severity: .info,
+                           actionTitle: "Turn on") { collectionEnabled = true }
                 }
             }
             .navigationTitle("Diagnostics")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Done") { dismiss() } }
                 ToolbarItem(placement: .topBarLeading) {
                     Button { Sharer.shareFile(text: diag.report(engine: engine), name: "translator-report-\(Sharer.stamp()).txt") } label: {
                         Image(systemName: "square.and.arrow.up")
@@ -494,12 +498,6 @@ private struct DiagnosticsBody: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Button { showSimulator = true } label: { Label("Pipeline simulator", systemImage: "point.3.connected.trianglepath.dotted") }
-                        Section("View") {
-                            Picker("Diagnostic view", selection: $detailed) {
-                                Text("Simple").tag(false)
-                                Text("Detailed").tag(true)
-                            }
-                        }
                         Section("Collection") {
                             Toggle("Simple diagnostics", isOn: $collectionEnabled)
                             Toggle("Detailed diagnostics", isOn: $collectDetails).disabled(!collectionEnabled)
@@ -635,34 +633,7 @@ private struct DiagnosticsBody: View {
         }.frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    @ViewBuilder private var advancedContent: some View {
-        if detailed {
-            if !collectDetails {
-                Banner(text: "Graphs and events are off. Language counters and session speaker labels still work. Turn on Detailed diagnostics in the toolbar menu to collect graph samples.",
-                       severity: .warning)
-            }
-            detailedBody
-        } else {
-            evidenceDetails
-            adaptivePipelineCard
-            if collectDetails {
-                let cutoff = Date().addingTimeInterval(-120)
-                VStack(alignment: .leading, spacing: Space.s) {
-                    SectionHeader(title: "Speed, last 2 minutes")
-                    MultiSpeedChart(ocr: diag.ocr.filter { $0.t > cutoff },
-                                    translate: diag.translate.filter { $0.t > cutoff },
-                                    delay: diag.latency.filter { $0.t > cutoff })
-                }
-                .infoCard()
-                recentEvents
-            } else {
-                Hint("Summary collection is active. Timing history and events are off.")
-            }
-            SecondaryButton(title: "Open the detailed views", symbol: "square.grid.2x2") { detailed = true }
-        }
-    }
-
-    /// The counters behind the headline numbers (Advanced).
+    /// The counters behind the headline numbers (shown on the Pipeline page).
     private var evidenceDetails: some View {
         let stats = diag.s
         let model = Diagnostics.summarize(diag.translate)
@@ -722,7 +693,6 @@ private struct DiagnosticsBody: View {
             }
             ForEach(recent) { e in eventRow(e) }
             Button {
-                detailed = true
                 pageRaw = DiagPage.timeline.rawValue
             } label: {
                 Label("Open the full timeline", systemImage: "timeline.selection").font(.footnote.weight(.semibold))
@@ -731,42 +701,48 @@ private struct DiagnosticsBody: View {
         .infoCard()
     }
 
-    // MARK: Detailed
+    // MARK: Pages
     private func pageChip(_ p: DiagPage) -> some View {
         Button { pageRaw = p.rawValue } label: {
             Label(p.title, systemImage: p.icon)
-                .font(.caption.weight(.semibold))
-                .padding(.horizontal, 12).padding(.vertical, 8)
-                .foregroundStyle(page == p ? Color.white : Color.secondary)
-                .background(page == p ? Color.accentColor.opacity(0.85) : Palette.surface, in: Capsule())
+                .font(.subheadline.weight(.semibold))
+                .padding(.horizontal, Space.m).frame(minHeight: 44)
+                .foregroundStyle(page == p ? Color.white : Color.primary)
+                .background(page == p ? Color.accentColor : Palette.surface, in: Capsule())
+                .overlay(Capsule().strokeBorder(Palette.separator, lineWidth: page == p ? 0 : 1))
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(page == p ? .isSelected : [])
+    }
+
+    private var pageBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: Space.s) { ForEach(DiagPage.allCases) { p in pageChip(p) } }
         }
     }
 
-    private var detailedBody: some View {
-        VStack(spacing: 14) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) { ForEach(DiagPage.allCases) { p in pageChip(p) } }
-            }
-            if page == .speed || page == .timeline || page == .device {
-                Picker("Range", selection: $rangeRaw) {
-                    ForEach(DiagRange.allCases) { Text($0.title).tag($0.rawValue) }
-                }
-                .pickerStyle(.segmented)
-            }
-            switch page {
-            case .overview: overviewPage
-            case .speed: speedPage
-            case .timeline: timelinePage
-            case .pipeline:
-                pipelinePage
-                adaptivePipelineCard
-                subtitleLifecycleCard
-            case .language: languagePage
-            case .device: devicePage
-            case .memory: memoryPage
-            case .sessions: sessionsPage
-            case .log: logPage
-            }
+    private var rangePicker: some View {
+        Picker("Range", selection: $rangeRaw) {
+            ForEach(DiagRange.allCases) { Text($0.title).tag($0.rawValue) }
+        }
+        .pickerStyle(.segmented)
+    }
+
+    @ViewBuilder private var pageContent: some View {
+        switch page {
+        case .overview: livePage
+        case .speed: speedPage
+        case .timeline: timelinePage
+        case .pipeline:
+            evidenceDetails
+            pipelinePage
+            adaptivePipelineCard
+            subtitleLifecycleCard
+        case .language: languagePage
+        case .device: devicePage
+        case .memory: memoryPage
+        case .sessions: sessionsPage
+        case .log: logPage
         }
     }
 
@@ -806,13 +782,16 @@ private struct DiagnosticsBody: View {
         return Swift.min(1, live / total)
     }
 
-    private var overviewPage: some View {
+    /// What is happening now, where the time goes, and what to look at first.
+    private var livePage: some View {
         VStack(spacing: Space.l) {
-            evidenceDetails
+            LiveFeedSection()
+            issuesSection
             pipelineStrip
-            adaptivePipelineCard
+            evidenceCard
             sessionGrid
             percentileTable
+            systemCard
         }
     }
 

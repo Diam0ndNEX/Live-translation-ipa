@@ -198,7 +198,7 @@ private struct DiagnosticsSettingsPage: View {
             Section {
                 ListRow(title: "Live dashboard", subtitle: "Speed, memory and the timeline of this session",
                         symbol: "chart.xyaxis.line") { Image(systemName: "chevron.right").foregroundStyle(.secondary) }
-                    .contentShape(Rectangle()).onTapGesture { router.present(.diagnostics) }
+                    .contentShape(Rectangle()).onTapGesture { router.go(.diagnostics) }
                     .accessibilityAddTraits(.isButton)
                 ListRow(title: "Test runs", subtitle: "\(facts.runCount) saved · \(ByteCountFormatter.string(fromByteCount: Int64(facts.runBytes), countStyle: .file))",
                         symbol: "checklist") { Image(systemName: "chevron.right").foregroundStyle(.secondary) }

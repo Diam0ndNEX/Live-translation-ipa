@@ -211,7 +211,7 @@ struct SettingsView: View {
 
                 if testsMatch {
                     Section("Tests & diagnostics") {
-                        Button { router.present(.diagnostics) } label: {
+                        Button { router.go(.diagnostics) } label: {
                             ListRow(title: "Live dashboard", subtitle: "Health, timing and exports while you translate", symbol: "waveform.path.ecg") { chevron }
                         }.buttonStyle(.plain)
                         Button { router.present(.testRuns) } label: {

@@ -1,20 +1,26 @@
-// ScreenLingo – App – Typed navigation (2.0.0 build 86)
+// ScreenLingo – App – Typed navigation (2.0.0 build 87)
 import SwiftUI
 
 enum AppTab: String, CaseIterable, Identifiable, Hashable {
-    case live, library, languages, settings
+    case live, library, languages, diagnostics, settings
     var id: String { rawValue }
     var title: String {
-        switch self { case .live: "Live"; case .library: "Library"; case .languages: "Languages"; case .settings: "Settings" }
+        switch self {
+        case .live: "Live"; case .library: "Library"; case .languages: "Languages"
+        case .diagnostics: "Diagnostics"; case .settings: "Settings"
+        }
     }
     var symbol: String {
-        switch self { case .live: "captions.bubble.fill"; case .library: "books.vertical.fill"; case .languages: "globe"; case .settings: "gearshape.fill" }
+        switch self {
+        case .live: "captions.bubble.fill"; case .library: "books.vertical.fill"; case .languages: "globe"
+        case .diagnostics: "waveform.path.ecg"; case .settings: "gearshape.fill"
+        }
     }
 }
 
 /// Everything that opens as a sheet. One sheet at a time.
 enum AppSheet: String, Identifiable, Hashable {
-    case more, status, test, reader, captureArea, workspace, diagnostics, testRuns
+    case more, status, test, reader, captureArea, workspace, testRuns
     var id: String { rawValue }
 }
 
@@ -48,7 +54,7 @@ final class AppRouter: ObservableObject {
         }
     }
 
-    /// screenlingo://live | library | languages | settings | more | status | test | reader | capture-area | text-photos | diagnostics | test-runs
+    /// screenlingo://live | library | languages | diagnostics | settings | more | status | test | reader | capture-area | text-photos | test-runs
     @discardableResult
     func open(_ url: URL) -> Bool {
         guard url.scheme == "screenlingo" else { return false }
@@ -56,7 +62,7 @@ final class AppRouter: ObservableObject {
         if let tab = AppTab(rawValue: target) { go(tab); return true }
         let sheets: [String: AppSheet] = ["more": .more, "status": .status, "test": .test, "reader": .reader,
                                           "capture-area": .captureArea, "text-photos": .workspace,
-                                          "diagnostics": .diagnostics, "test-runs": .testRuns]
+                                          "test-runs": .testRuns]
         guard let sheet = sheets[target] else { return false }
         if sheet == .more || sheet == .status || sheet == .test { tab = .live }
         present(sheet)
