@@ -21,9 +21,6 @@ struct HomeView: View {
     @AppStorage("homeMetrics") private var homeMetrics = true
     /// Same key as Settings → Translation; both pickers edit one value.
     @AppStorage("translationSystem") private var translationSystem = TranslationSystem.legacy.rawValue
-    @AppStorage("persistDiagnosticSessions") private var persistSessions = false
-    @State private var confirmClearTestMemory = false
-    @State private var showTestReport = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var state: String {
@@ -58,12 +55,12 @@ struct HomeView: View {
                     languageCard
                     liveCard
                     modeSwitch
+                    HomeTestCard(diag: engine.diag)
                     warmupCard
                     if homeTools { outputTools }
                     if homeStatus && homeMetrics { LatencyReadout(monitor: engine.latency) }
                     if !engine.captureAlive { readiness }
                     toolsSection
-                    if persistSessions { testTools }
                     if homePresets {
                         PresetChips(store: engine.presets, onNew: { editor = .new }, onEdit: { editor = .edit($0) })
                     }
@@ -91,13 +88,6 @@ struct HomeView: View {
             }
         }
         .sheet(item: $editor) { PresetEditor(store: engine.presets, mode: $0).environmentObject(engine) }
-        .sheet(isPresented: $showTestReport) { TestReportSheet(diag: engine.diag) }
-        .confirmationDialog("Clear Temporary Memory? Saved translation memory is not touched.",
-                            isPresented: $confirmClearTestMemory, titleVisibility: .visible) {
-            Button("Clear test memory", role: .destructive) {
-                engine.toast(engine.clearTemporaryTestMemory() ? "Test memory cleared" : "Stop the broadcast first")
-            }
-        }
     }
 
     private var header: some View {
@@ -266,25 +256,6 @@ struct HomeView: View {
                 HomeToolTile(symbol: "text.viewfinder", title: "Text & photos", subtitle: "Paste · import · translate", tint: .mint) { destination = .workspace }
                 HomeToolTile(symbol: "viewfinder", title: "Capture area", subtitle: "Choose where to read", tint: .purple) { destination = .area }
             }
-        }
-    }
-
-    /// v2.0.0 three-mode test routine: run → stop → Save run → Clear test
-    /// memory → switch mode → run; then Export test report.
-    private var testTools: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Mode test").font(.system(.title3, design: .rounded, weight: .bold))
-            HStack(spacing: 12) {
-                HomeToolTile(symbol: "tray.and.arrow.down", title: "Save run",
-                             subtitle: engine.activeTranslationSystem.title + (engine.diag.archiveStatus.isEmpty ? "" : " · " + engine.diag.archiveStatus),
-                             tint: .mint) { engine.diag.persistSession(); engine.tap() }
-                HomeToolTile(symbol: "eraser", title: "Clear test memory",
-                             subtitle: engine.captureAlive ? "Stop the broadcast first" : "\(engine.temporaryMemoryEntries) temporary entries",
-                             tint: .orange) { confirmClearTestMemory = true }
-                    .disabled(engine.captureAlive).opacity(engine.captureAlive ? 0.5 : 1)
-            }
-            HomeToolTile(symbol: "doc.text", title: "Export test report",
-                         subtitle: "One file · newest saved run of each mode", tint: .purple) { showTestReport = true }
         }
     }
 

@@ -916,6 +916,23 @@ final class Diagnostics: ObservableObject {
         } catch { archiveStatus = "Export failed; no file was shared" }
     }
 
+    /// Evidence ZIP for one saved run (pretty JSON stays inside the ZIP only).
+    func exportRunZIP(_ id: UUID) async {
+        guard !exportInProgress else { return }
+        exportInProgress = true
+        defer { exportInProgress = false }
+        guard let snapshot = (try? await runStore.load(id: id))?.1 else {
+            archiveStatus = "Run could not be loaded"; return
+        }
+        do {
+            let url = try await exportWriter.exportZIP(snapshot)
+            Sharer.present([url])
+            archiveStatus = "ZIP diagnostic bundle ready"
+        } catch {
+            archiveStatus = "ZIP export failed; no file was shared"
+        }
+    }
+
     func exportZIP() async {
         guard !exportInProgress else { return }
         exportInProgress = true
