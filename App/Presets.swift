@@ -292,7 +292,7 @@ struct PresetChips: View {
                         .font(.footnote.weight(.semibold))
                         .frame(maxWidth: .infinity, minHeight: 44)
                         .foregroundStyle(.secondary)
-                        .overlay(Capsule().stroke(Palette.separator, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                        .overlay(RoundedRectangle(cornerRadius: Radius.s, style: .continuous).stroke(Palette.separator, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
                 }
             }
             if let a = store.active, store.isModified {
@@ -325,10 +325,9 @@ struct PresetChips: View {
                 Text(p.name).font(.footnote.weight(.semibold)).lineLimit(1)
                 if isActive && store.isModified { Circle().fill(Color.orange).frame(width: 7, height: 7) }
             }
-            .frame(maxWidth: .infinity, minHeight: 44)
+            .frame(maxWidth: .infinity, minHeight: 48)
             .foregroundStyle(isActive ? Color.white : Color.primary)
-            .background(isActive ? p.color.opacity(0.85) : Palette.surfaceRaised, in: Capsule())
-            .overlay(Capsule().stroke(p.color.opacity(isActive ? 0 : 0.55), lineWidth: 1))
+            .background(isActive ? p.color : Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
         }
         .contextMenu {
             if !p.builtIn && isActive && store.isModified {
@@ -397,7 +396,7 @@ struct PresetEditor: View {
                     HStack(spacing: Space.m) {
                         Image(systemName: symbol)
                             .font(.title2).foregroundStyle(.white)
-                            .frame(width: 56, height: 56)
+                            .frame(width: 64, height: 64)
                             .background(PresetStore.palette[colorIndex], in: RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
                             .accessibilityHidden(true)
                         TextField("Preset name", text: $name)
@@ -493,109 +492,103 @@ struct PresetManagerView: View {
     @State private var message = ""
 
     var body: some View {
-        List {
-            Section {
-                Button { editor = .new } label: {
-                    Label("Save current settings as a new preset", systemImage: "plus.circle.fill")
-                }
-            } footer: {
-                Text("Tap a preset to apply it. Swipe right to edit, swipe left to duplicate or delete. Drag to reorder with Edit.")
-            }
+        ScreenScaffold {
+            PrimaryButton(title: "Save current settings as a preset", symbol: "plus") { editor = .new }
+            Hint("Tap a preset to apply it. Press and hold for more: edit, duplicate, use at start-up or delete.")
 
-            Section("Built-in") {
+            VStack(alignment: .leading, spacing: Space.s) {
+                SectionHeader(title: "Built-in")
                 ForEach(PresetStore.builtIns) { p in row(p) }
             }
 
-            Section("Your presets") {
+            VStack(alignment: .leading, spacing: Space.s) {
+                SectionHeader(title: "Your presets")
                 if store.custom.isEmpty {
-                    Text("None yet. Set things up the way you like, then save them above.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                    EmptyState(title: "No presets yet", symbol: "square.stack", message: "Set things up the way you like, then save them above.")
+                        .frame(maxWidth: .infinity, minHeight: 180)
                 }
                 ForEach(store.custom) { p in row(p) }
-                    .onMove { store.move(from: $0, to: $1) }
-                    .onDelete { idx in
-                        let ids = idx.map { store.custom[$0].id }
-                        ids.forEach { store.delete($0) }
-                    }
             }
 
-            Section {
-                Picker("Apply when the app opens", selection: Binding(get: { store.startupID },
-                                                                      set: { store.startupID = $0 })) {
+            VStack(alignment: .leading, spacing: Space.s) {
+                SectionHeader(title: "Start-up", detail: "Applied each time the app opens.")
+                Picker("Apply when the app opens", selection: Binding(get: { store.startupID }, set: { store.startupID = $0 })) {
                     Text("Nothing").tag(String?.none)
                     ForEach(store.all) { Text($0.name).tag(Optional($0.id.uuidString)) }
                 }
-            } header: {
-                Text("Start-up")
-            }
+                .pickerStyle(.menu).frame(minHeight: 44)
+            }.infoCard()
 
-            Section {
-                Button { Sharer.shareFile(text: store.exportJSON(), name: "screen-translator-presets.json") } label: {
-                    Label("Share my presets", systemImage: "square.and.arrow.up")
+            VStack(alignment: .leading, spacing: Space.m) {
+                SectionHeader(title: "Share & backup", detail: "Export, copy the text, and import it on another phone or after reinstalling.")
+                HStack(spacing: Space.s) {
+                    SecondaryButton(title: "Share", symbol: "square.and.arrow.up") {
+                        Sharer.shareFile(text: store.exportJSON(), name: "screen-translator-presets.json")
+                    }
+                    SecondaryButton(title: "Copy", symbol: "doc.on.doc") {
+                        UIPasteboard.general.string = store.exportJSON()
+                        message = "Presets copied to the clipboard."
+                    }
+                    SecondaryButton(title: "Import", symbol: "square.and.arrow.down") {
+                        let n = store.importJSON(UIPasteboard.general.string ?? "")
+                        message = n > 0 ? "Imported \(n) preset\(n == 1 ? "" : "s")." : "The clipboard doesn't contain exported presets."
+                    }
                 }
-                Button {
-                    UIPasteboard.general.string = store.exportJSON()
-                    message = "Presets copied to the clipboard."
-                } label: { Label("Copy my presets", systemImage: "doc.on.doc") }
-                Button {
-                    let n = store.importJSON(UIPasteboard.general.string ?? "")
-                    message = n > 0 ? "Imported \(n) preset\(n == 1 ? "" : "s")." : "The clipboard doesn't contain exported presets."
-                } label: { Label("Import presets from clipboard", systemImage: "square.and.arrow.down") }
-                if !message.isEmpty { Text(message).font(.footnote).foregroundStyle(.secondary) }
-            } header: {
-                Text("Share & backup")
-            } footer: {
-                Text("Export, copy the text, and import it on another phone or after reinstalling.")
-            }
+                if !message.isEmpty { Banner(text: message, severity: .info) }
+            }.infoCard()
         }
-        .scrollContentBackground(.hidden)
-        .background(Palette.background.ignoresSafeArea())
         .navigationTitle("Presets")
-        .navigationBarTitleDisplayMode(.inline)
-        .toolbar { EditButton() }
+        .navigationBarTitleDisplayMode(.large)
         .sheet(item: $editor) { PresetEditor(store: store, mode: $0).environmentObject(engine) }
     }
 
     private func row(_ p: Preset) -> some View {
         let isActive = store.activeID == p.id.uuidString
-        return HStack(spacing: 12) {
-            Image(systemName: p.symbol)
-                .foregroundStyle(.white)
-                .frame(width: 38, height: 38)
-                .background(p.color, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(p.name).font(.body.weight(.semibold))
-                    if store.startupID == p.id.uuidString {
-                        Image(systemName: "power").font(.caption2).foregroundStyle(.secondary)
-                    }
-                    if isActive {
-                        Text(store.isModified ? "ACTIVE · MODIFIED" : "ACTIVE")
-                            .font(.caption2.weight(.bold))
-                            .foregroundStyle(store.isModified ? Color.orange : Color.green)
-                    }
-                }
-                Text(PresetStore.summary(p)).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-            }
-            Spacer()
-        }
-        .contentShape(Rectangle())
-        .onTapGesture {
+        return Button {
             store.apply(p)
             engine.tap()
             engine.toast("\(p.name) applied")
+        } label: {
+            HStack(spacing: Space.m) {
+                Image(systemName: p.symbol)
+                    .font(.title3).foregroundStyle(.white)
+                    .frame(width: 48, height: 48)
+                    .background(p.color, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: Space.s) {
+                        Text(p.name).font(.headline)
+                        if store.startupID == p.id.uuidString {
+                            Image(systemName: "power").font(.caption).foregroundStyle(.secondary).accessibilityLabel("Used at start-up")
+                        }
+                    }
+                    Text(PresetStore.summary(p)).font(.footnote).foregroundStyle(.secondary).lineLimit(2).multilineTextAlignment(.leading)
+                    if isActive {
+                        StatusPill(text: store.isModified ? "Active, modified" : "Active",
+                                   symbol: store.isModified ? "pencil.circle.fill" : "checkmark.circle.fill",
+                                   severity: store.isModified ? .warning : .success)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .infoCard(raised: isActive)
+            .overlay(RoundedRectangle(cornerRadius: Radius.m, style: .continuous).strokeBorder(isActive ? p.color : .clear, lineWidth: 2))
         }
-        .swipeActions(edge: .trailing) {
+        .buttonStyle(.plain)
+        .contextMenu {
+            if !p.builtIn {
+                Button { editor = .edit(p) } label: { Label("Edit…", systemImage: "pencil") }
+            }
+            Button { store.duplicate(p) } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
+            Button {
+                store.startupID = (store.startupID == p.id.uuidString) ? nil : p.id.uuidString
+            } label: {
+                Label(store.startupID == p.id.uuidString ? "Don't use at start-up" : "Use at start-up", systemImage: "power")
+            }
             if !p.builtIn {
                 Button(role: .destructive) { store.delete(p.id) } label: { Label("Delete", systemImage: "trash") }
             }
-            Button { store.duplicate(p) } label: { Label("Duplicate", systemImage: "plus.square.on.square") }
-                .tint(.blue)
         }
-        .swipeActions(edge: .leading) {
-            if !p.builtIn {
-                Button { editor = .edit(p) } label: { Label("Edit", systemImage: "pencil") }.tint(.orange)
-            }
-        }
+        .accessibilityHint("Applies this preset")
     }
 }
