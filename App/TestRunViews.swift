@@ -80,9 +80,20 @@ struct TestRunRow: View {
 
 // MARK: Test card (shown in the Live Test sheet)
 
-struct HomeTestCard: View {
+struct TestMemorySnapshot: Equatable {
+    var captureAlive: Bool
+    var temporaryEntries: Int
+    @MainActor static func read(_ e: TranslatorEngine) -> TestMemorySnapshot {
+        TestMemorySnapshot(captureAlive: e.captureAlive, temporaryEntries: e.temporaryMemoryEntries)
+    }
+}
+
+/// The test checklist shown in the Live Test sheet. Same engine and Diagnostics calls as before, new layout.
+struct TestCard: View {
     @ObservedObject var diag: Diagnostics
-    @EnvironmentObject private var engine: TranslatorEngine
+    let engine: TranslatorEngine
+    @StateObject private var memory: EngineSlice<TestMemorySnapshot>
+    @EnvironmentObject private var feedback: FeedbackCenter
     @AppStorage("privateSession") private var privateSession = false
     @AppStorage("testRunSaving") private var saving = "automatic"
     @State private var showRuns = false
@@ -93,79 +104,71 @@ struct HomeTestCard: View {
     @State private var runLabelDraft = ""
     @State private var confirmClear = false
 
-    private var currentRuns: [TestRunMeta] { diag.testRuns.filter { $0.testID == diag.currentTestID } }
+    init(diag: Diagnostics, engine: TranslatorEngine) {
+        self.diag = diag
+        self.engine = engine
+        _memory = StateObject(wrappedValue: EngineSlice(engine) { TestMemorySnapshot.read($0) })
+    }
 
+    private var currentRuns: [TestRunMeta] { diag.testRuns.filter { $0.testID == diag.currentTestID } }
     private func saved(_ mode: String) -> TestRunMeta? {
         currentRuns.filter { $0.mode == mode }.max { $0.endedAt < $1.endedAt }
     }
     private var nextMode: String? { TestRunText.modes.first { saved($0) == nil } }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: Space.m) {
             HStack {
-                Text("Test").font(.system(.title3, design: .rounded, weight: .bold))
+                Button { testNameDraft = diag.currentTestName; renameTest = true } label: {
+                    Label(diag.currentTestName, systemImage: "pencil").font(.headline).frame(minHeight: 44)
+                }.buttonStyle(.plain)
                 Spacer()
-                Button("New test") { diag.startNewTest(); engine.tap() }.font(.footnote)
+                Button("New test") { diag.startNewTest(); Feedback.tap() }.frame(minHeight: 44)
             }
-            Button {
-                testNameDraft = diag.currentTestName; renameTest = true
-            } label: {
-                Label(diag.currentTestName, systemImage: "pencil").font(.subheadline.weight(.semibold))
-            }.buttonStyle(.plain)
-
             if privateSession {
-                Label("Private session – runs are not saved", systemImage: "lock.fill")
-                    .font(.footnote).foregroundStyle(.orange)
+                Banner(text: "Private session: runs are not saved.", severity: .warning)
             } else if saving == "off" {
-                Label("Saving test runs is off (Settings → Diagnostics & tests)", systemImage: "exclamationmark.triangle")
-                    .font(.footnote).foregroundStyle(.orange)
+                Banner(text: "Saving test runs is off. Turn it on in Settings > Diagnostics & tests.", severity: .warning)
             }
-
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: Space.s) {
+                SectionHeader(title: "Three systems, same content")
                 ForEach(TestRunText.modes, id: \.self) { mode in
                     HStack {
                         Image(systemName: saved(mode) != nil ? "checkmark.circle.fill" : "circle")
-                            .foregroundStyle(saved(mode) != nil ? Color.green : Color.secondary)
-                        Text(TestRunText.modeTitle(mode)).font(.subheadline)
+                            .foregroundStyle(saved(mode) != nil ? Palette.success : Color.secondary)
+                            .accessibilityLabel(saved(mode) != nil ? "Saved" : "Not saved yet")
+                        Text(TestRunText.modeTitle(mode)).font(.body)
                         Spacer()
                         if let run = saved(mode) {
                             Text("\(TestRunText.duration(run.durationSeconds)) · \(TestRunText.ms(run.enqueueP50Ms))")
-                                .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                .font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
                         }
-                    }
+                    }.frame(minHeight: 36)
                 }
                 if let next = nextMode {
-                    Text("Next: \(TestRunText.modeTitle(next))").font(.caption).foregroundStyle(.secondary)
+                    Text("Next: \(TestRunText.modeTitle(next))").font(.footnote).foregroundStyle(.secondary)
                 }
-            }
+            }.infoCard()
 
             if let run = diag.activeRun {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
-                    Label("Recording run · \(TestRunText.modeTitle(run.mode)) · \(TestRunText.duration(context.date.timeIntervalSince(run.startedAt))) · \(diag.s.enqueuedCandidateFrames) captions",
-                          systemImage: "record.circle")
-                        .font(.footnote.weight(.semibold)).foregroundStyle(.red)
+                    StatusPill(text: "Recording \(TestRunText.modeTitle(run.mode)) · \(TestRunText.duration(context.date.timeIntervalSince(run.startedAt))) · \(diag.s.enqueuedCandidateFrames) captions",
+                               symbol: "record.circle", severity: .error)
                 }
             } else if let banner = diag.lastRunBanner {
                 bannerView(banner)
             }
 
-            HStack(spacing: 10) {
-                Button { Task { await diag.saveRunNow() }; engine.tap() } label: { Label("Save run", systemImage: "tray.and.arrow.down") }
-                Button { confirmClear = true } label: { Label("Clear test memory", systemImage: "eraser") }
-                    .disabled(engine.captureAlive)
-            }.buttonStyle(.bordered).font(.footnote)
-            HStack(spacing: 10) {
-                Button { showReport = true } label: { Label("Export report", systemImage: "doc.text") }
-                Button { showRuns = true } label: { Label("Test runs", systemImage: "list.bullet") }
-            }.buttonStyle(.bordered).font(.footnote)
-            if engine.captureAlive {
-                Text("Stop the broadcast before clearing test memory.").font(.caption2).foregroundStyle(.secondary)
-            } else {
-                Text("\(engine.temporaryMemoryEntries) temporary memory entries").font(.caption2).foregroundStyle(.secondary)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: Space.s) {
+                SecondaryButton(title: "Save run", symbol: "tray.and.arrow.down") { Task { await diag.saveRunNow() }; Feedback.tap() }
+                SecondaryButton(title: "Clear test memory", symbol: "eraser", enabled: !memory.value.captureAlive) { confirmClear = true }
+                SecondaryButton(title: "Export report", symbol: "doc.text") { showReport = true }
+                SecondaryButton(title: "Test runs", symbol: "list.bullet") { showRuns = true }
             }
+            Text(memory.value.captureAlive ? "Stop the broadcast before clearing test memory."
+                                           : "\(memory.value.temporaryEntries) temporary memory entries")
+                .font(.footnote).foregroundStyle(.secondary)
         }
-        .padding(14)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .task { await diag.refreshRuns() }
         .sheet(isPresented: $showRuns) { TestRunsScreen(diag: diag) }
         .sheet(isPresented: $showReport) { TestRunReportSheet(diag: diag) }
@@ -183,34 +186,32 @@ struct HomeTestCard: View {
             }
             Button("Cancel", role: .cancel) {}
         }
-        .confirmationDialog("Clear Temporary Memory? Saved translation memory is not touched.",
-                            isPresented: $confirmClear, titleVisibility: .visible) {
-            Button("Clear test memory", role: .destructive) {
-                engine.toast(engine.clearTemporaryTestMemory() ? "Test memory cleared" : "Stop the broadcast first")
-            }
+        .confirmDestructive("Clear temporary memory?", message: "Saved translation memory is not touched.",
+                            isPresented: $confirmClear, button: "Clear test memory") {
+            let ok = engine.clearTemporaryTestMemory()
+            feedback.show(ok ? "Test memory cleared" : "Stop the broadcast first", severity: ok ? .success : .warning)
         }
     }
 
     @ViewBuilder private func bannerView(_ banner: Diagnostics.RunBanner) -> some View {
         switch banner.result {
         case .saved(let meta):
-            VStack(alignment: .leading, spacing: 6) {
-                Label("Run saved · \(TestRunText.modeTitle(meta.mode)) · \(TestRunText.duration(meta.durationSeconds))",
-                      systemImage: "checkmark.seal").font(.footnote.weight(.semibold)).foregroundStyle(.green)
+            VStack(alignment: .leading, spacing: Space.s) {
+                StatusPill(text: "Run saved · \(TestRunText.modeTitle(meta.mode)) · \(TestRunText.duration(meta.durationSeconds))",
+                           symbol: "checkmark.seal", severity: .success)
                 if !meta.trimmed.isEmpty {
-                    Text("Trimmed to fit: " + meta.trimmed.joined(separator: ", ")).font(.caption2).foregroundStyle(.orange)
+                    Hint("Trimmed to fit: " + meta.trimmed.joined(separator: ", "))
                 }
-                HStack(spacing: 8) {
-                    Button("Rename") { runLabelDraft = meta.label; renameRun = true }
-                    Button(meta.pinned ? "Unpin" : "Pin") { Task { await diag.setRunPinned(meta.id, !meta.pinned) } }
-                    Button("Undo", role: .destructive) { Task { await diag.deleteRuns([meta.id]) } }
-                }.buttonStyle(.bordered).font(.caption)
+                HStack(spacing: Space.s) {
+                    SecondaryButton(title: "Rename") { runLabelDraft = meta.label; renameRun = true }
+                    SecondaryButton(title: meta.pinned ? "Unpin" : "Pin") { Task { await diag.setRunPinned(meta.id, !meta.pinned) } }
+                    SecondaryButton(title: "Undo") { Task { await diag.deleteRuns([meta.id]) } }
+                }
             }
         case .skipped(_, let detail):
-            Label(detail, systemImage: "exclamationmark.circle").font(.footnote).foregroundStyle(.orange)
+            Banner(text: detail, severity: .warning)
         case .failed(let reason):
-            Label("Run not saved: \(TestRunText.reason(reason))", systemImage: "xmark.octagon")
-                .font(.footnote).foregroundStyle(.orange)
+            Banner(text: "Run not saved: \(TestRunText.reason(reason))", severity: .error)
         }
     }
 }
@@ -264,8 +265,8 @@ struct TestRunsScreen: View {
         NavigationStack {
             List {
                 if diag.testRuns.isEmpty {
-                    Text("No saved runs yet. Start a broadcast: a run of 30 seconds or more is saved automatically when it ends.")
-                        .font(.footnote).foregroundStyle(.secondary)
+                    EmptyState(title: "No saved runs yet", symbol: "checklist",
+                               message: "Start a broadcast. A run of 30 seconds or more is saved automatically when it ends.")
                 }
                 ForEach(groups, id: \.id) { group in
                     Section(group.name) {

@@ -3,7 +3,8 @@ import SwiftUI
 
 /// Large, calm text. All reading options live in one controls sheet.
 struct ReaderView: View {
-    @EnvironmentObject private var engine: TranslatorEngine
+    let engine: TranslatorEngine
+    @StateObject private var output: EngineSlice<OutputSnapshot>
     @EnvironmentObject private var feedback: FeedbackCenter
     @Environment(\.dismiss) private var dismiss
     @AppStorage("readerSize") private var size = 28.0
@@ -15,6 +16,11 @@ struct ReaderView: View {
     @ScaledMetric(relativeTo: .title) private var scale = 1.0
     @State private var showControls = false
 
+    init(engine: TranslatorEngine) {
+        self.engine = engine
+        _output = StateObject(wrappedValue: EngineSlice(engine) { OutputSnapshot.read($0) })
+    }
+
     private var design: Font.Design {
         switch font { case "serif": return .serif; case "mono": return .monospaced; case "standard": return .default; default: return .rounded }
     }
@@ -23,14 +29,14 @@ struct ReaderView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: centered ? .center : .leading, spacing: Space.xl) {
-                    if engine.translated.isEmpty {
+                    if output.value.translated.isEmpty {
                         EmptyState(title: "Ready to read", symbol: "text.book.closed", message: "Start a live translation, or translate text in Text & photos.")
                     } else {
-                        Text(engine.translated).font(.system(size: size * scale, weight: .medium, design: design))
+                        Text(output.value.translated).font(.system(size: size * scale, weight: .medium, design: design))
                             .lineSpacing(max(0, min(16, spacing))).textSelection(.enabled)
-                        if showOriginal, !engine.original.isEmpty {
+                        if showOriginal, !output.value.original.isEmpty {
                             Divider()
-                            Text(engine.original).font(.system(size: max(15, size * 0.65) * scale))
+                            Text(output.value.original).font(.system(size: max(15, size * 0.65) * scale))
                                 .foregroundStyle(.secondary).textSelection(.enabled)
                         }
                     }
@@ -44,14 +50,14 @@ struct ReaderView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("Done") { dismiss() } }
                 ToolbarItemGroup(placement: .topBarTrailing) {
-                    Button { engine.toggleFrozenOutput() } label: { Image(systemName: engine.frozen ? "play.fill" : "pause.fill") }
-                        .accessibilityLabel(engine.frozen ? "Resume live text" : "Freeze current text")
+                    Button { engine.toggleFrozenOutput() } label: { Image(systemName: output.value.frozen ? "play.fill" : "pause.fill") }
+                        .accessibilityLabel(output.value.frozen ? "Resume live text" : "Freeze current text")
                     Button { showControls = true } label: { Image(systemName: "textformat.size") }
                         .accessibilityLabel("Reading options")
                     Menu {
-                        Button { engine.speak(engine.translated) } label: { Label("Listen", systemImage: "speaker.wave.2") }
-                        Button { UIPasteboard.general.string = engine.translated; feedback.show("Copied", severity: .success) } label: { Label("Copy translation", systemImage: "doc.on.doc") }
-                        ShareLink(item: engine.translated) { Label("Share text", systemImage: "square.and.arrow.up") }
+                        Button { engine.speak(output.value.translated) } label: { Label("Listen", systemImage: "speaker.wave.2") }
+                        Button { UIPasteboard.general.string = output.value.translated; feedback.show("Copied", severity: .success) } label: { Label("Copy translation", systemImage: "doc.on.doc") }
+                        ShareLink(item: output.value.translated) { Label("Share text", systemImage: "square.and.arrow.up") }
                     } label: { Image(systemName: "ellipsis.circle") }.accessibilityLabel("More")
                 }
             }

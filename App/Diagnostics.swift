@@ -1807,7 +1807,7 @@ final class Diagnostics: ObservableObject {
 private func fmt(_ v: Double) -> String { v >= 100 ? "\(Int(v))" : String(format: "%.1f", v) }
 
 private func level(_ v: Double, _ n: Int, _ warn: Double, _ bad: Double) -> Color {
-    n == 0 ? Color.white : (v > bad ? Color.red : (v > warn ? Color.orange : Color.green))
+    n == 0 ? Color.primary : (v > bad ? Color.red : (v > warn ? Color.orange : Color.green))
 }
 
 private struct BarRow: Identifiable {
@@ -1833,7 +1833,7 @@ private struct Bucket: Identifiable {
 private struct StatTile: View {
     let title: String
     let value: String
-    var tint: Color = Color.white
+    var tint: Color = Color.primary
     var icon: String? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1858,7 +1858,7 @@ private struct HealthRing: View {
     private var color: Color { score >= 85 ? Color.green : (score >= 60 ? Color.orange : Color.red) }
     var body: some View {
         ZStack {
-            Circle().stroke(Color.white.opacity(0.1), lineWidth: 10)
+            Circle().stroke(Color.primary.opacity(0.1), lineWidth: 10)
             Circle()
                 .trim(from: 0, to: CGFloat(score) / 100)
                 .stroke(color, style: StrokeStyle(lineWidth: 10, lineCap: .round))
@@ -2629,9 +2629,9 @@ private struct DiagnosticsBody: View {
             StatTile(title: "Cache hits", value: hits == 0 ? "–" : "\(Int(Double(s.cacheHits + s.savedHits + s.specHits) / Double(hits) * 100))%",
                      tint: Color.purple, icon: "memorychip")
             StatTile(title: "Capture drops", value: "\(s.captureDrops)",
-                     tint: s.captureDrops > 0 ? Color.orange : Color.white, icon: "bolt.slash")
+                     tint: s.captureDrops > 0 ? Color.orange : Color.primary, icon: "bolt.slash")
             StatTile(title: "Failures", value: "\(s.failures)",
-                     tint: s.failures > 0 ? Color.red : Color.white, icon: "exclamationmark.triangle")
+                     tint: s.failures > 0 ? Color.red : Color.primary, icon: "exclamationmark.triangle")
             StatTile(title: "Pre-translated", value: "\(s.specHits)", tint: Color.cyan, icon: "forward.fill")
             StatTile(title: "Remembered", value: "\(engine.memoryCount)", tint: Color.mint, icon: "externaldrive")
         }

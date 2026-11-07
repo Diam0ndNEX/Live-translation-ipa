@@ -35,7 +35,7 @@ if re.search(r'Label\("Activity"', root_src) or ".tag(3)" in root_src:
     fail("U2", "Activity tab is back in the tab bar")
 
 # U3: leaf tabs observe snapshots, not the whole engine
-for name in ("Live/LiveView.swift", "Languages/LanguagesView.swift", "Library/LibraryView.swift"):
+for name in ("Live/LiveView.swift", "Languages/LanguagesView.swift", "Library/LibraryView.swift", "Reader/ReaderView.swift", "Onboarding/OnboardingView.swift"):
     t = (app / name).read_text()
     if re.search(r"@EnvironmentObject[^\n]*TranslatorEngine", t) or "@ObservedObject var engine" in t:
         fail("U3", f"{name} observes the whole engine")
@@ -134,7 +134,9 @@ for p, t in files.items():
 for name, structs in {"SettingsViews.swift": ["ReadingSettings", "IntelligenceSettings", "WindowSettings", "InterfaceSettings",
                                               "PerformanceSettings", "BackupSettings", "AboutSettings", "PrivacySettings"],
                       "CustomizationViews.swift": ["CaptionAppearanceSettings", "ReaderWorkspaceSettings", "FeedbackStorageSettings"],
-                      "ExperimentalFeaturesView.swift": ["ExperimentalFeaturesView"]}.items():
+                      "ExperimentalFeaturesView.swift": ["ExperimentalFeaturesView"],
+                      "SettingsCategories.swift": ["TranslationSettings", "HistoryStorageSettings"],
+                      "WorkspaceViews.swift": ["TranslationWorkspace", "CaptureAreaEditor"]}.items():
     text = (app / name).read_text()
     for st in structs:
         i = text.index(f"struct {st}")

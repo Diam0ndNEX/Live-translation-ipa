@@ -5,7 +5,9 @@ import ImageIO
 import UniformTypeIdentifiers
 
 struct TranslationWorkspace: View {
-    @EnvironmentObject private var engine: TranslatorEngine
+    let engine: TranslatorEngine
+    @StateObject private var pair: EngineSlice<PairSnapshot>
+    @StateObject private var output: EngineSlice<OutputSnapshot>
     @EnvironmentObject private var feedback: FeedbackCenter
     @State private var input = ""
     @State private var photo: PhotosPickerItem?
@@ -17,13 +19,20 @@ struct TranslationWorkspace: View {
     @AppStorage("photoOCREdge") private var photoEdge = 2400
     @AppStorage("photoAutoTranslate") private var photoAutoTranslate = false
 
+    init(engine: TranslatorEngine) {
+        self.engine = engine
+        _pair = StateObject(wrappedValue: EngineSlice(engine) { PairSnapshot.read($0) })
+        _output = StateObject(wrappedValue: EngineSlice(engine) { OutputSnapshot.read($0) })
+    }
+
     var body: some View {
         SheetScaffold(title: "Text & photos") {
             ScreenScaffold {
                 Text("Translate typed text, a photo, a screenshot or a file. Live screen reading continues when you close this.")
                     .font(.subheadline).foregroundStyle(.secondary)
-                LanguagePairBar(source: $engine.sourceCode, target: $engine.targetCode, items: engine.languages,
-                                swapDisabled: engine.sourceCode == "auto") { engine.swapLanguages() }
+                LanguagePairBar(source: Binding(get: { pair.value.source }, set: { engine.sourceCode = $0 }),
+                                target: Binding(get: { pair.value.target }, set: { engine.targetCode = $0 }),
+                                items: pair.value.languages, swapDisabled: pair.value.source == "auto") { engine.swapLanguages() }
                 HStack(spacing: Space.s) {
                     PhotosPicker(selection: $photo, matching: .images) {
                         Label("Photo", systemImage: "photo").frame(maxWidth: .infinity, minHeight: 44)
@@ -46,22 +55,22 @@ struct TranslationWorkspace: View {
                 }.infoCard()
                 if recognizing { ProgressRow(title: "Reading the image on your device…") }
                 if let errorText { Banner(text: errorText, severity: .error) }
-                PrimaryButton(title: engine.isTranslating ? "Translating…" : "Translate", symbol: "sparkles",
-                              enabled: !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !recognizing && !engine.isTranslating) {
+                PrimaryButton(title: output.value.translating ? "Translating…" : "Translate", symbol: "sparkles",
+                              enabled: !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !recognizing && !output.value.translating) {
                     engine.translateText(input)
                 }
-                if !engine.translated.isEmpty {
+                if !output.value.translated.isEmpty {
                     VStack(alignment: .leading, spacing: Space.m) {
                         SectionHeader(title: "Translation")
-                        Text(engine.translated).font(.title3).textSelection(.enabled)
+                        Text(output.value.translated).font(.title3).textSelection(.enabled)
                         HStack(spacing: Space.s) {
-                            SecondaryButton(title: "Copy", symbol: "doc.on.doc") { UIPasteboard.general.string = engine.translated; feedback.show("Copied", severity: .success) }
-                            SecondaryButton(title: "Listen", symbol: "speaker.wave.2") { engine.speak(engine.translated) }
-                            ShareLink(item: engine.translated) { Label("Share", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity, minHeight: 44) }.buttonStyle(.bordered)
+                            SecondaryButton(title: "Copy", symbol: "doc.on.doc") { UIPasteboard.general.string = output.value.translated; feedback.show("Copied", severity: .success) }
+                            SecondaryButton(title: "Listen", symbol: "speaker.wave.2") { engine.speak(output.value.translated) }
+                            ShareLink(item: output.value.translated) { Label("Share", systemImage: "square.and.arrow.up").frame(maxWidth: .infinity, minHeight: 44) }.buttonStyle(.bordered)
                         }
                     }.infoCard()
                 }
-                Text(engine.status).font(.footnote).foregroundStyle(.secondary)
+                Text(output.value.status).font(.footnote).foregroundStyle(.secondary)
             }
         }
         .onAppear { engine.beginWorkspace() }
@@ -155,7 +164,7 @@ struct TranslationWorkspace: View {
 /// The broadcast extension owns capture, so the app has no live frame to show. The box is drawn over an honest
 /// "Preview" placeholder, not over your screen. Drag the box or its handles, or use the sliders.
 struct CaptureAreaEditor: View {
-    @EnvironmentObject private var engine: TranslatorEngine
+    @EngineHandle private var engine
     @EnvironmentObject private var feedback: FeedbackCenter
     @Environment(\.dismiss) private var dismiss
     @AppStorage("customY0") private var lower = 0.0

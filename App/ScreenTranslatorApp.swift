@@ -138,9 +138,9 @@ private struct SheetHost: View {
         case .more: MoreSheet(engine: engine)
         case .status: StatusSheet(engine: engine)
         case .test: TestSheet(engine: engine)
-        case .reader: ReaderView()
+        case .reader: ReaderView(engine: engine)
         case .captureArea: CaptureAreaEditor()
-        case .workspace: TranslationWorkspace()
+        case .workspace: TranslationWorkspace(engine: engine)
         case .diagnostics: DiagnosticsView()
         case .testRuns: TestRunsScreen(diag: engine.diag)
         }

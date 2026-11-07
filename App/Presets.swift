@@ -271,7 +271,7 @@ final class PresetStore: ObservableObject {
 
 // MARK: - Preset chips
 struct PresetChips: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @ObservedObject var store: PresetStore
     var onNew: () -> Void
     var onEdit: (Preset) -> Void
@@ -285,16 +285,14 @@ struct PresetChips: View {
                     Text("Manage").font(.caption.weight(.semibold))
                 }
             }
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(store.all) { p in chip(p) }
-                    Button(action: onNew) {
-                        Label("Save current", systemImage: "plus")
-                            .font(.footnote.weight(.semibold))
-                            .padding(.horizontal, 12).padding(.vertical, 9)
-                            .foregroundStyle(.secondary)
-                            .overlay(Capsule().stroke(Color.white.opacity(0.25), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
-                    }
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: Space.s)], alignment: .leading, spacing: Space.s) {
+                ForEach(store.all) { p in chip(p) }
+                Button(action: onNew) {
+                    Label("Save current", systemImage: "plus")
+                        .font(.footnote.weight(.semibold))
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .foregroundStyle(.secondary)
+                        .overlay(Capsule().stroke(Palette.separator, style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
                 }
             }
             if let a = store.active, store.isModified {
@@ -327,9 +325,9 @@ struct PresetChips: View {
                 Text(p.name).font(.footnote.weight(.semibold)).lineLimit(1)
                 if isActive && store.isModified { Circle().fill(Color.orange).frame(width: 7, height: 7) }
             }
-            .padding(.horizontal, 12).padding(.vertical, 9)
-            .foregroundStyle(Color.white)
-            .background(isActive ? p.color.opacity(0.85) : Palette.surface, in: Capsule())
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .foregroundStyle(isActive ? Color.white : Color.primary)
+            .background(isActive ? p.color.opacity(0.85) : Palette.surfaceRaised, in: Capsule())
             .overlay(Capsule().stroke(p.color.opacity(isActive ? 0 : 0.55), lineWidth: 1))
         }
         .contextMenu {
@@ -417,7 +415,7 @@ struct PresetEditor: View {
                         ForEach(0..<PresetStore.palette.count, id: \.self) { i in
                             Circle().fill(PresetStore.palette[i])
                                 .frame(width: 30, height: 30)
-                                .overlay(Circle().stroke(Color.white, lineWidth: colorIndex == i ? 3 : 0))
+                                .overlay(Circle().stroke(Color.primary, lineWidth: colorIndex == i ? 3 : 0))
                                 .onTapGesture { colorIndex = i }
                         }
                     }
@@ -468,7 +466,7 @@ struct PresetEditor: View {
 
 // MARK: - Manager page
 struct PresetManagerView: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
     @ObservedObject var store: PresetStore
     @State private var editor: PresetEditorMode?
     @State private var message = ""

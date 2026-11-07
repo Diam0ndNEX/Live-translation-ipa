@@ -127,3 +127,15 @@ extension PairSnapshot {
         }
     }
 }
+
+/// Output text for the Reader and Text & photos.
+struct OutputSnapshot: Equatable {
+    var translated: String
+    var original: String
+    var frozen: Bool
+    var translating: Bool
+    var status: String
+    @MainActor static func read(_ e: TranslatorEngine) -> OutputSnapshot {
+        OutputSnapshot(translated: e.translated, original: e.original, frozen: e.frozen, translating: e.isTranslating, status: e.status)
+    }
+}

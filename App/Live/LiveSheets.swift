@@ -143,7 +143,7 @@ struct TestSheet: View {
     var body: some View {
         SheetScaffold(title: "Test") {
             ScrollView {
-                HomeTestCard(diag: engine.diag).padding(Space.l)
+                TestCard(diag: engine.diag, engine: engine).padding(Space.l)
             }
         }
     }

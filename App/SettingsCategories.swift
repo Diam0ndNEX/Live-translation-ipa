@@ -2,8 +2,19 @@ import SwiftUI
 
 /// Existing settings keys are used unchanged. Moving a setting here is an
 /// information-architecture change, not a migration or a change of defaults.
+struct TranslationFacts: Equatable {
+    var active: TranslationSystem
+    var pending: TranslationSystem
+    var memoryCount: Int
+    var warmupMs: Double?
+    @MainActor static func read(_ e: TranslatorEngine) -> TranslationFacts {
+        TranslationFacts(active: e.activeTranslationSystem, pending: e.pendingTranslationSystem, memoryCount: e.memoryCount, warmupMs: e.warmupLastDurationMs)
+    }
+}
+
 struct TranslationSettings: View {
-    @EnvironmentObject private var engine: TranslatorEngine
+    @EngineHandle private var engine
+    @EngineFacts(TranslationFacts.read) private var facts
     @AppStorage("translationSystem") private var translationSystem = TranslationSystem.legacy.rawValue
     @AppStorage("translateAhead") private var translateAhead = true
     @AppStorage("keepWarm") private var keepWarm = true
@@ -26,9 +37,9 @@ struct TranslationSettings: View {
                     }
                 }
                 Hint((TranslationSystem(rawValue: translationSystem) ?? .legacy).explanation)
-                LabeledContent("Running now", value: engine.activeTranslationSystem.title)
-                if engine.activeTranslationSystem != engine.pendingTranslationSystem {
-                    LabeledContent("Starts next time", value: engine.pendingTranslationSystem.title)
+                LabeledContent("Running now", value: facts.active.title)
+                if facts.active != facts.pending {
+                    LabeledContent("Starts next time", value: facts.pending.title)
                     Hint("Stop the broadcast and start it again to switch.")
                 }
             } header: { Text("How translation runs") }
@@ -37,13 +48,13 @@ struct TranslationSettings: View {
                 Toggle("Translate ahead", isOn: $translateAhead)
                 Hint("Starts translating a promising first reading early. It only appears on screen once the text is confirmed, so captions show sooner.")
                 Toggle("Remember translations", isOn: $remember)
-                Hint("Reuses earlier translations of the same text, even in later sessions. \(engine.memoryCount) remembered so far.")
+                Hint("Reuses earlier translations of the same text, even in later sessions. \(facts.memoryCount) remembered so far.")
                 NavigationLink("Manage translation memory") { MemoryManagementView() }
             } header: { Text("Speed and reuse") }
 
             Section {
                 TranslationActivityView()
-                if let ms = engine.warmupLastDurationMs {
+                if let ms = facts.warmupMs {
                     LabeledContent("Last warm-up", value: "\(Int(ms)) ms")
                 }
             } header: { Text("Readiness") }
@@ -81,7 +92,8 @@ struct TranslationSettings: View {
 }
 
 struct HistoryStorageSettings: View {
-    @EnvironmentObject private var engine: TranslatorEngine
+    @EngineHandle private var engine
+    @EngineFacts({ $0.memoryCount }) private var memoryCount
     @AppStorage("saveHistory") private var saveHistory = true
     @AppStorage("historyRetentionDays") private var retentionDays = 0
     @AppStorage("historyCapacity") private var historyCapacity = 500
@@ -115,7 +127,7 @@ struct HistoryStorageSettings: View {
                 } label: {
                     Label("Translation memory", systemImage: "externaldrive")
                 }
-                LabeledContent("Remembered units", value: "\(engine.memoryCount)")
+                LabeledContent("Remembered units", value: "\(memoryCount)")
                 NavigationLink {
                     BackupSettings()
                 } label: {
