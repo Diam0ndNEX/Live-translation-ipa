@@ -171,6 +171,12 @@ struct CaptureAreaEditor: View {
     @AppStorage("customY1") private var upper = 0.5
     @AppStorage("area") private var area = "smart"
     @State private var base: (Double, Double)?
+    // Preview only, never saved: the band is a fraction of the screen height in the screen's own orientation,
+    // so the same two numbers apply to portrait and landscape. These just change the picture it is drawn on.
+    @State private var landscape = false
+    @State private var pickerItem: PhotosPickerItem?
+    @State private var photo: UIImage?
+    private var previewSize: CGSize { landscape ? CGSize(width: 340, height: 190) : CGSize(width: 150, height: 300) }
     private var range: ClosedRange<Double> { ExportFormat.normalizedArea(lower, upper) }
 
     private func clamp(_ v: Double, _ lo: Double, _ hi: Double) -> Double { min(max(v, lo), hi) }
@@ -181,14 +187,20 @@ struct CaptureAreaEditor: View {
                 Text("The highlighted band is the part of the screen ScreenLingo reads. Move it away from player controls, or shrink it to the subtitles.")
                     .font(.subheadline).foregroundStyle(.secondary)
                 Banner(text: "This is a preview, not your live screen. iOS gives capture only to the broadcast extension.", severity: .info)
+                Picker("Preview shape", selection: $landscape) {
+                    Text("Portrait").tag(false)
+                    Text("Landscape").tag(true)
+                }.pickerStyle(.segmented)
+                Hint("The area is a share of the screen height, counted from the bottom, and follows the screen's orientation. The same band works in portrait and landscape.")
                 GeometryReader { geo in
                     let h = geo.size.height
                     let top = h * (1 - range.upperBound)
                     let bottom = h * (1 - range.lowerBound)
                     ZStack(alignment: .top) {
-                        RoundedRectangle(cornerRadius: Radius.m, style: .continuous).fill(Palette.surfaceRaised)
+                        previewBackground(width: geo.size.width, height: h)
                         VStack { Text("Top of screen"); Spacer(); Text("Bottom of screen") }
-                            .font(.caption.bold()).foregroundStyle(.secondary).padding(Space.m)
+                            .font(.caption.bold()).foregroundStyle(photo == nil ? Color.secondary : Color.white)
+                            .shadow(radius: photo == nil ? 0 : 2).padding(Space.s)
                         Rectangle().fill(Color.accentColor.opacity(0.3))
                             .overlay(Rectangle().stroke(Color.accentColor, lineWidth: 2))
                             .frame(height: max(24, bottom - top)).offset(y: top)
@@ -218,7 +230,17 @@ struct CaptureAreaEditor: View {
                                 }.onEnded { _ in base = nil })
                             .accessibilityHidden(true)
                     }
-                }.frame(height: 300).frame(maxWidth: 220).frame(maxWidth: .infinity)
+                }.frame(width: previewSize.width, height: previewSize.height).frame(maxWidth: .infinity)
+                HStack(spacing: Space.s) {
+                    PhotosPicker(selection: $pickerItem, matching: .images) {
+                        Label(photo == nil ? "Use my own screenshot" : "Choose another", systemImage: "photo")
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                    }.buttonStyle(.bordered)
+                    if photo != nil {
+                        SecondaryButton(title: "Use the example") { photo = nil; pickerItem = nil }
+                    }
+                }
+                Hint("Your picture stays on this screen as a guide. It is not saved or uploaded.")
                 VStack(alignment: .leading, spacing: Space.s) {
                     Text("Top edge: \(Int(range.upperBound * 100))% from the bottom")
                     Slider(value: $upper, in: 0.1...1).accessibilityLabel("Top edge of the capture area")
@@ -236,6 +258,41 @@ struct CaptureAreaEditor: View {
                     engine.syncConfig(); feedback.show("Capture area updated", severity: .success); dismiss()
                 }
             }
+        }
+        .onChange(of: pickerItem) { _, item in
+            guard let item else { return }
+            Task {
+                guard let data = try? await item.loadTransferable(type: Data.self), let image = UIImage(data: data) else {
+                    feedback.show("That picture could not be opened", severity: .warning)
+                    return
+                }
+                photo = await image.byPreparingThumbnail(ofSize: CGSize(width: 900, height: 900)) ?? image
+            }
+        }
+    }
+
+    /// The picture the band is drawn on: your own screenshot, or a drawn example frame with a subtitle line.
+    @ViewBuilder private func previewBackground(width: CGFloat, height: CGFloat) -> some View {
+        if let photo {
+            Image(uiImage: photo).resizable().scaledToFill()
+                .frame(width: width, height: height).clipped()
+                .clipShape(RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
+                .accessibilityHidden(true)
+        } else {
+            ZStack {
+                RoundedRectangle(cornerRadius: Radius.m, style: .continuous)
+                    .fill(LinearGradient(colors: [Color.indigo.opacity(0.55), Color.teal.opacity(0.45)], startPoint: .top, endPoint: .bottom))
+                VStack(spacing: 0) {
+                    Spacer()
+                    Text("Example subtitle line")
+                        .font(.caption.weight(.semibold)).foregroundStyle(.white)
+                        .padding(.horizontal, Space.s).padding(.vertical, 3)
+                        .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 4))
+                    Spacer().frame(height: height * 0.12)
+                }
+                Text("Example picture").font(.caption2).foregroundStyle(.white.opacity(0.8))
+            }
+            .accessibilityHidden(true)
         }
     }
 
