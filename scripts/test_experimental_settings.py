@@ -48,7 +48,7 @@ expected = {
         "translationSystem", "translateAhead", "keepWarm", "remember", "predictiveWarmup",
         "selectiveSpeculation", "adaptiveSpeculation", "speculationConfidence",
         "saveHistory", "historyRetentionDays", "historyCapacity",
-        "diagSamples", "persistDiagnosticSessions", "freshTranslationTest", "temporaryMemoryTest",
+        "diagSamples", "testRunSaving", "freshTranslationTest", "temporaryMemoryTest",
     },
     "CustomizationViews.swift": {
         "displayPolicy", "minDisplay", "heartbeatInterval",

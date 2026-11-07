@@ -158,7 +158,8 @@ struct DiagnosticsSettings: View {
     @EnvironmentObject private var engine: TranslatorEngine
     @Environment(\.selectTab) private var selectTab
     @AppStorage("diagSamples") private var samples = 600
-    @AppStorage("persistDiagnosticSessions") private var persistSessions = false
+    @AppStorage("testRunSaving") private var testRunSaving = "automatic"
+    @State private var confirmDeleteRuns = false
     @AppStorage("freshTranslationTest") private var freshTranslationTest = false
     @AppStorage("temporaryMemoryTest") private var temporaryMemoryTest = false
 
@@ -184,7 +185,6 @@ struct DiagnosticsSettings: View {
             } header: { Text("Review & export") }
             Section {
                 DiagnosticsCollectionControls()
-                Toggle("Keep diagnostic sessions between launches", isOn: $persistSessions)
                 Text("Controls how much numeric performance evidence is retained; detailed collection can use extra memory and CPU.")
                     .font(.footnote).foregroundStyle(.secondary)
                 Picker("Samples per chart", selection: $samples) {
@@ -193,6 +193,22 @@ struct DiagnosticsSettings: View {
                     Text("1,200").tag(1200)
                 }
             } header: { Text("Diagnostics collection") }
+
+            Section {
+                Picker("Save test runs", selection: $testRunSaving) {
+                    Text("Automatically").tag("automatic")
+                    Text("Only when I tap Save").tag("manual")
+                    Text("Off").tag("off")
+                }
+                Text("A run is one broadcast in one translation system. Automatic saves runs of 30 seconds or more with captions when they end. Metadata only; private sessions are never saved.")
+                    .font(.footnote).foregroundStyle(.secondary)
+                let storage = engine.diag.testRuns.reduce(0) { $0 + $1.bytes }
+                LabeledContent("Saved runs", value: "\(engine.diag.testRuns.count) · \(ByteCountFormatter.string(fromByteCount: Int64(storage), countStyle: .file))")
+                Button("Delete all unpinned runs", role: .destructive) { confirmDeleteRuns = true }
+                    .disabled(engine.diag.testRuns.allSatisfy { $0.pinned })
+                Text("Pinned runs are never deleted automatically. Deleting runs does not change any setting, translation memory or history.")
+                    .font(.footnote).foregroundStyle(.secondary)
+            } header: { Text("Test runs") }
 
             Section {
                 Toggle("Fresh requests only", isOn: Binding(get: { freshTranslationTest }, set: { enabled in
@@ -229,10 +245,14 @@ struct DiagnosticsSettings: View {
                     engine.toast("Counters reset")
                 }
             }
-            ResetSection(keys: ["diagSamples", "persistDiagnosticSessions", "freshTranslationTest", "temporaryMemoryTest"])
+            ResetSection(keys: ["diagSamples", "testRunSaving", "freshTranslationTest", "temporaryMemoryTest"])
         }
         .settingsPage("Diagnostics & tests")
-        .onChange(of: persistSessions) { _, _ in engine.diagnosticsSettingsChanged() }
+        .task { await engine.diag.refreshRuns() }
+        .confirmationDialog("Delete all unpinned test runs? Pinned runs, translation memory, history and settings are not changed.",
+                            isPresented: $confirmDeleteRuns, titleVisibility: .visible) {
+            Button("Delete unpinned runs", role: .destructive) { Task { await engine.diag.deleteAllUnpinnedRuns() } }
+        }
         .onChange(of: samples) { _, _ in engine.applyStorageSettings() }
     }
 }

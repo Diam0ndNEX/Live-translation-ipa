@@ -442,7 +442,7 @@ actor DiagnosticExportWriter {
             "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
             "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
             "deduplicateCopies", "contextualLanguage", "languageRecovery",
-            "continuousRotation", "smartCool", "persistDiagnosticSessions",
+            "continuousRotation", "smartCool", "testRunSaving",
             "diagSamples", "heartbeatInterval", "keepAwake", "suppressOwnInterface",
             "temporaryMemoryTest", "translationTestMode", "startingRAMEntries",
             "rapidTextTracking", "joinAdjacentText", "activeTextFocus",
