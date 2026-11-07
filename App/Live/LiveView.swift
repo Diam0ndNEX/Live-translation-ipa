@@ -1,4 +1,4 @@
-// ScreenLingo – App – Live tab (2.0.0 build 87)
+// ScreenLingo – App – Live tab (2.0.0 build 88)
 import SwiftUI
 
 /// Capture, language pair and the three controls that matter. Everything else is in More and Status.

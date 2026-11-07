@@ -1,4 +1,4 @@
-// ScreenLingo – App – Test Runs (2.0.0 build 87)
+// ScreenLingo – App – Test Runs (2.0.0 build 88)
 import SwiftUI
 
 // Test Runs UI (spec §11.6): Test card, Test Runs list and detail, report sheet.

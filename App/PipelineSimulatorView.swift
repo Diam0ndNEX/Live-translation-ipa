@@ -1,4 +1,4 @@
-// ScreenLingo – App – Pipeline simulator (2.0.0 build 86)
+// ScreenLingo – App – Pipeline simulator (2.0.0 build 88)
 import SwiftUI
 import Charts
 
@@ -61,20 +61,23 @@ struct PipelineSimulatorView: View {
     /// The answer first: did a frame get enqueued and how long the modeled path takes. The caveats come right after.
     private var headline: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            HStack(alignment: .top, spacing: Space.m) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Modeled enqueue").font(.caption).foregroundStyle(.secondary)
-                    Text(result.lanes.isEmpty ? "No frame" : "\(Int(result.totalMs)) ms")
-                        .font(.title2.weight(.semibold).monospacedDigit())
-                }.frame(maxWidth: .infinity, alignment: .leading)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Caption shown").font(.caption).foregroundStyle(.secondary)
-                    Text(result.displayAccepted ? "Yes" : "No").font(.title2.weight(.semibold))
-                }.frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: Space.s) {
+                headlineTile("Modeled enqueue", result.lanes.isEmpty ? "No frame" : "\(Int(result.totalMs)) ms")
+                headlineTile("Caption shown", result.displayAccepted ? "Yes" : "No",
+                             tint: result.displayAccepted ? Palette.success : Color.secondary)
             }
             Banner(text: "Decision simulation, not a device benchmark. A private settings copy drives the same policy helpers as the live pipeline; OCR quality, processing costs and model output are assumptions. Nothing is captured, downloaded, translated, saved or spoken.",
                    severity: .info)
         }
+    }
+    private func headlineTile(_ title: String, _ value: String, tint: Color = .primary) -> some View {
+        VStack(alignment: .leading, spacing: Space.xs) {
+            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Text(value).font(.title.weight(.bold).monospacedDigit()).foregroundStyle(tint).minimumScaleFactor(0.6).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+        .padding(Space.m)
+        .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
     }
     private var pipelinePanel: some View {
         Group {
@@ -85,7 +88,7 @@ struct PipelineSimulatorView: View {
                     Button { playing = false; cursor = max(0,cursor-1) } label: { Image(systemName:"backward.end.fill") }.accessibilityLabel("Previous stage")
                     Button { playing = false; cursor = min(max(0,result.steps.count-1),cursor+1) } label: { Image(systemName:"forward.end.fill") }.accessibilityLabel("Next stage")
                     Button { playing = false; cursor = 0 } label: { Image(systemName:"arrow.counterclockwise") }.accessibilityLabel("Restart simulation")
-                }.buttonStyle(.borderless)
+                }.buttonStyle(.borderless).labelStyle(.titleAndIcon).font(.title3).frame(minHeight: 44)
                 if result.steps.count > 1 {
                     Slider(value: Binding(get:{Double(cursor)},set:{playing=false;cursor=Int($0)}),in:0...Double(result.steps.count-1),step:1)
                 }

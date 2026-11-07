@@ -1,4 +1,4 @@
-// ScreenLingo – App – Translation memory (2.0.0 build 86)
+// ScreenLingo – App – Translation memory (2.0.0 build 88)
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -455,12 +455,15 @@ private struct MemorySummary: View {
     private func number(_ title: String, _ value: String) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.title2.weight(.semibold).monospacedDigit()).minimumScaleFactor(0.7).lineLimit(1)
-        }.frame(maxWidth: .infinity, alignment: .leading)
+            Text(value).font(.title2.weight(.bold).monospacedDigit()).minimumScaleFactor(0.7).lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
+        .padding(Space.s)
+        .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
     }
     var body: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            HStack(alignment: .top, spacing: Space.m) {
+            HStack(alignment: .top, spacing: Space.s) {
                 number("Remembered", facts.count.formatted())
                 number("Pending writes", facts.pendingWrites.formatted())
                 number("Database", facts.health.map { ByteCountFormatter.string(fromByteCount: $0.databaseBytes, countStyle: .file) } ?? "–")

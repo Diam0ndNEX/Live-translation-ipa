@@ -1,4 +1,4 @@
-// ScreenLingo – App – Basic / Advanced split for Settings (2.0.0 build 86)
+// ScreenLingo – App – Basic / Advanced split for Settings (2.0.0 build 88)
 import SwiftUI
 
 /// One switch for the whole Settings area. Basic options are always visible; Advanced sections appear when it is on.

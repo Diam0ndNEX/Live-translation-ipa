@@ -297,7 +297,7 @@ struct PresetChips: View {
             }
             if let a = store.active, store.isModified {
                 HStack(spacing: 10) {
-                    Text("\(a.name) has unsaved changes").font(.caption2).foregroundStyle(.orange)
+                    Text("\(a.name) has unsaved changes").font(.footnote).foregroundStyle(.orange)
                     Spacer()
                     if !a.builtIn {
                         Button("Update") {

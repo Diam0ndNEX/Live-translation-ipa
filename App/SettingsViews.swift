@@ -1,4 +1,4 @@
-// ScreenLingo – App – Settings (2.0.0 build 87)
+// ScreenLingo – App – Settings (2.0.0 build 88)
 import SwiftUI
 
 extension View {

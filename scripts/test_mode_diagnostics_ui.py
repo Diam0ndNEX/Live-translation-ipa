@@ -116,7 +116,7 @@ assert "Previous displayed text must not invalidate" in tests
 version = (root / "Shared/Shared.swift").read_text()
 project = (root / "project.yml").read_text()
 assert 'static let version = "2.0.0"' in version
-assert "static let build = 87" in version
-assert project.count('"2.0.0"') == 3 and project.count('"87"') == 3
+assert "static let build = 88" in version
+assert project.count('"2.0.0"') == 3 and project.count('"88"') == 3
 
 print("v2.0.0 predictive ownership and all-mode Diagnostics routing contract passed")

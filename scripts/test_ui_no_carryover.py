@@ -26,7 +26,7 @@ for p, t in files.items():
     if "selectTab" in t:
         fail("U1/U2", f"selectTab still used in {rel(p)}")
 
-# U2: five typed tabs, Diagnostics among them (build 87); the old Activity tab stays gone
+# U2: five typed tabs, Diagnostics among them (build 88); the old Activity tab stays gone
 root_src = (app / "ScreenTranslatorApp.swift").read_text()
 tags = re.findall(r"\.tag\(AppTab\.\w+\)", root_src)
 if len(tags) != 5:

@@ -1,4 +1,4 @@
-// ScreenLingo – App – Design system components (2.0.0 build 86)
+// ScreenLingo – App – Design system components (2.0.0 build 88)
 import SwiftUI
 
 // MARK: - Surfaces
