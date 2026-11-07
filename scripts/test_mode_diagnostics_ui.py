@@ -5,6 +5,8 @@ from pathlib import Path
 root = Path(__file__).resolve().parents[1]
 engine = (root / "App/TranslatorEngine.swift").read_text()
 diagnostics = (root / "App/Diagnostics.swift").read_text()
+# 2.0.0 build 86: the dashboard view moved to its own file; the recorder stays in Diagnostics.swift.
+dashboard = (root / "App/DiagnosticsDashboard.swift").read_text()
 coordinator = (root / "Shared/TranslationSystem.swift").read_text()
 backend = (root / "App/ModeTranslationService.swift").read_text()
 archive = (root / "App/DiagnosticArchive.swift").read_text()
@@ -88,14 +90,15 @@ assert "No" not in model
 settings = section(engine, "func diagnosticsSettingsChanged()", "Own-app visibility is observable")
 assert "modeDiagnosticEpochs[modeSessionID] = diag.started" in settings
 assert "func resetDiagnostics()" in settings
-ui = section(diagnostics, "private struct DiagnosticsBody: View", "// MARK: Simple")
+ui = section(dashboard, "private struct DiagnosticsBody: View", "// MARK: Simple")
 assert "engine.resetDiagnostics()" in ui
 assert "engine.diagnosticsSettingsChanged()" in ui
 assert "v1.5.0" not in ui
-assert "AppVersion.full" not in ui or "AppVersion.full" in diagnostics
-assert "Measured model processing:" in diagnostics
-assert "No measurements in this range" in diagnostics
-assert 'engine.activeTranslationSystem == .legacy' in diagnostics
+assert "AppVersion.full" not in ui or "AppVersion.full" in dashboard
+assert "Measured model processing:" in dashboard
+assert "No measurements in this range" in dashboard
+# the view reads a DashboardFacts snapshot instead of the whole engine
+assert 'facts.system == .legacy' in dashboard
 
 ownership = section(coordinator, "func shouldStartModel(", "func noteOverlappingRecovery(")
 assert "speculativeEligible" in ownership
@@ -113,7 +116,7 @@ assert "Previous displayed text must not invalidate" in tests
 version = (root / "Shared/Shared.swift").read_text()
 project = (root / "project.yml").read_text()
 assert 'static let version = "2.0.0"' in version
-assert "static let build = 85" in version
-assert project.count('"2.0.0"') == 3 and project.count('"85"') == 3
+assert "static let build = 86" in version
+assert project.count('"2.0.0"') == 3 and project.count('"86"') == 3
 
 print("v2.0.0 predictive ownership and all-mode Diagnostics routing contract passed")

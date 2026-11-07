@@ -158,33 +158,60 @@ struct HistoryStorageSettings: View {
     }
 }
 
+/// What the Diagnostics settings page shows from the recorder. Equatable, so the page redraws only on a real change.
+struct DiagnosticsSettingsFacts: Equatable {
+    var exporting: Bool
+    var archive: String
+    var runCount: Int
+    var runBytes: Int
+    var allPinned: Bool
+    @MainActor static func read(_ d: Diagnostics) -> DiagnosticsSettingsFacts {
+        DiagnosticsSettingsFacts(exporting: d.exportInProgress, archive: d.archiveStatus, runCount: d.testRuns.count,
+                                 runBytes: d.testRuns.reduce(0) { $0 + $1.bytes }, allPinned: d.testRuns.allSatisfy { $0.pinned })
+    }
+}
+
 struct DiagnosticsSettings: View {
-    @EnvironmentObject private var engine: TranslatorEngine
+    @EngineHandle private var engine
+    var body: some View { DiagnosticsSettingsPage(engine: engine) }
+}
+
+private struct DiagnosticsSettingsPage: View {
+    let engine: TranslatorEngine
     @EnvironmentObject private var router: AppRouter
+    @StateObject private var recorder: ObjectSlice<Diagnostics, DiagnosticsSettingsFacts>
+    @EngineFacts({ $0.temporaryMemoryEntries }) private var temporaryEntries
     @AppStorage("diagSamples") private var samples = 600
     @AppStorage("testRunSaving") private var testRunSaving = "automatic"
     @State private var confirmDeleteRuns = false
     @AppStorage("freshTranslationTest") private var freshTranslationTest = false
     @AppStorage("temporaryMemoryTest") private var temporaryMemoryTest = false
 
+    init(engine: TranslatorEngine) {
+        self.engine = engine
+        _recorder = StateObject(wrappedValue: ObjectSlice(engine.diag) { DiagnosticsSettingsFacts.read($0) })
+    }
+
     var body: some View {
+        let facts = recorder.value
         List {
             Section {
-                Button { router.present(.diagnostics) } label: {
-                    Label("Open the live dashboard", systemImage: "chart.xyaxis.line")
-                }.frame(minHeight: 44)
-                Button { router.present(.testRuns) } label: {
-                    Label("Open test runs", systemImage: "checklist")
-                }.frame(minHeight: 44)
+                ListRow(title: "Live dashboard", subtitle: "Speed, memory and the timeline of this session",
+                        symbol: "chart.xyaxis.line") { Image(systemName: "chevron.right").foregroundStyle(.secondary) }
+                    .contentShape(Rectangle()).onTapGesture { router.present(.diagnostics) }
+                    .accessibilityAddTraits(.isButton)
+                ListRow(title: "Test runs", subtitle: "\(facts.runCount) saved · \(ByteCountFormatter.string(fromByteCount: Int64(facts.runBytes), countStyle: .file))",
+                        symbol: "checklist") { Image(systemName: "chevron.right").foregroundStyle(.secondary) }
+                    .contentShape(Rectangle()).onTapGesture { router.present(.testRuns) }
+                    .accessibilityAddTraits(.isButton)
                 Button {
                     Task { await engine.diag.exportZIP() }
                 } label: {
-                    Label(engine.diag.exportInProgress ? "Preparing the export…" : "Export everything as a ZIP",
-                          systemImage: "archivebox")
+                    Label(facts.exporting ? "Preparing the export…" : "Export everything as a ZIP", systemImage: "archivebox")
                 }
-                .disabled(engine.diag.exportInProgress).frame(minHeight: 44)
+                .disabled(facts.exporting).frame(minHeight: 44)
                 Hint("The ZIP has a readable summary, counters, timings and a timeline without screen text. Nothing is uploaded.")
-                Text(engine.diag.archiveStatus).font(.caption).foregroundStyle(.secondary)
+                if !facts.archive.isEmpty { Hint(facts.archive) }
             } header: { Text("Review and export") }
 
             Section {
@@ -194,10 +221,8 @@ struct DiagnosticsSettings: View {
                     Text("Off").tag("off")
                 }
                 Hint("A run is one broadcast in one translation system. Automatic saves runs of 30 seconds or more when they end. Only numbers are saved, never screen text. Private sessions are never saved.")
-                let storage = engine.diag.testRuns.reduce(0) { $0 + $1.bytes }
-                LabeledContent("Saved runs", value: "\(engine.diag.testRuns.count) · \(ByteCountFormatter.string(fromByteCount: Int64(storage), countStyle: .file))")
                 Button("Delete all unpinned runs", role: .destructive) { confirmDeleteRuns = true }
-                    .disabled(engine.diag.testRuns.allSatisfy { $0.pinned }).frame(minHeight: 44)
+                    .disabled(facts.allPinned).frame(minHeight: 44)
                     .confirmDestructive("Delete all unpinned test runs?", message: "Pinned runs, translation memory, Library and settings are not changed.",
                                         isPresented: $confirmDeleteRuns, button: "Delete unpinned runs") {
                         Task { await engine.diag.deleteAllUnpinnedRuns() }
@@ -226,7 +251,7 @@ struct DiagnosticsSettings: View {
                 }))
                 Hint("Uses a throwaway cache in memory. Saved translations and your Library are untouched. It is lost when the app closes.")
                 if temporaryMemoryTest {
-                    LabeledContent("Temporary entries", value: "\(engine.temporaryMemoryEntries)")
+                    LabeledContent("Temporary entries", value: "\(temporaryEntries)")
                 }
                 NavigationLink {
                     PipelineSimulatorView()

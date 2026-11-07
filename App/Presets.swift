@@ -366,8 +366,16 @@ enum PresetEditorMode: Identifiable {
     }
 }
 
+/// The two language codes the editor mentions. Equatable, so the editor redraws only when the pair changes.
+struct PresetLanguageFacts: Equatable {
+    var source: String
+    var target: String
+    @MainActor static func read(_ e: TranslatorEngine) -> PresetLanguageFacts { PresetLanguageFacts(source: e.sourceCode, target: e.targetCode) }
+}
+
 struct PresetEditor: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
+    @EngineFacts(PresetLanguageFacts.read) private var pair
     @ObservedObject var store: PresetStore
     let mode: PresetEditorMode
     @Environment(\.dismiss) private var dismiss
@@ -383,57 +391,70 @@ struct PresetEditor: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    HStack(spacing: 14) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Space.l) {
+                    // What the preset will look like comes first, then what to change.
+                    HStack(spacing: Space.m) {
                         Image(systemName: symbol)
                             .font(.title2).foregroundStyle(.white)
-                            .frame(width: 52, height: 52)
-                            .background(PresetStore.palette[colorIndex], in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                            .frame(width: 56, height: 56)
+                            .background(PresetStore.palette[colorIndex], in: RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
+                            .accessibilityHidden(true)
                         TextField("Preset name", text: $name)
                             .font(.title3.weight(.semibold))
+                            .frame(minHeight: 44)
                     }
-                }
-                Section("Icon") {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: 14) {
-                        ForEach(PresetStore.symbols, id: \.self) { s in
-                            Button { symbol = s } label: {
-                                Image(systemName: s)
-                                    .font(.title3)
-                                    .frame(width: 40, height: 40)
-                                    .foregroundStyle(symbol == s ? Color.white : Color.secondary)
-                                    .background(symbol == s ? PresetStore.palette[colorIndex] : Color.clear,
-                                                in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .infoCard(raised: true)
+
+                    VStack(alignment: .leading, spacing: Space.s) {
+                        SectionHeader(title: "Icon")
+                        LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 6), spacing: Space.s) {
+                            ForEach(PresetStore.symbols, id: \.self) { s in
+                                Button { symbol = s } label: {
+                                    Image(systemName: s)
+                                        .font(.title3)
+                                        .frame(maxWidth: .infinity, minHeight: 44)
+                                        .foregroundStyle(symbol == s ? Color.white : Color.secondary)
+                                        .background(symbol == s ? PresetStore.palette[colorIndex] : Color.clear,
+                                                    in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel(s.replacingOccurrences(of: ".", with: " "))
+                                .accessibilityAddTraits(symbol == s ? .isSelected : [])
                             }
-                            .buttonStyle(.plain)
                         }
-                    }
-                    .padding(.vertical, 4)
-                }
-                Section("Colour") {
-                    HStack(spacing: 12) {
-                        ForEach(0..<PresetStore.palette.count, id: \.self) { i in
-                            Circle().fill(PresetStore.palette[i])
-                                .frame(width: 30, height: 30)
-                                .overlay(Circle().stroke(Color.primary, lineWidth: colorIndex == i ? 3 : 0))
-                                .onTapGesture { colorIndex = i }
+                    }.infoCard()
+
+                    VStack(alignment: .leading, spacing: Space.s) {
+                        SectionHeader(title: "Colour")
+                        HStack(spacing: Space.s) {
+                            ForEach(0..<PresetStore.palette.count, id: \.self) { i in
+                                Button { colorIndex = i } label: {
+                                    Circle().fill(PresetStore.palette[i])
+                                        .frame(width: 32, height: 32)
+                                        .overlay(Circle().stroke(Color.primary, lineWidth: colorIndex == i ? 3 : 0))
+                                        .frame(minWidth: 44, minHeight: 44)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Colour \(i + 1)")
+                                .accessibilityAddTraits(colorIndex == i ? .isSelected : [])
+                            }
                         }
+                    }.infoCard()
+
+                    VStack(alignment: .leading, spacing: Space.s) {
+                        Toggle("Remember languages", isOn: $includeLanguages).frame(minHeight: 44)
+                        Hint("When on, applying this preset also switches to \(pair.source.uppercased()) → \(pair.target.uppercased()).")
+                    }.infoCard()
+
+                    if editingID == nil {
+                        Banner(text: "Saves your current reading options, rules, floating-window look and every other behaviour setting.",
+                               severity: .info)
                     }
                 }
-                Section {
-                    Toggle("Remember languages", isOn: $includeLanguages)
-                } footer: {
-                    Text("When on, applying this preset also switches to \(engine.sourceCode.uppercased()) → \(engine.targetCode.uppercased()).")
-                }
-                if editingID == nil {
-                    Section {
-                        Text("Saves your current reading options, rules, floating-window look and every other behaviour setting.")
-                            .font(.footnote).foregroundStyle(.secondary)
-                    } header: {
-                        Text("What gets saved")
-                    }
-                }
+                .padding(Space.l)
             }
+            .background(Palette.background.ignoresSafeArea())
             .navigationTitle(editingID == nil ? "New preset" : "Edit preset")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

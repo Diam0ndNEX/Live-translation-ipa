@@ -1,8 +1,57 @@
+// ScreenLingo – App – Translation memory (2.0.0 build 86)
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Everything this screen shows from the engine. Equatable, so the page redraws only when one of these changes.
+struct MemoryFacts: Equatable {
+    struct Health: Equatable {
+        var totalEntries: Int, readyEntries: Int, needsValidation: Int
+        var legacyValidated: Int, legacySuperseded: Int, legacyUnverified: Int
+        var suggestedOCRMatches: Int, suggestedFragmentMatches: Int, conflicts: Int
+        var databaseBytes: Int64
+        var migrationStatus: String, integrity: String
+        var failedWrites: Int, importedEntries: Int, duplicateEntries: Int
+        var categoryCounts: [String: Int]
+        var lastVerifiedBackup: String?
+        init(_ h: MemoryStoreHealth) {
+            totalEntries = h.totalEntries; readyEntries = h.readyEntries; needsValidation = h.needsValidation
+            legacyValidated = h.legacyValidated; legacySuperseded = h.legacySuperseded; legacyUnverified = h.legacyUnverified
+            suggestedOCRMatches = h.suggestedOCRMatches; suggestedFragmentMatches = h.suggestedFragmentMatches; conflicts = h.conflicts
+            databaseBytes = h.databaseBytes; migrationStatus = h.migrationStatus; integrity = h.integrity
+            failedWrites = h.failedWrites; importedEntries = h.importedEntries; duplicateEntries = h.duplicateEntries
+            categoryCounts = h.categoryCounts; lastVerifiedBackup = h.lastVerifiedBackup
+        }
+    }
+    var count: Int
+    var pendingWrites: Int
+    var health: Health?
+    var failure: String?
+    var captureInProgress: Bool
+    var idleStatus: String
+    var inventory: [String: Int]
+    var scanReasons: [String: Int]
+    var warmupMs: Double?
+    var batchActive: Bool
+    var batchTotal: Int, batchProcessed: Int, batchCompleted: Int, batchSkipped: Int, batchWorkers: Int
+    var validatedThisSession: Int
+    var perMinute: Double
+    var remainingMinutes: Double?
+
+    @MainActor static func read(_ e: TranslatorEngine) -> MemoryFacts {
+        MemoryFacts(count: e.memoryCount, pendingWrites: e.memoryPendingWrites, health: e.memoryHealth.map(Health.init),
+                    failure: e.memoryFailure, captureInProgress: e.captureAlive || e.pipActive,
+                    idleStatus: e.legacyIdleValidationStatus, inventory: e.legacyValidationInventory,
+                    scanReasons: e.legacyScanReasons, warmupMs: e.warmupLastDurationMs, batchActive: e.legacyBatchActive,
+                    batchTotal: e.legacyBatchTotal, batchProcessed: e.legacyBatchProcessed, batchCompleted: e.legacyBatchCompleted,
+                    batchSkipped: e.legacyBatchSkipped, batchWorkers: e.legacyBatchWorkers,
+                    validatedThisSession: e.legacyValidatedThisSession, perMinute: e.legacyEntriesPerMinute,
+                    remainingMinutes: e.legacyEstimatedRemainingMinutes)
+    }
+}
+
 struct MemoryManagementView: View {
-    @EnvironmentObject private var engine: TranslatorEngine
+    @EngineHandle private var engine
+    @EngineFacts(MemoryFacts.read) private var facts
     @State private var entries: [MemoryStoredEntry] = []
     @State private var conflictingEntries: [MemoryStoredEntry] = []
     @State private var showConflicts = false
@@ -23,14 +72,30 @@ struct MemoryManagementView: View {
     @AppStorage("memorySoftLimit") private var softLimit = 100000
 
     /// Bulk database operations must not compete with active OCR/PiP lookups.
-    private var captureInProgress: Bool { engine.captureAlive || engine.pipActive }
+    private var captureInProgress: Bool { facts.captureInProgress }
 
     var body: some View {
         List {
-            Section("What is remembered") {
-                LabeledContent("Committed entries", value: String(engine.memoryCount))
-                LabeledContent("Pending writes", value: String(engine.memoryPendingWrites))
-                if let h = engine.memoryHealth {
+            Section {
+                MemorySummary(facts: facts)
+                    .listRowInsets(EdgeInsets(top: Space.m, leading: Space.l, bottom: Space.m, trailing: Space.l))
+                if let failure = facts.failure { Banner(text: failure, severity: .warning) }
+                if let health = facts.health, softLimit > 0, health.totalEntries >= softLimit {
+                    Banner(text: "Storage management threshold reached. No entries were deleted.", severity: .info)
+                }
+            } header: { Text("What is remembered") }
+            Section {
+                Picker("RAM entries", selection: $ramCapacity) {
+                    Text("1,000").tag(1000); Text("3,000").tag(3000); Text("6,000").tag(6000)
+                }
+                Picker("Management threshold", selection: $softLimit) {
+                    Text("25,000").tag(25000); Text("100,000").tag(100000)
+                    Text("500,000").tag(500000); Text("Storage aware").tag(0)
+                }
+                Hint("Thresholds do not delete translations. RAM eviction preserves committed entries.")
+            } header: { Text("Limits") }
+            AdvancedSection(title: "Memory details") {
+                if let h = facts.health {
                     LabeledContent("Migration", value: h.migrationStatus)
                     LabeledContent("Integrity", value: h.integrity)
                     LabeledContent("Ready for compatible reuse", value: String(h.readyEntries))
@@ -42,29 +107,13 @@ struct MemoryManagementView: View {
                     LabeledContent("Legacy imports", value: String(h.importedEntries))
                     LabeledContent("Legacy duplicates", value: String(h.duplicateEntries))
                     LabeledContent("Failed write attempts", value: String(h.failedWrites))
-                    LabeledContent("Database", value: ByteCountFormatter.string(fromByteCount: h.databaseBytes, countStyle: .file))
                     LabeledContent("Last verified backup", value: h.lastVerifiedBackup ?? "None")
-                }
-                if let h = engine.memoryHealth, !h.categoryCounts.isEmpty {
                     ForEach(h.categoryCounts.keys.sorted(), id: \.self) { category in
                         LabeledContent(category.replacingOccurrences(of: "_", with: " ").capitalized,
                                        value: String(h.categoryCounts[category, default: 0]))
                     }
                 }
-                if let failure = engine.memoryFailure { Text(failure).foregroundStyle(.orange) }
-                Picker("RAM entries", selection: $ramCapacity) {
-                    Text("1,000").tag(1000); Text("3,000").tag(3000); Text("6,000").tag(6000)
-                }
-                Picker("Management threshold", selection: $softLimit) {
-                    Text("25,000").tag(25000); Text("100,000").tag(100000)
-                    Text("500,000").tag(500000); Text("Storage aware").tag(0)
-                }
-                if let health = engine.memoryHealth, softLimit > 0, health.totalEntries >= softLimit {
-                    Label("Storage management threshold reached. No entries were deleted.", systemImage: "externaldrive.badge.exclamationmark")
-                        .font(.footnote)
-                }
-                Text("Live validation uses independently confirmed model output; optional idle validation makes bounded on-device model requests when screen capture is stopped. Originals remain preserved.").font(.footnote)
-                Text("Thresholds do not delete translations. RAM eviction preserves committed entries.").font(.footnote)
+                Hint("Live validation uses independently confirmed model output; optional idle validation makes bounded on-device model requests when screen capture is stopped. Originals remain preserved.")
             }
             AdvancedSection(title: "Review old saved translations") {
                 Toggle("Automatically validate while idle", isOn: $legacyIdleValidationEnabled)
@@ -73,26 +122,26 @@ struct MemoryManagementView: View {
                 Button("Validate up to 48 entries now") {
                     engine.startLegacyValidation(maxEntries: IdleLegacyBatchPolicy.manualEntries)
                 }.disabled(captureInProgress || transferBusy ||
-                    engine.memoryHealth == nil)
+                    facts.health == nil)
                 Button("Delete unvalidated legacy entries…", role: .destructive) { confirmDeleteLegacy = true }
-                    .disabled(captureInProgress || transferBusy || engine.legacyBatchActive ||
-                        (engine.memoryHealth?.legacyUnverified ?? 0) == 0)
-                LabeledContent("Validation activity", value: engine.legacyIdleValidationStatus)
+                    .disabled(captureInProgress || transferBusy || facts.batchActive ||
+                        (facts.health?.legacyUnverified ?? 0) == 0)
+                LabeledContent("Validation activity", value: facts.idleStatus)
                 Button("Rescan pending legacy records") { engine.rescanLegacyValidation() }
-                    .disabled(captureInProgress || transferBusy || engine.legacyBatchActive || engine.memoryHealth == nil)
-                ForEach(engine.legacyValidationInventory.keys.sorted(), id: \.self) { key in
-                    LabeledContent(key, value: String(engine.legacyValidationInventory[key] ?? 0))
+                    .disabled(captureInProgress || transferBusy || facts.batchActive || facts.health == nil)
+                ForEach(facts.inventory.keys.sorted(), id: \.self) { key in
+                    LabeledContent(key, value: String(facts.inventory[key] ?? 0))
                 }
-                ForEach(engine.legacyScanReasons.keys.sorted(), id: \.self) { key in
-                    LabeledContent(key, value: String(engine.legacyScanReasons[key] ?? 0))
+                ForEach(facts.scanReasons.keys.sorted(), id: \.self) { key in
+                    LabeledContent(key, value: String(facts.scanReasons[key] ?? 0))
                 }
                 Text("Inventory is a snapshot from the last scan. Scan candidates still need compatible keys, unchanged cleanup, one sentence unit and an installed model. Skip reasons describe the latest scanned batch, not every pending record. Scanning resumes automatically after language, rule or database changes. Originals are preserved.")
                     .font(.footnote).foregroundStyle(.secondary)
                 TranslationActivityView()
-                if let duration = engine.warmupLastDurationMs {
+                if let duration = facts.warmupMs {
                     LabeledContent("Last model warm-up", value: "\(Int(duration)) ms")
                 }
-                if let h = engine.memoryHealth {
+                if let h = facts.health {
                     LabeledContent("Older entries remaining", value: String(h.legacyUnverified))
                     let resolved = h.legacyValidated + h.legacySuperseded
                     let totalHistorical = resolved + h.legacyUnverified
@@ -104,26 +153,26 @@ struct MemoryManagementView: View {
                         }
                     }
                 }
-                if engine.legacyBatchActive {
-                    ProgressView(value: Double(engine.legacyBatchProcessed),
-                        total: Double(max(1, engine.legacyBatchTotal))) {
+                if facts.batchActive {
+                    ProgressView(value: Double(facts.batchProcessed),
+                        total: Double(max(1, facts.batchTotal))) {
                         Text("Current batch — translated")
                     } currentValueLabel: {
-                        Text("\(engine.legacyBatchProcessed) / \(engine.legacyBatchTotal)")
+                        Text("\(facts.batchProcessed) / \(facts.batchTotal)")
                     }
                     Text("Model results are saved only after the batch passes validation checks.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                LabeledContent("Model workers", value: String(engine.legacyBatchWorkers))
-                LabeledContent("Selected in batch", value: String(engine.legacyBatchTotal))
-                LabeledContent("Translated in batch", value: String(engine.legacyBatchProcessed))
-                LabeledContent("Validated in batch", value: String(engine.legacyBatchCompleted))
-                LabeledContent("Skipped or unsupported", value: String(engine.legacyBatchSkipped))
-                LabeledContent("Verified this session", value: String(engine.legacyValidatedThisSession))
-                if engine.legacyEntriesPerMinute > 0 {
+                LabeledContent("Model workers", value: String(facts.batchWorkers))
+                LabeledContent("Selected in batch", value: String(facts.batchTotal))
+                LabeledContent("Translated in batch", value: String(facts.batchProcessed))
+                LabeledContent("Validated in batch", value: String(facts.batchCompleted))
+                LabeledContent("Skipped or unsupported", value: String(facts.batchSkipped))
+                LabeledContent("Verified this session", value: String(facts.validatedThisSession))
+                if facts.perMinute > 0 {
                     LabeledContent("Observed validation speed",
-                        value: String(format: "%.1f entries/min", engine.legacyEntriesPerMinute))
-                    if let estimate = engine.legacyEstimatedRemainingMinutes {
+                        value: String(format: "%.1f entries/min", facts.perMinute))
+                    if let estimate = facts.remainingMinutes {
                         LabeledContent("Estimated time remaining",
                             value: estimate >= 60 ?
                                 String(format: "~%.1f hours", estimate / 60) :
@@ -132,10 +181,10 @@ struct MemoryManagementView: View {
                             .font(.caption).foregroundStyle(.secondary)
                     }
                 }
-                if engine.legacyBatchActive {
+                if facts.batchActive {
                     Button("Stop validation") { engine.cancelLegacyValidation() }
                 }
-                if let h = engine.memoryHealth {
+                if let h = facts.health {
                     LabeledContent("OCR-related suggestions", value: String(h.suggestedOCRMatches))
                     LabeledContent("Fragment alignment suggestions", value: String(h.suggestedFragmentMatches))
                 }
@@ -171,7 +220,7 @@ struct MemoryManagementView: View {
                             Text(entry.sourceText)
                             Text(entry.translatedText).foregroundStyle(.secondary)
                             Text("\(entry.sourceLanguage) → \(entry.targetLanguage) · \(entry.validationState)")
-                                .font(.caption)
+                                .font(.footnote)
                         }
                     }
                 }
@@ -190,12 +239,12 @@ struct MemoryManagementView: View {
                     }
                 }.disabled(transferBusy || captureInProgress)
                 Text("Snapshots protect stored memory, but restoring an older snapshot can omit newer translations. No automatic rollback is performed.").font(.footnote)
-                if engine.memoryPendingWrites > 0 {
+                if facts.pendingWrites > 0 {
                     Button("Retry pending confirmed-memory writes") {
                         engine.saveMemory(force: true)
                         message = "Persistence retry requested; verify that pending writes reach zero."
                     }
-                    .disabled(transferBusy || captureInProgress || engine.memoryHealth == nil)
+                    .disabled(transferBusy || captureInProgress || facts.health == nil)
                 }
                 Button("Clear RAM cache") { engine.clearRAMCache() }
                 Button("Verify integrity") {
@@ -224,7 +273,7 @@ struct MemoryManagementView: View {
                 ForEach(snapshotNames, id: \.self) { name in
                     Button(name) {
                         selectedSnapshot = name
-                        if engine.memoryHealth == nil {
+                        if facts.health == nil {
                             confirmUnavailableRestore = true
                         } else {
                             confirmSnapshotMerge = true
@@ -240,7 +289,7 @@ struct MemoryManagementView: View {
                     VStack(alignment: .leading) {
                         Text(entry.sourceText)
                         Text(entry.translatedText).foregroundStyle(.secondary)
-                        Text("\(entry.sourceLanguage) → \(entry.targetLanguage) · \(entry.validationState)").font(.caption)
+                        Text("\(entry.sourceLanguage) → \(entry.targetLanguage) · \(entry.validationState)").font(.footnote)
                     }
                     .swipeActions {
                         Button("Review") {
@@ -397,3 +446,35 @@ struct MemoryTransferDocument: FileDocument {
     func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper { FileWrapper(regularFileWithContents: data) }
 }
 
+
+
+/// The numbers worth seeing first: how much is remembered, whether it is healthy, and anything waiting to be written.
+private struct MemorySummary: View {
+    let facts: MemoryFacts
+    private var integrityOK: Bool { facts.health.map { $0.integrity == "ok" } ?? false }
+    private func number(_ title: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            Text(value).font(.title2.weight(.semibold).monospacedDigit()).minimumScaleFactor(0.7).lineLimit(1)
+        }.frame(maxWidth: .infinity, alignment: .leading)
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.m) {
+            HStack(alignment: .top, spacing: Space.m) {
+                number("Remembered", facts.count.formatted())
+                number("Pending writes", facts.pendingWrites.formatted())
+                number("Database", facts.health.map { ByteCountFormatter.string(fromByteCount: $0.databaseBytes, countStyle: .file) } ?? "–")
+            }
+            if let health = facts.health {
+                StatusPill(text: "Integrity: \(health.integrity.replacingOccurrences(of: "_", with: " "))",
+                           symbol: integrityOK ? "checkmark.shield" : "questionmark.circle",
+                           severity: integrityOK ? .success : .info)
+                if health.legacyUnverified > 0 {
+                    Hint("\(health.legacyUnverified.formatted()) older entries are kept but not reused until they are verified.")
+                }
+            } else {
+                StatusPill(text: "Memory is preparing", symbol: "hourglass", severity: .info)
+            }
+        }
+    }
+}

@@ -1,10 +1,12 @@
+// ScreenLingo – App – Pipeline simulator (2.0.0 build 86)
 import SwiftUI
 import Charts
 
 private struct SimulationSetting: Identifiable { let id: String }
 
 struct PipelineSimulatorView: View {
-    @EnvironmentObject private var engine: TranslatorEngine
+    // Not subscribed: the engine is only read when a button copies its values, never while drawing.
+    @EngineHandle private var engine
     @Environment(\.dismiss) private var dismiss
     @State private var options: [String:String] = [:]
     @State private var input = SimulationInput()
@@ -24,9 +26,7 @@ struct PipelineSimulatorView: View {
     var body: some View {
         List {
             Section {
-                Text("Decision simulation · not a device benchmark").font(.headline)
-                Text("A private settings copy drives the same policy helpers as the live pipeline. OCR quality, processing costs and model output are assumptions; the sample's language classifier runs locally. No capture, downloads, translation calls, history writes, speech or clipboard actions occur.")
-                    .font(.footnote).foregroundStyle(.secondary)
+                headline
                 Picker("Panel", selection: $panel) {
                     Text("Pipeline").tag("pipeline")
                     Text("Scenario").tag("scenario")
@@ -56,6 +56,24 @@ struct PipelineSimulatorView: View {
                 SimulatorSettingEditor(key: setting.id, value: Binding(get: { options[setting.id] ?? "" }, set: { options[setting.id] = $0 }),
                     isBoolean: TranslatorEngine.defaults[setting.id] is Bool, choices: choices(for: setting.id))
             }
+        }
+    }
+    /// The answer first: did a frame get enqueued and how long the modeled path takes. The caveats come right after.
+    private var headline: some View {
+        VStack(alignment: .leading, spacing: Space.m) {
+            HStack(alignment: .top, spacing: Space.m) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Modeled enqueue").font(.caption).foregroundStyle(.secondary)
+                    Text(result.lanes.isEmpty ? "No frame" : "\(Int(result.totalMs)) ms")
+                        .font(.title2.weight(.semibold).monospacedDigit())
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Caption shown").font(.caption).foregroundStyle(.secondary)
+                    Text(result.displayAccepted ? "Yes" : "No").font(.title2.weight(.semibold))
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Banner(text: "Decision simulation, not a device benchmark. A private settings copy drives the same policy helpers as the live pipeline; OCR quality, processing costs and model output are assumptions. Nothing is captured, downloaded, translated, saved or spoken.",
+                   severity: .info)
         }
     }
     private var pipelinePanel: some View {
@@ -111,7 +129,7 @@ struct PipelineSimulatorView: View {
                     }.buttonStyle(.plain)
                 }
             }
-            Section("PiP result preview") {
+            Section("Caption preview") {
                 if result.displayAccepted {
                     VStack(alignment:horizontalAlignment,spacing:10) {
                         if PipelineSimulation.bool(options,"showOriginal") { Text(input.text).font(.caption).foregroundStyle(.secondary) }

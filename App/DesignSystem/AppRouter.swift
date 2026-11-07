@@ -1,4 +1,4 @@
-// ScreenLingo – App – Typed navigation (2.0.0 build 85)
+// ScreenLingo – App – Typed navigation (2.0.0 build 86)
 import SwiftUI
 
 enum AppTab: String, CaseIterable, Identifiable, Hashable {

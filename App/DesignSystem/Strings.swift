@@ -1,4 +1,4 @@
-// ScreenLingo – App – User-facing copy shared by several screens (2.0.0 build 85)
+// ScreenLingo – App – User-facing copy shared by several screens (2.0.0 build 86)
 import Foundation
 
 /// Wording used in more than one place lives here, so it stays consistent and can be reviewed in one file.

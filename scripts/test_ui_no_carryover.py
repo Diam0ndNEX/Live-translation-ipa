@@ -97,7 +97,7 @@ for p, t in files.items():
             fail("U13", f'old wording "{bad}" in {rel(p)}')
 
 # U15: diagnostics content must not be gated on onAppear
-diag = (app / "Diagnostics.swift").read_text()
+diag = (app / "Diagnostics.swift").read_text() + (app / "DiagnosticsDashboard.swift").read_text()
 if "onAppear { visible = true }" in diag or "if visible {" in diag:
     fail("U15", "Diagnostics content is gated behind onAppear")
 
@@ -144,6 +144,25 @@ for name, structs in {"SettingsViews.swift": ["ReadingSettings", "IntelligenceSe
         body = text[i:j if j > 0 else len(text)]
         if re.search(r"@EnvironmentObject[^\n]*TranslatorEngine", body):
             fail("U3", f"{st} still observes the whole engine")
+
+# U3/U11/U19: developer screens read snapshots, never the whole engine or the whole recorder
+for name in ("DiagnosticsDashboard.swift", "MemoryManagementView.swift", "PipelineSimulatorView.swift", "TestRunViews.swift"):
+    text = (app / name).read_text()
+    if re.search(r"@EnvironmentObject[^\n]*TranslatorEngine", text):
+        fail("U3", f"{name} observes the whole engine")
+    if re.search(r"@ObservedObject[^\n]*(engine|diag|Diagnostics|TranslatorEngine)", text):
+        fail("U3", f"{name} observes the whole engine or recorder")
+presets = (app / "Presets.swift").read_text()
+editor = presets[presets.index("struct PresetEditor"):presets.index("// MARK: - Manager page")]
+if re.search(r"@EnvironmentObject[^\n]*TranslatorEngine", editor):
+    fail("U3", "PresetEditor observes the whole engine")
+dset = (app / "SettingsCategories.swift").read_text()
+dset = dset[dset.index("struct DiagnosticsSettings"):]
+dset = dset[:dset.find("\nstruct ", 10)] if "\nstruct " in dset[10:] else dset
+if re.search(r"@EnvironmentObject[^\n]*TranslatorEngine", dset):
+    fail("U3", "DiagnosticsSettings observes the whole engine")
+if "AdvancedBlock" not in (app / "DiagnosticsDashboard.swift").read_text():
+    fail("U11", "dashboard has no Advanced disclosure")
 
 # U2: deep links
 if "screenlingo" not in (root / "project.yml").read_text() or "onOpenURL" not in root_src:

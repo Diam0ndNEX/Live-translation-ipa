@@ -1,4 +1,4 @@
-// ScreenLingo – App – Narrow observation core (2.0.0 build 85)
+// ScreenLingo – App – Narrow observation core (2.0.0 build 86)
 import SwiftUI
 import Combine
 
@@ -12,11 +12,12 @@ final class ObjectSlice<Source: ObservableObject, Value: Equatable>: ObservableO
     @Published private(set) var value: Value
     private var cancellable: AnyCancellable?
 
-    init(_ source: Source, read: @escaping @MainActor (Source) -> Value) {
+    /// `milliseconds` is the throttle: dashboards that are live by design use a slower one than the default.
+    init(_ source: Source, milliseconds: Int = 250, read: @escaping @MainActor (Source) -> Value) {
         value = read(source)
         cancellable = source.objectWillChange
             .receive(on: DispatchQueue.main)   // hop first: willChange fires before the new value is stored
-            .throttle(for: .milliseconds(250), scheduler: DispatchQueue.main, latest: true)
+            .throttle(for: .milliseconds(milliseconds), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self, weak source] _ in
                 guard let self, let source else { return }
                 let next = read(source)

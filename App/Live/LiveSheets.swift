@@ -1,4 +1,4 @@
-// ScreenLingo – App – Live sheets: More, Status (with session), Test (2.0.0 build 85)
+// ScreenLingo – App – Live sheets: More, Status (with session), Test (2.0.0 build 86)
 import SwiftUI
 
 // MARK: - More

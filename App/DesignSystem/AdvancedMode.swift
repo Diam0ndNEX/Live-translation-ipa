@@ -1,4 +1,4 @@
-// ScreenLingo – App – Basic / Advanced split for Settings (2.0.0 build 85)
+// ScreenLingo – App – Basic / Advanced split for Settings (2.0.0 build 86)
 import SwiftUI
 
 /// One switch for the whole Settings area. Basic options are always visible; Advanced sections appear when it is on.
@@ -25,6 +25,25 @@ struct AdvancedSection<Content: View>: View {
             } header: { Text("Advanced · \(title)") } footer: {
                 if let footer { Text(footer) }
             }
+        }
+    }
+}
+
+/// The same Advanced gate for screens built from cards in a ScrollView (AdvancedSection is for Lists).
+struct AdvancedBlock<Content: View>: View {
+    @EnvironmentObject private var mode: AdvancedMode
+    let title: String
+    var footer: String? = nil
+    @ViewBuilder var content: () -> Content
+    var body: some View {
+        if mode.on {
+            VStack(alignment: .leading, spacing: Space.m) {
+                SectionHeader(title: "Advanced · \(title)", detail: footer)
+                content()
+            }
+        } else {
+            Banner(text: "More detail about \(title.lowercased()) is hidden.", severity: .info,
+                   actionTitle: "Show advanced details") { mode.on = true }
         }
     }
 }
