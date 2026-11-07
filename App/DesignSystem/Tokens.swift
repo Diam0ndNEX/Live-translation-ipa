@@ -74,7 +74,7 @@ enum Space {
     static let xs: CGFloat = 4, s: CGFloat = 8, m: CGFloat = 12, l: CGFloat = 16, xl: CGFloat = 24, xxl: CGFloat = 32
 }
 enum Radius {
-    static let s: CGFloat = 10, m: CGFloat = 16, l: CGFloat = 24
+    static let s: CGFloat = 12, m: CGFloat = 20, l: CGFloat = 28
 }
 enum Motion {
     static let quick = 0.18, standard = 0.3
@@ -85,9 +85,10 @@ private func adaptive(light: UIColor, dark: UIColor) -> Color {
     Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? dark : light })
 }
 enum Palette {
-    static let background = adaptive(light: UIColor(red: 0.95, green: 0.96, blue: 0.98, alpha: 1), dark: UIColor(red: 0.035, green: 0.043, blue: 0.075, alpha: 1))
+    static let background = adaptive(light: UIColor(red: 0.94, green: 0.95, blue: 0.985, alpha: 1), dark: UIColor(red: 0.035, green: 0.043, blue: 0.075, alpha: 1))
     static let surface = adaptive(light: .white, dark: UIColor(red: 0.075, green: 0.09, blue: 0.14, alpha: 1))
     static let surfaceRaised = adaptive(light: UIColor(red: 0.91, green: 0.93, blue: 0.96, alpha: 1), dark: UIColor(red: 0.12, green: 0.14, blue: 0.2, alpha: 1))
+    static let cardShadow = adaptive(light: UIColor.black.withAlphaComponent(0.07), dark: UIColor.black.withAlphaComponent(0.35))
     static let separator = adaptive(light: UIColor.black.withAlphaComponent(0.1), dark: UIColor.white.withAlphaComponent(0.12))
     static let textPrimary = Color.primary
     static let textSecondary = Color.secondary

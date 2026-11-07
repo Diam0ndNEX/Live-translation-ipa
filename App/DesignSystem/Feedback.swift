@@ -59,7 +59,8 @@ struct NoticeHost: View {
         ZStack {
             if let n = center.current {
                 Banner(text: n.text, severity: n.severity, actionTitle: n.actionTitle, action: n.action)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
+                    .background(.thickMaterial, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
+                    .shadow(color: Palette.cardShadow, radius: 14, x: 0, y: 6)
                     .padding(.horizontal, Space.l).padding(.top, Space.s)
                     .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                     .onTapGesture { center.dismiss() }

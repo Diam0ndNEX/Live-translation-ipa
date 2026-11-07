@@ -4,10 +4,39 @@ import SwiftUI
 extension View {
     func settingsPage(_ title: String) -> some View {
         self.scrollContentBackground(.hidden)
+            .listStyle(.insetGrouped)
+            .listSectionSpacing(.custom(Space.l))
+            .headerProminence(.increased)
+            .environment(\.defaultMinListRowHeight, 52)
             .background(Palette.background.ignoresSafeArea())
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.inline)
+    }
+}
+
+/// First row of every Settings sub-page: what this page is for, at a glance.
+struct SettingsPageHeader: View {
+    let symbol: String
+    let title: String
+    let summary: String
+    var body: some View {
+        Section {
+            HStack(spacing: Space.m) {
+                Image(systemName: symbol).font(.title2.weight(.semibold)).foregroundStyle(.white)
+                    .frame(width: 52, height: 52)
+                    .background(LinearGradient(colors: [Color.accentColor, Color.accentColor.opacity(0.7)], startPoint: .topLeading, endPoint: .bottomTrailing),
+                                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.title3.weight(.bold))
+                    Text(summary).font(.subheadline).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.vertical, Space.xs)
+            .listRowBackground(Color.clear)
+            .accessibilityElement(children: .combine)
+        }
     }
 }
 
@@ -302,6 +331,7 @@ struct ReadingSettings: View {
 
     var body: some View {
         List {
+            SettingsPageHeader(symbol: "text.viewfinder", title: "Reading & OCR", summary: "How ScreenLingo finds the text on your screen.")
             Section {
                 Picker("Content style defaults", selection: contentStyleSelection) {
                     ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) }
@@ -417,6 +447,7 @@ struct IntelligenceSettings: View {
 
     var body: some View {
         List {
+            SettingsPageHeader(symbol: "globe", title: "Languages & text rules", summary: "Language handling, names and text clean-up.")
             Section {
                 Toggle("Clean up reading mistakes", isOn: $cleanOCR)
                 Hint("Fixes common mix-ups such as 0 and O before translating.")
@@ -488,6 +519,7 @@ struct WindowSettings: View {
 
     var body: some View {
         List {
+            SettingsPageHeader(symbol: "pip", title: "Floating subtitles", summary: "Size, position and behaviour of the floating window.")
             Section("Live preview") {
                 Image(uiImage: previewImage)
                     .resizable().scaledToFit()
@@ -554,6 +586,7 @@ struct InterfaceSettings: View {
 
     var body: some View {
         List {
+            SettingsPageHeader(symbol: "paintbrush", title: "App appearance", summary: "Theme, accent colour and feel of the app.")
             Section {
                 Picker("Appearance", selection: $appearance) {
                     ForEach(Appearance.allCases) { Text($0.title).tag($0.rawValue) }
@@ -601,6 +634,7 @@ struct PerformanceSettings: View {
 
     var body: some View {
         List {
+            SettingsPageHeader(symbol: "battery.100", title: "Performance & battery", summary: "Trade speed against heat and battery.")
             Section {
                 Toggle("Adapt to device conditions", isOn: $adaptive)
                 Hint("Does less work when the phone gets hot, memory is low or Low Power Mode is on.")
@@ -647,6 +681,7 @@ struct BackupSettings: View {
 
     var body: some View {
         List {
+            SettingsPageHeader(symbol: "externaldrive.badge.timemachine", title: "Backup & reset", summary: "Save, restore or reset your settings.")
             Section {
                 Button { Sharer.shareFile(text: engine.exportSettings(), name: "screen-translator-settings.json") } label: {
                     Label("Share all settings", systemImage: "square.and.arrow.up")
@@ -686,6 +721,7 @@ struct AboutSettings: View {
 
     var body: some View {
         List {
+            SettingsPageHeader(symbol: "info.circle", title: "About & help", summary: "Version, changelog and help.")
             Section("Version") {
                 LabeledContent("App", value: AppVersion.full)
                 LabeledContent("Capture extension",
@@ -725,6 +761,7 @@ struct PrivacySettings: View {
 
     var body: some View {
         List {
+            SettingsPageHeader(symbol: "hand.raised", title: "Privacy", summary: "What stays on your phone.")
             Section {
                 Toggle("Private session", isOn: $privateSession)
                 Hint("New translations are not added to your Library or saved translation memory. Things saved earlier stay.")

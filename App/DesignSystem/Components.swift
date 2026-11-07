@@ -9,7 +9,8 @@ struct InfoCardModifier: ViewModifier {
             .padding(Space.l)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(raised ? Palette.surfaceRaised : Palette.surface, in: RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Radius.m, style: .continuous).strokeBorder(Palette.separator, lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: Radius.m, style: .continuous).strokeBorder(Palette.separator.opacity(0.6), lineWidth: 0.5))
+            .shadow(color: Palette.cardShadow, radius: raised ? 0 : 10, x: 0, y: raised ? 0 : 3)
     }
 }
 extension View {
@@ -23,8 +24,9 @@ struct ScreenScaffold<Content: View>: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.l) { content() }
-                .padding(.horizontal, Space.l).padding(.vertical, Space.m)
+                .padding(.horizontal, Space.l).padding(.top, Space.m).padding(.bottom, Space.xxl)
         }
+        .scrollDismissesKeyboard(.interactively)
         .background(Palette.background.ignoresSafeArea())
     }
 }
@@ -34,8 +36,8 @@ struct SectionHeader: View {
     var detail: String? = nil
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.footnote.weight(.semibold)).foregroundStyle(.secondary).textCase(.uppercase)
-            if let detail { Text(detail).font(.footnote).foregroundStyle(.secondary) }
+            Text(title).font(.title3.weight(.bold)).foregroundStyle(.primary)
+            if let detail { Text(detail).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         }.accessibilityAddTraits(.isHeader)
     }
 }
@@ -62,8 +64,8 @@ struct StatusPill: View {
         Label { Text(text).font(.footnote.weight(.semibold)) } icon: { Image(systemName: symbol ?? severity.symbol) }
             .foregroundStyle(severity.color)
             .padding(.horizontal, Space.m).padding(.vertical, Space.s)
-            .frame(minHeight: 32)
-            .background(severity.color.opacity(0.14), in: Capsule())
+            .frame(minHeight: 36)
+            .background(severity.color.opacity(0.16), in: Capsule())
             .accessibilityElement(children: .combine)
     }
 }
@@ -87,6 +89,7 @@ struct Banner: View {
         }
         .padding(Space.m)
         .background(severity.color.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
+        .overlay(alignment: .leading) { Capsule().fill(severity.color).frame(width: 4).padding(.vertical, Space.s) }
         .accessibilityElement(children: .contain)
     }
 }
@@ -123,9 +126,11 @@ struct PrimaryButton: View {
                 if let symbol { Image(systemName: symbol) }
                 Text(title).font(.headline)
             }
-            .frame(maxWidth: .infinity, minHeight: 50)
+            .frame(maxWidth: .infinity, minHeight: 56)
             .foregroundStyle(.white)
-            .background(Color.accentColor, in: RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
+            .background(LinearGradient(colors: [Color.accentColor, Color.accentColor.opacity(0.78)], startPoint: .topLeading, endPoint: .bottomTrailing),
+                        in: RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
+            .shadow(color: Color.accentColor.opacity(enabled ? 0.35 : 0), radius: 10, x: 0, y: 4)
         }
         .buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.4)
     }
@@ -142,8 +147,9 @@ struct SecondaryButton: View {
                 if let symbol { Image(systemName: symbol) }
                 Text(title).font(.subheadline.weight(.semibold))
             }
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
+            .foregroundStyle(Color.accentColor)
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
         }
         .buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.4)
     }
@@ -158,8 +164,9 @@ struct IconButton: View {
     var body: some View {
         Button(action: action) {
             Image(systemName: symbol).font(.body.weight(.semibold))
-                .frame(minWidth: 44, minHeight: 44)
-                .background(Palette.surfaceRaised, in: Circle())
+                .frame(minWidth: 48, minHeight: 48)
+                .foregroundStyle(Color.accentColor)
+                .background(Color.accentColor.opacity(0.12), in: Circle())
         }
         .buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.4)
         .accessibilityLabel(label)
@@ -174,14 +181,19 @@ struct ListRow<Trailing: View>: View {
     @ViewBuilder var trailing: () -> Trailing
     var body: some View {
         HStack(spacing: Space.m) {
-            if let symbol { Image(systemName: symbol).frame(width: 28).foregroundStyle(Color.accentColor).accessibilityHidden(true) }
+            if let symbol {
+                Image(systemName: symbol).font(.subheadline.weight(.semibold)).foregroundStyle(Color.accentColor)
+                    .frame(width: 34, height: 34)
+                    .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                    .accessibilityHidden(true)
+            }
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.body)
                 if let subtitle { Text(subtitle).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             }
             Spacer(minLength: Space.s)
             trailing()
-        }.frame(minHeight: 44).contentShape(Rectangle())
+        }.frame(minHeight: 52).contentShape(Rectangle())
     }
 }
 
@@ -195,7 +207,7 @@ struct LabeledToggleRow: View {
                 Text(title)
                 if let detail { Text(detail).font(.footnote).foregroundStyle(.secondary) }
             }
-        }.frame(minHeight: 44)
+        }.frame(minHeight: 52)
     }
 }
 
@@ -211,12 +223,13 @@ struct LanguagePicker: View {
             ForEach(items) { i in Button(i.name) { code = i.code } }
         } label: {
             HStack(spacing: Space.xs) {
-                Text(label).font(.subheadline.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.7)
+                Text(label).font(.headline).lineLimit(1).minimumScaleFactor(0.7)
                 Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.bold)).opacity(0.6)
             }
             .foregroundStyle(.primary)
-            .frame(maxWidth: .infinity, minHeight: 48)
-            .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
+            .frame(maxWidth: .infinity, minHeight: 56)
+            .background(Palette.surface, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Radius.s, style: .continuous).strokeBorder(Palette.separator, lineWidth: 1))
         }
         .accessibilityLabel(label)
     }
@@ -248,7 +261,8 @@ struct SheetScaffold<Content: View>: View {
             content()
                 .background(Palette.background.ignoresSafeArea())
                 .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() }.fontWeight(.semibold) } }
+                .presentationDragIndicator(.visible)
         }
     }
 }

@@ -14,6 +14,7 @@ struct ResponsivenessSettings: View {
 
     var body: some View {
         List {
+            SettingsPageHeader(symbol: "timer", title: "Subtitle timing", summary: "How quickly a subtitle is confirmed and shown.")
             Section {
                 Picker("When a translation is ready", selection: $policy) {
                     Text("Show immediately").tag("immediate")
@@ -71,6 +72,7 @@ struct CaptionAppearanceSettings: View {
     private var key: String { "\(weight)|\(alignment)|\(spacing)|\(padding)|\(scale)|\(originalFraction)|\(accent)" }
     var body: some View {
         List {
+            SettingsPageHeader(symbol: "textformat.size", title: "Caption layout", summary: "Fonts, spacing and placement of captions.")
             Section("Text") {
                 Picker("Weight", selection: $weight) {
                     Text("Regular").tag("regular"); Text("Medium").tag("medium"); Text("Bold").tag("bold")
@@ -112,6 +114,7 @@ struct ReaderWorkspaceSettings: View {
 
     var body: some View {
         List {
+            SettingsPageHeader(symbol: "text.book.closed", title: "Reader & photos", summary: "Reader and Text & photos options.")
             Section("Focus reader") {
                 Picker("Reader font", selection: $font) {
                     ForEach(PiPFont.allCases) { Text($0.title).tag($0.rawValue) }
@@ -154,6 +157,7 @@ struct FeedbackStorageSettings: View {
 
     var body: some View {
         List {
+            SettingsPageHeader(symbol: "hand.tap", title: "Feedback & sharing", summary: "Haptics, toasts and what sharing includes.")
             Section {
                 Toggle("Vibrate on new translation", isOn: $haptics)
                 Picker("Vibration strength", selection: $hapticStrength) {

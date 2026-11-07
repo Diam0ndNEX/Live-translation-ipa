@@ -41,6 +41,7 @@ struct ExperimentalFeaturesView: View {
 
     var body: some View {
         List {
+            SettingsPageHeader(symbol: "flask", title: "Experimental Features", summary: "Switches for ideas that are not proven yet.")
             Section {
                 Text("Optional features that are still being tested. New ones start switched off and your normal settings are never changed for you.")
                     .font(.subheadline)
