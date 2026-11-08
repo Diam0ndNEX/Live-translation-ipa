@@ -335,7 +335,7 @@ struct ReadingSettings: View {
                 Toggle("Merge duplicate OCR copies", isOn: $deduplicateCopies)
                 Hint("Removes shadow or overlapping copies of the same subtitle but keeps genuinely repeated lyrics.")
             }
-            AdvancedSection(title: "Text behavior", footer: "Applies to every preset.") {
+            AdvancedSection(title: "Text behavior", footer: "Applies to every scene.") {
                 Toggle("React quickly to changing text", isOn: $rapidTextTracking)
                 Hint("Confirms changing text sooner when reading is fast. Heat and power safeguards stay on.")
                 Toggle("Join neighboring text fragments", isOn: $joinAdjacentText)
@@ -568,7 +568,7 @@ struct PerformanceSettings: View {
                     Text("30 minutes").tag(30)
                 }
                 Toggle("Pause reading inside ScreenLingo", isOn: $suppressOwnInterface)
-                Hint("Avoids translating this app's own screens. Turn off to read a video floating over ScreenLingo. Text & photos still works.")
+                Hint("Avoids translating this app's own screens. Turn off to read a video floating over ScreenLingo. Typed and photo translation still work.")
             } header: { Text("When nothing is happening") } footer: {
                 Text("Pausing saves power but can delay the next detected text.")
             }
@@ -640,11 +640,12 @@ struct AboutSettings: View {
                 LabeledContent("App", value: AppVersion.full)
                 LabeledContent("Capture extension",
                                value: engine.extensionVersion == "–" ? "not seen yet" : "v\(engine.extensionVersion)")
+                LabeledContent("Legacy system", value: "based on \(TranslationSystem.referenceVersion)")
             }
             Section("How to use") {
-                Text("1. Languages tab: download your source and target packs.\n2. Live tab: tap the round broadcast button, choose ScreenLingo Capture, then Start Broadcast.\n3. Switch to your app. If nothing shows, open Status on the Live tab, or Settings → Tests & diagnostics.")
+                Text("1. On Translate, tap a language in the pair to choose it and get its pack.\n2. Tap the round Start button, choose ScreenLingo Capture, then Start Broadcast.\n3. Switch to your app. If nothing shows, tap the status line on Translate, or open Diagnostics.")
                     .font(.footnote)
-                Button("Show the welcome tour again") { onboarded = false }
+                Button("Run setup again") { onboarded = false }
             }
             Section("What's new") {
                 ForEach(Array(AppVersion.changelog.prefix(3)), id: \.1) { v in

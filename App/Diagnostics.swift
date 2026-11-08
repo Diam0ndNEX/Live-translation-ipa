@@ -1630,10 +1630,10 @@ final class Diagnostics: ObservableObject {
         let trS = Diagnostics.summarize(Array(translate.suffix(30)))
 
         if !alive {
-            flag(2, "Capture isn't running", "Open the Live tab, tap the round broadcast button and choose ScreenLingo Capture.", .startCapture)
+            flag(2, "Capture isn't running", "Open Translate, tap the round Start button and choose ScreenLingo Capture.", .startCapture)
             score -= 45
         } else {
-            if paused { flag(0, "Translating is paused", "Turn Pause off on the Live tab to continue."); score -= 5 }
+            if paused { flag(0, "Translating is paused", "Tap Resume on Translate to continue."); score -= 5 }
             if ocrS.n >= 3 {
                 if ocrS.avg > 500 {
                     flag(2, "Reading the screen is slow (\(Int(ocrS.avg)) ms)", "A smaller area or the Fast speed makes it quicker.", .fastSpeed); score -= 20

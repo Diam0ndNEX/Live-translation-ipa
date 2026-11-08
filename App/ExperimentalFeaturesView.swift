@@ -49,7 +49,7 @@ struct ExperimentalFeaturesView: View {
             }
             Section {
                 NavigationLink("Translation system") { TranslationSettings() }
-                Text("Pick Legacy, Hybrid or Low Latency in Translation & memory, or on the Live tab.")
+                Text("Pick Legacy, Hybrid or Low Latency in Settings > System, or on Translate.")
                     .font(.footnote).foregroundStyle(.secondary)
                 ExperimentalOption(
                     title: "Incremental translation recovery",

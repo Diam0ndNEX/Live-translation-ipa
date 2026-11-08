@@ -7,7 +7,7 @@ struct TranslationActivityView: View {
     var body: some View {
         let activity = engine.translationActivity
         VStack(alignment: .leading, spacing: 8) {
-            Text(engine.activeTranslationSystem.title).font(.caption).foregroundStyle(.secondary)
+            Text(engine.activeTranslationSystem.shortName).font(.caption).foregroundStyle(.secondary)
             if engine.activeTranslationSystem != .legacy, !engine.initialWarmupProgress.isEmpty {
                 Text(engine.initialWarmupProgress).font(.caption).foregroundStyle(.secondary)
             }
@@ -53,7 +53,7 @@ struct TranslationActivityView: View {
             }
             Text(engine.currentRuntimeConditions.isEmpty ? engine.translationConditions : engine.currentRuntimeConditions).font(.caption).foregroundStyle(.secondary)
             if engine.pendingTranslationSystem != engine.activeTranslationSystem {
-                Text("Next capture: \(engine.pendingTranslationSystem.title)").font(.caption)
+                Text("Next capture: \(engine.pendingTranslationSystem.shortName)").font(.caption)
             }
         }.accessibilityElement(children: .combine)
     }

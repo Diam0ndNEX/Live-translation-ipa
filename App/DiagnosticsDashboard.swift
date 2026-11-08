@@ -613,9 +613,9 @@ private struct DiagnosticsBody: View {
     // MARK: Simple
     private var systemCard: some View {
         VStack(alignment: .leading, spacing: Space.s) {
-            LabeledContent("Active system", value: facts.system.title)
+            LabeledContent("Active system", value: facts.system.shortName)
             if facts.pending != facts.system {
-                LabeledContent("Next capture", value: facts.pending.title)
+                LabeledContent("Next capture", value: facts.pending.shortName)
             }
             Hint(facts.availability)
             Hint("Legacy reference: 1.7.2 (58), e94542ce. Apple default does not identify an effective model.")
@@ -1232,7 +1232,7 @@ private struct DiagnosticsBody: View {
                 StatTile(title: "Language pack", value: pair, tint: pair == "Needs pack" ? Color.orange : Color.green, icon: "arrow.down.circle")
                 StatTile(title: "Engine", value: facts.system == .legacy
                          ? (s.sessionKind == "–" ? "Default" : (s.sessionKind.contains("iOS 26") ? "Direct" : "Hosted"))
-                         : facts.system.title, icon: "cpu")
+                         : facts.system.shortName, icon: "cpu")
             }
             VStack(alignment: .leading, spacing: 6) {
                 Text(facts.sourceCode == "auto" ? "Source: Automatic" : "Source: \(facts.sourceCode.uppercased()) selected")

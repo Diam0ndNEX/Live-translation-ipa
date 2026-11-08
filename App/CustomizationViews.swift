@@ -117,7 +117,7 @@ struct ReaderWorkspaceSettings: View {
 
     var body: some View {
         List {
-            Section("Focus reader") {
+            Section("Focus mode") {
                 Picker("Reader font", selection: $font) {
                     ForEach(PiPFont.allCases) { Text($0.title).tag($0.rawValue) }
                 }

@@ -1,46 +1,5 @@
-// ScreenLingo – App – Design system components (2.0.0 build 90)
+// ScreenLingo – App – Shared small components still used by settings and developer pages (2.1.0)
 import SwiftUI
-
-// MARK: - Surfaces
-struct InfoCardModifier: ViewModifier {
-    var raised = false
-    func body(content: Content) -> some View {
-        content
-            .padding(Space.l)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(raised ? Palette.surfaceRaised : Palette.surface, in: RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Radius.m, style: .continuous).strokeBorder(Palette.separator.opacity(0.6), lineWidth: 0.5))
-            .shadow(color: Palette.cardShadow, radius: raised ? 0 : 10, x: 0, y: raised ? 0 : 3)
-    }
-}
-extension View {
-    /// The one card surface (replaces the old flat card style).
-    func infoCard(raised: Bool = false) -> some View { modifier(InfoCardModifier(raised: raised)) }
-}
-
-/// Page background plus consistent scrolling content padding.
-struct ScreenScaffold<Content: View>: View {
-    @ViewBuilder var content: () -> Content
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Space.l) { content() }
-                .padding(.horizontal, Space.l).padding(.top, Space.m).padding(.bottom, Space.xxl)
-        }
-        .scrollDismissesKeyboard(.interactively)
-        .background(Palette.background.ignoresSafeArea())
-    }
-}
-
-struct SectionHeader: View {
-    let title: String
-    var detail: String? = nil
-    var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.title3.weight(.bold)).foregroundStyle(.primary)
-            if let detail { Text(detail).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
-        }.accessibilityAddTraits(.isHeader)
-    }
-}
 
 // MARK: - Status
 enum Severity { case info, success, warning, error
@@ -126,13 +85,11 @@ struct PrimaryButton: View {
                 if let symbol { Image(systemName: symbol) }
                 Text(title).font(.headline)
             }
-            .frame(maxWidth: .infinity, minHeight: 56)
-            .foregroundStyle(.white)
-            .background(LinearGradient(colors: [Color.accentColor, Color.accentColor.opacity(0.78)], startPoint: .topLeading, endPoint: .bottomTrailing),
-                        in: RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
-            .shadow(color: Color.accentColor.opacity(enabled ? 0.35 : 0), radius: 10, x: 0, y: 4)
+            .frame(maxWidth: .infinity, minHeight: 44)
         }
-        .buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.4)
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .disabled(!enabled)
     }
 }
 
@@ -156,23 +113,6 @@ struct SecondaryButton: View {
 }
 
 /// Round icon button; always at least 44 x 44 pt and always labelled.
-struct IconButton: View {
-    let symbol: String
-    let label: String
-    var enabled = true
-    let action: () -> Void
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: symbol).font(.body.weight(.semibold))
-                .frame(minWidth: 48, minHeight: 48)
-                .foregroundStyle(Color.accentColor)
-                .background(Color.accentColor.opacity(0.12), in: Circle())
-        }
-        .buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.4)
-        .accessibilityLabel(label)
-    }
-}
-
 // MARK: - Rows
 struct ListRow<Trailing: View>: View {
     let title: String
@@ -211,61 +151,6 @@ struct LabeledToggleRow: View {
     }
 }
 
-// MARK: - Language picker (the only implementation)
-struct LanguagePicker: View {
-    @Binding var code: String
-    let items: [LangItem]
-    var allowAuto = false
-    var label: String { code == "auto" ? "Auto-detect" : (items.first { $0.code == code }?.name ?? code) }
-    var body: some View {
-        Menu {
-            if allowAuto { Button("Auto-detect") { code = "auto" } }
-            ForEach(items) { i in Button(i.name) { code = i.code } }
-        } label: {
-            HStack(spacing: Space.xs) {
-                Text(label).font(.headline).lineLimit(1).minimumScaleFactor(0.7)
-                Image(systemName: "chevron.up.chevron.down").font(.caption2.weight(.bold)).opacity(0.6)
-            }
-            .foregroundStyle(.primary)
-            .frame(maxWidth: .infinity, minHeight: 56)
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Radius.s, style: .continuous).strokeBorder(Palette.separator, lineWidth: 1))
-        }
-        .accessibilityLabel(label)
-    }
-}
-
-/// Source ⇄ target with swap. Reads and writes through the bindings only.
-struct LanguagePairBar: View {
-    @Binding var source: String
-    @Binding var target: String
-    let items: [LangItem]
-    var swapDisabled = false
-    let onSwap: () -> Void
-    var body: some View {
-        HStack(spacing: Space.s) {
-            LanguagePicker(code: $source, items: items, allowAuto: true)
-            IconButton(symbol: "arrow.left.arrow.right", label: "Swap source and target languages", enabled: !swapDisabled, action: onSwap)
-            LanguagePicker(code: $target, items: items)
-        }
-    }
-}
-
-// MARK: - Sheets and confirmation
-struct SheetScaffold<Content: View>: View {
-    let title: String
-    @Environment(\.dismiss) private var dismiss
-    @ViewBuilder var content: () -> Content
-    var body: some View {
-        NavigationStack {
-            content()
-                .background(Palette.background.ignoresSafeArea())
-                .navigationTitle(title).navigationBarTitleDisplayMode(.inline)
-                .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() }.fontWeight(.semibold) } }
-                .presentationDragIndicator(.visible)
-        }
-    }
-}
 
 extension View {
     /// Destructive confirmation attached to the view that owns the action (never to a Section).
@@ -274,20 +159,5 @@ extension View {
             Button(button, role: .destructive, action: perform)
             Button("Cancel", role: .cancel) {}
         } message: { if let message { Text(message) } }
-    }
-}
-
-// MARK: - Branding
-/// The same screen-and-arrow motif used by the application icon.
-struct BrandMark: View {
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 13).fill(LinearGradient(colors: [Color(red: 0.21, green: 0.13, blue: 0.40), Color(red: 0.035, green: 0.043, blue: 0.075)], startPoint: .topLeading, endPoint: .bottomTrailing))
-            RoundedRectangle(cornerRadius: 9).stroke(Color.mint, lineWidth: 2).padding(8)
-            VStack(spacing: 0) {
-                Image(systemName: "arrow.right").foregroundStyle(.white)
-                Image(systemName: "arrow.left").foregroundStyle(.mint)
-            }.font(.footnote.weight(.bold))
-        }.accessibilityHidden(true)
     }
 }

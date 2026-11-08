@@ -63,6 +63,8 @@ jobs:
         run: python3 scripts/test_experimental_settings.py
       - name: Carry-over guard (no problem of the old UI may return)
         run: python3 scripts/test_ui_no_carryover.py
+      - name: UI layout lint (2.1.0 §13.8, R1-R10)
+        run: python3 scripts/test_ui_layout_rules.py
       - name: Navigation router and narrow-observation tests
         run: |
           swiftc -parse-as-library App/DesignSystem/AppRouter.swift App/DesignSystem/ObjectSlice.swift Tests/Navigation/main.swift -o /tmp/navigation-tests

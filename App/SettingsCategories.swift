@@ -33,13 +33,13 @@ struct TranslationSettings: View {
             Section {
                 Picker("Translation system", selection: $translationSystem) {
                     ForEach(TranslationSystem.allCases, id: \.rawValue) { system in
-                        Text(system.title).tag(system.rawValue)
+                        Text(system.shortName).tag(system.rawValue)
                     }
                 }
                 Hint((TranslationSystem(rawValue: translationSystem) ?? .legacy).explanation)
-                LabeledContent("Running now", value: facts.active.title)
+                LabeledContent("Running now", value: facts.active.shortName)
                 if facts.active != facts.pending {
-                    LabeledContent("Starts next time", value: facts.pending.title)
+                    LabeledContent("Starts next time", value: facts.pending.shortName)
                     Hint("Stop the broadcast and start it again to switch.")
                 }
             } header: { Text("How translation runs") }

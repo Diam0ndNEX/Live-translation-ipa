@@ -96,8 +96,11 @@ if "not your live screen" not in area:
 
 # U10: one language picker
 pickers = sum(len(re.findall(r"struct LanguagePicker\b", t)) for t in files.values())
-if pickers != 1:
-    fail("U10", f"expected one LanguagePicker implementation, found {pickers}")
+if pickers > 1:
+    fail("U10", f"expected at most one LanguagePicker implementation, found {pickers}")
+sheets = sum(len(re.findall(r"struct LanguageSheet\b", t)) for t in files.values())
+if sheets != 1:
+    fail("U10/§13.3", f"expected one LanguageSheet implementation, found {sheets}")
 if any("LangMenu" in t for t in files.values()):
     fail("U10", "LangMenu still referenced")
 
