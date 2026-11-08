@@ -87,6 +87,7 @@ struct LibraryScreen: View {
             .overlay { if items.isEmpty { emptyState } }
             .searchable(text: $query, prompt: "Search translations and notes")
             .navigationTitle("Library")
+            .navigationBarTitleDisplayMode(.inline)
             .navigationDestination(for: UUID.self) { id in
                 if let item = history.first(where: { $0.id == id }) { LibraryDetail(engine: engine, item: item) }
             }
@@ -184,19 +185,19 @@ private struct LibraryRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: KitSpace.tight) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.translated).font(.headline).lineLimit(2)
-                Text(item.original).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
-                if let from = item.sourceLanguage, let to = item.targetLanguage {
-                    Text("\(from.uppercased()) → \(to.uppercased())").font(.footnote).foregroundStyle(.secondary)
-                }
+                Text(item.translated).font(.body.weight(.medium)).lineLimit(2)
+                Text(item.original).font(.footnote).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: KitSpace.tight)
             VStack(alignment: .trailing, spacing: KitSpace.unit) {
                 Text(item.date.formatted(date: .omitted, time: .shortened)).font(.footnote).foregroundStyle(.secondary)
+                if let from = item.sourceLanguage, let to = item.targetLanguage {
+                    Text("\(from.uppercased())→\(to.uppercased())").font(.caption).foregroundStyle(.tertiary)
+                }
                 if item.starred { Image(systemName: "star.fill").font(.footnote).foregroundStyle(.yellow).accessibilityLabel("Saved") }
             }
         }
-        .padding(.vertical, 2)
+        .padding(.vertical, 0)
         .accessibilityElement(children: .combine)
     }
 }
