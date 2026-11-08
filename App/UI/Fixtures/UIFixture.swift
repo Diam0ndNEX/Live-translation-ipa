@@ -134,13 +134,38 @@ extension UIFixture {
     }
 }
 
+extension UIFixture {
+    /// Fills the recorder's in-memory series with sample timings (fixture builds only; nothing is saved).
+    @MainActor static func seedDiagnostics(_ d: Diagnostics, bad: Bool) {
+        let now = Date()
+        func series(_ base: Double, _ spread: Int, step: Int) -> [Sample] {
+            (0..<120).map { i in Sample(t: now.addingTimeInterval(Double(i - 120) * 2), v: base + Double((i * step) % spread)) }
+        }
+        d.ocr = series(bad ? 260 : 105, bad ? 240 : 30, step: 13)
+        d.translate = series(bad ? 900 : 42, bad ? 700 : 25, step: 17)
+        d.latency = series(bad ? 1300 : 380, bad ? 900 : 160, step: 37)
+        d.s.translations = 126
+        d.s.failures = bad ? 9 : 0
+        if bad {
+            d.event(.error, "Translation failed for one caption")
+            d.event(.capture, "Capture connection lost")
+        }
+    }
+}
+
 /// Root hook: routes the fixture and, for `kit`, covers the app with the component gallery.
 struct FixtureHost: ViewModifier {
     let router: AppRouter
+    let engine: TranslatorEngine
     @State private var showKit = UIFixture.current == .kit
     func body(content: Content) -> some View {
         content
-            .task { UIFixture.apply(router: router) }
+            .task {
+                if let fixture = UIFixture.current, fixture == .diagnosticsLive || fixture == .diagnosticsBad {
+                    UIFixture.seedDiagnostics(engine.diag, bad: fixture == .diagnosticsBad)
+                }
+                UIFixture.apply(router: router)
+            }
             .fullScreenCover(isPresented: $showKit) { KitGallery() }
     }
 }

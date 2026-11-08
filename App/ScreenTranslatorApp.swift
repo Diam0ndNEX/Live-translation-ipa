@@ -118,7 +118,7 @@ private struct RootContent: View {
                 .tint(theme.tint)
         }
         #if SCREENLINGO_FIXTURES
-        .modifier(FixtureHost(router: model.router))
+        .modifier(FixtureHost(router: model.router, engine: model.engine))
         #endif
     }
 }

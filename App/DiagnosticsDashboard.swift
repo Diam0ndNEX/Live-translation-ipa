@@ -1,4 +1,4 @@
-// ScreenLingo – App – Diagnostics dashboard (2.0.0 build 90)
+// ScreenLingo – App – Diagnostics (2.1.0, spec §13.5.4: one answer, then lenses as pushed pages)
 import SwiftUI
 import Charts
 
@@ -19,15 +19,22 @@ struct DashboardFacts: Equatable {
     var sourceCode: String
     var sourceReady: Bool
     var extensionVersion: String
+    var capture: CaptureReadiness.State
+    var targetCode: String
     @MainActor static func read(_ e: TranslatorEngine) -> DashboardFacts {
         DashboardFacts(system: e.activeTranslationSystem, pending: e.pendingTranslationSystem, availability: e.modeAvailability,
                        captureAlive: e.captureAlive, paused: e.paused, pipActive: e.pipActive, memoryCount: e.memoryCount,
                        unconsumedSpeculation: "\(e.unconsumedSpeculation)", sourceCode: e.sourceCode,
-                       sourceReady: e.langStatus[e.sourceCode] == .installed, extensionVersion: e.extensionVersion)
+                       sourceReady: e.langStatus[e.sourceCode] == .installed, extensionVersion: e.extensionVersion,
+                       capture: e.captureStatus, targetCode: e.targetCode)
+    }
+    var phase: SessionPhase {
+        SessionPhase.derive(capture: capture, alive: captureAlive, paused: paused, pipActive: pipActive,
+                            packReady: sourceCode == "auto" || sourceReady)
     }
 }
 
-/// Fast-changing engine values. Only the headline and the "Right now" section read it.
+/// Fast-changing engine values. Only the overview answer and the "Right now" section read it.
 struct PulseFacts: Equatable {
     var ocrMs: Double
     var translateMs: Double
@@ -102,45 +109,22 @@ private struct Bucket: Identifiable {
 }
 
 // MARK: - Building blocks
+/// One labelled value per row (replaces the 2.0.0 tile grid).
 private struct StatTile: View {
     let title: String
     let value: String
     var tint: Color = Color.primary
     var icon: String? = nil
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                if let icon { Image(systemName: icon).font(.caption).foregroundStyle(tint) }
-                Text(title).font(.caption).foregroundStyle(.secondary)
-            }
-            Text(value)
-                .font(.title3.weight(.bold).monospacedDigit())
-                .foregroundStyle(tint)
-                .minimumScaleFactor(0.6)
-                .lineLimit(1)
+        HStack(spacing: KitSpace.row) {
+            if let icon { Image(systemName: icon).foregroundStyle(.secondary).frame(width: 24).accessibilityHidden(true) }
+            Text(title).font(.body)
+            Spacer(minLength: KitSpace.tight)
+            Text(value).font(.body.monospacedDigit()).foregroundStyle(tint == Color.primary ? Color.secondary : tint)
+                .lineLimit(1).minimumScaleFactor(0.7)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-}
-
-private struct HealthRing: View {
-    let score: Int
-    private var color: Color { score >= 85 ? Color.green : (score >= 60 ? Color.orange : Color.red) }
-    var body: some View {
-        ZStack {
-            Circle().stroke(Color.primary.opacity(0.1), lineWidth: 10)
-            Circle()
-                .trim(from: 0, to: CGFloat(score) / 100)
-                .stroke(color, style: StrokeStyle(lineWidth: 10, lineCap: .round))
-                .rotationEffect(.degrees(-90))
-            VStack(spacing: 0) {
-                Text("\(score)").font(.title.weight(.bold).monospacedDigit())
-                Text("health").font(.caption).foregroundStyle(.secondary)
-            }
-        }
-        .frame(width: 96, height: 96)
+        .frame(minHeight: 44)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -218,7 +202,7 @@ private struct LineCard: View {
                 }
             }
         }
-        .infoCard()
+        .padding(.vertical, KitSpace.tight)
     }
 }
 
@@ -260,7 +244,7 @@ private struct HistogramCard: View {
                 .frame(height: 120)
             }
         }
-        .infoCard()
+        .padding(.vertical, KitSpace.tight)
     }
 }
 
@@ -284,7 +268,7 @@ private struct DonutCard: View {
                 .frame(height: 210)
             }
         }
-        .infoCard()
+        .padding(.vertical, KitSpace.tight)
     }
 }
 
@@ -310,7 +294,7 @@ private struct BarListCard: View {
                 .frame(height: CGFloat(rows.count) * 34 + 20)
             }
         }
-        .infoCard()
+        .padding(.vertical, KitSpace.tight)
     }
 }
 
@@ -360,8 +344,14 @@ enum DiagPage: String, CaseIterable, Identifiable {
     case overview, speed, timeline, pipeline, language, device, memory, sessions, log
     var id: String { rawValue }
     var title: String {
-        switch self { case .overview: "Live"; case .sessions: "Test runs"; default: rawValue.capitalized }
+        switch self { case .overview: "Right now"; case .sessions: "Test runs"; case .log: "Event log"; default: rawValue.capitalized }
     }
+    /// The lens list on the overview, in order (§13.5.4).
+    static let lenses: [DiagPage] = [.speed, .timeline, .pipeline, .language, .device, .memory, .sessions, .log]
+    /// Lenses with time charts get their own range control.
+    var ranged: Bool { self == .speed || self == .timeline || self == .device }
+    /// Lenses that only fill with Detailed collection.
+    var needsDetails: Bool { self != .memory && self != .sessions && self != .language }
     var icon: String {
         switch self {
         case .overview: "square.grid.2x2"
@@ -396,39 +386,43 @@ struct DiagnosticsView: View {
     var body: some View { DiagnosticsBody(diag: engine.diag) }
 }
 
-/// Four big numbers first. Everything else sits under the Advanced gate.
-private struct HeadlineNumbers: View {
-    @EngineFacts(PulseFacts.read) private var pulse
-    let delay: Summary
-    let collectDetails: Bool
-    let translations: Int
-    let failures: Int
-    var body: some View {
-        let typical = collectDetails && delay.n > 0 ? delay.p50 : pulse.totalMs
-        LazyVGrid(columns: [GridItem(.flexible(), spacing: Space.m), GridItem(.flexible(), spacing: Space.m)], spacing: Space.m) {
-            StatTile(title: "Typical delay", value: typical > 0 ? "\(Int(typical)) ms" : "–",
-                     tint: level(typical, typical > 0 ? 1 : 0, 1200, 2000), icon: "timer")
-            StatTile(title: "Slow tail · P95", value: delay.n > 0 ? "\(Int(delay.p95)) ms" : "–", icon: "tortoise")
-            StatTile(title: "Translations", value: "\(translations)", icon: "character.bubble")
-            StatTile(title: "Problems", value: "\(failures)", tint: failures > 0 ? Palette.danger : Color.primary,
-                     icon: "exclamationmark.triangle")
-        }
-    }
-}
-
 /// What is being read and shown right now. The only other section that reads the fast-changing engine values.
 private struct LiveFeedSection: View {
     @EngineFacts(PulseFacts.read) private var pulse
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
-            SectionHeader(title: "Right now")
+            Text("Right now").font(.headline)
             ListRow(title: "Reads", subtitle: pulse.lastRaw.isEmpty ? "Nothing yet" : pulse.lastRaw, symbol: "text.viewfinder") { EmptyView() }
             Divider()
             ListRow(title: "Shows", subtitle: pulse.translated.isEmpty ? "Nothing yet" : pulse.translated, symbol: "character.bubble") { EmptyView() }
             Hint("Translator: " + pulse.activity)
             Hint(pulse.status)
         }
-        .infoCard()
+        .padding(.vertical, KitSpace.tight)
+    }
+}
+
+/// The overview's one answer: typical delay with a 60-sample sparkline and one row of secondary values.
+/// With no evidence it says "No session yet"; no score or red colour without data (R7).
+private struct OverviewAnswer: View {
+    @EngineFacts(PulseFacts.read) private var pulse
+    let diag: Diagnostics
+    let captureAlive: Bool
+    var body: some View {
+        let delay = Diagnostics.summarize(diag.latency)
+        let typical: Double? = delay.n > 0 ? delay.p50 : (pulse.totalMs > 0 ? pulse.totalMs : nil)
+        var secondary: [String] = []
+        if delay.n > 0 { secondary.append("P95 \(Int(delay.p95)) ms") }
+        if typical != nil {
+            secondary.append("\(diag.s.translations) translations")
+            secondary.append("\(diag.s.failures) problem\(diag.s.failures == 1 ? "" : "s")")
+        }
+        return StatLine(value: typical.map { "\(Int($0)) ms" },
+                        caption: "Typical delay · screen text to floating window",
+                        samples: Array(diag.latency.suffix(60)).map(\.v),
+                        secondary: secondary,
+                        emptyCaption: captureAlive ? "Measuring: the first captions set this number" : "No session yet")
+            .padding(.vertical, KitSpace.unit)
     }
 }
 
@@ -440,7 +434,6 @@ private struct DiagnosticsBody: View {
     @StateObject private var tick: ObjectSlice<Diagnostics, DiagTick>
     @AppStorage("diagnosticsEnabled") private var collectionEnabled = true
     @AppStorage("detailedCollection") private var collectDetails = false
-    @AppStorage("diagPage") private var pageRaw = DiagPage.overview.rawValue
     @AppStorage("diagRange") private var rangeRaw = DiagRange.fiveMin.rawValue
     @State private var kinds: Set<EventKind> = []
     @State private var query = ""
@@ -455,7 +448,6 @@ private struct DiagnosticsBody: View {
         _tick = StateObject(wrappedValue: ObjectSlice(diag, milliseconds: 500) { DiagTick.read($0) })
     }
 
-    private var page: DiagPage { DiagPage(rawValue: pageRaw) ?? .overview }
     private var range: DiagRange { DiagRange(rawValue: rangeRaw) ?? .fiveMin }
     private var rangeStart: Date {
         range == .session ? diag.started : Date().addingTimeInterval(-Double(range.rawValue))
@@ -468,63 +460,69 @@ private struct DiagnosticsBody: View {
     }
 
     // MARK: Body
-    /// Live first: the headline numbers, then one row of pages. Nothing is hidden behind an Advanced switch here;
-    /// this tab exists to read the numbers.
+    /// Opens on one answer: what state the session is in and the typical delay, then only what needs attention,
+    /// then the lenses. Each lens is its own pushed page with its own title; nothing here stays above it (R6).
     var body: some View {
         NavigationStack {
-            ScreenScaffold {
-                if collectionEnabled {
-                    headline
-                    pageBar
-                    if page == .speed || page == .timeline || page == .device { rangePicker }
-                    if page != .overview && !collectDetails {
-                        Banner(text: "Graphs and the event log need Detailed diagnostics.", severity: .warning,
-                               actionTitle: "Turn on") { collectDetails = true }
+            List {
+                Section {
+                    PhaseHeader(phase: facts.phase, mode: facts.system.shortName)
+                    if collectionEnabled {
+                        OverviewAnswer(diag: diag, captureAlive: facts.captureAlive)
+                    } else {
+                        Toggle("Collect diagnostics", isOn: $collectionEnabled)
+                        Text("Collection is off. Translation and capture continue.").font(.footnote).foregroundStyle(.secondary)
                     }
-                    pageContent
-                } else {
-                    Banner(text: "Diagnostics collection is off. Translation and capture continue.", severity: .info,
-                           actionTitle: "Turn on") { collectionEnabled = true }
+                }
+                attentionSection
+                Section("Lenses") {
+                    ForEach(DiagPage.lenses) { lens in
+                        NavigationLink { lensPage(lens) } label: {
+                            LensRow(title: lens.title, value: lensValue(lens), symbol: lens.icon)
+                        }
+                    }
+                }
+                if !collectDetails && collectionEnabled {
+                    Section {
+                        Toggle("Detailed collection", isOn: $collectDetails)
+                    } footer: {
+                        Text("Adds the graphs, timings and event log. Turn it on before a test run.")
+                    }
                 }
             }
             .navigationTitle("Diagnostics")
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .topBarTrailing) {
                     Button { Sharer.shareFile(text: diag.report(engine: engine), name: "translator-report-\(Sharer.stamp()).txt") } label: {
-                        Image(systemName: "square.and.arrow.up")
+                        Label("Share report", systemImage: "square.and.arrow.up")
                     }
-                    .accessibilityLabel("Share report")
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
+                        Section("Detail level") {
+                            Toggle("Collect diagnostics", isOn: $collectionEnabled)
+                            Toggle("Detailed collection", isOn: $collectDetails).disabled(!collectionEnabled)
+                        }
+                        Section("Export") {
+                            Button { Task { await diag.exportZIP() } } label: {
+                                Label(diag.exportInProgress ? "Preparing ZIP…" : "Export evidence ZIP", systemImage: "archivebox")
+                            }.disabled(diag.exportInProgress)
+                            Button { Task { await diag.exportJSON() } } label: {
+                                Label(diag.exportInProgress ? "Preparing JSON…" : "Export structured JSON", systemImage: "curlybraces")
+                            }.disabled(diag.exportInProgress)
+                            Button { Sharer.shareFile(text: diag.csv(), name: "translator-data-\(Sharer.stamp()).csv") } label: {
+                                Label("Export data (CSV)", systemImage: "tablecells")
+                            }
+                            Button {
+                                UIPasteboard.general.string = diag.report(engine: engine)
+                                engine.toast("Report copied")
+                            } label: { Label("Copy report", systemImage: "doc.on.doc") }
+                        }
                         Button { showSimulator = true } label: { Label("Pipeline simulator", systemImage: "point.3.connected.trianglepath.dotted") }
-                        Section("Collection") {
-                            Toggle("Simple diagnostics", isOn: $collectionEnabled)
-                            Toggle("Detailed diagnostics", isOn: $collectDetails).disabled(!collectionEnabled)
-                        }
-                    } label: { Image(systemName: "slider.horizontal.3") }
-                    .accessibilityLabel("Diagnostic settings")
-                }
-                ToolbarItem(placement: .topBarTrailing) {
-                    Menu {
-                        Button { Task { await diag.exportJSON() } } label: {
-                            Label(diag.exportInProgress ? "Preparing JSON…" : "Export structured JSON", systemImage: "curlybraces")
-                        }.disabled(diag.exportInProgress)
-                        Button { Task { await diag.exportZIP() } } label: {
-                            Label(diag.exportInProgress ? "Preparing bundle…" : "Export complete evidence ZIP", systemImage: "archivebox")
-                        }.disabled(diag.exportInProgress)
-                        Button { Sharer.shareFile(text: diag.csv(), name: "translator-data-\(Sharer.stamp()).csv") } label: {
-                            Label("Export data (CSV)", systemImage: "tablecells")
-                        }
-                        Button {
-                            UIPasteboard.general.string = diag.report(engine: engine)
-                            engine.toast("Report copied")
-                        } label: { Label("Copy report", systemImage: "doc.on.doc") }
-                        Button(role: .destructive) { confirmReset = true } label: {
-                            Label("Reset diagnostics", systemImage: "trash")
-                        }
-                    } label: { Image(systemName: "ellipsis.circle") }
-                    .accessibilityLabel("More diagnostics actions")
+                        Button(role: .destructive) { confirmReset = true } label: { Label("Reset counters", systemImage: "trash") }
+                    } label: {
+                        Label("More", systemImage: "ellipsis.circle")
+                    }
                 }
             }
             .sheet(isPresented: $showSimulator) { NavigationStack { PipelineSimulatorView() } }
@@ -535,11 +533,81 @@ private struct DiagnosticsBody: View {
                                 isPresented: $confirmDeleteSessions, button: "Delete unpinned runs") {
                 Task { await diag.deleteAllUnpinnedRuns() }
             }
-            .confirmDestructive("Clear all graphs, counters and the timeline?", isPresented: $confirmReset, button: "Reset diagnostics") {
+            .confirmDestructive("Clear all graphs, counters and the timeline?", isPresented: $confirmReset, button: "Reset counters") {
                 engine.resetDiagnostics()
                 engine.toast("Diagnostics reset")
             }
         }
+    }
+
+    /// Only shown when there is evidence: an issue the recorder actually found.
+    @ViewBuilder private var attentionSection: some View {
+        let a = diag.assessment(alive: facts.captureAlive, paused: facts.paused)
+        if collectionEnabled && !a.issues.isEmpty {
+            Section("Needs attention") {
+                ForEach(Array(a.issues.prefix(3))) { issue in
+                    HStack(alignment: .firstTextBaseline, spacing: KitSpace.row) {
+                        Image(systemName: issue.severity == 2 ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                            .foregroundStyle(issue.severity == 2 ? Color.red : Color.orange)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(issue.title).font(.body)
+                            Text(issue.detail).font(.footnote).foregroundStyle(.secondary)
+                        }
+                        Spacer(minLength: KitSpace.tight)
+                        if let fix = issue.fix {
+                            Button(fix.label) { apply(fix) }.buttonStyle(.bordered).font(.subheadline)
+                        }
+                    }
+                    .frame(minHeight: 44)
+                }
+            }
+        }
+    }
+
+    /// The one-line live value next to each lens.
+    private func lensValue(_ lens: DiagPage) -> String {
+        switch lens {
+        case .overview: return ""
+        case .speed:
+            let d = Diagnostics.summarize(diag.latency)
+            return d.n > 0 ? "\(Int(d.p50)) ms median" : "–"
+        case .timeline: return "\(tick.value.events) events"
+        case .pipeline:
+            let o = Diagnostics.summarize(Array(diag.ocr.suffix(20)))
+            let t = Diagnostics.summarize(Array(diag.translate.suffix(20)))
+            return o.n + t.n > 0 ? "Reading \(Int(o.avg)) · Translating \(Int(t.avg))" : "–"
+        case .language:
+            let pair = "\(facts.sourceCode == "auto" ? "Auto" : facts.sourceCode.uppercased()) → \(facts.targetCode.uppercased())"
+            return pair + (facts.sourceCode == "auto" || facts.sourceReady ? " · ready" : " · needs pack")
+        case .device: return thermalName
+        case .memory: return "\(facts.memoryCount.formatted()) remembered"
+        case .sessions: return "\(tick.value.runs) saved"
+        case .log: return "\(tick.value.events) entries"
+        }
+    }
+
+    /// A lens: its own large title, its own range control, an inline switch when it needs Detailed collection.
+    private func lensPage(_ lens: DiagPage) -> some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: KitSpace.group) {
+                if lens.ranged { rangePicker }
+                if lens.needsDetails && !collectDetails {
+                    Toggle(isOn: $collectDetails) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Detailed collection")
+                            Text("Graphs on this page need it.").font(.footnote).foregroundStyle(.secondary)
+                        }
+                    }
+                    .frame(minHeight: 44)
+                }
+                pageContent(lens)
+            }
+            .padding(.horizontal, KitSpace.margin)
+            .padding(.bottom, KitSpace.group)
+        }
+        .navigationTitle(lens.title)
+        .navigationBarTitleDisplayMode(.large)
     }
 
     // MARK: Simple
@@ -552,7 +620,7 @@ private struct DiagnosticsBody: View {
             Hint(facts.availability)
             Hint("Legacy reference: 1.7.2 (58), e94542ce. Apple default does not identify an effective model.")
         }
-        .infoCard()
+        .padding(.vertical, KitSpace.tight)
     }
 
     private var statusLine: String {
@@ -561,51 +629,12 @@ private struct DiagnosticsBody: View {
             : "Waiting for capture to start"
     }
 
-    private var headline: some View {
-        let a = diag.assessment(alive: facts.captureAlive, paused: facts.paused)
-        let delay = Diagnostics.summarize(diag.latency)
-        return VStack(alignment: .leading, spacing: Space.m) {
-            HStack(spacing: Space.s) {
-                StatusPill(text: facts.captureAlive ? (facts.paused ? "Paused" : "Capturing") : "Waiting for capture",
-                           symbol: facts.captureAlive ? (facts.paused ? "pause.circle" : "dot.radiowaves.left.and.right") : "hourglass",
-                           severity: facts.captureAlive ? (facts.paused ? .warning : .success) : .info)
-                StatusPill(text: facts.system.title, symbol: "cpu", severity: .info)
-            }
-            HStack(spacing: Space.l) {
-                if collectDetails { HealthRing(score: a.score) }
-                VStack(alignment: .leading, spacing: Space.xs) {
-                    Text(collectDetails ? a.headline : "Summary only").font(.title3.weight(.bold))
-                    Text(statusLine).font(.footnote).foregroundStyle(.secondary)
-                }
-            }
-            HeadlineNumbers(delay: delay, collectDetails: collectDetails, translations: diag.s.translations, failures: diag.s.failures)
-        }
-        .infoCard(raised: true)
-    }
-
-    @ViewBuilder private var issuesSection: some View {
-        let a = diag.assessment(alive: facts.captureAlive, paused: facts.paused)
-        if !a.issues.isEmpty {
-            VStack(alignment: .leading, spacing: Space.s) {
-                SectionHeader(title: "What to look at")
-                ForEach(Array(a.issues.prefix(3))) { i in
-                    let severity: Severity = i.severity == 2 ? .error : (i.severity == 1 ? .warning : .info)
-                    if let f = i.fix {
-                        Banner(text: "\(i.title). \(i.detail)", severity: severity, actionTitle: f.label) { apply(f) }
-                    } else {
-                        Banner(text: "\(i.title). \(i.detail)", severity: severity)
-                    }
-                }
-            }
-        }
-    }
-
     /// Delay evidence plus the export button. Counters that explain it are under Advanced.
     private var evidenceCard: some View {
         let delay = Diagnostics.summarize(diag.latency)
         return VStack(alignment: .leading, spacing: Space.m) {
             HStack {
-                SectionHeader(title: "Test evidence")
+                Text("Test evidence").font(.headline)
                 Spacer()
                 Text(AppVersion.full).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
@@ -623,7 +652,7 @@ private struct DiagnosticsBody: View {
                           symbol: "archivebox", enabled: !diag.exportInProgress) { Task { await diag.exportZIP() } }
             Hint(diag.archiveStatus)
         }
-        .infoCard()
+        .padding(.vertical, KitSpace.tight)
     }
 
     private func evidenceNumber(_ title: String, _ value: Double) -> some View {
@@ -638,7 +667,7 @@ private struct DiagnosticsBody: View {
         let stats = diag.s
         let model = Diagnostics.summarize(diag.translate)
         return VStack(alignment: .leading, spacing: Space.s) {
-            SectionHeader(title: "Counters")
+            Text("Counters").font(.headline)
             LabeledContent("Confirmed candidate packets", value: "\(stats.confirmedCandidatePackets)")
             LabeledContent("Successful PiP candidate enqueues", value: "\(stats.enqueuedCandidateFrames)")
             LabeledContent("Confirmed but superseded before enqueue", value: "\(stats.supersededUnpresentedConfirmed)")
@@ -662,7 +691,7 @@ private struct DiagnosticsBody: View {
             Hint("Latency covers successful frame enqueues. Replaced work is excluded, so lower latency alone does not establish better subtitle continuity. Candidates, sentence hits and model requests count different events.")
         }
         .font(.footnote)
-        .infoCard()
+        .padding(.vertical, KitSpace.tight)
     }
 
     private func apply(_ f: Fix) {
@@ -684,43 +713,7 @@ private struct DiagnosticsBody: View {
         engine.toast("Applied: \(f.label)")
     }
 
-    private var recentEvents: some View {
-        let recent = Array(diag.events.filter { $0.kind != .translation }.suffix(5).reversed())
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("Recent activity").font(.subheadline.weight(.semibold))
-            if recent.isEmpty {
-                Text("Nothing has happened yet.").font(.footnote).foregroundStyle(.secondary)
-            }
-            ForEach(recent) { e in eventRow(e) }
-            Button {
-                pageRaw = DiagPage.timeline.rawValue
-            } label: {
-                Label("Open the full timeline", systemImage: "timeline.selection").font(.footnote.weight(.semibold))
-            }
-        }
-        .infoCard()
-    }
-
     // MARK: Pages
-    private func pageChip(_ p: DiagPage) -> some View {
-        Button { pageRaw = p.rawValue } label: {
-            Label(p.title, systemImage: p.icon)
-                .font(.subheadline.weight(.semibold))
-                .padding(.horizontal, Space.m).frame(minHeight: 44)
-                .foregroundStyle(page == p ? Color.white : Color.primary)
-                .background(page == p ? Color.accentColor : Palette.surface, in: Capsule())
-                .overlay(Capsule().strokeBorder(Palette.separator, lineWidth: page == p ? 0 : 1))
-        }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(page == p ? .isSelected : [])
-    }
-
-    private var pageBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: Space.s) { ForEach(DiagPage.allCases) { p in pageChip(p) } }
-        }
-    }
-
     private var rangePicker: some View {
         Picker("Range", selection: $rangeRaw) {
             ForEach(DiagRange.allCases) { Text($0.title).tag($0.rawValue) }
@@ -728,12 +721,18 @@ private struct DiagnosticsBody: View {
         .pickerStyle(.segmented)
     }
 
-    @ViewBuilder private var pageContent: some View {
-        switch page {
-        case .overview: livePage
-        case .speed: speedPage
+    @ViewBuilder private func pageContent(_ lens: DiagPage) -> some View {
+        switch lens {
+        case .overview: evidenceCard
+        case .speed:
+            sessionGrid
+            percentileTable
+            speedPage
         case .timeline: timelinePage
         case .pipeline:
+            LiveFeedSection()
+            pipelineStrip
+            systemCard
             evidenceDetails
             pipelinePage
             adaptivePipelineCard
@@ -767,11 +766,11 @@ private struct DiagnosticsBody: View {
                 LabeledContent(outcome.rawValue, value: String(diag.memoryOutcomesForUI(outcome)))
             }
             Text(diag.archiveStatus).font(.caption).foregroundStyle(.secondary)
-        }.infoCard()
+        }.padding(.vertical, KitSpace.tight)
     }
 
     private var sessionsPage: some View {
-        TestRunsPage(diag: diag, showReport: $showTestReport, confirmDeleteUnpinned: $confirmDeleteSessions).infoCard()
+        TestRunsPage(diag: diag, showReport: $showTestReport, confirmDeleteUnpinned: $confirmDeleteSessions).padding(.vertical, KitSpace.tight)
     }
 
     private var liveFraction: Double {
@@ -780,19 +779,6 @@ private struct DiagnosticsBody: View {
         guard total > 1 else { return 0 }
         let live = diag.spans.filter { $0.state == .live }.reduce(0.0) { $0 + ($1.end ?? now).timeIntervalSince($1.start) }
         return Swift.min(1, live / total)
-    }
-
-    /// What is happening now, where the time goes, and what to look at first.
-    private var livePage: some View {
-        VStack(spacing: Space.l) {
-            LiveFeedSection()
-            issuesSection
-            pipelineStrip
-            evidenceCard
-            sessionGrid
-            percentileTable
-            systemCard
-        }
     }
 
     private var arrow: some View {
@@ -834,13 +820,13 @@ private struct DiagnosticsBody: View {
                 node("Show", "rectangle.on.rectangle", facts.pipActive ? (d.n > 0 ? "\(Int(d.avg)) ms" : "–") : "closed", showColor)
             }
         }
-        .infoCard()
+        .padding(.vertical, KitSpace.tight)
     }
 
     private var sessionGrid: some View {
         let s = diag.s
         let hits = s.cacheHits + s.savedHits + s.specHits + s.cacheMisses
-        return LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+        return VStack(spacing: 0) {
             StatTile(title: "Time live", value: "\(Int(liveFraction * 100))%", tint: Color.green, icon: "dot.radiowaves.left.and.right")
             StatTile(title: "Started", value: diag.started.formatted(date: .omitted, time: .shortened), icon: "clock")
             StatTile(title: "Translations", value: "\(s.translations)", tint: Color.cyan, icon: "character.bubble")
@@ -888,7 +874,7 @@ private struct DiagnosticsBody: View {
                 }
             }
         }
-        .infoCard()
+        .padding(.vertical, KitSpace.tight)
     }
 
     // MARK: Speed
@@ -905,7 +891,7 @@ private struct DiagnosticsBody: View {
             HistogramCard(title: "How long the total delay is", values: slice(diag.latency).map { $0.v }, color: Color.orange)
             if facts.system != .legacy {
                 Text("Model-inference timings include successful backend requests even if an obsolete result was not displayed. Memory-only translations add no model sample. Total delay ends at PiP buffer enqueue.")
-                    .font(.caption).foregroundStyle(.secondary).infoCard()
+                    .font(.caption).foregroundStyle(.secondary).padding(.vertical, KitSpace.tight)
             }
             PairedTimingCard(samples: diag.pipeline.filter { $0.date >= rangeStart })
             granularityCard
@@ -952,7 +938,7 @@ private struct DiagnosticsBody: View {
             Text("Buckets use actual elapsed time. For precise event order and durations, export events.csv; for longer sessions, use 15-second intervals. Individual buckets may have too few timings for useful P95.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .infoCard()
+        .padding(.vertical, KitSpace.tight)
     }
 
     // MARK: Timeline
@@ -997,7 +983,7 @@ private struct DiagnosticsBody: View {
                 }
             }
         }
-        .infoCard()
+        .padding(.vertical, KitSpace.tight)
     }
 
     private var perMinuteCard: some View {
@@ -1019,7 +1005,7 @@ private struct DiagnosticsBody: View {
                 .frame(height: 120)
             }
         }
-        .infoCard()
+        .padding(.vertical, KitSpace.tight)
     }
 
     private var timelinePage: some View {
@@ -1096,7 +1082,7 @@ private struct DiagnosticsBody: View {
             }
             ForEach(Array(shown.prefix(limit))) { e in eventRow(e) }
         }
-        .infoCard()
+        .padding(.vertical, KitSpace.tight)
     }
 
     // MARK: Pipeline
@@ -1111,7 +1097,7 @@ private struct DiagnosticsBody: View {
                 }
             }
             Text("Times measure app processing and frame enqueue, not physical screen presentation. Full bounded timeline is in CSV.").font(.caption).foregroundStyle(.secondary)
-        }.infoCard()
+        }.padding(.vertical, KitSpace.tight)
     }
 
     private var adaptivePipelineCard: some View {
@@ -1136,7 +1122,7 @@ private struct DiagnosticsBody: View {
             Text("Capture packets over 8 KB: \(s.largePackets) · failed sends: \(s.packetSendErrors)").font(.caption).foregroundStyle(.secondary)
             Text("Pixel-verified confirmations: \(s.pixelConfirmations) · fell back to OCR: \(s.pixelRejections) · OCR skipped while caption unchanged: \(s.watchSkippedOCR) · OCR started on caption change: \(s.watchTriggeredOCR)").font(.caption).foregroundStyle(.secondary)
             Text("Recorder self-time · simple \(String(format: "%.1f", diag.recorderCosts.simpleMs)) ms · detailed \(String(format: "%.1f", diag.recorderCosts.detailedMs)) ms. Excludes chart drawing and model work; these are different workloads.").font(.caption).foregroundStyle(.secondary)
-        }.infoCard()
+        }.padding(.vertical, KitSpace.tight)
     }
 
     private var pipelinePage: some View {
@@ -1180,7 +1166,7 @@ private struct DiagnosticsBody: View {
                 LabeledContent("Unchanged frames skipped", value: "\(s.skippedFrames)")
             }
             .font(.footnote)
-            .infoCard()
+            .padding(.vertical, KitSpace.tight)
             if diag.detailedCollection {
                 candidateTraceCard
             }
@@ -1224,7 +1210,7 @@ private struct DiagnosticsBody: View {
                 }
             }
         }
-        .infoCard()
+        .padding(.vertical, KitSpace.tight)
     }
 
     // MARK: Language
@@ -1240,7 +1226,7 @@ private struct DiagnosticsBody: View {
             DonutPart(name: "Translated fresh", value: s.cacheMisses, color: Color.orange)
         ]
         return VStack(spacing: 14) {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+            VStack(spacing: 0) {
                 StatTile(title: "Source used", value: s.sourceUsed == "–" ? "–" : s.sourceUsed.uppercased(), icon: "sparkle.magnifyingglass")
                 StatTile(title: "Locked to", value: s.lockedLang == "–" ? "none" : s.lockedLang.uppercased(), tint: Color.purple, icon: "lock")
                 StatTile(title: "Language pack", value: pair, tint: pair == "Needs pack" ? Color.orange : Color.green, icon: "arrow.down.circle")
@@ -1253,7 +1239,7 @@ private struct DiagnosticsBody: View {
                     .font(.subheadline.weight(.semibold))
                 Text(facts.sourceCode == "auto" ? "With language lock enabled, four confident matching detections within six qualifying readings lock the source. Clear language changes translate immediately; three mismatches release the lock. The target language is never locked." : "Automatic detection is off. Selected-language inputs still count in the graph.")
                     .font(.caption).foregroundStyle(.secondary)
-            }.infoCard()
+            }.padding(.vertical, KitSpace.tight)
             BarListCard(title: "Source languages used · session", rows: Array(counts), color: Color.purple)
             BarListCard(title: "How the source was chosen", rows: SourceLanguageOrigin.allCases.map {
                 BarRow(name: $0.title, value: diag.sourceUsage.origins[$0, default: 0])
@@ -1276,7 +1262,7 @@ private struct DiagnosticsBody: View {
                     }
                 }
             }
-            .infoCard()
+            .padding(.vertical, KitSpace.tight)
         }
     }
 
@@ -1343,7 +1329,7 @@ private struct DiagnosticsBody: View {
                 .frame(height: 110)
             }
         }
-        .infoCard()
+        .padding(.vertical, KitSpace.tight)
     }
 
     private var devicePage: some View {
@@ -1366,7 +1352,7 @@ private struct DiagnosticsBody: View {
                 LabeledContent("Battery now", value: b < 0 ? "–" : "\(Int(b * 100))%")
             }
             .font(.footnote)
-            .infoCard()
+            .padding(.vertical, KitSpace.tight)
         }
     }
 

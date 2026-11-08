@@ -64,10 +64,11 @@ shoot_device() {
             local dir="$OUT/$slug/$scheme-$text"
             mkdir -p "$dir"
             for fixture in "${FIXTURES[@]}"; do
-                local onboarded=YES
+                local onboarded=YES detailed=NO
                 [ "$fixture" = onboarding ] && onboarded=NO
+                case "$fixture" in diagnostics-live|diagnostics-bad) detailed=YES ;; esac
                 xcrun simctl terminate "$udid" "$BUNDLE" > /dev/null 2>&1 || true
-                xcrun simctl launch "$udid" "$BUNDLE" -uiFixture "$fixture" -onboarded "$onboarded" \
+                xcrun simctl launch "$udid" "$BUNDLE" -uiFixture "$fixture" -onboarded "$onboarded" -detailedCollection "$detailed" \
                     -appearance system > /dev/null
                 # Sheets open after a short router delay; give every fixture the same settle time.
                 sleep 4
