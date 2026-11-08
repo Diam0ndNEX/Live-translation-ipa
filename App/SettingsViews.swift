@@ -261,7 +261,7 @@ struct SettingsView: View {
     }
 }
 
-// MARK: - Reading & OCR
+// MARK: - Area and recognition
 struct ReadingSettings: View {
     @EngineHandle private var engine
     @AppStorage("mode") private var mode = TranslateMode.movie.rawValue
@@ -360,7 +360,7 @@ struct ReadingSettings: View {
                 }
                 Toggle("Skip unchanged frames", isOn: $skipUnchanged)
                 Hint("Does no reading while the picture stays the same. Saves battery.")
-                Toggle("OCR language correction", isOn: $correction)
+                Toggle("Correct reading with language rules", isOn: $correction)
                 VStack(alignment: .leading) {
                     Text("Minimum confidence · \(Int(confidence * 100))%")
                     Slider(value: $confidence, in: 0.1...0.9, step: 0.05).accessibilityLabel("Minimum recognition confidence")
@@ -370,9 +370,9 @@ struct ReadingSettings: View {
             AdvancedSection(title: "Smarter recognition") {
                 Toggle("Adaptive detail in Balanced", isOn: $adaptiveOCR)
                 Hint("Reads small or unclear subtitles in more detail without lowering accuracy elsewhere.")
-                Toggle("Track subtitle position and lifetime", isOn: $subtitleTracking)
+                Toggle("Follow where subtitles appear and how long they stay", isOn: $subtitleTracking)
                 Hint("Keeps moving or multi-line subtitles together across frames.")
-                Toggle("Merge duplicate OCR copies", isOn: $deduplicateCopies)
+                Toggle("Merge duplicate copies of the same text", isOn: $deduplicateCopies)
                 Hint("Removes shadow or overlapping copies of the same subtitle but keeps genuinely repeated lyrics.")
             }
             AdvancedSection(title: "Text behavior", footer: "Applies to every scene.") {
@@ -389,7 +389,7 @@ struct ReadingSettings: View {
                                 "adaptiveOCR", "subtitleTracking", "deduplicateCopies",
                                 "rapidTextTracking", "joinAdjacentText", "activeTextFocus"])
         }
-        .settingsPage("Reading & OCR")
+        .settingsPage("Area and recognition")
         .fullScreenCover(isPresented: $showAreaEditor) { AreaSheet() }
         .onChange(of: key) { _, _ in engine.syncConfig() }
         .onChange(of: frameRot) { _, _ in engine.rotationSettingChanged() }
@@ -456,7 +456,7 @@ struct IntelligenceSettings: View {
             ResetSection(keys: ["cleanOCR", "slang", "speakerDetect", "langLock", "contextualLanguage", "languageRecovery",
                                 "neverTranslate", "sourceFixes", "glossary"])
         }
-        .settingsPage("Languages & text rules")
+        .settingsPage("Text rules and names")
         .onChange(of: contextualLanguage) { _, _ in engine.pipelineSettingsChanged() }
         .onChange(of: languageRecovery) { _, _ in engine.pipelineSettingsChanged() }
         .onDisappear { engine.reloadSettings() }
@@ -508,7 +508,7 @@ struct WindowSettings: View {
                     }
                 }
             } header: { Text("Behavior") } footer: {
-                Text("When captions appear is under Subtitle timing. Speech, copying and vibration are under Feedback & sharing.")
+                Text("When captions appear is under Timing. Speech, copying and vibration are under Haptics and feedback.")
             }
             AdvancedSection(title: "Typography") {
                 Picker("Font", selection: $pipFont) {
@@ -527,7 +527,7 @@ struct WindowSettings: View {
                 "showOriginal", "autoOpenPiP", "autoClear", "clearHold"
             ])
         }
-        .settingsPage("Floating subtitles")
+        .settingsPage("Window")
         .onChange(of: styleKey) { _, _ in engine.applyStyle() }
         .onChange(of: showOriginal) { _, _ in engine.applyStyle() }
         .onChange(of: winSize) { _, _ in engine.applyWindowSize() }
@@ -574,7 +574,7 @@ struct InterfaceSettings: View {
             }
             ResetSection(keys: ["accent", "appearance", "homeMetrics", "uiHaptics"])
         }
-        .settingsPage("App appearance")
+        .settingsPage("Appearance")
     }
 }
 
@@ -613,14 +613,14 @@ struct PerformanceSettings: View {
                 Text("Pausing saves power but can delay the next detected text.")
             }
             AdvancedSection(title: "Cooling and idle details") {
-                Toggle("Smart Cool controller", isOn: $smartCool).disabled(!coolMode)
+                Toggle("Smart cooling", isOn: $smartCool).disabled(!coolMode)
                 Hint("Adjusts how often the screen is read to match the actual workload. Off uses fixed, conservative timing.")
                 Toggle("Reduce reading when no text is visible", isOn: $idleBackoff)
             }
             AdvancedSwitchSection()
             ResetSection(keys: ["suppressOwnInterface", "coolMode", "smartCool", "adaptive", "idleMinutes", "idleBackoff", "keepAwake"])
         }
-        .settingsPage("Performance & battery")
+        .settingsPage("Performance and battery")
         .onChange(of: suppressOwnInterface) { _, _ in engine.pipelineSettingsChanged() }
         .onChange(of: adaptive) { _, _ in engine.syncConfig() }
         .onChange(of: idleBackoff) { _, _ in engine.syncConfig() }
@@ -662,7 +662,7 @@ struct BackupSettings: View {
                 Text("Presets and history are kept.")
             }
         }
-        .settingsPage("Backup & reset")
+        .settingsPage("Backup and reset")
         .confirmDestructive("Reset every setting to its default?", message: "Presets and history are kept.", isPresented: $confirmReset, button: "Reset every setting") {
             engine.resetAllSettings()
         }
@@ -704,7 +704,7 @@ struct AboutSettings: View {
                 }
             }
         }
-        .settingsPage("About & help")
+        .settingsPage("About ScreenLingo")
     }
 }
 

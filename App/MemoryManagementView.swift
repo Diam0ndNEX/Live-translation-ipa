@@ -314,7 +314,7 @@ struct MemoryManagementView: View {
                 }
             }
         }
-        .settingsPage("Translation memory")
+        .settingsPage("Memory")
         .fileExporter(isPresented: $exporting, document: transfer, contentType: .json, defaultFilename: "screenlingo-memory") { result in
             switch result {
             case .success: message = "Memory exported"

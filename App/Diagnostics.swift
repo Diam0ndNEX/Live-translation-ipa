@@ -1676,7 +1676,7 @@ final class Diagnostics: ObservableObject {
             flag(1, "Some sentences failed to translate", "Make sure the language packs are downloaded.", .openLanguages); score -= 10
         }
         if s.rotationTries >= 3 {
-            flag(1, "Sentence order keeps being re-detected", "Pick a fixed frame rotation in Settings → Reading & OCR.", .fixedRotation); score -= 8
+            flag(1, "Sentence order keeps being re-detected", "Pick a fixed frame rotation in Settings > Area and recognition.", .fixedRotation); score -= 8
         }
         if s.captureDrops >= 2 {
             flag(1, "Capture stopped \(s.captureDrops) times", "iOS closed the extension. The Fast speed is easier on memory.", .fastSpeed); score -= 8

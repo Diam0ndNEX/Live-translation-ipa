@@ -61,7 +61,7 @@ struct TranslationSettings: View {
 
             AdvancedSection(title: "Warm-up", footer: "Warm-up prepares the translator before the first caption. Live translation always has priority.") {
                 Toggle("Keep the translator warm", isOn: $keepWarm)
-                Hint("Hybrid prepares both models, Low Latency only its own. A successful warm-up is reused for the same languages during this launch.")
+                Hint("Hybrid gets both translators ready, Low Latency only its own. Once ready, they stay ready for the same languages until the app closes.")
                 Toggle("Predict the language for warm-up", isOn: $predictiveWarmup)
                 Hint("Prepares a recently confirmed language when Automatic has not decided yet.")
             }
@@ -83,7 +83,7 @@ struct TranslationSettings: View {
                 "selectiveSpeculation", "adaptiveSpeculation", "speculationConfidence"
             ])
         }
-        .settingsPage("Translation & memory")
+        .settingsPage("System")
         .onChange(of: translationSystem) { _, _ in engine.translationSystemChanged() }
         .onChange(of: translateAhead) { _, _ in engine.syncConfig() }
         .onChange(of: keepWarm) { _, _ in engine.powerPolicyChanged() }
@@ -142,7 +142,7 @@ struct HistoryStorageSettings: View {
             }
             ResetSection(keys: ["saveHistory", "historyRetentionDays", "historyCapacity"])
         }
-        .settingsPage("History & storage")
+        .settingsPage("History and storage")
         .onChange(of: saveHistory) { _, enabled in
             if !enabled {
                 UserDefaults.standard.removeObject(forKey: "historyData")
@@ -267,7 +267,7 @@ private struct DiagnosticsSettingsPage: View {
             AdvancedSwitchSection()
             ResetSection(keys: ["diagSamples", "testRunSaving", "freshTranslationTest", "temporaryMemoryTest"])
         }
-        .settingsPage("Diagnostics & tests")
+        .settingsPage("Diagnostics settings")
         .task { await engine.diag.refreshRuns() }
         .onChange(of: samples) { _, _ in engine.applyStorageSettings() }
     }

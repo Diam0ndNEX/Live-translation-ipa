@@ -31,7 +31,7 @@ struct ResponsivenessSettings: View {
                 Hint("Keeps a confirmed caption on screen instead of replacing it with a first, uncertain reading.")
             } header: { Text("Stability") }
 
-            AdvancedSection(title: "Caption handoff and floating window") {
+            AdvancedSection(title: "Caption changes and the floating window") {
                 Toggle("Let a confirmed caption finish before it is replaced", isOn: $protectConfirmed)
                     .disabled(!steadyCaptions)
                 Hint("Gives an already confirmed subtitle a short, limited chance to finish before a newer one takes over.")
@@ -53,7 +53,7 @@ struct ResponsivenessSettings: View {
             AdvancedSwitchSection()
             ResetSection(keys: ["displayPolicy", "minDisplay", "heartbeatInterval", "steadyCaptions", "protectConfirmedPresentation"])
         }
-        .settingsPage("Subtitle timing")
+        .settingsPage("Timing")
         .onChange(of: timingKey) { _, _ in engine.timingSettingsChanged() }
         .onChange(of: continuityKey) { _, _ in engine.pipelineSettingsChanged() }
     }
@@ -102,7 +102,7 @@ struct CaptionAppearanceSettings: View {
             AdvancedSwitchSection()
             ResetSection(keys: ["pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "pipScale", "originalFraction", "speakerAccent"])
         }
-        .settingsPage("Caption layout")
+        .settingsPage("Style")
         .onChange(of: key) { _, _ in engine.applyStyle() }
     }
 }
@@ -143,7 +143,7 @@ struct ReaderWorkspaceSettings: View {
                 "photoOCREdge", "photoAutoTranslate"
             ])
         }
-        .settingsPage("Reader & photos")
+        .settingsPage("Reader and photos")
     }
 }
 
@@ -195,6 +195,6 @@ struct FeedbackStorageSettings: View {
                 "speak", "speechRate", "interruptSpeech"
             ])
         }
-        .settingsPage("Feedback & sharing")
+        .settingsPage("Haptics and feedback")
     }
 }

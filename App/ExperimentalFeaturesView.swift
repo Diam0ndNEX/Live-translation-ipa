@@ -86,7 +86,7 @@ struct ExperimentalFeaturesView: View {
                     explanation: "Looks at more of the chosen subtitle area to notice small changes. Rotated video uses the normal whole-screen check.",
                     enabled: $subtitleAwareChangeDetection, available: skipUnchanged)
                 if !skipUnchanged {
-                    Text("Turn on Skip unchanged frames in Reading & OCR first.")
+                    Text("Turn on Skip unchanged frames in Settings > Area and recognition first.")
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 ExperimentalOption(
@@ -128,7 +128,7 @@ struct ExperimentalFeaturesView: View {
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 VStack(alignment: .leading, spacing: 5) {
-                    Text("PiP heartbeat backpressure").font(.subheadline.weight(.medium))
+                    Text("Floating window refresh back-pressure").font(.subheadline.weight(.medium))
                     Text("Always on: skips needless idle frames when the floating window is busy. New captions still appear at once.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
@@ -141,7 +141,7 @@ struct ExperimentalFeaturesView: View {
                 "adaptiveConfirmation", "confirmationDeadline", "continuousRotation"
             ])
         }
-        .settingsPage("Experimental Features")
+        .settingsPage("Experimental features")
         .onChange(of: pipelineSignature) { _, _ in engine.pipelineSettingsChanged() }
         .onChange(of: directPiPBuffer) { _, _ in engine.applyStyle() }
     }
