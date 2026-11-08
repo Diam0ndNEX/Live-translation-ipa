@@ -1,16 +1,17 @@
-// ScreenLingo – App – Guided setup (2.0.0 build 90)
+// ScreenLingo – App – Guided setup (2.1.0, spec §13.5.7)
 import SwiftUI
 import Translation
 
-/// Three real checks: pick languages and download the pack, start a broadcast, confirm the floating window.
-/// Skip is allowed and can be resumed from the "Finish setup" banner on Live.
+/// One screen, three live rows that turn green as they really happen: language pack ready, broadcast started,
+/// floating window on screen. Done enables when all three are green. Skip is always there; unfinished setup
+/// comes back as one "Finish setup" row on Translate.
 struct OnboardingView: View {
     let engine: TranslatorEngine
     @Binding var done: Bool
     @AppStorage("setupState") private var setupState = ""
-    @State private var step = 0
     @StateObject private var pair: EngineSlice<PairSnapshot>
     @StateObject private var capture: EngineSlice<CaptureSnapshot>
+    @State private var languagesOpen = false
 
     init(engine: TranslatorEngine, done: Binding<Bool>) {
         self.engine = engine
@@ -19,91 +20,119 @@ struct OnboardingView: View {
         _capture = StateObject(wrappedValue: EngineSlice(engine) { CaptureSnapshot.read($0) })
     }
 
-    private var windowOpen: Bool { capture.value.alive || capture.value.pipActive }
+    private var p: PairSnapshot { pair.value }
+    private var packDone: Bool { p.packState == .ready || p.packState == .autoDetect }
+    private var broadcastDone: Bool { capture.value.alive }
+    private var windowDone: Bool { capture.value.pipActive }
+    private var allDone: Bool { packDone && broadcastDone && windowDone }
 
     var body: some View {
-        VStack(spacing: Space.l) {
-            VStack(spacing: Space.s) {
-                HStack(spacing: Space.xs) {
-                    ForEach(0..<3, id: \.self) { i in
-                        Capsule().fill(i <= step ? Color.accentColor : Palette.surfaceRaised).frame(height: 6)
+        NavigationStack {
+            List {
+                Section {
+                    Text("Three quick checks. Each one turns green when it has actually happened on your phone.")
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .listRowBackground(Color.clear)
+                }
+                Section {
+                    CheckRow(number: 1, title: "Language pair ready", done: packDone, detail: packDetail) {
+                        LanguagePairTitle(source: LanguageNames.name(p.source, in: p.languages),
+                                          target: LanguageNames.name(p.target, in: p.languages),
+                                          status: p.packState.title, statusSymbol: p.packState.symbol,
+                                          canSwap: p.source != "auto",
+                                          onSource: { languagesOpen = true }, onTarget: { languagesOpen = true },
+                                          onSwap: { engine.swapLanguages() })
+                        if p.source != "auto", p.statuses[p.source] == .supported {
+                            Button("Get the \(LanguageNames.name(p.source, in: p.languages)) pack") { engine.download(p.source) }
+                                .buttonStyle(.borderedProminent)
+                                .frame(minHeight: 44)
+                        }
+                    }
+                    CheckRow(number: 2, title: "Start a broadcast", done: broadcastDone,
+                             detail: "Tap the button, choose ScreenLingo Capture, then Start Broadcast.") {
+                        HStack(spacing: KitSpace.row) {
+                            StartButton(live: broadcastDone) {
+                                engine.captureRequested()
+                                if !engine.pipActive { engine.startPiP() }
+                            }
+                            .scaleEffect(0.6)
+                            .frame(width: 106, height: 106)
+                            Text(capture.value.status.title).font(.subheadline).foregroundStyle(.secondary)
+                        }
+                    }
+                    CheckRow(number: 3, title: "Floating window is on screen", done: windowDone,
+                             detail: windowDone ? "It floats over other apps while you watch."
+                                                : "It opens with the broadcast. Switch to any app with text to see it.") {
+                        if !windowDone && broadcastDone {
+                            Button("Show the window") { engine.startPiP() }.buttonStyle(.bordered).frame(minHeight: 44)
+                        }
                     }
                 }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel("Step \(step + 1) of 3")
-                HStack {
-                    Text("Step \(step + 1) of 3").font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
-                    Spacer()
-                    Button("Skip for now") { setupState = "skipped"; done = true }.foregroundStyle(.secondary).frame(minHeight: 44)
+            }
+            .navigationTitle("Set up ScreenLingo")
+            .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Skip") { setupState = "skipped"; done = true }
                 }
             }
-            ScrollView {
-                VStack(spacing: Space.xl) {
-                    switch step {
-                    case 0: languages
-                    case 1: start
-                    default: confirm
-                    }
-                }.padding(.vertical, Space.l)
+            .safeAreaInset(edge: .bottom) {
+                Button {
+                    setupState = "done"
+                    done = true
+                } label: {
+                    Text(allDone ? "Done" : "Done (finish the checks first)")
+                        .font(.headline)
+                        .frame(maxWidth: .infinity, minHeight: 50)
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(!allDone)
+                .padding(.horizontal, KitSpace.margin)
+                .padding(.vertical, KitSpace.tight)
+                .background(.bar)
             }
-            HStack(spacing: Space.m) {
-                if step > 0 { SecondaryButton(title: "Back") { step -= 1 } }
-                PrimaryButton(title: step < 2 ? "Next" : "Finish") {
-                    if step < 2 { step += 1 } else { setupState = "done"; done = true }
+            .sheet(isPresented: $languagesOpen) { LanguageSheet(engine: engine) }
+            .sensoryFeedback(.success, trigger: allDone)
+        }
+    }
+
+    private var packDetail: String {
+        switch p.packState {
+        case .ready: return "Works offline."
+        case .autoDetect: return "Auto-detect needs no download up front."
+        case .checking: return "Checking which packs are on this phone…"
+        case .needsDownload: return p.downloadMessage.isEmpty ? "This language needs a one-time download." : p.downloadMessage
+        case .unsupported: return "This pair isn't supported on this phone. Choose another language."
+        }
+    }
+}
+
+/// A numbered check that turns green when it has happened. Never green on a guess.
+private struct CheckRow<Content: View>: View {
+    let number: Int
+    let title: String
+    let done: Bool
+    let detail: String
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: KitSpace.row) {
+            HStack(spacing: KitSpace.row) {
+                Image(systemName: done ? "checkmark.circle.fill" : "\(number).circle")
+                    .font(.title2)
+                    .foregroundStyle(done ? Color.green : Color.secondary)
+                    .contentTransition(.symbolEffect(.replace))
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.headline)
+                    Text(detail).font(.subheadline).foregroundStyle(.secondary)
                 }
             }
+            content()
         }
-        .padding(Space.l)
-        .background(Palette.background.ignoresSafeArea())
-    }
-
-    private func header(_ symbol: String, _ title: String, _ text: String) -> some View {
-        VStack(spacing: Space.m) {
-            Image(systemName: symbol).font(.system(.largeTitle, design: .rounded).weight(.semibold)).foregroundStyle(Color.accentColor)
-                .frame(width: 88, height: 88)
-                .background(Color.accentColor.opacity(0.12), in: Circle())
-                .accessibilityHidden(true)
-            Text(title).font(.title2.bold()).multilineTextAlignment(.center)
-            Text(text).font(.body).foregroundStyle(.secondary).multilineTextAlignment(.center)
-        }
-    }
-
-    private var languages: some View {
-        VStack(spacing: Space.l) {
-            header("globe", "Pick your languages", "Translation runs on your phone, so each language needs a one-time download.")
-            LanguagePairBar(
-                source: Binding(get: { pair.value.source }, set: { engine.sourceCode = $0 }),
-                target: Binding(get: { pair.value.target }, set: { engine.targetCode = $0 }),
-                items: pair.value.languages, swapDisabled: pair.value.source == "auto"
-            ) { engine.swapLanguages() }
-            StatusPill(text: pair.value.packState.title, symbol: pair.value.packState.symbol, severity: pair.value.packState.severity)
-            if pair.value.source != "auto", pair.value.statuses[pair.value.source] == .supported {
-                PrimaryButton(title: "Download language pack", symbol: "arrow.down.circle") { engine.download(pair.value.source) }
-            }
-            if !pair.value.downloadMessage.isEmpty { Banner(text: pair.value.downloadMessage) }
-        }
-    }
-
-    private var start: some View {
-        VStack(spacing: Space.l) {
-            header("play.rectangle.fill", "Start a test broadcast", Strings.startHelp)
-            BroadcastPicker(onTap: { engine.captureRequested(); if !engine.pipActive { engine.startPiP() } })
-                .frame(width: 84, height: 84)
-                .background(Color.accentColor, in: Circle())
-                .accessibilityLabel("Start screen capture")
-            StatusPill(text: capture.value.status.title, symbol: capture.value.status.symbol, severity: capture.value.severity)
-        }
-    }
-
-    private var confirm: some View {
-        VStack(spacing: Space.l) {
-            header("pip", "Check the floating window", "Switch to any app with text. A small translation window should float on top.")
-            if windowOpen {
-                StatusPill(text: "Capture is running. You're set.", symbol: "checkmark.seal.fill", severity: .success)
-            } else {
-                StatusPill(text: "No floating window yet", symbol: "clock.fill", severity: .warning)
-                Text("You can finish now and start from the Live tab at any time.").font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
-            }
-        }
+        .padding(.vertical, KitSpace.tight)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Step \(number): \(title), \(done ? "done" : "not done")")
     }
 }

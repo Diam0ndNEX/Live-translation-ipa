@@ -218,7 +218,7 @@ struct TranslateScreen: View {
 
     private var finishSetupRow: some View {
         Button { onboarded = false } label: {
-            LensRow(title: "Finish setup", value: "2 checks left", symbol: "checklist")
+            LensRow(title: "Finish setup", value: "Not finished", symbol: "checklist")
         }
         .buttonStyle(.plain)
     }
