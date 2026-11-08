@@ -36,13 +36,25 @@ struct SettingsRow: View {
     let symbol: String
     var tint: Color = .blue
     var chevron = true
+    @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
         HStack(spacing: KitSpace.row) {
             IconTile(symbol: symbol, tint: tint)
-            Text(title).font(.body).lineLimit(2).layoutPriority(1)
-            Spacer(minLength: KitSpace.tight)
-            if !value.isEmpty {
-                Text(value).font(.subheadline).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+            if typeSize.isAccessibilitySize {
+                // 2.2.2: at accessibility sizes the value sits under the title. Beside it, "Legacy" was cut to "Le…" and the
+                // title wrapped into "Language packs" over three lines.
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.body)
+                    if !value.isEmpty { Text(value).font(.subheadline).foregroundStyle(.secondary) }
+                }
+                .layoutPriority(1)
+                Spacer(minLength: KitSpace.tight)
+            } else {
+                Text(title).font(.body).lineLimit(2).layoutPriority(1)
+                Spacer(minLength: KitSpace.tight)
+                if !value.isEmpty {
+                    Text(value).font(.subheadline).foregroundStyle(.secondary).lineLimit(1).truncationMode(.tail)
+                }
             }
             if chevron {
                 Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)

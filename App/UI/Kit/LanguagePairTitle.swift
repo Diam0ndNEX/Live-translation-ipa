@@ -21,11 +21,13 @@ struct LanguagePairTitle: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: KitSpace.unit) {
+            // 2.2.2: try the big title on one line, then a slightly smaller one, and only then stack the two words.
+            // On an iPhone SE the pair used to stack at the default text size while a shorter pair stayed inline.
             ViewThatFits(in: .horizontal) {
-                HStack(alignment: .firstTextBaseline, spacing: KitSpace.tight) { words }
-                VStack(alignment: .leading, spacing: 2) { words }
+                HStack(alignment: .firstTextBaseline, spacing: KitSpace.tight) { words }.font(.largeTitle.bold())
+                HStack(alignment: .firstTextBaseline, spacing: KitSpace.tight) { words }.font(.title.bold())
+                VStack(alignment: .leading, spacing: 2) { words }.font(.largeTitle.bold())
             }
-            .font(.largeTitle.bold())
             .foregroundStyle(.primary)
             .buttonStyle(.plain)
             Label(status, systemImage: statusSymbol)

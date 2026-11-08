@@ -11,6 +11,7 @@ struct PhaseHeader: View {
     var morph: Namespace.ID? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
         Button { action?() } label: {
@@ -20,11 +21,18 @@ struct PhaseHeader: View {
                     .modifier(MorphTarget(namespace: reduceMotion ? nil : morph))
                     .symbolEffect(.pulse, options: .repeating, isActive: phase == .live && !reduceMotion)
                     .accessibilityHidden(true)
-                Text(line)
-                    .font(.headline)
-                    .foregroundStyle(phase.tone == .neutral ? Color.primary : phase.tone.color)
-                    .lineLimit(4)
-                    .multilineTextAlignment(.leading)
+                // 2.2.2: at accessibility sizes the mode goes on its own line, so the word and the timer never wrap
+                // into "Live · 04:14 · Low Laten…".
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(typeSize.isAccessibilitySize ? primaryLine : line)
+                        .font(.headline)
+                        .foregroundStyle(phase.tone == .neutral ? Color.primary : phase.tone.color)
+                        .lineLimit(4)
+                        .multilineTextAlignment(.leading)
+                    if typeSize.isAccessibilitySize, let mode, !mode.isEmpty {
+                        Text(mode).font(.subheadline).foregroundStyle(.secondary)
+                    }
+                }
             }
             .frame(minHeight: 44, alignment: .leading)
             .contentShape(Rectangle())
@@ -40,6 +48,11 @@ struct PhaseHeader: View {
         var parts = [phase.word]
         if let elapsed, phase.isSession { parts.append(Self.clock(elapsed)) }
         if let mode, !mode.isEmpty { parts.append(mode) }
+        return parts.joined(separator: " · ")
+    }
+    private var primaryLine: String {
+        var parts = [phase.word]
+        if let elapsed, phase.isSession { parts.append(Self.clock(elapsed)) }
         return parts.joined(separator: " · ")
     }
     private var accessibilityText: String {

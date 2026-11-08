@@ -17,6 +17,7 @@ struct AreaEditor: View {
     @State private var base: (Double, Double)?
     @State private var pickerItem: PhotosPickerItem?
     @State private var photo: UIImage?
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     init(initial: ClosedRange<Double>, onSave: @escaping (ClosedRange<Double>) -> Void, onCancel: @escaping () -> Void) {
         self.initial = initial
@@ -31,7 +32,7 @@ struct AreaEditor: View {
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: KitSpace.row) {
+            page {
                 GeometryReader { geo in
                     let height = geo.size.height
                     let width = min(geo.size.width, height * 9 / 19.5)
@@ -39,7 +40,10 @@ struct AreaEditor: View {
                         .frame(width: width, height: height)
                         .frame(maxWidth: .infinity)
                 }
+                // 2.2.2: at accessibility sizes the page scrolls and the picture keeps a usable height. The picture used
+                // to shrink to a sliver and the example caption ran into the title.
                 .frame(minHeight: 300)
+                .frame(height: typeSize.isAccessibilitySize ? 380 : nil)
                 Text(label)
                     .font(.headline.monospacedDigit())
                     .accessibilityHidden(true)
@@ -47,10 +51,17 @@ struct AreaEditor: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
-                HStack(spacing: KitSpace.tight) {
-                    preset("Subtitles", 0, 0.35)
-                    preset("Middle", 0.3, 0.7)
-                    preset("Full screen", 0, 1)
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: KitSpace.tight) {
+                        preset("Subtitles", 0, 0.35)
+                        preset("Middle", 0.3, 0.7)
+                        preset("Full screen", 0, 1)
+                    }
+                    VStack(spacing: KitSpace.tight) {
+                        preset("Subtitles", 0, 0.35)
+                        preset("Middle", 0.3, 0.7)
+                        preset("Full screen", 0, 1)
+                    }
                 }
                 PhotosPicker(selection: $pickerItem, matching: .images) {
                     Label(photo == nil ? "Use my own screenshot" : "Choose another screenshot", systemImage: "photo")
@@ -60,8 +71,6 @@ struct AreaEditor: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             }
-            .padding(.horizontal, KitSpace.margin)
-            .padding(.bottom, KitSpace.tight)
             .navigationTitle("Reading area")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -76,6 +85,14 @@ struct AreaEditor: View {
                 photo = await image.byPreparingThumbnail(ofSize: CGSize(width: 900, height: 1900)) ?? image
             }
         }
+    }
+
+    /// The editor's content; scrolls at accessibility text sizes.
+    @ViewBuilder private func page<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        let inner = VStack(spacing: KitSpace.row) { content() }
+            .padding(.horizontal, KitSpace.margin)
+            .padding(.bottom, KitSpace.tight)
+        if typeSize.isAccessibilitySize { ScrollView { inner } } else { inner }
     }
 
     private func preset(_ title: String, _ lo: Double, _ hi: Double) -> some View {

@@ -449,6 +449,7 @@ private struct DiagnosticsBody: View {
     @State private var bucketSeconds = 1
     @State private var showTestReport = false
     @Namespace private var chipSpace
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     init(diag: Diagnostics) {
         self.diag = diag
@@ -552,12 +553,22 @@ private struct DiagnosticsBody: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(issue.title).font(.subheadline.weight(.semibold))
                             Text(issue.detail).font(.footnote).foregroundStyle(.secondary)
+                            // 2.2.2: at accessibility sizes the button goes under the text. Beside it, it was squeezed
+                            // into a round blob and the title shrank to "Cap-".
+                            if typeSize.isAccessibilitySize, let fix = issue.fix {
+                                Button(fix.label) { apply(fix) }
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.regular)
+                                    .padding(.top, KitSpace.unit)
+                            }
                         }
-                        Spacer(minLength: KitSpace.tight)
-                        if let fix = issue.fix {
-                            Button(fix.label) { apply(fix) }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
+                        if !typeSize.isAccessibilitySize {
+                            Spacer(minLength: KitSpace.tight)
+                            if let fix = issue.fix {
+                                Button(fix.label) { apply(fix) }
+                                    .buttonStyle(.borderedProminent)
+                                    .controlSize(.small)
+                            }
                         }
                     }
                 }

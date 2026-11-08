@@ -12,6 +12,7 @@ struct OnboardingView: View {
     @StateObject private var pair: EngineSlice<PairSnapshot>
     @StateObject private var capture: EngineSlice<CaptureSnapshot>
     @State private var languagesOpen = false
+    @Environment(\.dynamicTypeSize) private var typeSize
 
     init(engine: TranslatorEngine, done: Binding<Bool>) {
         self.engine = engine
@@ -73,7 +74,8 @@ struct OnboardingView: View {
                 }
             }
             .kitPage()
-            .navigationTitle("Set up ScreenLingo")
+            // 2.2.2: the long title ended in "Set up Scree…" at accessibility sizes.
+            .navigationTitle(typeSize.isAccessibilitySize ? "Set up" : "Set up ScreenLingo")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

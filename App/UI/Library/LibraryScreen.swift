@@ -63,6 +63,17 @@ struct LibraryScreen: View {
                         .listRowInsets(EdgeInsets(top: KitSpace.tight, leading: 0, bottom: KitSpace.tight, trailing: 0))
                         .listRowBackground(Color.clear)
                 }
+                // 2.2.2: the empty state is a row under the switch. As an overlay centred on the list it was drawn over
+                // the Recent/Saved switch once the text got large.
+                if items.isEmpty {
+                    Section {
+                        emptyState
+                            .frame(maxWidth: .infinity)
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                            .listRowInsets(EdgeInsets())
+                    }
+                }
                 ForEach(groups, id: \.day) { group in
                     Section(Self.dayTitle(group.day)) {
                         ForEach(group.items) { item in
@@ -84,7 +95,6 @@ struct LibraryScreen: View {
             .kitPage()
             .listStyle(.insetGrouped)
             .modifier(ReadableColumn())
-            .overlay { if items.isEmpty { emptyState } }
             .searchable(text: $query, prompt: "Search translations and notes")
             .navigationTitle("Library")
             .navigationBarTitleDisplayMode(.large)
@@ -182,7 +192,28 @@ struct LibraryScreen: View {
 /// Translation (2 lines), original (1 line), trailing time; the pair is a small footnote.
 private struct LibraryRow: View {
     let item: HistoryItem
+    @Environment(\.dynamicTypeSize) private var typeSize
     var body: some View {
+        // 2.2.2: at accessibility sizes the time, pair and star go under the text instead of squeezing it to "Hello, how a…".
+        if typeSize.isAccessibilitySize {
+            VStack(alignment: .leading, spacing: KitSpace.unit) {
+                Text(item.translated).font(.body.weight(.medium)).lineLimit(4)
+                Text(item.original).font(.footnote).foregroundStyle(.secondary).lineLimit(2)
+                HStack(spacing: KitSpace.tight) {
+                    Text(item.date.formatted(date: .omitted, time: .shortened)).font(.footnote).foregroundStyle(.secondary)
+                    if let from = item.sourceLanguage, let to = item.targetLanguage {
+                        Text("\(from.uppercased())→\(to.uppercased())").font(.caption).foregroundStyle(.tertiary)
+                    }
+                    if item.starred { Image(systemName: "star.fill").font(.footnote).foregroundStyle(.yellow).accessibilityLabel("Saved") }
+                }
+            }
+            .accessibilityElement(children: .combine)
+        } else {
+            compactRow
+        }
+    }
+
+    private var compactRow: some View {
         HStack(alignment: .firstTextBaseline, spacing: KitSpace.tight) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.translated).font(.body.weight(.medium)).lineLimit(2)

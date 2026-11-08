@@ -17,6 +17,7 @@ struct TranslateScreen: View {
     @AppStorage("onboarded") private var onboarded = true
     @AppStorage("showOriginal") private var showOriginal = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
     @State private var focus = false
     @State private var composing = false
     @Namespace private var morph
@@ -51,6 +52,11 @@ struct TranslateScreen: View {
                         idleHero
                     }
                     if !composing { ReadinessCard(prep: snap.prep, phase: snap.phase) }
+                    // 2.2.2: at accessibility text sizes the compose bar sits in the page instead of over it. Pinned at the
+                    // bottom it, plus the tab bar, covered Start capture and the live caption on small phones.
+                    if typeSize.isAccessibilitySize {
+                        ComposeBar(engine: engine, composing: $composing).padding(.horizontal, -KitSpace.margin)
+                    }
                     controls
                     if snap.phase.isSession { controlTiles }
                     ScenesStrip(store: engine.presets)
@@ -67,7 +73,7 @@ struct TranslateScreen: View {
             .ambientGlow()
             .background(Color(.systemGroupedBackground))
             .safeAreaInset(edge: .bottom) {
-                ComposeBar(engine: engine, composing: $composing)
+                if !typeSize.isAccessibilitySize { ComposeBar(engine: engine, composing: $composing) }
             }
             .navigationTitle("Translate")
             .navigationBarTitleDisplayMode(.inline)
@@ -94,7 +100,7 @@ struct TranslateScreen: View {
                 .font(.title3)
                 .foregroundStyle(Color.accentColor)
                 .accessibilityHidden(true)
-            Text("ScreenLingo").font(.headline)
+            Text("ScreenLingo").font(.headline).lineLimit(1).minimumScaleFactor(0.7)   // 2.2.2: never "ScreenLin-go"
             Spacer(minLength: KitSpace.tight)
             moreMenu
         }
@@ -283,7 +289,7 @@ struct TranslateScreen: View {
                             elapsed: snap.sessionStarted.map { context.date.timeIntervalSince($0) },
                             mode: snap.modeName, action: { router.present(.status) }, morph: morph)
             }
-            WaveformBars(active: snap.phase == .live && snap.stage != .showing)
+            if !typeSize.isAccessibilitySize { WaveformBars(active: snap.phase == .live && snap.stage != .showing) }   // 2.2.2: decoration only; at large text the status line needs the room
             Spacer(minLength: KitSpace.tight)
             if snap.phase == .live || snap.phase == .paused {
                 StartButton(live: true, size: 52, onTap: {})
