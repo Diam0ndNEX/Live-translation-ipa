@@ -296,6 +296,8 @@ final class Diagnostics: ObservableObject {
     private var completedWorkRecoveredUnits = 0
     private var lookupSamples: [Double] = []
     private var writeSamples: [Double] = []
+    /// 2.2.1 (E15): time to encode and write the Library once, in milliseconds.
+    private var historySaveSamples: [Double] = []
     private(set) var recorderCosts = RecorderCosts()
     private var recorderDepth = 0
     private struct CostToken { let start: Double; let outer: Bool; let detailed: Bool }
@@ -836,6 +838,7 @@ final class Diagnostics: ObservableObject {
             appVersion: AppVersion.full, systemVersion: UIDevice.current.systemVersion,
             hardwareModel: Self.hardwareModelCode, settings: settings, health: currentHealth, counters: counters,
             distributions: ["memoryLookupMs": DiagnosticDistribution(lookupSamples), "memoryWriteMs": DiagnosticDistribution(writeSamples),
+                "historySaveMs": DiagnosticDistribution(historySaveSamples),
                 "ocrMs": DiagnosticDistribution(ocr.map { $0.v }), "translationMs": DiagnosticDistribution(translate.map { $0.v }),
                 "enqueueLatencyMs": DiagnosticDistribution(latency.map { $0.v }),
                 "finalOCRMs": DiagnosticDistribution(pipeline.map { $0.stages.recognition }),
@@ -1255,6 +1258,13 @@ final class Diagnostics: ObservableObject {
 
     func recordLatency(ms: Double) { add(\.latency, ms) }
 
+    /// One Library write (E15). Bounded like the memory timings.
+    func noteHistorySave(ms: Double) {
+        guard enabled, ms.isFinite, ms >= 0 else { return }
+        historySaveSamples.append(ms)
+        if historySaveSamples.count > 600 { historySaveSamples.removeFirst(historySaveSamples.count - 600) }
+    }
+
     func recordPipeline(_ stages: LatencyBreakdown) {
         let recorderToken = beginRecorder(); defer { endRecorder(recorderToken) }
         guard detailedCollection else { return }
@@ -1283,7 +1293,7 @@ final class Diagnostics: ObservableObject {
         intervalBaseline = [:]; oneSecondBaseline = [:]; fiveSecondBaseline = [:]
         lastCaptureConnected = false
         lastRecordedThermalState = nil
-        memoryOutcomes = [:]; lookupSamples = []; writeSamples = []
+        memoryOutcomes = [:]; lookupSamples = []; writeSamples = []; historySaveSamples = []
         modelTimingSamples = [:]; completedWorkRecoveredUnits = 0
         sharedModelUnits = 0; sharedConfirmedModelUnits = 0; memoryAwareSpeculationSkipped = 0; ramCaptionBypasses = 0; exactCaptionHits = 0; exactUnitsCoalesced = 0
         speculativeUnitCounts = [:]; queueWaitSamples = [:]

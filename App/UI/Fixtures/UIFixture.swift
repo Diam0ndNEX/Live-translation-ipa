@@ -30,6 +30,8 @@ enum UIFixture: String, CaseIterable {
     case languagesSheet = "languages-sheet"
     case onboarding
     case areaEditor = "area-editor"
+    /// Typing mode: the compose bar has paused capture (2.2.1, U2).
+    case composeActive = "compose-active"
     /// Every 2.1.0 kit component on one scrolling page (step 1).
     case kit
 
@@ -41,7 +43,7 @@ enum UIFixture: String, CaseIterable {
     /// Where the build 90 interface can show this fixture.
     var baselineTab: AppTab {
         switch self {
-        case .idle, .idlePackMissing, .starting, .liveShort, .liveLong, .paused, .attentionLost, .onboarding, .areaEditor, .kit:
+        case .idle, .idlePackMissing, .starting, .liveShort, .liveLong, .paused, .attentionLost, .onboarding, .areaEditor, .composeActive, .kit:
             return .translate
         case .libraryEmpty, .libraryMany:
             return .library
@@ -125,6 +127,10 @@ extension UIFixture {
         case .paused:
             s.phase = .paused; s.paused = true; s.sessionStarted = now.addingTimeInterval(-600); s.pipActive = true
             s.translated = "Hello, how are you today?"; s.original = "Olá, como você está hoje?"; s.stage = .showing
+            return s
+        case .composeActive:
+            s.phase = .typing; s.manual = true; s.sessionStarted = now.addingTimeInterval(-180); s.pipActive = true
+            s.translated = "Where is the station?"; s.original = "Onde fica a estação?"; s.stage = .showing
             return s
         case .attentionLost:
             s.phase = .attention(.captureLost); s.sessionStarted = now.addingTimeInterval(-75)

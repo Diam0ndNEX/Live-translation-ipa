@@ -79,6 +79,7 @@ struct HistoryItem: Identifiable, Codable {
     var targetLanguage: String? = nil
     var note: String? = nil
 }
+extension HistoryItem: HistoryTrimmable {}
 
 @MainActor
 final class TranslatorEngine: ObservableObject {
@@ -132,13 +133,25 @@ final class TranslatorEngine: ObservableObject {
             Task { await refreshStatus(); await prewarm() }
         }
     }
-    @Published var paused = false { didSet { invalidatePending(); syncConfig(); if !paused { enqueue(latestBlocks) } } }
+    @Published var paused = false {
+        didSet {
+            invalidatePending(); syncConfig()
+            // 2.2.1 (E2): after a resume the idle timer and the session timer start again. Without this the next
+            // tick saw the old values and paused again about a second later.
+            if oldValue && !paused { lastTextDate = Date(); limitBase = Date() }
+            if !paused { enqueue(latestBlocks) }
+        }
+    }
     @Published var frozen = false
     @Published private(set) var manualMode = false
     @Published private(set) var sessionStarted: Date?
     @Published private(set) var sessionTranslations = 0
     @Published private(set) var sessionCharacters = 0
     @Published private(set) var downloadMessage = ""
+    /// The language whose pack download was requested and has not finished (success or failure) yet (U4).
+    @Published private(set) var downloadInFlight: String?
+    /// The language of the last request, so a failed download can offer "Try again".
+    private(set) var lastDownloadCode: String?
     @Published var isTranslating = false
     @Published private(set) var waitingToDisplay = false
     private var presentationTask: Task<Void, Never>?
@@ -215,7 +228,11 @@ final class TranslatorEngine: ObservableObject {
     @Published var ocrMs: Double = 0
     @Published var translateMs: Double = 0
     @Published var extFreeMB: Double = 0
-    @Published var history: [HistoryItem] = [] { didSet { saveHistory() } }
+    @Published var history: [HistoryItem] = [] { didSet { historyWriter.schedule() } }
+    /// 2.2.1 (E15): the whole Library used to be encoded and written on every caption, on the main thread.
+    /// Changes are now written once after a second without changes; `flushHistorySave()` writes at once.
+    private lazy var historyWriter: DebouncedAction = DebouncedAction(delay: .seconds(1)) { [weak self] in self?.saveHistory() }
+    func flushHistorySave() { historyWriter.flush() }
     // Translation session plumbing
     @Published var legacyConfig: TranslationSession.Configuration?
     @Published var downloadConfig: TranslationSession.Configuration?
@@ -960,6 +977,8 @@ final class TranslatorEngine: ObservableObject {
     private var legacyContinuation: CheckedContinuation<[String]?, Never>?
     private var lastPacketDate = Date.distantPast
     private var lastTextDate = Date()
+    /// Where the session-limit countdown starts: the session start, or the last resume (E2).
+    private var limitBase: Date?
     private var lastShowDate = Date.distantPast
     private let modelPerf = OSSignposter(subsystem: "com.diam0ndnex.screenlingo", category: "model")
     private var directSession: TranslationSession?
@@ -1207,10 +1226,10 @@ final class TranslatorEngine: ObservableObject {
             if activeTranslationSystem != .legacy { invalidatePending() }
         }
         if captureAlive != alive { captureAlive = alive }
-        if alive, let started = sessionStarted, int("sessionLimit", 0) > 0,
+        if alive, let started = limitBase ?? sessionStarted, int("sessionLimit", 0) > 0,
            Date().timeIntervalSince(started) >= Double(int("sessionLimit", 0)) * 60, !paused {
             paused = true
-            toast("Session timer reached – translation paused")
+            toast("Session timer reached – translation paused. Turn Pause off to continue; the timer starts again.")
             diag.noteRuntimeState("session_time_limit")
         }
         if activeTranslationSystem != .legacy,
@@ -1239,7 +1258,7 @@ final class TranslatorEngine: ObservableObject {
         let idle = int("idleMinutes", 0)
         if idle > 0, alive, !paused, Date().timeIntervalSince(lastTextDate) > Double(idle) * 60 {
             paused = true
-            status = "Paused after \(idle) min without text. Turn Pause off to resume."
+            status = "Paused after \(idle) min without text. Turn Pause off to resume; the idle timer starts again."
             diag.log("Auto-paused (idle)")
             diag.noteRuntimeState("idle_auto_pause")
         }
@@ -1546,7 +1565,7 @@ final class TranslatorEngine: ObservableObject {
     }
 
     func resetSession() {
-        sessionStarted = Date(); sessionTranslations = 0; sessionCharacters = 0
+        sessionStarted = Date(); limitBase = sessionStarted; sessionTranslations = 0; sessionCharacters = 0
         toast("Session restarted")
     }
 
@@ -1560,12 +1579,14 @@ final class TranslatorEngine: ObservableObject {
     func deleteHistory(ids: Set<UUID>) {
         undoHistory = history.filter { ids.contains($0.id) }
         history.removeAll { ids.contains($0.id) }
+        flushHistorySave()
         toast("Deleted. Undo is available in History.")
     }
 
     func eraseHistory() {
         undoHistory = nil
         history = []
+        historyWriter.cancel()      // the empty list must not be written again after the keys are removed
         ud.removeObject(forKey: "historyData")
         ud.removeObject(forKey: "screenlingo.history.v1")
     }
@@ -1576,6 +1597,7 @@ final class TranslatorEngine: ObservableObject {
         history += saved.filter { !existing.contains($0.id) }
         history.sort { $0.date > $1.date }
         undoHistory = nil
+        flushHistorySave()
         toast("History restored")
     }
 
@@ -1594,9 +1616,12 @@ final class TranslatorEngine: ObservableObject {
     func importHistory(_ data: Data) -> Bool {
         guard data.count < 5_000_000, let entries = try? JSONDecoder().decode([HistoryItem].self, from: data) else { return false }
         var ids = Set(history.map(\.id))
-        history += entries.filter { ids.insert($0.id).inserted }
-        history = Array(history.sorted { $0.date > $1.date }.prefix(historyCapacity))
+        var merged = history
+        merged += entries.filter { ids.insert($0.id).inserted }
+        merged.sort { $0.date > $1.date }
+        history = HistoryPolicy.trimmed(merged, capacity: historyCapacity)   // starred entries are never cut (E1)
         applyHistoryRetention()
+        flushHistorySave()
         return true
     }
 
@@ -1608,7 +1633,8 @@ final class TranslatorEngine: ObservableObject {
     }
 
     func applyStorageSettings() {
-        if history.count > historyCapacity { history = Array(history.prefix(historyCapacity)) }
+        let fitted = HistoryPolicy.trimmed(history, capacity: historyCapacity)
+        if fitted.count != history.count { history = fitted; flushHistorySave() }
         if ram.values.count > max(500, min(6000, int("memoryRAMCapacity", 3000))) { trimCache(); memoryDirty = true }
         saveMemory()
     }
@@ -1655,13 +1681,16 @@ final class TranslatorEngine: ObservableObject {
         // Private translations are excluded when history is populated in show().
         // Explicit edits/deletions of existing history must still survive restart.
         guard flag("saveHistory", true) else { return }
+        let started = ProcessInfo.processInfo.systemUptime
         let days = int("historyRetentionDays", 0)
         let cutoff = days > 0 ? Date().addingTimeInterval(-Double(days) * 86400) : Date.distantPast
-        let retained = Array(history.filter { $0.starred || $0.date >= cutoff }.prefix(historyCapacity))
+        let retained = HistoryPolicy.trimmed(history.filter { $0.starred || $0.date >= cutoff }, capacity: historyCapacity)
         if let d = try? JSONEncoder().encode(retained) { ud.set(d, forKey: "historyData") }
+        diag.noteHistorySave(ms: (ProcessInfo.processInfo.systemUptime - started) * 1000)
     }
-    private func loadHistory() {
-        guard flag("saveHistory", true) else { return }
+
+    /// The stored Library as it is on disk (current key first, then the oldest key), or nil when there is none.
+    private func storedHistory() -> [HistoryItem]? {
         struct Stored: Decodable {
             let id: UUID?
             let original: String
@@ -1673,18 +1702,37 @@ final class TranslatorEngine: ObservableObject {
             let note: String?
         }
         let data = ud.data(forKey: "historyData") ?? ud.data(forKey: "screenlingo.history.v1")
-        guard let data, let records = try? JSONDecoder().decode([Stored].self, from: data) else { return }
-        history = records.map { HistoryItem(id: $0.id ?? UUID(), original: $0.original,
-                                            translated: $0.translated, date: $0.date, starred: $0.starred ?? false,
-                                            sourceLanguage: $0.sourceLanguage, targetLanguage: $0.targetLanguage, note: $0.note) }
+        guard let data, let records = try? JSONDecoder().decode([Stored].self, from: data) else { return nil }
+        return records.map { HistoryItem(id: $0.id ?? UUID(), original: $0.original,
+                                         translated: $0.translated, date: $0.date, starred: $0.starred ?? false,
+                                         sourceLanguage: $0.sourceLanguage, targetLanguage: $0.targetLanguage, note: $0.note) }
+    }
+
+    private func loadHistory() {
+        guard flag("saveHistory", true), let stored = storedHistory() else { return }
+        history = HistoryPolicy.trimmed(stored, capacity: historyCapacity)
         applyHistoryRetention()
+    }
+
+    /// 2.2.1 (U5): switching "Save translation history" off no longer deletes the stored Library; it only stops
+    /// saving and loading. Switching it on again brings the stored Library back and merges it with this session's items.
+    func historySavingChanged() {
+        guard flag("saveHistory", true), let stored = storedHistory() else { return }
+        var ids = Set(history.map(\.id))
+        var merged = history
+        merged += stored.filter { ids.insert($0.id).inserted }
+        merged.sort { $0.date > $1.date }
+        history = HistoryPolicy.trimmed(merged, capacity: historyCapacity)
+        applyHistoryRetention()
+        flushHistorySave()
     }
 
     func applyHistoryRetention() {
         let days = int("historyRetentionDays", 0)
         guard days > 0 else { return }
         let cutoff = Date().addingTimeInterval(-Double(days) * 86400)
-        history.removeAll { !$0.starred && $0.date < cutoff }
+        let kept = history.filter { $0.starred || $0.date >= cutoff }
+        if kept.count != history.count { history = kept }     // no write when nothing expired (E15)
     }
 
     // MARK: Packets from the extension
@@ -1727,7 +1775,7 @@ final class TranslatorEngine: ObservableObject {
             startupWarmupTask = nil
             idleValidationTask?.cancel()
             idleValidationTask = nil
-            sessionStarted = now
+            sessionStarted = now; limitBase = now
             sessionTranslations = 0; sessionCharacters = 0
             diag.log("Capture connected (extension v\(p.version))")
             diag.noteRuntimeState("capture_connected")
@@ -3343,10 +3391,12 @@ final class TranslatorEngine: ObservableObject {
         if history.first?.original != text {
             sessionTranslations += 1; sessionCharacters += text.count
             if memoryTestMode.allowsHistoryInsertion && !flag("privateSession", false) {
-                history.insert(HistoryItem(original: text, translated: result,
-                                           sourceLanguage: sourceCode == "auto" ? detectedLang : sourceCode,
-                                           targetLanguage: targetCode), at: 0)
-                if history.count > historyCapacity { history.removeLast() }
+                // 2.2.1 (E1, E15): one mutation (one scheduled write), and starred items are never trimmed.
+                var next = history
+                next.insert(HistoryItem(original: text, translated: result,
+                                        sourceLanguage: sourceCode == "auto" ? detectedLang : sourceCode,
+                                        targetLanguage: targetCode), at: 0)
+                history = HistoryPolicy.trimmed(next, capacity: historyCapacity)
             }
             if flag("speak", false) { speak(result) }
             if flag("haptics", false) {
@@ -4242,7 +4292,7 @@ final class TranslatorEngine: ObservableObject {
     }
 
     func toggleStar(_ id: UUID) {
-        if let i = history.firstIndex(where: { $0.id == id }) { history[i].starred.toggle() }
+        if let i = history.firstIndex(where: { $0.id == id }) { history[i].starred.toggle(); flushHistorySave() }
     }
 
     // iOS 18 path (needs the hosted .translationTask view in RootView)
@@ -4411,19 +4461,30 @@ final class TranslatorEngine: ObservableObject {
         }
         let source = Locale.Language(identifier: code)
         let target = Locale.Language(identifier: targetCode)
+        let requested: TranslationSession.Configuration
         if strategy == .lowLatency {
             guard #available(iOS 26.4, *) else {
                 downloadMessage = "Explicit Low Latency requires iOS 26.4 or newer."
                 return
             }
-            downloadConfig = .init(source: source, target: target, preferredStrategy: .lowLatency)
+            requested = .init(source: source, target: target, preferredStrategy: .lowLatency)
         } else {
             // A new configuration allows the hosted view to request permission
             // for the Apple Default pack without touching any saved translations.
-            downloadConfig = .init(source: source, target: target)
+            requested = .init(source: source, target: target)
+        }
+        lastDownloadCode = code
+        downloadInFlight = code
+        if downloadConfig == requested {
+            // The same request again (for example "Try again" after a failure): an unchanged value would not run
+            // the hosted translation task a second time, and the spinner would never stop.
+            downloadConfig?.invalidate()
+        } else {
+            downloadConfig = requested
         }
     }
     func runDownload(_ session: TranslationSession) async {
+        defer { downloadInFlight = nil }       // success, failure or cancellation: the spinner always stops (U4)
         let workContext = contextRevision
         var prepared = false
         do {

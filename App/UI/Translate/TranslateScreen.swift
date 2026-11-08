@@ -42,6 +42,8 @@ struct TranslateScreen: View {
                     if setupState == "skipped" { finishSetupRow }
                     pairTitle
                     if composing {
+                        // 2.2.1 (U2): capture is paused while typing; say so instead of showing nothing about the session.
+                        if snap.phase == .typing { PhaseHeader(phase: snap.phase, mode: snap.modeName) }
                         ComposeResult(engine: engine, translated: snap.translated, original: snap.original) { endCompose() }
                     } else if snap.phase.isSession {
                         sessionHero
@@ -74,6 +76,8 @@ struct TranslateScreen: View {
             .fullScreenCover(isPresented: $focus) { FocusMode(engine: engine) }
             .onChange(of: translationSystem) { _, _ in engine.translationSystemChanged() }
             .onChange(of: area) { _, _ in engine.syncConfig() }
+            // The engine ends typing mode when the app goes to the background (U2); leave the compose view with it.
+            .onChange(of: snap.manual) { _, manual in if !manual && composing { composing = false } }
             .onChange(of: snap.phase) { old, new in
                 if case .attention = new, old != new { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
                 if new == .live, old == .starting { UINotificationFeedbackGenerator().notificationOccurred(.success) }

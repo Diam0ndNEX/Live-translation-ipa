@@ -21,16 +21,17 @@ struct DashboardFacts: Equatable {
     var extensionVersion: String
     var capture: CaptureReadiness.State
     var targetCode: String
+    var manual: Bool
     @MainActor static func read(_ e: TranslatorEngine) -> DashboardFacts {
         DashboardFacts(system: e.activeTranslationSystem, pending: e.pendingTranslationSystem, availability: e.modeAvailability,
                        captureAlive: e.captureAlive, paused: e.paused, pipActive: e.pipActive, memoryCount: e.memoryCount,
                        unconsumedSpeculation: "\(e.unconsumedSpeculation)", sourceCode: e.sourceCode,
                        sourceReady: e.langStatus[e.sourceCode] == .installed, extensionVersion: e.extensionVersion,
-                       capture: e.captureStatus, targetCode: e.targetCode)
+                       capture: e.captureStatus, targetCode: e.targetCode, manual: e.manualMode)
     }
     var phase: SessionPhase {
         SessionPhase.derive(capture: capture, alive: captureAlive, paused: paused, pipActive: pipActive,
-                            packReady: sourceCode == "auto" || sourceReady)
+                            packReady: sourceCode == "auto" || sourceReady, manual: manual)
     }
 }
 

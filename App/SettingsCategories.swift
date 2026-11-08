@@ -118,7 +118,7 @@ struct HistoryStorageSettings: View {
                 }
                 .disabled(!saveHistory)
             } header: { Text("Library history") } footer: {
-                Text("Your Library is separate from remembered translations. Changing how long it is kept does not clear translation memory.")
+                Text("Starred items are never removed by the limit above. Turning history off stops saving and stops loading it; what is already saved stays on this phone until you delete it below, and comes back if you turn history on again. Your Library is separate from remembered translations.")
             }
 
             Section {
@@ -143,11 +143,10 @@ struct HistoryStorageSettings: View {
             ResetSection(keys: ["saveHistory", "historyRetentionDays", "historyCapacity"])
         }
         .settingsPage("History and storage")
+        // 2.2.1 (U5): off = stop saving and stop loading; the stored Library stays until "Delete translation history".
+        // On again = the stored Library comes back.
         .onChange(of: saveHistory) { _, enabled in
-            if !enabled {
-                UserDefaults.standard.removeObject(forKey: "historyData")
-                UserDefaults.standard.removeObject(forKey: "screenlingo.history.v1")
-            }
+            if enabled { engine.historySavingChanged() }
         }
         .onChange(of: retentionDays) { _, _ in engine.applyHistoryRetention() }
         .onChange(of: historyCapacity) { _, _ in engine.applyStorageSettings() }

@@ -28,6 +28,8 @@ struct TranslateSnapshot: Equatable {
     var recentPairs: [String]
     var recent: [RecentLine]
     var prep = PrepFacts()
+    /// True while the compose bar has paused capture (U2).
+    var manual = false
 
     var hasOutput: Bool { !translated.isEmpty }
     var canSwap: Bool { sourceCode != "auto" }
@@ -47,7 +49,8 @@ struct TranslateSnapshot: Equatable {
     @MainActor static func read(_ e: TranslatorEngine) -> TranslateSnapshot {
         let pair = PairSnapshot.read(e)
         let phase = SessionPhase.derive(capture: e.captureStatus, alive: e.captureAlive, paused: e.paused,
-                                        pipActive: e.pipActive, packReady: pair.packState != .needsDownload && pair.packState != .unsupported)
+                                        pipActive: e.pipActive, packReady: pair.packState != .needsDownload && pair.packState != .unsupported,
+                                        manual: e.manualMode)
         let stage: CaptionStage = e.isTranslating ? .translating : (e.waitingToDisplay || e.translated.isEmpty ? .reading : .showing)
         let recent = e.history.prefix(5).map {
             RecentLine(id: $0.id, translated: $0.translated, original: $0.original, date: $0.date)
@@ -60,7 +63,7 @@ struct TranslateSnapshot: Equatable {
             translated: e.translated, original: e.original, stage: stage, held: e.frozen, paused: e.paused,
             pipActive: e.pipActive, sessionStarted: e.sessionStarted,
             modeName: e.activeTranslationSystem.shortName, recentPairs: pair.recent, recent: Array(recent),
-            prep: PrepFacts.read(e))
+            prep: PrepFacts.read(e), manual: e.manualMode)
     }
 }
 

@@ -50,13 +50,19 @@ struct PairSnapshot: Equatable {
     var languages: [LangItem]
     var recent: [String]
     var downloadMessage: String
+    /// The language being downloaded right now, from the engine (U4).
+    var downloadInFlight: String?
+    /// The language to retry when the last download failed.
+    var downloadRetryCode: String?
 
     var sourcePackCode: String { source == "auto" ? detected : source }
     var packReady: Bool { statuses[sourcePackCode] == .installed }
     @MainActor static func read(_ e: TranslatorEngine) -> PairSnapshot {
         PairSnapshot(source: e.sourceCode, target: e.targetCode, detected: e.detectedLang, locked: e.lockedLang != nil,
                      checking: e.languageStatusChecking, summary: e.languageSummary, statuses: e.langStatus,
-                     languages: e.languages, recent: e.recentPairs, downloadMessage: e.downloadMessage)
+                     languages: e.languages, recent: e.recentPairs, downloadMessage: e.downloadMessage,
+                     downloadInFlight: e.downloadInFlight,
+                     downloadRetryCode: e.downloadMessage.hasPrefix("Download failed") ? e.lastDownloadCode : nil)
     }
 }
 

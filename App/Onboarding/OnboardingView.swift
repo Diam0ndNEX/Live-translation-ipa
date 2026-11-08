@@ -52,10 +52,9 @@ struct OnboardingView: View {
                     CheckRow(number: 2, title: "Start a broadcast", done: broadcastDone,
                              detail: "Tap the button, choose ScreenLingo Capture, then Start Broadcast.") {
                         HStack(spacing: KitSpace.row) {
-                            StartButton(live: broadcastDone) {
-                                engine.captureRequested()
-                                if !engine.pipActive { engine.startPiP() }
-                            }
+                            // Capture only (2.2.1, U3). iOS may refuse to open the floating window while the capture sheet
+                            // is coming up, so step 3 has its own button.
+                            StartButton(live: broadcastDone) { engine.captureRequested() }
                             .scaleEffect(0.6)
                             .frame(width: 106, height: 106)
                             Text(capture.value.status.title).font(.subheadline).foregroundStyle(.secondary)
@@ -63,9 +62,12 @@ struct OnboardingView: View {
                     }
                     CheckRow(number: 3, title: "Floating window is on screen", done: windowDone,
                              detail: windowDone ? "It floats over other apps while you watch."
-                                                : "It opens with the broadcast. Switch to any app with text to see it.") {
-                        if !windowDone && broadcastDone {
-                            Button("Show the window") { engine.startPiP() }.buttonStyle(.bordered).frame(minHeight: 44)
+                                                : "After the broadcast starts, tap the button. Then switch to any app with text.") {
+                        if !windowDone {
+                            Button("Open the floating window") { engine.startPiP() }
+                                .buttonStyle(.bordered)
+                                .frame(minHeight: 44)
+                                .disabled(!broadcastDone)
                         }
                     }
                 }

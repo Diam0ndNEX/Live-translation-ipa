@@ -494,7 +494,7 @@ actor DiagnosticExportWriter {
         // nonfinite caller-supplied measurements. Reconstruct from bounded,
         // known timing statistics instead of copying potentially private labels.
         let allowedMetrics: Set<String> = [
-            "memoryLookupMs", "memoryWriteMs", "ocrMs", "translationMs",
+            "memoryLookupMs", "memoryWriteMs", "historySaveMs", "ocrMs", "translationMs",
             "enqueueLatencyMs", "finalOCRMs", "transportMs", "confirmationMs",
             "deliveryFilteringMs", "queueMs", "processingMs", "displayHoldMs",
             "renderingMs", "speculativeModelMs", "confirmedModelMs", "modelBatchMs",

@@ -31,6 +31,12 @@ jobs:
         run: python3 scripts/test_thermal_parity.py
       - name: Verify v1.9.9 recovery and OCR regression contract
         run: python3 scripts/test_v199_performance.py
+      - name: Verify v2.2.1 source contracts
+        run: python3 scripts/test_v221_contracts.py
+      - name: Library history rules and debounced save (2.2.1 E1, E15)
+        run: |
+          swiftc -parse-as-library Shared/HistoryPolicy.swift Tests/HistoryPolicy/main.swift -o /tmp/history-policy-tests
+          /tmp/history-policy-tests
       - name: Check pipeline regressions
         run: |
           swiftc Shared/*.swift App/TextIntelligence.swift App/CaptionAssembly.swift App/MemoryWriter.swift App/PipelineSimulation.swift Tests/main.swift -o /tmp/pipeline-tests

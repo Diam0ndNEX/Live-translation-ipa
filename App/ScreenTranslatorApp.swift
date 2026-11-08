@@ -70,6 +70,8 @@ struct RootView: View {
                 engine.diag.noteExecutionPhase(p == .active ? "active" : (p == .background ? "background" : "inactive"), pipActive: engine.pipActive)
                 if p == .active { engine.server.start() }
                 if p == .background {
+                    if engine.manualMode { engine.endWorkspace() } // typing mode pauses capture; do not leave it paused behind the person's back (U2)
+                    engine.flushHistorySave()                       // the Library is written after a second of quiet (E15)
                     engine.diag.checkpointRun() // Test Run crash safety if iOS ends the app in the background
                     engine.saveMemory(force: true)
                     let backgroundTask = MemoryBackgroundTask()

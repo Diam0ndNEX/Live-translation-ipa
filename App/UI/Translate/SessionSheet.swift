@@ -102,6 +102,7 @@ struct SessionFacts: Equatable {
         case .starting: return "Waiting for the first frame from the broadcast."
         case .live: return "Reading your screen and translating."
         case .paused: return "Capture continues; translation is paused."
+        case .typing: return "You are typing text, so capture is paused. Tap Done on the Translate tab to continue."
         case .attention(let reason): return "\(reason.message). \(captureTitle)."
         }
     }
@@ -110,7 +111,8 @@ struct SessionFacts: Equatable {
         let pair = PairSnapshot.read(e)
         return SessionFacts(
             phase: SessionPhase.derive(capture: e.captureStatus, alive: e.captureAlive, paused: e.paused, pipActive: e.pipActive,
-                                       packReady: pair.packState != .needsDownload && pair.packState != .unsupported),
+                                       packReady: pair.packState != .needsDownload && pair.packState != .unsupported,
+                                       manual: e.manualMode),
             started: e.sessionStarted, modeName: e.activeTranslationSystem.shortName,
             translations: e.sessionTranslations, characters: e.sessionCharacters,
             paused: e.paused, pipActive: e.pipActive, captureTitle: e.captureStatus.title)

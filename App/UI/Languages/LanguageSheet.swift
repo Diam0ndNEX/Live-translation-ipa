@@ -14,7 +14,6 @@ struct LanguageSheet: View {
     @StateObject private var pair: EngineSlice<PairSnapshot>
     @State private var query = ""
     @State private var side: LanguageSide = .target
-    @State private var downloading: Set<String> = []
     @State private var showDownloaded = false
     @State private var showUnsupported = false
 
@@ -89,7 +88,13 @@ struct LanguageSheet: View {
                 Section("Frequently used") { ForEach(frequent) { row($0) } }
             }
             if !p.downloadMessage.isEmpty {
-                Section { Label(p.downloadMessage, systemImage: "arrow.down.circle").font(.subheadline) }
+                Section {
+                    Label(p.downloadMessage, systemImage: p.downloadRetryCode == nil ? "arrow.down.circle" : "exclamationmark.triangle")
+                        .font(.subheadline)
+                    if let retry = p.downloadRetryCode {
+                        Button("Try again") { engine.download(retry) }.frame(minHeight: 44)
+                    }
+                }
             }
             if p.statuses.isEmpty {
                 Section { HStack(spacing: KitSpace.tight) { ProgressView(); Text("Checking installed packs…").foregroundStyle(.secondary) } }
@@ -121,7 +126,6 @@ struct LanguageSheet: View {
         .animation(KitMotion.spring, value: current)
         .searchable(text: $query, prompt: "Search languages")
         .refreshable { await engine.refreshStatus() }
-        .onChange(of: p.statuses) { _, new in downloading = downloading.filter { new[$0] != .installed } }
     }
 
     private func disclosureHeader(_ title: String, expanded: Binding<Bool>, forced: Bool) -> some View {
@@ -171,10 +175,10 @@ struct LanguageSheet: View {
     @ViewBuilder private func packControl(_ item: LangItem) -> some View {
         switch status(item.code) {
         case .supported:
-            if downloading.contains(item.code) {
+            if p.downloadInFlight == item.code {
                 ProgressView().accessibilityLabel("Downloading")
             } else {
-                Button("Get") { downloading.insert(item.code); engine.download(item.code) }
+                Button("Get") { engine.download(item.code) }
                     .buttonStyle(.borderedProminent)
                     .buttonBorderShape(.capsule)
                     .controlSize(.small)

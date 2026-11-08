@@ -32,6 +32,8 @@ enum PhaseTone: Equatable { case neutral, accent, caution, failure }
 
 enum SessionPhase: Equatable {
     case idle, starting, live, paused
+    /// 2.2.1 (U2): the compose bar is open. Capture is paused on purpose until Done is tapped.
+    case typing
     case attention(AttentionReason)
 
     var word: String {
@@ -40,6 +42,7 @@ enum SessionPhase: Equatable {
         case .starting: return "Starting"
         case .live: return "Live"
         case .paused: return "Paused"
+        case .typing: return "Typing mode"
         case .attention(let reason): return reason.message
         }
     }
@@ -49,6 +52,7 @@ enum SessionPhase: Equatable {
         case .starting: return "circle.dotted"
         case .live: return "circle.fill"
         case .paused: return "pause.circle.fill"
+        case .typing: return "keyboard"
         case .attention: return "exclamationmark.triangle.fill"
         }
     }
@@ -56,7 +60,7 @@ enum SessionPhase: Equatable {
         switch self {
         case .idle: return .neutral
         case .starting, .live: return .accent
-        case .paused: return .caution
+        case .paused, .typing: return .caution
         case .attention(let reason): return reason.stopsTranslation ? .failure : .caution
         }
     }
@@ -64,7 +68,8 @@ enum SessionPhase: Equatable {
     var isSession: Bool { self != .idle }
 
     /// One mapping from engine facts to a phase, used by every screen.
-    static func derive(capture: CaptureReadiness.State, alive: Bool, paused: Bool, pipActive: Bool, packReady: Bool) -> SessionPhase {
+    static func derive(capture: CaptureReadiness.State, alive: Bool, paused: Bool, pipActive: Bool, packReady: Bool,
+                       manual: Bool = false) -> SessionPhase {
         switch capture {
         case .lost: return .attention(.captureLost)
         case .timedOut: return .attention(.timedOut)
@@ -72,6 +77,8 @@ enum SessionPhase: Equatable {
         case .waiting, .connected: return .starting
         case .active:
             if !packReady { return .attention(.packMissing) }
+            // The compose bar pauses capture. Without this the header read Live while nothing was translating (U2).
+            if manual { return .typing }
             if paused { return .paused }
             if alive && !pipActive { return .attention(.windowClosed) }
             return .live
