@@ -122,12 +122,23 @@ struct TranslateScreen: View {
             StartButton(live: false, onTap: startTapped)
                 .modifier(MorphTarget(namespace: reduceMotion ? nil : morph))
                 .background { RippleBackdrop(live: false).frame(width: 260, height: 260) }
-            Text("Tap to start").font(.title3.weight(.semibold))
+            Text("Start capture").font(.title3.weight(.semibold))
             Text("Choose ScreenLingo Capture in the system sheet, then Start Broadcast.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
+            // 2.2.0: the floating window has its own button. It used to be opened by the same tap as the
+            // system capture sheet, and iOS may refuse to open it while that sheet is coming up.
+            Button { if snap.pipActive { engine.pip.stop() } else { engine.startPiP() } } label: {
+                Label(snap.pipActive ? "Close floating window" : "Open floating window",
+                      systemImage: snap.pipActive ? "pip.exit" : "pip.enter")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(minHeight: 44)
+                    .padding(.horizontal, KitSpace.row)
+            }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
         }
         .frame(maxWidth: .infinity)
     }
@@ -368,8 +379,8 @@ struct TranslateScreen: View {
     }
 
     private func startTapped() {
+        // Capture only. The floating window is opened with its own button (or "Show window" if it is closed).
         engine.captureRequested()
-        if !engine.pipActive { engine.startPiP() }
     }
 
     private func endCompose() {
