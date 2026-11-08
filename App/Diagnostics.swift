@@ -304,6 +304,9 @@ final class Diagnostics: ObservableObject {
     private var completedWorkRecoveredUnits = 0
     private var lookupSamples: [Double] = []
     private var writeSamples: [Double] = []
+    /// 2.2.1 (D10): measurement only. Queue wait before a memory lookup starts, and the cost of a health query.
+    private var lookupWaitSamples: [Double] = []
+    private var memoryHealthSamples: [Double] = []
     /// 2.2.1 (E15): time to encode and write the Library once, in milliseconds.
     private var historySaveSamples: [Double] = []
     private(set) var recorderCosts = RecorderCosts()
@@ -884,6 +887,8 @@ final class Diagnostics: ObservableObject {
             hardwareModel: Self.hardwareModelCode, settings: settings, health: currentHealth, counters: counters,
             distributions: ["memoryLookupMs": DiagnosticDistribution(lookupSamples), "memoryWriteMs": DiagnosticDistribution(writeSamples),
                 "historySaveMs": DiagnosticDistribution(historySaveSamples),
+                "memoryLookupWaitMs": DiagnosticDistribution(lookupWaitSamples),
+                "memoryHealthMs": DiagnosticDistribution(memoryHealthSamples),
                 "ocrMs": DiagnosticDistribution(ocr.map { $0.v }), "translationMs": DiagnosticDistribution(translate.map { $0.v }),
                 "enqueueLatencyMs": DiagnosticDistribution(latency.map { $0.v }),
                 "finalOCRMs": DiagnosticDistribution(pipeline.map { $0.stages.recognition }),
@@ -1312,6 +1317,20 @@ final class Diagnostics: ObservableObject {
 
     func recordLatency(ms: Double) { add(\.latency, ms) }
 
+    /// 2.2.1 (D10): how long a persistent-memory lookup waited behind other work on the store actor.
+    func noteMemoryLookupWait(_ ms: Double?) {
+        guard enabled, let ms, ms.isFinite, ms >= 0 else { return }
+        lookupWaitSamples.append(ms)
+        if lookupWaitSamples.count > 600 { lookupWaitSamples.removeFirst(lookupWaitSamples.count - 600) }
+    }
+
+    /// 2.2.1 (D10): how long a memory health query ran on the store actor (it ends every save).
+    func noteMemoryHealth(_ ms: Double?) {
+        guard enabled, let ms, ms.isFinite, ms >= 0 else { return }
+        memoryHealthSamples.append(ms)
+        if memoryHealthSamples.count > 300 { memoryHealthSamples.removeFirst(memoryHealthSamples.count - 300) }
+    }
+
     /// One Library write (E15). Bounded like the memory timings.
     func noteHistorySave(ms: Double) {
         guard enabled, ms.isFinite, ms >= 0 else { return }
@@ -1351,7 +1370,7 @@ final class Diagnostics: ObservableObject {
         structuredEventsDropped = 0; idMapResets = 0; legacyContextResets = 0; subtitleTracesDropped = 0
         thermalStartLevel = ProcessInfo.processInfo.thermalState.rawValue
         thermalMaxLevel = ProcessInfo.processInfo.thermalState.rawValue
-        memoryOutcomes = [:]; lookupSamples = []; writeSamples = []; historySaveSamples = []
+        memoryOutcomes = [:]; lookupSamples = []; writeSamples = []; historySaveSamples = []; lookupWaitSamples = []; memoryHealthSamples = []
         modelTimingSamples = [:]; completedWorkRecoveredUnits = 0
         sharedModelUnits = 0; sharedConfirmedModelUnits = 0; memoryAwareSpeculationSkipped = 0; ramCaptionBypasses = 0; exactCaptionHits = 0; exactUnitsCoalesced = 0
         speculativeUnitCounts = [:]; queueWaitSamples = [:]

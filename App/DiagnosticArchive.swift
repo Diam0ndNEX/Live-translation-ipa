@@ -503,7 +503,7 @@ actor DiagnosticExportWriter {
         // nonfinite caller-supplied measurements. Reconstruct from bounded,
         // known timing statistics instead of copying potentially private labels.
         let allowedMetrics: Set<String> = [
-            "memoryLookupMs", "memoryWriteMs", "historySaveMs", "ocrMs", "translationMs",
+            "memoryLookupMs", "memoryWriteMs", "historySaveMs", "memoryLookupWaitMs", "memoryHealthMs", "ocrMs", "translationMs",
             "enqueueLatencyMs", "finalOCRMs", "transportMs", "confirmationMs",
             "deliveryFilteringMs", "queueMs", "processingMs", "displayHoldMs",
             "renderingMs", "speculativeModelMs", "confirmedModelMs", "modelBatchMs",
@@ -1283,6 +1283,16 @@ enum CombinedDiagnosticReport {
         return String(format: "%.0f", value)
     }
 
+    /// 2.2.1 (D10): share of persistent-memory lookups that hit the 8 ms deadline, as "n of m (x%)".
+    static func memoryTimeoutShare(_ session: DiagnosticSessionExport) -> String {
+        let outcomes = ["ramHit", "persistentHit", "legacyHit", "normalizedHit", "speculativeHit", "miss", "timeout",
+                        "compatibilityRejected", "databaseUnavailable"]
+        let total = outcomes.reduce(0) { $0 + max(0, session.counters[$1, default: 0]) }
+        guard total > 0 else { return "–" }
+        let timeouts = max(0, session.counters["timeout", default: 0])
+        return "\(timeouts) of \(total) (\(Int((Double(timeouts) / Double(total) * 100).rounded()))%)"
+    }
+
     private static func thermalName(_ level: Int) -> String {
         switch level {
         case 0: return "nominal"
@@ -1530,11 +1540,11 @@ enum CombinedDiagnosticReport {
 
         // 2.2.1 (D8): the variables the next A/B tests change, and a warning for sessions with no timing.
         out.append("")
-        out.append("| | hot path | Hybrid scheduler | detailed | thermal start/end/max | focused/strict | identical-frame holds | manual |")
-        out.append("|---|---|---|---|---|---|---|---|")
+        out.append("| | hot path | Hybrid scheduler | detailed | thermal start/end/max | focused/strict | identical-frame holds | manual | memory wait P50/P95 | health P50/P95 | memory timeouts |")
+        out.append("|---|---|---|---|---|---|---|---|---|---|---|")
         for (i, session) in selected.enumerated() {
             let s = session.settings
-            out.append("| \(labels[i]) | \(s["hotPathAB"] ?? "?") | \(s["hybridSchedulerAB"] ?? "?") | \(s["detailedCollection"] ?? "?")\(s["detailSuspended"] == "true" ? " (suspended: thermal)" : "") | \(s["thermalStart"] ?? "?")/\(s["thermalEnd"] ?? "?")/\(s["thermalMax"] ?? "?") | \(s["focusedCaptionOCR"] ?? "?")/\(s["strictCaptionIdentity"] ?? "?") | \(session.counters["identicalFrameHolds", default: 0]) | \(session.counters["manualTranslations", default: 0]) |")
+            out.append("| \(labels[i]) | \(s["hotPathAB"] ?? "?") | \(s["hybridSchedulerAB"] ?? "?") | \(s["detailedCollection"] ?? "?")\(s["detailSuspended"] == "true" ? " (suspended: thermal)" : "") | \(s["thermalStart"] ?? "?")/\(s["thermalEnd"] ?? "?")/\(s["thermalMax"] ?? "?") | \(s["focusedCaptionOCR"] ?? "?")/\(s["strictCaptionIdentity"] ?? "?") | \(session.counters["identicalFrameHolds", default: 0]) | \(session.counters["manualTranslations", default: 0]) | \(ms(session.distributions["memoryLookupWaitMs"]?.p50))/\(ms(session.distributions["memoryLookupWaitMs"]?.p95)) | \(ms(session.distributions["memoryHealthMs"]?.p50))/\(ms(session.distributions["memoryHealthMs"]?.p95)) | \(memoryTimeoutShare(session)) |")
         }
         for (i, session) in selected.enumerated() where (session.distributions["enqueueLatencyMs"]?.count ?? 0) == 0 {
             out.append("")

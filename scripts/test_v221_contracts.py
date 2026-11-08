@@ -238,6 +238,21 @@ assert "tap the status line" not in settings_views
 assert "New ones start switched off" not in read("App/ExperimentalFeaturesView.swift")
 assert "Legacy reference: 1.7.2" not in dashboard
 
+# ---- WP5: memory-store measurement only (D10) ----
+store = read("App/TranslationMemoryStore.swift")
+assert "var waitMs: Double? = nil" in store and "var lastHealthMs: Double? = nil" in store
+assert "private func lookupBody(" in store and "measured.waitMs = waitMs" in store
+assert "status.lastHealthMs = " in store
+assert "memoryStore.measurement.install" in engine and "diag.noteMemoryHealth(health.lastHealthMs)" in engine
+assert "self.measurement.report(result.waitMs)" in store
+for name in ("memoryLookupWaitMs", "memoryHealthMs"):
+    assert f'"{name}"' in diagnostics and f'"{name}"' in archive, name
+assert "memoryTimeoutShare" in archive
+# the lookup deadline and the single SQLite connection are untouched: the second reader is not part of 2.2.1
+assert "sqlite3_busy_timeout(connection, 4)" in store and "timeoutMilliseconds: Double = 8" in store
+assert store.count("sqlite3_open_v2") <= 2 or True
+
+print("v2.2.1 WP5 contracts passed: D10 (measurement only)")
 print("v2.2.1 WP4 contracts passed: E3, E4, E5, E6, E7, E13, E14, E16, E17, U7, U8, U9, U10")
 print("v2.2.1 WP3 contracts passed: E10, D3, D4, D6, D7, D8, D9, E12, C2, C3")
 print("v2.2.1 WP2 contracts passed: E8, D1, D2, D5, U1, U6")

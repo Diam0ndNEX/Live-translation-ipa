@@ -3486,6 +3486,10 @@ final class TranslatorEngine: ObservableObject {
 
     private func loadMemory() {
         diag.memoryStore = memoryStore
+        // 2.2.1 (D10): the store reports each lookup's queue wait; it is recorded here so the lookup call sites stay untouched.
+        memoryStore.measurement.install { [weak self] ms in
+            Task { @MainActor in self?.diag.noteMemoryLookupWait(ms) }
+        }
         let legacy = [memoryURL, FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("translation-memory.json")]
         Task { [weak self] in
             guard let self else { return }
@@ -3641,6 +3645,7 @@ final class TranslatorEngine: ObservableObject {
     /// Reuse the health snapshot already returned after COMMIT. A second full
     /// health query would occupy the same SQLite actor that serves live lookups.
     private func applyMemoryHealth(_ health: MemoryStoreHealth) {
+        diag.noteMemoryHealth(health.lastHealthMs)
         memoryHealth = health
         memoryCount = health.totalEntries
         var diagnosticHealth = diag.memoryHealth

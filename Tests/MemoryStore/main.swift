@@ -45,6 +45,9 @@ import CryptoKit
             let preferredHit = await upgrade.lookup(key: preferred, timeoutMilliseconds: 50)
             let lowHit = await upgrade.lookup(key: low, timeoutMilliseconds: 50)
             precondition(preferredHit.value == "Preferred answer" && lowHit.value == "Historical fast answer")
+            // 2.2.1 D10: the measurement fields are filled and sane (measurement only, no behaviour change).
+            precondition((afterHealth.lastHealthMs ?? -1) >= 0, "health() reports its own duration")
+            precondition((preferredHit.waitMs ?? -1) >= 0 && (preferredHit.waitMs ?? 0) <= preferredHit.durationMs + 1, "lookup reports its queue wait")
             let retained = try Data(contentsOf: retainedSettings)
             precondition(retained == settings)
             precondition(FileManager.default.fileExists(atPath: oldJSON.path))

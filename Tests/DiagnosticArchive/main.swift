@@ -709,6 +709,19 @@ import Foundation
         let truncatedText = CombinedDiagnosticReport.markdown([truncated], version: "2.2.1", build: 104, generatedAt: Date())
         precondition(truncatedText.contains("dropped: 7 structured events, 2 correlation-ID map resets, 1 Legacy context resets, 4 subtitle traces"), "D6")
         precondition(truncatedText.contains("L1_F1") && truncatedText.contains("nominal/fair/fair") && truncatedText.contains("| 9 |"), "D8: variables row")
+        // 2.2.1 D10: wait, health and timeout share are reported.
+        let measured = DiagnosticSessionExport(id: UUID(), startedAt: Date(timeIntervalSince1970: 1_000),
+            endedAt: Date(timeIntervalSince1970: 1_600), appVersion: "2.2.1", systemVersion: "test", hardwareModel: "iPhoneTest1,1",
+            settings: [:], health: MemoryDiagnosticHealth(),
+            counters: ["timeout": 3, "persistentHit": 90, "miss": 7],
+            distributions: ["memoryLookupWaitMs": DiagnosticDistribution((1...40).map { Double($0) / 4 }),
+                            "memoryHealthMs": DiagnosticDistribution(Array(repeating: 12.0, count: 25))],
+            events: [], measurementBoundary: "test", textCapture: false)
+        precondition(CombinedDiagnosticReport.memoryTimeoutShare(measured) == "3 of 100 (3%)", "D10: timeout share")
+        precondition(CombinedDiagnosticReport.markdown([measured], version: "2.2.1", build: 104, generatedAt: Date()).contains("3 of 100 (3%)"), "D10: in report")
+        let archivedMeasure = try await writer.decode(try await writer.encode(measured))
+        precondition(archivedMeasure.distributions["memoryLookupWaitMs"]?.count == 40 &&
+                     archivedMeasure.distributions["memoryHealthMs"]?.count == 25, "D10: both distributions survive export")
         precondition(truncatedText.contains("has n = 0"), "D8: warning row for a session without samples")
 
         // 2.2.1 E10: the four events the engine emitted reach the exported trace instead of "redacted".

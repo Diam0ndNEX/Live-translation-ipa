@@ -22,6 +22,8 @@ struct MemoryStoreHealth: Codable, Sendable {
     var duplicateEntries = 0
     var categoryCounts: [String: Int] = [:]
     var lastVerifiedBackup: String? = nil
+    /// 2.2.1 (D10): how long the last health() took on the store actor. Measurement only.
+    var lastHealthMs: Double? = nil
 }
 
 struct MemoryLookupResult: Sendable {
@@ -29,6 +31,8 @@ struct MemoryLookupResult: Sendable {
     let origin: String
     let outcome: String
     let durationMs: Double
+    /// 2.2.1 (D10): time the lookup waited behind other work on the store actor before its query started.
+    var waitMs: Double? = nil
 }
 
 struct MemoryStoredEntry: Codable, Identifiable, Sendable {
@@ -66,8 +70,21 @@ private final class MemoryLookupCompletion: @unchecked Sendable {
 
 /// Owns all SQLite access. None of these operations run on MainActor. The persistent
 /// store is additive: evicting a RAM entry or saving a partial snapshot cannot erase it.
+/// Hands the queue wait of each executed lookup to whoever installed a handler (2.2.1, D10). Measurement only.
+final class MemoryLookupMeasurement: @unchecked Sendable {
+    private let lock = NSLock()
+    private var handler: (@Sendable (Double) -> Void)?
+    func install(_ handler: @escaping @Sendable (Double) -> Void) { lock.lock(); self.handler = handler; lock.unlock() }
+    func report(_ ms: Double?) {
+        guard let ms, ms.isFinite else { return }
+        lock.lock(); let current = handler; lock.unlock()
+        current?(ms)
+    }
+}
+
 actor TranslationMemoryStore {
     static let schemaVersion = 2
+    nonisolated let measurement = MemoryLookupMeasurement()
     let directory: URL
     private var db: OpaquePointer?
     private var lookupStatements: [String: OpaquePointer] = [:]
@@ -430,11 +447,20 @@ actor TranslationMemoryStore {
             }
             Task {
                 let result = await self.lookupNow(key: key, started: started, deadline: started + budget)
+                self.measurement.report(result.waitMs)
                 completion.finish(result)
             }
         }
     }
     private func lookupNow(key: String, started: Double, deadline: Double) -> MemoryLookupResult {
+        // 2.2.1 (D10): measure how long this lookup queued behind saves, health queries and other lookups.
+        let waitMs = (ProcessInfo.processInfo.systemUptime - started) * 1000
+        var measured = lookupBody(key: key, started: started, deadline: deadline)
+        measured.waitMs = waitMs
+        return measured
+    }
+
+    private func lookupBody(key: String, started: Double, deadline: Double) -> MemoryLookupResult {
         func result(_ value: String? = nil, _ origin: String = "none", _ outcome: String) -> MemoryLookupResult {
             MemoryLookupResult(value: value, origin: origin, outcome: outcome, durationMs: (ProcessInfo.processInfo.systemUptime - started) * 1000)
         }
@@ -827,6 +853,7 @@ actor TranslationMemoryStore {
     }
 
     func health() throws -> MemoryStoreHealth {
+        let healthBegan = ProcessInfo.processInfo.systemUptime
         status.totalEntries = Int(try scalar("SELECT COUNT(*) FROM memory_entries"))
         status.readyEntries = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE validation_state='ready'"))
         status.needsValidation = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE validation_state='needs_validation'"))
@@ -852,6 +879,8 @@ actor TranslationMemoryStore {
         status.databaseBytes = ["memory.sqlite","memory.sqlite-wal","memory.sqlite-shm"].reduce(0) {
             $0 + ((try? FileManager.default.attributesOfItem(atPath: directory.appendingPathComponent($1).path)[.size] as? NSNumber)?.int64Value ?? 0)
         }
+        // Set before the copy is returned, so the caller sees the time this query took.
+        status.lastHealthMs = (ProcessInfo.processInfo.systemUptime - healthBegan) * 1000
         return status
     }
 
