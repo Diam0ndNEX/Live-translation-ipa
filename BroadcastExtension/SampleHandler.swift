@@ -112,7 +112,12 @@ class SampleHandler: RPBroadcastSampleHandler {
     private func listen() {
         conn?.receiveMessage { [weak self] data, _, _, error in
             if let data, let cfg = try? JSONDecoder().decode(Config.self, from: data) { self?.config = cfg }
-            if error == nil { self?.listen() }
+            guard let error else { self?.listen(); return }
+            // 2.2.0: one receive error (for example the app was not listening for a moment) used to end this loop for
+            // the rest of the broadcast, so pause and area changes never arrived again. A deliberate cancel still
+            // ends it; anything else retries once a second until broadcastFinished clears the connection.
+            if case .posix(let code) = error, code == .ECANCELED { return }
+            DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1) { [weak self] in self?.listen() }
         }
     }
 
