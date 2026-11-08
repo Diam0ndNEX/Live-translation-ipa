@@ -20,7 +20,7 @@ struct PhaseHeader: View {
                 Text(line)
                     .font(.headline)
                     .foregroundStyle(phase.tone == .neutral ? Color.primary : phase.tone.color)
-                    .lineLimit(2)
+                    .lineLimit(4)
                     .multilineTextAlignment(.leading)
             }
             .frame(minHeight: 44, alignment: .leading)

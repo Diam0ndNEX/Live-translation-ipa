@@ -59,7 +59,15 @@ struct LiveCaption: View {
 private struct StageTrail: View {
     let stage: CaptionStage
     var body: some View {
-        HStack(spacing: KitSpace.row) {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: KitSpace.row) { steps }
+            VStack(alignment: .leading, spacing: KitSpace.unit) { steps }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Step: \(stage.title)")
+    }
+
+    @ViewBuilder private var steps: some View {
             ForEach(CaptionStage.allCases, id: \.self) { step in
                 HStack(spacing: KitSpace.unit) {
                     Image(systemName: step == stage ? "circle.fill" : "circle")
@@ -70,8 +78,5 @@ private struct StageTrail: View {
                         .foregroundStyle(step == stage ? Color.primary : Color.secondary)
                 }
             }
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Step: \(stage.title)")
     }
 }

@@ -190,18 +190,32 @@ struct TranslateScreen: View {
         }
     }
 
+    /// Four actions on one row; at large text sizes they fall back to two rows of two.
     private var actionRow: some View {
-        HStack(spacing: KitSpace.tight) {
-            action(snap.held ? "Release" : "Hold", snap.held ? "pin.slash" : "pin", enabled: snap.hasOutput) { engine.toggleFrozenOutput() }
-            action("Copy", "doc.on.doc", enabled: snap.hasOutput) {
-                UIPasteboard.general.string = snap.translated
-                feedback.show("Translation copied", severity: .success)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: KitSpace.tight) { holdButton; copyButton; listenButton; focusButton }
+            VStack(spacing: KitSpace.tight) {
+                HStack(spacing: KitSpace.tight) { holdButton; copyButton }
+                HStack(spacing: KitSpace.tight) { listenButton; focusButton }
             }
-            action("Listen", "speaker.wave.2", enabled: snap.hasOutput) { engine.speak(snap.translated) }
-            action("Focus", "arrow.up.left.and.arrow.down.right", enabled: true) { focus = true }
         }
         .buttonStyle(.bordered)
         .sensoryFeedback(.selection, trigger: snap.held)
+    }
+    private var holdButton: some View {
+        action(snap.held ? "Release" : "Hold", snap.held ? "pin.slash" : "pin", enabled: snap.hasOutput) { engine.toggleFrozenOutput() }
+    }
+    private var copyButton: some View {
+        action("Copy", "doc.on.doc", enabled: snap.hasOutput) {
+            UIPasteboard.general.string = snap.translated
+            feedback.show("Translation copied", severity: .success)
+        }
+    }
+    private var listenButton: some View {
+        action("Listen", "speaker.wave.2", enabled: snap.hasOutput) { engine.speak(snap.translated) }
+    }
+    private var focusButton: some View {
+        action("Focus", "arrow.up.left.and.arrow.down.right", enabled: true) { focus = true }
     }
 
     private func action(_ title: String, _ symbol: String, enabled: Bool, run: @escaping () -> Void) -> some View {
@@ -210,7 +224,7 @@ struct TranslateScreen: View {
                 .labelStyle(.titleAndIcon)
                 .font(.subheadline.weight(.medium))
                 .lineLimit(1)
-                .minimumScaleFactor(0.8)
+                .fixedSize(horizontal: true, vertical: false)
                 .frame(maxWidth: .infinity, minHeight: 44)
         }
         .disabled(!enabled)
