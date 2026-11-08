@@ -290,7 +290,15 @@ assert "diag.s.warmupsDuringCapture += 1" in engine and 'count("warmupsDuringCap
 assert '"liveWarmupLegacy"' in diagnostics and archive.count('"liveWarmupLegacy"') >= 2
 ripple = read("App/UI/Translate/ReadinessCard.swift")
 assert "minimumInterval: 1.0 / 15, paused: scenePhase != .active" in ripple and "1.0 / 30" not in ripple
-print("v2.2.1 WP6 contracts passed: D11, D12, D13, E9, E11, E18, U12")
+# U11: one token set. The old Space/Radius/Palette enums are gone and nothing in App refers to them.
+import re as _re
+tokens = read("App/DesignSystem/Tokens.swift"); kit_style = read("App/UI/Kit/KitStyle.swift")
+for name in ("Space", "Radius", "Palette"):
+    assert f"enum {name} " not in tokens and f"enum {name} {{" not in tokens, name
+    for f in (root / "App").rglob("*.swift"):
+        assert not _re.search(rf"(?<![A-Za-z]){name}\.[a-z]", f.read_text(encoding="utf-8")), (name, f.name)
+assert "enum KitRadius" in kit_style and "enum KitColor" in kit_style and "static let gap: CGFloat = 16" in kit_style
+print("v2.2.1 WP6 contracts passed: D11, D12, D13, E9, E11, E18, U11 (tokens), U12")
 
 print("v2.2.1 WP5 contracts passed: D10 (measurement only)")
 print("v2.2.1 WP4 contracts passed: E3, E4, E5, E6, E7, E13, E14, E16, E17, U7, U8, U9, U10")

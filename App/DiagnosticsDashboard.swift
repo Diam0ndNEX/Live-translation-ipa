@@ -394,7 +394,7 @@ private struct LiveFeedSection: View {
         if active || !pulse.lastRaw.isEmpty || !pulse.translated.isEmpty { feed }
     }
     private var feed: some View {
-        VStack(alignment: .leading, spacing: Space.s) {
+        VStack(alignment: .leading, spacing: KitSpace.tight) {
             Text("Right now").font(.headline)
             ListRow(title: "Reads", subtitle: pulse.lastRaw.isEmpty ? "Nothing yet" : pulse.lastRaw, symbol: "text.viewfinder") { EmptyView() }
             Divider()
@@ -639,7 +639,7 @@ private struct DiagnosticsBody: View {
 
     // MARK: Simple
     private var systemCard: some View {
-        VStack(alignment: .leading, spacing: Space.s) {
+        VStack(alignment: .leading, spacing: KitSpace.tight) {
             LabeledContent("Active system", value: facts.system.shortName)
             if facts.pending != facts.system {
                 LabeledContent("Next capture", value: facts.pending.shortName)
@@ -659,14 +659,14 @@ private struct DiagnosticsBody: View {
     /// Delay evidence plus the export button. Counters that explain it are under Advanced.
     private var evidenceCard: some View {
         let delay = Diagnostics.summarize(diag.latency)
-        return VStack(alignment: .leading, spacing: Space.m) {
+        return VStack(alignment: .leading, spacing: KitSpace.row) {
             HStack {
                 Text("Test evidence").font(.headline)
                 Spacer()
                 Text(AppVersion.full).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
             if delay.n > 0 {
-                HStack(alignment: .top, spacing: Space.m) {
+                HStack(alignment: .top, spacing: KitSpace.row) {
                     evidenceNumber("Typical", delay.p50)
                     evidenceNumber("Average", delay.avg)
                     evidenceNumber("Slow tail · P95", delay.p95)
@@ -693,7 +693,7 @@ private struct DiagnosticsBody: View {
     private var evidenceDetails: some View {
         let stats = diag.s
         let model = Diagnostics.summarize(diag.translate)
-        return VStack(alignment: .leading, spacing: Space.s) {
+        return VStack(alignment: .leading, spacing: KitSpace.tight) {
             Text("Counters").font(.headline)
             LabeledContent("Confirmed candidate packets", value: "\(stats.confirmedCandidatePackets)")
             LabeledContent("Successful PiP candidate enqueues", value: "\(stats.enqueuedCandidateFrames)")
@@ -1084,7 +1084,7 @@ private struct DiagnosticsBody: View {
                 .font(.caption.weight(.semibold))
                 .padding(.horizontal, 10).padding(.vertical, 6)
                 .foregroundStyle(on ? Color.white : Color.secondary)
-                .background(on ? color.opacity(0.7) : Palette.surface, in: Capsule())
+                .background(on ? color.opacity(0.7) : KitColor.surface, in: Capsule())
         }
     }
 
@@ -1408,7 +1408,7 @@ private struct DiagnosticsBody: View {
                 }
             }
             .padding(12)
-            .background(Palette.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(KitColor.surface, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             eventListCard(limit: 400)
         }
     }

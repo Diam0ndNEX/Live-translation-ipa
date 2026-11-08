@@ -4,7 +4,7 @@ import SwiftUI
 // MARK: - Status
 enum Severity { case info, success, warning, error
     var color: Color {
-        switch self { case .info: .accentColor; case .success: Palette.success; case .warning: Palette.warning; case .error: Palette.danger }
+        switch self { case .info: .accentColor; case .success: KitColor.success; case .warning: KitColor.warning; case .error: KitColor.danger }
     }
     var symbol: String {
         switch self { case .info: "info.circle.fill"; case .success: "checkmark.circle.fill"; case .warning: "exclamationmark.triangle.fill"; case .error: "xmark.octagon.fill" }
@@ -22,7 +22,7 @@ struct StatusPill: View {
     var body: some View {
         Label { Text(text).font(.footnote.weight(.semibold)) } icon: { Image(systemName: symbol ?? severity.symbol) }
             .foregroundStyle(severity.color)
-            .padding(.horizontal, Space.m).padding(.vertical, Space.s)
+            .padding(.horizontal, KitSpace.row).padding(.vertical, KitSpace.tight)
             .frame(minHeight: 36)
             .background(severity.color.opacity(0.16), in: Capsule())
             .accessibilityElement(children: .combine)
@@ -35,9 +35,9 @@ struct Banner: View {
     var actionTitle: String? = nil
     var action: (() -> Void)? = nil
     var body: some View {
-        HStack(alignment: .top, spacing: Space.m) {
+        HStack(alignment: .top, spacing: KitSpace.row) {
             Image(systemName: severity.symbol).foregroundStyle(severity.color).accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: Space.s) {
+            VStack(alignment: .leading, spacing: KitSpace.tight) {
                 Text(text).font(.subheadline).fixedSize(horizontal: false, vertical: true)
                 if let actionTitle, let action {
                     Button(actionTitle, action: action).font(.subheadline.weight(.semibold))
@@ -46,9 +46,9 @@ struct Banner: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(Space.m)
-        .background(severity.color.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
-        .overlay(alignment: .leading) { Capsule().fill(severity.color).frame(width: 4).padding(.vertical, Space.s) }
+        .padding(KitSpace.row)
+        .background(severity.color.opacity(0.12), in: RoundedRectangle(cornerRadius: KitRadius.small, style: .continuous))
+        .overlay(alignment: .leading) { Capsule().fill(severity.color).frame(width: 4).padding(.vertical, KitSpace.tight) }
         .accessibilityElement(children: .contain)
     }
 }
@@ -66,7 +66,7 @@ struct ProgressRow: View {
     let title: String
     var value: Double? = nil
     var body: some View {
-        HStack(spacing: Space.m) {
+        HStack(spacing: KitSpace.row) {
             if let value { ProgressView(value: value).frame(maxWidth: 80) } else { ProgressView() }
             Text(title).font(.subheadline)
         }.accessibilityElement(children: .combine)
@@ -81,7 +81,7 @@ struct PrimaryButton: View {
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            HStack(spacing: Space.s) {
+            HStack(spacing: KitSpace.tight) {
                 if let symbol { Image(systemName: symbol) }
                 Text(title).font(.headline)
             }
@@ -100,13 +100,13 @@ struct SecondaryButton: View {
     let action: () -> Void
     var body: some View {
         Button(action: action) {
-            HStack(spacing: Space.s) {
+            HStack(spacing: KitSpace.tight) {
                 if let symbol { Image(systemName: symbol) }
                 Text(title).font(.subheadline.weight(.semibold))
             }
             .foregroundStyle(Color.accentColor)
             .frame(maxWidth: .infinity, minHeight: 48)
-            .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
+            .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: KitRadius.small, style: .continuous))
         }
         .buttonStyle(.plain).disabled(!enabled).opacity(enabled ? 1 : 0.4)
     }
@@ -120,7 +120,7 @@ struct ListRow<Trailing: View>: View {
     var symbol: String? = nil
     @ViewBuilder var trailing: () -> Trailing
     var body: some View {
-        HStack(spacing: Space.m) {
+        HStack(spacing: KitSpace.row) {
             if let symbol {
                 Image(systemName: symbol).font(.subheadline.weight(.semibold)).foregroundStyle(Color.accentColor)
                     .frame(width: 34, height: 34)
@@ -131,7 +131,7 @@ struct ListRow<Trailing: View>: View {
                 Text(title).font(.body)
                 if let subtitle { Text(subtitle).font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             }
-            Spacer(minLength: Space.s)
+            Spacer(minLength: KitSpace.tight)
             trailing()
         }.frame(minHeight: 52).contentShape(Rectangle())
     }

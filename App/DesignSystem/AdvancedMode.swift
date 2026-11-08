@@ -37,7 +37,7 @@ struct AdvancedBlock<Content: View>: View {
     @ViewBuilder var content: () -> Content
     var body: some View {
         if mode.on {
-            VStack(alignment: .leading, spacing: Space.m) {
+            VStack(alignment: .leading, spacing: KitSpace.row) {
                 Text("Advanced · \(title)").font(.headline)
                 if let footer { Text(footer).font(.footnote).foregroundStyle(.secondary) }
                 content()

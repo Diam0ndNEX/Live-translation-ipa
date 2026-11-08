@@ -192,7 +192,7 @@ struct MemoryManagementView: View {
                     .font(.footnote).foregroundStyle(.secondary)
             }
             Section("Export and import") {
-                HStack(spacing: Space.s) {
+                HStack(spacing: KitSpace.tight) {
                     SecondaryButton(title: transferBusy ? "Preparing…" : "Export", symbol: "square.and.arrow.up", enabled: !(transferBusy || captureInProgress)) {
                         transferBusy = true
                         Task {
@@ -204,7 +204,7 @@ struct MemoryManagementView: View {
                     SecondaryButton(title: "Import", symbol: "square.and.arrow.down", enabled: !(transferBusy || captureInProgress)) { importing = true }
                 }
                 .listRowBackground(Color.clear)
-                .listRowInsets(EdgeInsets(top: Space.s, leading: Space.l, bottom: Space.s, trailing: Space.l))
+                .listRowInsets(EdgeInsets(top: KitSpace.tight, leading: KitSpace.gap, bottom: KitSpace.tight, trailing: KitSpace.gap))
                 Text("Memory exports contain source and translated text. Choose where to save them.").font(.footnote)
             }
             AdvancedSwitchSection()

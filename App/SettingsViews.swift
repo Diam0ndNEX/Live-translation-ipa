@@ -594,7 +594,7 @@ struct InterfaceSettings: View {
                 Text("System follows your iPhone's setting.")
             }
             Section("Accent color") {
-                HStack(spacing: Space.m) {
+                HStack(spacing: KitSpace.row) {
                     ForEach(AccentChoice.allCases) { color in
                         Button { accent = color.rawValue; engine.tap() } label: {
                             Circle()

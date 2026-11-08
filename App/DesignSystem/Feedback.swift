@@ -59,8 +59,8 @@ struct NoticeHost: View {
         ZStack {
             if let n = center.current {
                 Banner(text: n.text, severity: n.severity, actionTitle: n.actionTitle, action: n.action)
-                    .background(.thickMaterial, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
-                    .padding(.horizontal, Space.l).padding(.top, Space.s)
+                    .background(.thickMaterial, in: RoundedRectangle(cornerRadius: KitRadius.small, style: .continuous))
+                    .padding(.horizontal, KitSpace.gap).padding(.top, KitSpace.tight)
                     .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                     .onTapGesture { center.dismiss() }
                     .accessibilityAddTraits(.isStaticText)

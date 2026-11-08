@@ -69,31 +69,8 @@ final class ThemeStore: ObservableObject {
     var gradient: LinearGradient { LinearGradient(colors: [accent.start, accent.end], startPoint: .leading, endPoint: .trailing) }
 }
 
-// MARK: - Scales
-enum Space {
-    static let xs: CGFloat = 4, s: CGFloat = 8, m: CGFloat = 12, l: CGFloat = 16, xl: CGFloat = 24, xxl: CGFloat = 32
-}
-enum Radius {
-    static let s: CGFloat = 12, m: CGFloat = 20, l: CGFloat = 28
-}
+// MARK: - Motion
+// 2.2.1 (U11): spacing, radii and colour roles now live in App/UI/Kit/KitStyle.swift (KitSpace, KitRadius, KitColor).
 enum Motion {
     static let quick = 0.18, standard = 0.3
-}
-
-// MARK: - Colour roles (adaptive: light, dark, increased contrast follows the system)
-private func adaptive(light: UIColor, dark: UIColor) -> Color {
-    Color(uiColor: UIColor { $0.userInterfaceStyle == .dark ? dark : light })
-}
-enum Palette {
-    static let background = adaptive(light: UIColor(red: 0.94, green: 0.95, blue: 0.985, alpha: 1), dark: UIColor(red: 0.035, green: 0.043, blue: 0.075, alpha: 1))
-    static let surface = adaptive(light: .white, dark: UIColor(red: 0.075, green: 0.09, blue: 0.14, alpha: 1))
-    static let surfaceRaised = adaptive(light: UIColor(red: 0.91, green: 0.93, blue: 0.96, alpha: 1), dark: UIColor(red: 0.12, green: 0.14, blue: 0.2, alpha: 1))
-    static let cardShadow = adaptive(light: UIColor.black.withAlphaComponent(0.07), dark: UIColor.black.withAlphaComponent(0.35))
-    static let separator = adaptive(light: UIColor.black.withAlphaComponent(0.1), dark: UIColor.white.withAlphaComponent(0.12))
-    static let textPrimary = Color.primary
-    static let textSecondary = Color.secondary
-    static let textTertiary = Color(uiColor: .tertiaryLabel)
-    static let success = adaptive(light: UIColor(red: 0.1, green: 0.55, blue: 0.3, alpha: 1), dark: UIColor(red: 0.3, green: 0.85, blue: 0.5, alpha: 1))
-    static let warning = adaptive(light: UIColor(red: 0.75, green: 0.42, blue: 0, alpha: 1), dark: UIColor(red: 1, green: 0.7, blue: 0.25, alpha: 1))
-    static let danger = adaptive(light: UIColor(red: 0.8, green: 0.15, blue: 0.15, alpha: 1), dark: UIColor(red: 1, green: 0.45, blue: 0.42, alpha: 1))
 }

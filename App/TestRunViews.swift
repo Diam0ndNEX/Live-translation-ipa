@@ -97,12 +97,12 @@ private struct RunBadges: View {
 struct TestRunRow: View {
     let run: TestRunMeta
     var body: some View {
-        HStack(alignment: .top, spacing: Space.m) {
+        HStack(alignment: .top, spacing: KitSpace.row) {
             Image(systemName: TestRunText.modeIcon(run.mode)).font(.body.weight(.semibold)).foregroundStyle(Color.accentColor)
                 .frame(width: 40, height: 40)
-                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
+                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: KitRadius.small, style: .continuous))
                 .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: Space.xs) {
+            VStack(alignment: .leading, spacing: KitSpace.unit) {
                 HStack(alignment: .firstTextBaseline) {
                     Text(TestRunText.modeTitle(run.mode) + (run.label.isEmpty ? "" : " · " + run.label)).font(.headline)
                     Spacer()
@@ -117,7 +117,7 @@ struct TestRunRow: View {
                     .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 RunBadges(run: run)
             }
-        }.padding(.vertical, Space.xs)
+        }.padding(.vertical, KitSpace.unit)
     }
 }
 
@@ -162,7 +162,7 @@ struct TestCard: View {
     private var nextMode: String? { TestRunText.modes.first { saved($0) == nil } }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.m) {
+        VStack(alignment: .leading, spacing: KitSpace.row) {
             HStack {
                 Button { testNameDraft = runsSlice.value.currentName; renameTest = true } label: {
                     Label(runsSlice.value.currentName, systemImage: "pencil").font(.headline).frame(minHeight: 44)
@@ -261,13 +261,13 @@ struct TestCard: View {
     @ViewBuilder private func bannerView(_ banner: Diagnostics.RunBanner) -> some View {
         switch banner.result {
         case .saved(let meta):
-            VStack(alignment: .leading, spacing: Space.s) {
+            VStack(alignment: .leading, spacing: KitSpace.tight) {
                 StatusPill(text: "Run saved · \(TestRunText.modeTitle(meta.mode)) · \(TestRunText.duration(meta.durationSeconds))",
                            symbol: "checkmark.seal", severity: .success)
                 if !meta.trimmed.isEmpty {
                     Hint("Trimmed to fit: " + meta.trimmed.joined(separator: ", "))
                 }
-                HStack(spacing: Space.s) {
+                HStack(spacing: KitSpace.tight) {
                     SecondaryButton(title: "Rename") { runLabelDraft = meta.label; renameRun = true }
                     SecondaryButton(title: meta.pinned ? "Unpin" : "Pin") { Task { await diag.setRunPinned(meta.id, !meta.pinned) } }
                     SecondaryButton(title: "Undo") { Task { await diag.deleteRuns([meta.id]) } }
@@ -327,12 +327,12 @@ struct TestRunsPage: View {
 
     var body: some View {
         let s = snapshot.value
-        VStack(alignment: .leading, spacing: Space.m) {
+        VStack(alignment: .leading, spacing: KitSpace.row) {
             Text("Test: \(s.currentName)").font(.headline)
             Text("A run is one broadcast in one translation system. Saved runs are metadata only: no screen images, recognized text or translations. Private sessions are never saved.")
                 .font(.footnote).foregroundStyle(.secondary)
             LatestPerSystem(runs: s.runs.filter { $0.testID == s.currentID })
-            HStack(spacing: Space.s) {
+            HStack(spacing: KitSpace.tight) {
                 SecondaryButton(title: "Open test runs", symbol: "list.bullet") { showRuns = true }
                 SecondaryButton(title: "Save run", symbol: "tray.and.arrow.down") {
                     Task {

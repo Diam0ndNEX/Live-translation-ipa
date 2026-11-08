@@ -60,7 +60,7 @@ struct PipelineSimulatorView: View {
     }
     /// The answer first: did a frame get enqueued and how long the modeled path takes. The caveats come right after.
     private var headline: some View {
-        VStack(alignment: .leading, spacing: Space.m) {
+        VStack(alignment: .leading, spacing: KitSpace.row) {
             StatLine(value: result.lanes.isEmpty ? nil : "\(Int(result.totalMs)) ms",
                      caption: "Modeled time to the floating window",
                      secondary: [result.displayAccepted ? "Caption shown" : "Caption not shown"],
