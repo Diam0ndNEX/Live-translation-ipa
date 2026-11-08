@@ -835,6 +835,8 @@ final class Diagnostics: ObservableObject {
         // 2.2.3 (L5): written only when the pinned switch is ON. A missing value means off, so default runs stay
         // comparable with runs saved before 2.2.3 (a missing cohort value counts as "-").
         if TranslationHotPathAB.refreshAvailabilityInBackground { settings["availabilityRefreshAB"] = "on" }
+        if TranslationHotPathAB.hybridRelaxedBackoff { settings["hybridBackoffAB"] = "on" }
+        if TranslationHotPathAB.hybridShorterGuard { settings["hybridGuardAB"] = "on" }
         settings["reductionReasons"] = captureReductionReasons.joined(separator: "_")
         settings["appRequestedCaptureIntervalMs"] = String(requestedCaptureIntervalMs)
         settings["appRequestedCaptureEdgePx"] = String(requestedCaptureEdgePx)

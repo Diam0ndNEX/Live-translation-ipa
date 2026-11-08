@@ -59,6 +59,23 @@ assert archive.count('"availabilityRefreshAB"') == 2, "settingsKeys and cohortKe
 assert "deliveryFilteringMs matches confirmation-to-PiP time" in archive
 assert "hybrid_switch_guard_* values are the gap" in archive
 
+# L3 / L4: Hybrid-only arms, default OFF, pinned; constants unchanged when off.
+work = (root / "Shared/SharedTranslationWork.swift").read_text()
+system = (root / "Shared/TranslationSystem.swift").read_text()
+for name, pinned in (("hybridRelaxedBackoff", "hybridBackoffPinnedKey"), ("hybridShorterGuard", "hybridGuardPinnedKey")):
+    assert f'(UserDefaults.standard.object(forKey: {pinned}) as? Bool) ?? false' in work, name
+    assert f'@AppStorage("{name}") private var {name} = false' in experimental, name
+    assert experimental.count(f'"{name}"') >= 2, name
+assert 'label: "Hybrid relaxed backoff"' in index and 'label: "Hybrid shorter switch guard"' in index
+assert "static let switchGuardWindowMs = 1500.0" in system
+assert "TranslationHotPathAB.hybridShorterGuard ? 1000.0 : switchGuardWindowMs" in system
+assert "TranslationHotPathAB.hybridShorterGuard ? 120.0 : 220.0" in system
+assert "hybridRelaxedBackoff ? 4 : 8" in system
+assert "(relaxed ? 6 : 12) : (relaxed ? 2 : 4)" in system
+assert "gapMs < effectiveSwitchGuardWindowMs else { return .lowLatency }" in system
+assert '"hybridBackoffAB"' in archive and '"hybridGuardAB"' in archive
+assert 'settings["hybridBackoffAB"] = "on"' in diagnostics and 'settings["hybridGuardAB"] = "on"' in diagnostics
+
 # Version 2.2.3 build 106 in the places CI checks.
 assert 'static let version = "2.2.3"' in shared and "static let build = 106" in shared
 assert project.count('"2.2.3"') == 3 and project.count('"106"') == 3

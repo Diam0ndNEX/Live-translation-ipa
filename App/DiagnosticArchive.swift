@@ -452,7 +452,7 @@ actor DiagnosticExportWriter {
             "rapidTextTracking", "joinAdjacentText", "activeTextFocus",
             "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
             "thermalState", "performanceTier", "reductionReasons",
-            "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "detailSuspended",
+            "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "hybridBackoffAB", "hybridGuardAB", "detailSuspended",
             // 2.2.1 (D4, E12)
             "idleMinutes", "sessionLimit", "autoOpenPiP", "winSize", "textSize", "pipFont", "theme", "showOriginal",
             "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding",
@@ -888,7 +888,7 @@ struct DiagnosticPerformanceComparison {
         "mode", "speed", "stability", "area", "customY0", "customY1", "translationTestMode",
         "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
         "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
-        "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "detailedCollection", "performanceTier",
+        "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "hybridBackoffAB", "hybridGuardAB", "detailedCollection", "performanceTier",
         "focusedCaptionOCR", "strictCaptionIdentity", "cjkSingleCharacters", "liveWarmupLegacy"
     ]
     static let noteKeys = [

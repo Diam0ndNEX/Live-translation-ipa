@@ -118,6 +118,11 @@ enum TranslationHotPathAB {
     static let unitsPinnedKey = "hotPathReuseLegacyUnitsPinned"
     static let availabilityRefreshSettingKey = "backgroundAvailabilityRefresh"
     static let availabilityRefreshPinnedKey = "backgroundAvailabilityRefreshPinned"
+    // 2.2.3 (L3, L4): Hybrid-only arms, default OFF = current behaviour.
+    static let hybridBackoffSettingKey = "hybridRelaxedBackoff"
+    static let hybridBackoffPinnedKey = "hybridRelaxedBackoffPinned"
+    static let hybridGuardSettingKey = "hybridShorterGuard"
+    static let hybridGuardPinnedKey = "hybridShorterGuardPinned"
 
     private static func pinned(_ key: String) -> Bool {
         (UserDefaults.standard.object(forKey: key) as? Bool) ?? true
@@ -128,6 +133,8 @@ enum TranslationHotPathAB {
         defaults.set((defaults.object(forKey: planSettingKey) as? Bool) ?? true, forKey: planPinnedKey)
         defaults.set((defaults.object(forKey: unitsSettingKey) as? Bool) ?? true, forKey: unitsPinnedKey)
         defaults.set((defaults.object(forKey: availabilityRefreshSettingKey) as? Bool) ?? false, forKey: availabilityRefreshPinnedKey)
+        defaults.set((defaults.object(forKey: hybridBackoffSettingKey) as? Bool) ?? false, forKey: hybridBackoffPinnedKey)
+        defaults.set((defaults.object(forKey: hybridGuardSettingKey) as? Bool) ?? false, forKey: hybridGuardPinnedKey)
     }
 
     static var reuseStandaloneLowLatencyPlan: Bool {
@@ -144,6 +151,15 @@ enum TranslationHotPathAB {
         #else
         return pinned(unitsPinnedKey)
         #endif
+    }
+
+    /// 2.2.3 (L3): Hybrid skips fewer early Apple Default requests after wasted ones. Default OFF.
+    static var hybridRelaxedBackoff: Bool {
+        (UserDefaults.standard.object(forKey: hybridBackoffPinnedKey) as? Bool) ?? false
+    }
+    /// 2.2.3 (L4): shorter Hybrid switch-guard window and post-Default settling wait. Default OFF.
+    static var hybridShorterGuard: Bool {
+        (UserDefaults.standard.object(forKey: hybridGuardPinnedKey) as? Bool) ?? false
     }
 
     /// 2.2.3 (L5): refresh a cached language-availability check in the background. Default OFF.

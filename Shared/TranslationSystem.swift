@@ -245,9 +245,11 @@ enum HybridSchedulingPolicy {
         #if SCREENLINGO_REFERENCE_HYBRID_EXIT_SETTLING
         return 0
         #else
+        // 2.2.3 (L4): the arm shortens the settling window from 220 to 120 ms. UNVERIFIED value.
+        let window = TranslationHotPathAB.hybridShorterGuard ? 120.0 : 220.0
         guard variant != .reference195, let age = millisecondsSinceReturn,
-              age.isFinite, age >= 0, age < 220 else { return 0 }
-        return min(0.22, max(0, (220 - age) / 1000))
+              age.isFinite, age >= 0, age < window else { return 0 }
+        return min(window / 1000, max(0, (window - age) / 1000))
         #endif
     }
 
@@ -256,6 +258,11 @@ enum HybridSchedulingPolicy {
     /// Default call was running or had returned less than ~1.5 s earlier.
     /// This is a measured correlation, not a proven Apple mechanism.
     static let switchGuardWindowMs = 1500.0
+    /// 2.2.3 (L4): the arm uses 1000 ms instead of 1500 ms. UNVERIFIED value; Low Latency is only chosen
+    /// when the fast pack is installed and the guard gap has already passed.
+    static var effectiveSwitchGuardWindowMs: Double {
+        TranslationHotPathAB.hybridShorterGuard ? 1000.0 : switchGuardWindowMs
+    }
 
     /// Choose the confirmed Hybrid recovery strategy. `gapMs` is 0 while an
     /// Apple Default call is in flight, the time since the last same-pair
@@ -266,7 +273,7 @@ enum HybridSchedulingPolicy {
                                  guardEnabled: Bool) -> RequestedTranslationStrategy {
         guard fastRecoveryInstalled else { return .appleDefault }
         guard guardEnabled, let gapMs, gapMs.isFinite, gapMs >= 0,
-              gapMs < switchGuardWindowMs else { return .lowLatency }
+              gapMs < effectiveSwitchGuardWindowMs else { return .lowLatency }
         return .appleDefault
     }
 
@@ -345,7 +352,8 @@ struct HybridAdmissionPolicy {
         }
         consecutiveWaste += 1
         if consecutiveWaste >= 3 {
-            skipped = max(skipped, 8)
+            // 2.2.3 (L3): the arm skips 4 instead of 8 early requests. UNVERIFIED value.
+            skipped = max(skipped, TranslationHotPathAB.hybridRelaxedBackoff ? 4 : 8)
             consecutiveWaste = 0
         }
     }
@@ -361,7 +369,8 @@ struct HybridAdmissionPolicy {
               actualOverlap / serviceMilliseconds >= 0.25 else { return }
         // Bound admission backoff; leave periodic opportunities to re-evaluate
         // whether Apple Default is once again useful for the current scene.
-        skipped = max(skipped, actualOverlap >= 600 ? 12 : 4)
+        let relaxed = TranslationHotPathAB.hybridRelaxedBackoff
+        skipped = max(skipped, actualOverlap >= 600 ? (relaxed ? 6 : 12) : (relaxed ? 2 : 4))
         recentContention = min(8, recentContention + 1)
         consecutiveWaste = 0
     }

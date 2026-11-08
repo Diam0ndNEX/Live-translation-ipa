@@ -35,6 +35,9 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("liveWarmupLegacy") private var liveWarmupLegacy = true
     // 2.2.3 (L5): default OFF = current behaviour. Pinned at session start like the other A/B variants.
     @AppStorage("backgroundAvailabilityRefresh") private var backgroundAvailabilityRefresh = false
+    // 2.2.3 (L3, L4): Hybrid-only, default OFF = current behaviour.
+    @AppStorage("hybridRelaxedBackoff") private var hybridRelaxedBackoff = false
+    @AppStorage("hybridShorterGuard") private var hybridShorterGuard = false
 
     // Previous opt-in Smart pipeline controls are experimental, not core defaults.
     @AppStorage("adaptiveConfirmation") private var adaptiveConfirmation = false
@@ -150,6 +153,14 @@ struct ExperimentalFeaturesView: View {
                     title: "Refresh language check in background",
                     explanation: "Off (default): the language-pack check is repeated when a translation needs it after 30 seconds, as before. On: it is refreshed in the background while nothing is translating, so a translation does not wait for it. Same translations either way. Unverified effect.",
                     enabled: $backgroundAvailabilityRefresh)
+                ExperimentalOption(
+                    title: "Hybrid relaxed backoff",
+                    explanation: "Hybrid Recovery only. Off (default): after repeated unused early Apple Default work, the next 8 early requests are skipped. On: 4 are skipped, so early work resumes sooner. Same Apple Default text, but more unused calls may compete with confirmed ones. Unverified effect.",
+                    enabled: $hybridRelaxedBackoff)
+                ExperimentalOption(
+                    title: "Hybrid shorter switch guard",
+                    explanation: "Hybrid Recovery only. Off (default): Low Latency recovery waits until 1.5 s after an Apple Default call, with a 220 ms settling wait. On: 1.0 s and 120 ms. Same models and text; a slow 900 ms recovery may return. Unverified effect.",
+                    enabled: $hybridShorterGuard)
             } header: { Text("A/B test variants") } footer: {
                 Text("For comparing builds on the same video. A change applies from the next session, never during one. Each run's report names the variant it used.")
             }
@@ -173,7 +184,7 @@ struct ExperimentalFeaturesView: View {
                 "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
                 "adaptiveConfirmation", "confirmationDeadline", "continuousRotation",
                 "hybridSchedulerVariant", "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy",
-                "backgroundAvailabilityRefresh"
+                "backgroundAvailabilityRefresh", "hybridRelaxedBackoff", "hybridShorterGuard"
             ])
         }
         .settingsPage("Experimental features")
