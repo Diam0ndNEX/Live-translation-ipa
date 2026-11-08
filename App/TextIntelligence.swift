@@ -78,7 +78,9 @@ enum TextIntel {
     }
 
     /// Numbers-only or symbol-only text ("12 85 72.7") is almost never worth translating.
-    static func isNoise(_ s: String) -> Bool {
+    static func isNoise(_ s: String, allowSingleCJK: Bool = false) -> Bool {
+        // 2.2.1 (E13): one CJK character can be a whole word; the caller decides when that is allowed.
+        if allowSingleCJK && CJKText.isSingleCJKWord(s) { return false }
         let letters = s.filter { $0.isLetter }.count
         let digits = s.filter { $0.isNumber }.count
         return letters < 2 || (digits > 0 && letters * 2 < digits)

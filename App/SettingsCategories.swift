@@ -84,7 +84,6 @@ struct TranslationSettings: View {
             ])
         }
         .settingsPage("System")
-        .onChange(of: translationSystem) { _, _ in engine.translationSystemChanged() }
         .onChange(of: translateAhead) { _, _ in engine.syncConfig() }
         .onChange(of: keepWarm) { _, _ in engine.powerPolicyChanged() }
         .onChange(of: policySignature) { _, _ in engine.pipelineSettingsChanged() }

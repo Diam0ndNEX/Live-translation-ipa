@@ -42,7 +42,7 @@ struct ExperimentalFeaturesView: View {
     var body: some View {
         List {
             Section {
-                Text("Optional features that are still being tested. New ones start switched off and your normal settings are never changed for you.")
+                Text("Optional features that are still being tested. Some are on by default; you can switch any of them off. Your normal settings are never changed for you.")
                     .font(.subheadline)
                 Text("Try one switch at a time on the same video. Switch it off again if captions get slower, less complete or less accurate.")
                     .font(.footnote).foregroundStyle(.secondary)

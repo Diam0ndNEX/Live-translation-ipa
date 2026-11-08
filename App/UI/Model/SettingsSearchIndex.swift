@@ -17,7 +17,6 @@ enum SettingsSearchIndex {
     static let all: [SettingsSearchEntry] = [
         SettingsSearchEntry(label: "Appearance", page: .appearance, pageTitle: "Appearance"),
         SettingsSearchEntry(label: "Haptic feedback for taps", page: .appearance, pageTitle: "Appearance"),
-        SettingsSearchEntry(label: "Show timing details in Status", page: .appearance, pageTitle: "Appearance"),
         SettingsSearchEntry(label: "Detailed diagnostics", page: .diagnostics, pageTitle: "Diagnostics settings"),
         SettingsSearchEntry(label: "Fresh requests only", page: .diagnostics, pageTitle: "Diagnostics settings"),
         SettingsSearchEntry(label: "Samples per chart", page: .diagnostics, pageTitle: "Diagnostics settings"),
@@ -76,6 +75,7 @@ enum SettingsSearchIndex {
         SettingsSearchEntry(label: "Skip unchanged frames", page: .reading, pageTitle: "Area and recognition"),
         SettingsSearchEntry(label: "Smallest text to read", page: .reading, pageTitle: "Area and recognition"),
         SettingsSearchEntry(label: "Speed", page: .reading, pageTitle: "Area and recognition"),
+        SettingsSearchEntry(label: "Translate single Chinese, Japanese or Korean characters", page: .reading, pageTitle: "Area and recognition"),
         SettingsSearchEntry(label: "Upper edge of the reading area", page: .reading, pageTitle: "Area and recognition"),
         SettingsSearchEntry(label: "Wait for stable text", page: .reading, pageTitle: "Area and recognition"),
         SettingsSearchEntry(label: "Alignment", page: .style, pageTitle: "Style"),

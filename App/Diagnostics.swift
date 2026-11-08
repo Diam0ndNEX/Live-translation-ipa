@@ -406,7 +406,8 @@ final class Diagnostics: ObservableObject {
             "heartbeat_timeout", "capture_connected", "idle_auto_pause", "session_time_limit",
             "app_started", "app_interface_visible", "external_capture_period", "capture_config_changed", "capture_idle", "capture_live",
             "capture_paused", "capture_frozen",
-            "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical", "detail_suspended_thermal"
+            "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical", "detail_suspended_thermal",
+            "pip_auto_open_skipped_not_active"
         ]
         guard allowed.contains(reason) else { return }
         appendStructured(stage: "runtime_state", outcome: reason, reason: reason,
@@ -782,7 +783,7 @@ final class Diagnostics: ObservableObject {
                     "diagSamples", "heartbeatInterval", "keepAwake", "suppressOwnInterface", "temporaryMemoryTest",
                     // 2.2.1 (D4): settings that change render time or end a run
                     "idleMinutes", "sessionLimit", "autoOpenPiP", "winSize", "textSize", "pipFont", "theme", "showOriginal",
-                    "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding",
+                    "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding", "cjkSingleCharacters",
                     "rapidTextTracking", "joinAdjacentText", "activeTextFocus"]
         var settings: [String: String] = [:]
         for key in keys {

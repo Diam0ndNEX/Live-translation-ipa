@@ -301,6 +301,7 @@ struct ReadingSettings: View {
     @AppStorage("minTextH") private var minTextH = 0.0
     @AppStorage("ignoreList") private var ignoreList = ""
     @AppStorage("dropNoise") private var dropNoise = true
+    @AppStorage("cjkSingleCharacters") private var cjkSingleCharacters = true
     @AppStorage("boost") private var boost = 1
     @AppStorage("skipUnchanged") private var skipUnchanged = true
     @AppStorage("ocrConfidence") private var confidence = 0.3
@@ -326,7 +327,7 @@ struct ReadingSettings: View {
         })
     }
 
-    private var key: String { "\(mode)|\(area)|\(customY0)|\(customY1)|\(speed)|\(stability)|\(boost)|\(skipUnchanged)|\(confidence)|\(correction)" }
+    private var key: String { "\(mode)|\(area)|\(customY0)|\(customY1)|\(speed)|\(stability)|\(boost)|\(skipUnchanged)|\(confidence)|\(correction)|\(cjkSingleCharacters)" }
     private var recognitionPolicy: String { "\(adaptiveOCR)|\(subtitleTracking)|\(deduplicateCopies)|\(rapidTextTracking)|\(joinAdjacentText)|\(activeTextFocus)" }
 
     var body: some View {
@@ -362,6 +363,8 @@ struct ReadingSettings: View {
                     Slider(value: $minTextH, in: 0...0.08).accessibilityLabel("Smallest text to read")
                 }
                 TextField("Ignore text containing… (comma separated)", text: $ignoreList, axis: .vertical).lineLimit(1...3)
+                Toggle("Translate single Chinese, Japanese or Korean characters", isOn: $cjkSingleCharacters)
+                Hint("One character can be a whole word. Turn off if icons or labels on screen get translated by mistake.")
             }
 
             AdvancedSection(title: "Text order", footer: "If sentences come out in the wrong order, the picture is probably rotated. Automatic checks which way the lines read. Pick a fixed rotation to force it.") {
@@ -412,7 +415,7 @@ struct ReadingSettings: View {
             }
             AdvancedSwitchSection()
             ResetSection(keys: ["mode", "area", "customY0", "customY1", "frameRot", "speed", "stability",
-                                "minTextH", "ignoreList", "dropNoise", "boost", "skipUnchanged", "ocrConfidence", "ocrCorrection",
+                                "minTextH", "ignoreList", "dropNoise", "cjkSingleCharacters", "boost", "skipUnchanged", "ocrConfidence", "ocrCorrection",
                                 "adaptiveOCR", "subtitleTracking", "deduplicateCopies",
                                 "rapidTextTracking", "joinAdjacentText", "activeTextFocus"])
         }
@@ -436,6 +439,13 @@ struct IntelligenceSettings: View {
     @AppStorage("glossary") private var glossary = ""
     @AppStorage("contextualLanguage") private var contextualLanguage = true
     @AppStorage("languageRecovery") private var languageRecovery = true
+    /// 2.2.1 (E6): the nine rule values when the page opened. Leaving the page used to reload all settings
+    /// every time, which drops in-flight translation work and OCR packets even when nothing changed.
+    @State private var rulesAtAppear: String?
+    private var ruleSignature: String {
+        [cleanOCR, slang, speakerDetect, langLock, contextualLanguage, languageRecovery].map(String.init).joined(separator: "|")
+            + "\u{1F}" + neverTranslate + "\u{1F}" + sourceFixes + "\u{1F}" + glossary
+    }
 
     private func editor(_ text: Binding<String>) -> some View {
         TextEditor(text: text)
@@ -486,7 +496,11 @@ struct IntelligenceSettings: View {
         .settingsPage("Text rules and names")
         .onChange(of: contextualLanguage) { _, _ in engine.pipelineSettingsChanged() }
         .onChange(of: languageRecovery) { _, _ in engine.pipelineSettingsChanged() }
-        .onDisappear { engine.reloadSettings() }
+        .onAppear { if rulesAtAppear == nil { rulesAtAppear = ruleSignature } }
+        .onDisappear {
+            if let start = rulesAtAppear, start != ruleSignature { engine.pipelineSettingsChanged() }
+            rulesAtAppear = nil
+        }
     }
 }
 
@@ -526,6 +540,7 @@ struct WindowSettings: View {
             }
             Section {
                 Toggle("Open the floating window when capture starts", isOn: $autoOpenPiP)
+                Hint("Opens the window when capture starts, only if ScreenLingo is still open.")
                 Toggle("Clear subtitle when text ends", isOn: $autoClear)
                 if autoClear {
                     VStack(alignment: .leading, spacing: 6) {
@@ -566,7 +581,6 @@ struct InterfaceSettings: View {
     @EngineHandle private var engine
     @AppStorage("accent") private var accent = AccentChoice.blue.rawValue
     @AppStorage("appearance") private var appearance = Appearance.system.rawValue
-    @AppStorage("homeMetrics") private var homeMetrics = true
     @AppStorage("uiHaptics") private var uiHaptics = true
 
     var body: some View {
@@ -600,9 +614,8 @@ struct InterfaceSettings: View {
             }
             Section("Feedback") {
                 LabeledToggleRow(title: "Haptic feedback for taps", detail: "A light tick when you press buttons.", isOn: $uiHaptics)
-                LabeledToggleRow(title: "Show timing details in Status", detail: "Adds the per-stage timing list to the Status sheet.", isOn: $homeMetrics)
             }
-            ResetSection(keys: ["accent", "appearance", "homeMetrics", "uiHaptics"])
+            ResetSection(keys: ["accent", "appearance", "uiHaptics"])
         }
         .settingsPage("Appearance")
     }
@@ -655,7 +668,6 @@ struct PerformanceSettings: View {
         .onChange(of: adaptive) { _, _ in engine.syncConfig() }
         .onChange(of: idleBackoff) { _, _ in engine.syncConfig() }
         .onChange(of: smartCool) { _, _ in engine.pipelineSettingsChanged() }
-        .onChange(of: coolMode) { _, _ in engine.powerPolicyChanged() }
     }
 }
 
@@ -713,7 +725,7 @@ struct AboutSettings: View {
                 LabeledContent("Legacy system", value: "based on \(TranslationSystem.referenceVersion)")
             }
             Section("How to use") {
-                Text("1. On Translate, tap a language in the pair to choose it and get its pack.\n2. Tap the round Start button, choose ScreenLingo Capture, then Start Broadcast.\n3. Switch to your app. If nothing shows, tap the status line on Translate, or open Diagnostics.")
+                Text("1. On Translate, tap a language in the pair to choose it and get its pack.\n2. Tap the round Start button, choose ScreenLingo Capture, then Start Broadcast.\n3. Switch to your app. If nothing shows, tap the status at the top of Translate, or open Diagnostics.")
                     .font(.footnote)
                 Button("Run setup again") { onboarded = false }
             }

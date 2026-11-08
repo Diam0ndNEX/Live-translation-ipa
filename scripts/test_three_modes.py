@@ -34,6 +34,12 @@ assert 'legacyAdaptiveLowYieldSkips' in engine
 # original Legacy extraction and active-text selection logic must stay intact.
 reference_engine = old('App/TranslatorEngine.swift')
 old_extract = function(reference_engine, 'extractTexts').replace('area.range(mode: mode)', 'area.range()')
+# 2.2.1 (E13, owner decision D-5): a one-character CJK line may be translated from a confirmed packet. These two
+# replacements are the only change to extractTexts; every other line must still equal the e94542ce original.
+old_extract = old_extract.replace(
+    '            if TextSim.norm(t).count < 2 { continue }\n            if flag("dropNoise", true) && TextIntel.isNoise(t) {',
+    '            let singleCJK = allowsSingleCJK(t)\n            if TextSim.norm(t).count < 2 && !singleCJK { continue }\n            if flag("dropNoise", true) && TextIntel.isNoise(t, allowSingleCJK: singleCJK) {')
+assert 'let singleCJK = allowsSingleCJK(t)' in old_extract, 'E13 normalization did not apply'
 assert function(engine, 'extractTexts') == old_extract, 'Legacy extraction changed beyond preset-independent area routing'
 old_select = function(reference_engine, 'selectBlocks').replace('if mode == .movie {', 'if flag("activeTextFocus", true) {')
 assert function(engine, 'selectBlocks') == old_select, 'Legacy text selection changed beyond preset-independent focus routing'

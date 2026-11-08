@@ -194,6 +194,23 @@ struct LanguageSheet: View {
 
     private func choose(_ item: LangItem) {
         let previousSource = p.source, previousTarget = p.target
+        // 2.2.1 (U7): choosing the language that is already on the other side swaps the two sides, as Apple Translate does.
+        let other = side == .source ? previousTarget : previousSource
+        if item.code == other, item.code != "auto" {
+            let newSource = side == .source ? item.code : previousTarget
+            let newTarget = side == .source ? previousSource : item.code
+            guard newTarget != "auto" else {
+                feedback.show("From and Into must be different languages", severity: .warning)
+                return
+            }
+            engine.sourceCode = newSource
+            engine.targetCode = newTarget
+            feedback.show("Swapped: from \(name(newSource)) into \(name(newTarget))", severity: .success, actionTitle: "Undo") { [engine] in
+                engine.sourceCode = previousSource
+                engine.targetCode = previousTarget
+            }
+            return
+        }
         if side == .source { engine.sourceCode = item.code } else { engine.targetCode = item.code }
         let verb = side == .source ? "Translating from" : "Translating into"
         feedback.show("\(verb) \(item.name)", severity: .success, actionTitle: "Undo") { [engine] in

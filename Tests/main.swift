@@ -1241,3 +1241,17 @@ do {
     check(!PixelConfirmation.dwellSatisfied(sinceFirstReadStart: .nan, interval: 0.2), "Invalid time never confirms")
 }
 print("v2.0.0 pixel-verified confirmation checks passed")
+
+// 2.2.1 E13: one-character CJK captions
+do {
+    for word in ["猫", "あ", "ア", "한", "ｱ"] { check(CJKText.isSingleCJKWord(word), "A single \(word) is a CJK word") }
+    check(CJKText.isSingleCJKWord(" 猫\n"), "Surrounding whitespace is ignored")
+    for other in ["a", "x", "×", "5", "。", "！", "Ａ", "１", "猫猫", "", "猫a"] {
+        check(!CJKText.isSingleCJKWord(other), "\(other) is not a single CJK word")
+    }
+    check(TextIntel.isNoise("猫"), "Default: one character is noise")
+    check(!TextIntel.isNoise("猫", allowSingleCJK: true), "Allowed: one CJK character is not noise")
+    check(TextIntel.isNoise("a", allowSingleCJK: true) && TextIntel.isNoise("×", allowSingleCJK: true), "Other scripts keep the old minimum")
+    check(TextIntel.isNoise("12", allowSingleCJK: true), "Numbers stay noise")
+}
+print("v2.2.1 single-character CJK checks passed")

@@ -345,7 +345,8 @@ class SampleHandler: RPBroadcastSampleHandler {
         guard (try? handler.perform([req])) != nil, let results = req.results else { return [] }
 
         var lines = results.compactMap { obs -> OCRLine? in
-            guard let c = obs.topCandidates(1).first, c.confidence >= Float(min(0.95, max(0.1, cfg.confidence ?? 0.3))), c.string.count >= 2,
+            guard let c = obs.topCandidates(1).first, c.confidence >= Float(min(0.95, max(0.1, cfg.confidence ?? 0.3))),
+                  c.string.count >= 2 || (cfg.cjkSingleCharacters == true && CJKText.isSingleCJKWord(c.string)),
                   c.string.contains(where: { $0.isLetter || $0.isNumber }) else { return nil }
             let b = obs.boundingBox
             let y = y0 + Double(b.midY) * span

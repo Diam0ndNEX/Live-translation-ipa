@@ -645,7 +645,7 @@ private struct DiagnosticsBody: View {
                 LabeledContent("Next capture", value: facts.pending.shortName)
             }
             Hint(facts.availability)
-            Hint("Legacy reference: 1.7.2 (58), e94542ce. Apple default does not identify an effective model.")
+            Hint("Legacy keeps the reading and translation steps of version 1.7.2 (build 58, commit e94542ce). Apple Default does not report which model it used.")
         }
         .kitSurface()
     }

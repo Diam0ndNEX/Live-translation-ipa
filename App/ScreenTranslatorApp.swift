@@ -40,6 +40,7 @@ struct RootView: View {
     @AppStorage("showSessionSpeakers") private var showSessionSpeakers = true
     @AppStorage("privateSession") private var privateSession = false
     @AppStorage("coolMode") private var coolMode = false
+    @AppStorage("translationSystem") private var translationSystem = TranslationSystem.legacy.rawValue
 
     var body: some View {
         RootContent(model: model, onboarded: $onboarded)
@@ -61,6 +62,8 @@ struct RootView: View {
             .onChange(of: privateSession) { _, _ in model.engine.diag.clearSpeakers() }
             .onChange(of: showSessionSpeakers) { _, _ in model.engine.diag.clearSpeakers() }
             .onChange(of: coolMode) { _, _ in model.engine.powerPolicyChanged() }
+            // 2.2.1 (E14): the root is the only owner of these two keys; the Translate tab and the settings pages used to repeat them.
+            .onChange(of: translationSystem) { _, _ in model.engine.translationSystemChanged() }
             .onReceive(NotificationCenter.default.publisher(for: UIApplication.didReceiveMemoryWarningNotification)) { _ in
                 model.engine.handleMemoryPressure()
             }
@@ -68,7 +71,7 @@ struct RootView: View {
                 let engine = model.engine
                 engine.setAppInterfaceVisible(p != .background)
                 engine.diag.noteExecutionPhase(p == .active ? "active" : (p == .background ? "background" : "inactive"), pipActive: engine.pipActive)
-                if p == .active { engine.server.start() }
+                if p == .active { engine.server.start(); engine.openSkippedWindow() }
                 if p == .background {
                     if engine.manualMode { engine.endWorkspace() } // typing mode pauses capture; do not leave it paused behind the person's back (U2)
                     engine.flushHistorySave()                       // the Library is written after a second of quiet (E15)

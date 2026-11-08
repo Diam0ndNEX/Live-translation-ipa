@@ -174,6 +174,8 @@ struct Config: Codable, Equatable {
     var pixelConfirmation: Bool? = nil
     var eventDrivenOCR: Bool? = nil
     var fastOCR: Bool? = nil
+    /// 2.2.1 (E13): allow a one-character CJK line through the OCR filter. Nil (older app) means off.
+    var cjkSingleCharacters: Bool? = nil
 }
 
 /// Keeps the old memory context exactly unchanged unless a genuinely

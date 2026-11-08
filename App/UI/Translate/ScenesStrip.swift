@@ -5,6 +5,7 @@ import SwiftUI
 struct ScenesStrip: View {
     @ObservedObject var store: PresetStore
     @EnvironmentObject private var feedback: FeedbackCenter
+    @EngineHandle private var engine
     @State private var editor: PresetEditorMode?
     @State private var pendingDelete: Preset?
 
@@ -50,8 +51,12 @@ struct ScenesStrip: View {
     private func chip(_ scene: Preset) -> some View {
         let active = store.activeID == scene.id.uuidString
         return Button {
+            let systemBefore = UserDefaults.standard.string(forKey: "translationSystem")
             store.apply(scene)
-            feedback.show("\(scene.name) applied", severity: .success)
+            // 2.2.1 (E7): a scene can carry a translation system; during a session it applies from the next one.
+            let modeChanged = engine.captureAlive && UserDefaults.standard.string(forKey: "translationSystem") != systemBefore
+            feedback.show(modeChanged ? "\(scene.name) applied. The new mode starts with the next session." : "\(scene.name) applied",
+                          severity: .success)
         } label: {
             HStack(spacing: KitSpace.unit + 2) {
                 Image(systemName: scene.symbol)

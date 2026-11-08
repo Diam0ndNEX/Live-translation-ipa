@@ -70,6 +70,15 @@ enum PresetRecognitionPolicy {
         ]
     }
 
+    /// 2.2.1 (E4): choosing a content style from Translate or the Tune sheet writes the style and the three
+    /// recommended recognition switches, the same way Settings > Area and recognition does. Before 2.2.1 those two
+    /// places wrote only `mode`, which the engine never reads, so "Game" behaved like "Movie".
+    /// Applying a saved custom preset writes UserDefaults directly and does not come through here.
+    static func apply(mode: String, to defaults: UserDefaults = .standard) {
+        defaults.set(mode, forKey: "mode")
+        for (key, value) in legacyDefaults(for: mode) { defaults.set(value, forKey: key) }
+    }
+
     static func migrate(_ defaults: UserDefaults) {
         let inherited = legacyDefaults(for: defaults.string(forKey: "mode") ?? "movie")
         for (key, value) in inherited where defaults.object(forKey: key) == nil {

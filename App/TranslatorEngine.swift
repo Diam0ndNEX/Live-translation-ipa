@@ -93,7 +93,7 @@ final class TranslatorEngine: ObservableObject {
         "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode", "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "smartCool", "steadyCaptions", "languageRecovery", "deduplicateCopies", "continuousRotation", "contextualLanguage"
     ]
     /// App look & behaviour that presets do not touch.
-    static let interfaceKeys = ["memoryRAMCapacity", "memorySoftLimit", "testRunSaving", "suppressOwnInterface", "directPiPBuffer", "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession", "legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "temporaryMemoryTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment"]
+    static let interfaceKeys = ["memoryRAMCapacity", "memorySoftLimit", "testRunSaving", "suppressOwnInterface", "directPiPBuffer", "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession", "legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "temporaryMemoryTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment", "appearance", "cjkSingleCharacters"]
     static var settingKeys: [String] { presetKeys + interfaceKeys }
     static let defaults: [String: Any] = [
         "suppressOwnInterface": true, "memoryRAMCapacity": 3000, "memorySoftLimit": 100000, "testRunSaving": "automatic", "directPiPBuffer": false, "hybridSwitchGuard": true,
@@ -110,7 +110,7 @@ final class TranslatorEngine: ObservableObject {
         "displayPolicy": "immediate", "pipWeight": "bold", "pipAlignment": "left", "pipLineSpacing": 0.0,
         "pipPadding": 24.0, "originalFraction": 0.27, "pipScale": 1.0, "speakerAccent": "blue", "heartbeatInterval": 1.0,
         "readerFont": "rounded", "readerSpacing": 8.0, "readerWidth": "full", "historyCapacity": 500,
-        "diagSamples": 600, "homeMetrics": true, "homeQuickExpanded": false,
+        "diagSamples": 600, "appearance": "system", "cjkSingleCharacters": true, "homeMetrics": true, "homeQuickExpanded": false,
         "homeDetailsExpanded": false, "hapticStrength": "light", "autoCopyFormat": "translation", "interruptSpeech": true,
         "photoOCREdge": 2400, "photoAutoTranslate": false,
         "adaptiveOCR": true, "adaptiveConfirmation": false, "subtitleTracking": true, "selectiveSpeculation": true,
@@ -1443,11 +1443,23 @@ final class TranslatorEngine: ObservableObject {
                            strictCaptionIdentity: activeTranslationSystem != .legacy,
                            pixelConfirmation: flag("pixelConfirmation", true),
                            eventDrivenOCR: flag("eventDrivenOCR", true),
-                           fastOCR: flag("fastOCR", false)))
+                           fastOCR: flag("fastOCR", false),
+                           cjkSingleCharacters: flag("cjkSingleCharacters", true)))
     }
 
     // MARK: PiP
     /// Starts the PiP window (retrying while iOS gets ready), then calls `done`.
+    /// Set when "Open the floating window when capture starts" could not run because the app was not active (E17).
+    private var autoOpenSkipped = false
+
+    /// Called when the app becomes active: opens the window once if capture is alive, the setting is on and the
+    /// window was skipped at capture start.
+    func openSkippedWindow() {
+        let wanted = autoOpenSkipped && captureAlive && flag("autoOpenPiP", true) && !pip.isActive
+        autoOpenSkipped = false
+        if wanted { startPiP() }
+    }
+
     func startPiP(then done: @escaping () -> Void = {}) {
         let s = AVAudioSession.sharedInstance()
         try? s.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
@@ -1784,7 +1796,15 @@ final class TranslatorEngine: ObservableObject {
             // Do not launch a second synthetic model job as capture starts.
             // Startup preparation runs before capture; live text owns first use.
             // Capture just started: make sure the floating window is up too.
-            if flag("autoOpenPiP", true), !pip.isActive, UIApplication.shared.applicationState == .active { startPiP() }
+            // 2.2.1 (E17): the window opens only while ScreenLingo is still in front. When the person has already
+            // switched to the video app the skip is recorded, and the window opens once when the app is active again.
+            if flag("autoOpenPiP", true), !pip.isActive {
+                if UIApplication.shared.applicationState == .active { startPiP() }
+                else {
+                    autoOpenSkipped = true
+                    diag.noteRuntimeState("pip_auto_open_skipped_not_active")
+                }
+            }
         }
         if let orientation = p.orient {
             if let previous = lastCaptureOrientation, previous != orientation, frameRotMode == "auto" {
@@ -1825,6 +1845,7 @@ final class TranslatorEngine: ObservableObject {
             diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
                                       stage: "frame_arrival", reason: "accepted")
         }
+        extractingConfirmedPacket = p.stable != false
         let candidateTexts = extractTexts(p.lines, count: p.stable != false && !replayed)
         guard !candidateTexts.isEmpty else {
             if diag.detailedCollection {
@@ -2024,6 +2045,13 @@ final class TranslatorEngine: ObservableObject {
 
     /// Turns raw OCR lines into the text blocks worth translating (area, rules, own window, blocks, noise…).
     /// `count` is false for early sightings so the statistics are not counted twice.
+    /// 2.2.1 (E13): a one-character CJK line is translated only when it came from a confirmed packet (not the early
+    /// sighting) and the Advanced setting is on.
+    private var extractingConfirmedPacket = false
+    private func allowsSingleCJK(_ text: String) -> Bool {
+        extractingConfirmedPacket && flag("cjkSingleCharacters", true) && CJKText.isSingleCJKWord(text)
+    }
+
     private func extractTexts(_ lines: [OCRLine], count: Bool) -> [String] {
         let range = area.range()
         let minH = num("minTextH", 0)
@@ -2051,8 +2079,9 @@ final class TranslatorEngine: ObservableObject {
         var texts: [String] = []
         for b in blocks {
             let t = blockText(b)
-            if TextSim.norm(t).count < 2 { continue }
-            if flag("dropNoise", true) && TextIntel.isNoise(t) { if count && diag.enabled { diag.s.dropNoise += 1 }; continue }
+            let singleCJK = allowsSingleCJK(t)
+            if TextSim.norm(t).count < 2 && !singleCJK { continue }
+            if flag("dropNoise", true) && TextIntel.isNoise(t, allowSingleCJK: singleCJK) { if count && diag.enabled { diag.s.dropNoise += 1 }; continue }
             if isTargetLanguage(t) { if count && diag.enabled { diag.s.dropTarget += b.count }; continue }
             texts.append(t)
         }

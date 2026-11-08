@@ -60,6 +60,7 @@ struct MemoryManagementView: View {
     @State private var confirmSnapshotMerge = false
     @State private var confirmUnavailableRestore = false
     @State private var query = ""
+    @State private var healthRefreshed = false
     @State private var confirmClear = false
     @State private var confirmDeleteLegacy = false
     @State private var message = ""
@@ -354,7 +355,12 @@ struct MemoryManagementView: View {
                 let results = try await engine.memoryStore.search(query: query, limit: 100)
                 guard !Task.isCancelled else { return }
                 entries = results
-                await engine.refreshMemoryHealth()
+                // 2.2.1 (U8): health is a full set of COUNT queries on the memory actor that also serves live lookups,
+                // so it is refreshed once when the page opens and after maintenance actions, not after every search.
+                if !healthRefreshed {
+                    healthRefreshed = true
+                    await engine.refreshMemoryHealth()
+                }
             } catch { message = "Memory is preparing or unavailable" }
         }
         .confirmationDialog("Restore an unavailable database from this snapshot? The unreadable database and its journals will be preserved separately. Translations newer than the snapshot may not be in the restored database.", isPresented: $confirmUnavailableRestore, titleVisibility: .visible) {

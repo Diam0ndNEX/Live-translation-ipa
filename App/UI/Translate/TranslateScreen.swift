@@ -74,8 +74,10 @@ struct TranslateScreen: View {
             .toolbar(.hidden, for: .navigationBar)
             .modifier(AllowsLandscape())
             .fullScreenCover(isPresented: $focus) { FocusMode(engine: engine) }
-            .onChange(of: translationSystem) { _, _ in engine.translationSystemChanged() }
             .onChange(of: area) { _, _ in engine.syncConfig() }
+            // 2.2.1 (E5): Speed and Content reach the extension now, not on the next ping, and stale work is dropped.
+            .onChange(of: speed) { _, _ in engine.syncConfig() }
+            .onChange(of: mode) { _, _ in engine.pipelineSettingsChanged() }
             // The engine ends typing mode when the app goes to the background (U2); leave the compose view with it.
             .onChange(of: snap.manual) { _, manual in if !manual && composing { composing = false } }
             .onChange(of: snap.phase) { old, new in
@@ -205,9 +207,14 @@ struct TranslateScreen: View {
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 
+    /// 2.2.1 (E4): the style also writes the three recognition switches it recommends.
+    private var contentSelection: Binding<String> {
+        Binding(get: { mode }, set: { PresetRecognitionPolicy.apply(mode: $0) })
+    }
+
     private var contentMenu: some View {
         Menu {
-            Picker("Content", selection: $mode) { ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) } }
+            Picker("Content style", selection: contentSelection) { ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) } }
         } label: {
             menuLabel("Content", (TranslateMode(rawValue: mode) ?? .movie).title)
         }
@@ -303,7 +310,10 @@ struct TranslateScreen: View {
         case .packMissing:
             Button(reason.action) { router.present(.languages) }.buttonStyle(.borderedProminent).frame(minHeight: 44)
         case .windowClosed:
-            Button(reason.action) { engine.startPiP() }.buttonStyle(.borderedProminent).frame(minHeight: 44)
+            VStack(alignment: .leading, spacing: KitSpace.tight) {
+                Button(reason.action) { engine.startPiP() }.buttonStyle(.borderedProminent).frame(minHeight: 44)
+                Text("Open it before you leave the app.").font(.footnote).foregroundStyle(.secondary)
+            }
         }
     }
 

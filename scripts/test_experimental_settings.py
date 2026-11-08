@@ -42,7 +42,6 @@ expected = {
         "adaptiveOCR", "subtitleTracking", "deduplicateCopies",
         "rapidTextTracking", "joinAdjacentText", "activeTextFocus",
         "contextualLanguage", "languageRecovery", "smartCool", "keepAwake",
-        "homeMetrics",
     },
     "SettingsCategories.swift": {
         "translationSystem", "translateAhead", "keepWarm", "remember", "predictiveWarmup",
@@ -126,4 +125,15 @@ assert "engine.eraseHistory()" not in home
 assert 'Toggle("Copy translations automatically"' in sources["CustomizationViews.swift"]
 assert 'Toggle("Vibrate on new translation"' in sources["CustomizationViews.swift"]
 assert 'Toggle("Save translation history"' in sources["SettingsCategories.swift"]
+# 2.2.1 E4: the content style chosen on Translate or the Tune sheet writes the same three switches as Settings does.
+# Game and Comic recommend false for all three, Movie true (the table lives in one place).
+assert 'let subtitleStyle = mode == "movie"' in recognition_policy
+assert "static func apply(mode: String, to defaults: UserDefaults = .standard)" in recognition_policy
+for name in ("TranslateScreen.swift", "TuneSheet.swift"):
+    ui = (root / "App" / "UI" / "Translate" / name).read_text()
+    assert "PresetRecognitionPolicy.apply(mode: $0)" in ui, f"{name} must apply the content style, not only store it"
+# 2.2.1 E3/E13: the dead toggle is gone, the CJK setting is on the Reading page and in reset.
+assert "homeMetrics" not in home
+assert 'Toggle("Translate single Chinese, Japanese or Korean characters", isOn: $cjkSingleCharacters)' in home
+assert '"dropNoise", "cjkSingleCharacters"' in home
 print(f"Settings redesign regression checks passed: {len(owners)} saved keys, {len(nav)} routes, no duplicated switches")

@@ -24,9 +24,13 @@ struct TuneSheet: View {
                 Section {
                     Picker("Area to read", selection: $area) { ForEach(OCRArea.allCases) { Text($0.title).tag($0.rawValue) } }
                     Button { router.present(.captureArea) } label: { LensRow(title: "Adjust the band", symbol: "viewfinder") }
-                    Picker("Content", selection: $mode) { ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) } }
+                    Picker("Content style", selection: Binding(get: { mode }, set: { PresetRecognitionPolicy.apply(mode: $0) })) {
+                        ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) }
+                    }
                     Picker("Reading speed", selection: $speed) { ForEach(SpeedPreset.allCases) { Text($0.title).tag($0.rawValue) } }
-                } header: { Text("Reading") }
+                } header: { Text("Reading") } footer: {
+                    Text("Content style sets the reading options that suit it: subtitles, game text or comics.")
+                }
                 Section {
                     Picker("Window size", selection: $winSize) { ForEach(WindowSize.allCases) { Text($0.title).tag($0.rawValue) } }
                     Toggle("Show original text", isOn: $showOriginal)
@@ -43,7 +47,7 @@ struct TuneSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
             .onChange(of: area) { _, _ in engine.syncConfig() }
-            .onChange(of: mode) { _, _ in engine.syncConfig() }
+            .onChange(of: mode) { _, _ in engine.pipelineSettingsChanged() }
             .onChange(of: speed) { _, _ in engine.syncConfig() }
             .onChange(of: winSize) { _, _ in engine.applyWindowSize() }
             .onChange(of: showOriginal) { _, _ in engine.applyStyle() }

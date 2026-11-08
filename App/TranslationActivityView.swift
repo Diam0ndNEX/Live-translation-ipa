@@ -1,15 +1,50 @@
 import SwiftUI
 
 /// Shared by Live and settings; indefinite progress never invents a percentage.
+/// 2.2.1 (U9): what this card shows, read through EngineSlice so it redraws only when one of these values changes.
+/// Before 2.2.1 the card observed the whole engine and redrew on every engine change.
+struct ActivityFacts: Equatable {
+    var activity = TranslationActivity(title: "", detail: "", phase: .waiting)
+    var systemName = ""
+    var pendingName = ""
+    var warmupProgress = ""
+    var languages = TranslationReadiness.Step.pending
+    var sessions = TranslationReadiness.Step.pending
+    var execution = TranslationReadiness.Step.pending
+    var readinessSource = ""
+    var readinessTarget = ""
+    var completedAt: Date?
+    var durationMs: Double?
+    var lastCaption: String?
+    var conditions = ""
+    var selectedPair = ""
+    var nonLegacy = false
+
+    @MainActor static func read(_ e: TranslatorEngine) -> ActivityFacts {
+        let ready = e.displayedReadiness
+        let work = e.modeWorkActivity
+        return ActivityFacts(
+            activity: e.translationActivity, systemName: e.activeTranslationSystem.shortName,
+            pendingName: e.pendingTranslationSystem != e.activeTranslationSystem ? e.pendingTranslationSystem.shortName : "",
+            warmupProgress: e.initialWarmupProgress,
+            languages: ready.languages, sessions: ready.sessions, execution: ready.execution,
+            readinessSource: e.modelReadiness.source, readinessTarget: e.modelReadiness.target,
+            completedAt: e.modelReadiness.completedAt, durationMs: e.modelReadiness.durationMs,
+            lastCaption: work?.phase == .ready ? work?.title : nil,
+            conditions: e.currentRuntimeConditions.isEmpty ? e.translationConditions : e.currentRuntimeConditions,
+            selectedPair: "\(e.sourceCode) → \(e.targetCode)", nonLegacy: e.activeTranslationSystem != .legacy)
+    }
+}
+
 struct TranslationActivityView: View {
-    @EnvironmentObject private var engine: TranslatorEngine
+    @EngineFacts(ActivityFacts.read) private var facts
 
     var body: some View {
-        let activity = engine.translationActivity
+        let activity = facts.activity
         VStack(alignment: .leading, spacing: 8) {
-            Text(engine.activeTranslationSystem.shortName).font(.caption).foregroundStyle(.secondary)
-            if engine.activeTranslationSystem != .legacy, !engine.initialWarmupProgress.isEmpty {
-                Text(engine.initialWarmupProgress).font(.caption).foregroundStyle(.secondary)
+            Text(facts.systemName).font(.caption).foregroundStyle(.secondary)
+            if facts.nonLegacy, !facts.warmupProgress.isEmpty {
+                Text(facts.warmupProgress).font(.caption).foregroundStyle(.secondary)
             }
             HStack(alignment: .top, spacing: 10) {
                 if activity.phase == .working {
@@ -31,29 +66,29 @@ struct TranslationActivityView: View {
                 Spacer(minLength: 0)
             }
             HStack(spacing: 8) {
-                ReadinessStepView(title: "Languages", step: engine.displayedReadiness.languages)
-                ReadinessStepView(title: "Session", step: engine.displayedReadiness.sessions)
-                ReadinessStepView(title: "Model run", step: engine.displayedReadiness.execution)
+                ReadinessStepView(title: "Languages", step: facts.languages)
+                ReadinessStepView(title: "Session", step: facts.sessions)
+                ReadinessStepView(title: "Model run", step: facts.execution)
             }
-            Text(engine.modelReadiness.source.isEmpty ? "Selected: \(engine.sourceCode) → \(engine.targetCode)" : "Pair: \(engine.modelReadiness.source) → \(engine.modelReadiness.target)")
+            Text(facts.readinessSource.isEmpty ? "Selected: \(facts.selectedPair)" : "Pair: \(facts.readinessSource) → \(facts.readinessTarget)")
                 .font(.caption).foregroundStyle(.secondary)
-            if let completed = engine.modelReadiness.completedAt, let ms = engine.modelReadiness.durationMs {
+            if let completed = facts.completedAt, let ms = facts.durationMs {
                 TimelineView(.periodic(from: completed, by: 1)) { context in
                     Text("Last successful model request: \(Int(ms)) ms · \(max(0, Int(context.date.timeIntervalSince(completed)))) s ago")
                         .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
                 }
                 Text("Historical response only. A completed request does not prove the model is still loaded.")
                     .font(.caption).foregroundStyle(.secondary)
-            } else if engine.activeTranslationSystem != .legacy {
+            } else if facts.nonLegacy {
                 Text("No model response recorded for this preparation yet. Session setup alone does not run the model.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-            if let work = engine.modeWorkActivity, work.phase == .ready {
-                Text("Last caption: " + work.title).font(.caption)
+            if let last = facts.lastCaption {
+                Text("Last caption: " + last).font(.caption)
             }
-            Text(engine.currentRuntimeConditions.isEmpty ? engine.translationConditions : engine.currentRuntimeConditions).font(.caption).foregroundStyle(.secondary)
-            if engine.pendingTranslationSystem != engine.activeTranslationSystem {
-                Text("Next capture: \(engine.pendingTranslationSystem.shortName)").font(.caption)
+            Text(facts.conditions).font(.caption).foregroundStyle(.secondary)
+            if !facts.pendingName.isEmpty {
+                Text("Next capture: \(facts.pendingName)").font(.caption)
             }
         }.accessibilityElement(children: .combine)
     }

@@ -28,6 +28,14 @@ runviews = read("App/TestRunViews.swift")
 dashboard = read("App/DiagnosticsDashboard.swift")
 settings_views = read("App/SettingsViews.swift")
 guard_file = read("App/CollectionChangeGuard.swift")
+policy_shared = read("Shared/SubtitlePerformancePolicy.swift")
+cjk = read("Shared/CJKText.swift")
+extension_source = read("BroadcastExtension/SampleHandler.swift")
+tune = read("App/UI/Translate/TuneSheet.swift")
+scenes = read("App/UI/Translate/ScenesStrip.swift")
+memory_view = read("App/MemoryManagementView.swift")
+activity_view = read("App/TranslationActivityView.swift")
+tokens = read("App/DesignSystem/Tokens.swift")
 
 
 def body_of(source, start_marker, end_marker):
@@ -160,6 +168,77 @@ for key in ("focusedCaptionOCR", "strictCaptionIdentity", "thermalStart", "therm
     assert f'settings["{key}"]' in diagnostics and f'"{key}"' in archive, f"E12/D4: {key}"
 assert "scripts/test_diag_allowlists.py" in workflow, "C2/C3 run in CI"
 
+# ---- WP4: settings and UI consistency ----
+
+# E3: the dead homeMetrics toggle is gone from the page, but old backups still import (all eight Home keys stay).
+assert "homeMetrics" not in settings_views and "Show timing details in Status" not in settings_views
+for key in ("homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "homeQuickExpanded", "homeDetailsExpanded", "homeMetrics"):
+    assert f'"{key}"' in engine.split("static let interfaceKeys")[1].split("\n")[0], f"E3: {key} must stay in interfaceKeys"
+for key in ("homeQuickExpanded", "homeDetailsExpanded", "homeMetrics"):
+    assert engine.count(f'"{key}"') >= 2, f"E3: {key} keeps its default"
+
+# E4: one helper writes the content style and its three recommended switches; Translate and Tune use it.
+assert "static func apply(mode: String, to defaults: UserDefaults = .standard)" in policy_shared
+assert "PresetRecognitionPolicy.apply(mode: $0)" in translate and "PresetRecognitionPolicy.apply(mode: $0)" in tune
+assert "$mode" not in body_of(translate, "private var contentMenu", "private var speedMenu"), "E4: Translate must not write mode alone"
+assert "selection: $mode" not in tune
+# the Game case: the helper's table gives false for all three
+assert 'let subtitleStyle = mode == "movie"' in policy_shared
+
+# E5: Speed and Content reach the extension from the Translate menus.
+assert ".onChange(of: speed) { _, _ in engine.syncConfig() }" in translate
+assert ".onChange(of: mode) { _, _ in engine.pipelineSettingsChanged() }" in translate
+
+# E6: leaving the rules page flushes work only when a rule changed.
+rules = settings_views[settings_views.index("struct IntelligenceSettings: View"):]
+rules = rules[:rules.index("\nstruct ", 10)]
+assert "reloadSettings()" not in rules, "E6"
+assert "rulesAtAppear" in rules and "start != ruleSignature" in rules
+
+# E7: a scene that changes the translation system during a session says when it applies.
+assert "The new mode starts with the next session." in scenes and "engine.captureAlive" in scenes
+
+# E13: one-character CJK, in the three places, behind the Advanced setting (default on).
+assert "static func isSingleCJKWord" in cjk
+assert "CJKText.isSingleCJKWord(c.string)" in extension_source and "cfg.cjkSingleCharacters == true" in extension_source
+assert "func allowsSingleCJK(" in engine and "extractingConfirmedPacket = p.stable != false" in engine
+assert "allowSingleCJK: Bool = false" in read("App/TextIntelligence.swift")
+assert '"cjkSingleCharacters": true' in engine and '"cjkSingleCharacters"' in engine.split("static let interfaceKeys")[1].split("\n")[0]
+assert 'cjkSingleCharacters: flag("cjkSingleCharacters", true)' in engine
+assert "var cjkSingleCharacters: Bool? = nil" in read("Shared/Shared.swift")
+assert "cjkSingleCharacters" in settings_views and "cjkSingleCharacters" in diagnostics and "cjkSingleCharacters" in archive
+
+# E14: one owner per key. The root owns translationSystem and coolMode.
+assert app.count(".onChange(of: translationSystem)") == 1 and app.count(".onChange(of: coolMode)") == 1
+assert ".onChange(of: translationSystem)" not in translate and ".onChange(of: translationSystem)" not in categories
+assert ".onChange(of: coolMode)" not in settings_views
+
+# E16: the appearance key is in backup and reset.
+assert tokens.count('appearanceKey = "appearance"') == 1
+assert '"appearance"' in engine.split("static let interfaceKeys")[1].split("\n")[0] and '"appearance": "system"' in engine
+
+# E17: the window opens at capture start only while the app is active; the skip is recorded and retried once.
+assert "pip_auto_open_skipped_not_active" in engine and "autoOpenSkipped = true" in engine
+assert "func openSkippedWindow()" in engine and "engine.openSkippedWindow()" in app
+assert "only if ScreenLingo is still open" in settings_views
+assert "Open it before you leave the app." in translate
+assert "pip_auto_open_skipped_not_active" in diagnostics and archive.count("pip_auto_open_skipped_not_active") == 2
+
+# U7: choosing the other side's language swaps the sides.
+assert "Swapped: from" in languages and "let other = side == .source ? previousTarget : previousSource" in languages
+
+# U8: memory health refreshes once, not after every search.
+assert "healthRefreshed" in memory_view and memory_view.count("refreshMemoryHealth()") >= 3
+
+# U9: the activity card reads a snapshot, not the whole engine.
+assert "@EngineFacts(ActivityFacts.read)" in activity_view and "EnvironmentObject" not in activity_view
+
+# U10: the three stale strings are gone.
+assert "tap the status line" not in settings_views
+assert "New ones start switched off" not in read("App/ExperimentalFeaturesView.swift")
+assert "Legacy reference: 1.7.2" not in dashboard
+
+print("v2.2.1 WP4 contracts passed: E3, E4, E5, E6, E7, E13, E14, E16, E17, U7, U8, U9, U10")
 print("v2.2.1 WP3 contracts passed: E10, D3, D4, D6, D7, D8, D9, E12, C2, C3")
 print("v2.2.1 WP2 contracts passed: E8, D1, D2, D5, U1, U6")
 print("v2.2.1 WP1 contracts passed: E1, E15, E2, U2, U3, U4, U5")
