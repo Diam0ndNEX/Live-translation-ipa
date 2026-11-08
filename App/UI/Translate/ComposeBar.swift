@@ -32,7 +32,7 @@ struct ComposeBar: View {
                 .padding(.horizontal, KitSpace.row)
                 .padding(.vertical, 10)
                 .frame(minHeight: 44)
-                .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                .background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
                 .accessibilityLabel("Text to translate")
             if trimmed.isEmpty {
                 PhotosPicker(selection: $photo, matching: .images) {
@@ -49,12 +49,11 @@ struct ComposeBar: View {
             }
         }
         .disabled(recognizing)
+        .padding(.horizontal, KitSpace.tight)
+        .padding(.vertical, KitSpace.unit)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
         .padding(.horizontal, KitSpace.margin)
         .padding(.vertical, KitSpace.tight)
-        .background {
-            LinearGradient(colors: [Color(.systemGroupedBackground).opacity(0), Color(.systemGroupedBackground)],
-                           startPoint: .top, endPoint: .center)
-        }
         .onChange(of: input) { _, value in if value.count > 12000 { input = String(value.prefix(12000)) } }
         .onChange(of: photo) { _, value in
             guard let value else { return }

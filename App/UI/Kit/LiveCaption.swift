@@ -33,7 +33,7 @@ struct LiveCaption: View {
                         .accessibilityLabel("Held")
                 }
                 Text(translated.isEmpty ? placeholder : translated)
-                    .font(.system(size: captionSize, weight: .semibold))
+                    .font(translated.isEmpty ? .title3.weight(.semibold) : .system(size: captionSize, weight: .semibold))
                     .minimumScaleFactor(0.7)   // 40 pt down to 28 pt, then lines wrap
                     .lineLimit(6)
                     .foregroundStyle(translated.isEmpty ? Color.secondary : Color.primary)
@@ -51,7 +51,7 @@ struct LiveCaption: View {
             }
             StageTrail(stage: stage)
         }
-        .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: translated.isEmpty ? 72 : 140, alignment: .topLeading)
         .accessibilityElement(children: .contain)
     }
 }

@@ -35,7 +35,7 @@ struct SessionSheet: View {
                     .padding(.vertical, KitSpace.unit)
                     if facts.phase.isSession {
                         HStack(spacing: KitSpace.row) {
-                            StartButton(live: true).scaleEffect(0.5).frame(width: 88, height: 88)
+                            StartButton(live: true, size: 56)
                             Text("Stop the broadcast").font(.body)
                         }
                     }

@@ -40,13 +40,18 @@ struct TranslateScreen: View {
                 VStack(alignment: .leading, spacing: KitSpace.group) {
                     header
                     if setupState == "skipped" { finishSetupRow }
+                    pairTitle
                     if composing {
                         ComposeResult(engine: engine, translated: snap.translated, original: snap.original) { endCompose() }
                     } else if snap.phase.isSession {
-                        liveContent
+                        sessionHero
                     } else {
-                        idleContent
+                        idleHero
                     }
+                    controls
+                    if snap.phase.isSession { controlTiles }
+                    ScenesStrip(store: engine.presets)
+                    testRow
                     RecentList(lines: snap.recent) { router.go(.library) }
                 }
                 .padding(.horizontal, KitSpace.margin)
@@ -111,8 +116,7 @@ struct TranslateScreen: View {
     }
 
     // MARK: Idle
-    @ViewBuilder private var idleContent: some View {
-        pairTitle
+    @ViewBuilder private var idleHero: some View {
         VStack(spacing: KitSpace.unit) {
             StartButton(live: false, onTap: startTapped)
                 .modifier(MorphTarget(namespace: reduceMotion ? nil : morph))
@@ -124,9 +128,6 @@ struct TranslateScreen: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity)
-        controls
-        ScenesStrip(store: engine.presets)
-        testRow
     }
 
     private var pairTitle: some View {
@@ -247,11 +248,17 @@ struct TranslateScreen: View {
     }
 
     // MARK: Live, starting, paused, attention
-    @ViewBuilder private var liveContent: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            PhaseHeader(phase: snap.phase,
-                        elapsed: snap.sessionStarted.map { context.date.timeIntervalSince($0) },
-                        mode: snap.modeName, action: { router.present(.status) }, morph: morph)
+    @ViewBuilder private var sessionHero: some View {
+        HStack(spacing: KitSpace.row) {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                PhaseHeader(phase: snap.phase,
+                            elapsed: snap.sessionStarted.map { context.date.timeIntervalSince($0) },
+                            mode: snap.modeName, action: { router.present(.status) }, morph: morph)
+            }
+            Spacer(minLength: KitSpace.tight)
+            if snap.phase == .live || snap.phase == .paused {
+                StartButton(live: true, size: 52, onTap: {})
+            }
         }
         if case .attention(let reason) = snap.phase { attentionAction(reason) }
         if snap.phase == .starting {
@@ -261,15 +268,14 @@ struct TranslateScreen: View {
         LiveCaption(translated: snap.translated, original: snap.original, showOriginal: showOriginal,
                     stage: snap.stage, held: snap.held)
             .kitSurface(padding: KitSpace.margin)
-        controlTiles
-        actionRow
+        if snap.hasOutput { actionRow }
     }
 
     @ViewBuilder private func attentionAction(_ reason: AttentionReason) -> some View {
         switch reason {
         case .captureLost, .timedOut:
             HStack(spacing: KitSpace.row) {
-                StartButton(live: false, onTap: startTapped).scaleEffect(0.5).frame(width: 88, height: 88)
+                StartButton(live: false, size: 56, onTap: startTapped)
                 Text(reason.action).font(.headline)
             }
         case .packMissing:

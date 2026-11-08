@@ -6,11 +6,11 @@ import SwiftUI
 /// It is the only filled shape on the idle screen, and the only element allowed a glow.
 struct StartButton: View {
     var live: Bool
+    var size: CGFloat = 88
     var onTap: () -> Void = {}
 
     @State private var breathe = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private let size: CGFloat = 88
 
     var body: some View {
         ZStack {

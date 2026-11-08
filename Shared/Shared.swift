@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "2.1.8"
-    static let build = 99
+    static let version = "2.1.9"
+    static let build = 100
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("2.1.9", "Build 100: Translate keeps the same layout in every state (language pair, mode chips, menus, scenes, test row and recent stay on screen while capturing); idle-only buttons that did nothing are hidden until they can work (Hold, Copy, Listen need a translation; Pause, Session need a session); the live screen gets a stop button; the waiting placeholder is small instead of a big empty box; the compose bar is a floating card with no black strip; Library's Recent/Saved switch scrolls with the list instead of sitting on a blurred slab. UI only, engine untouched. Not compiled or run on a device by Claude; speed unverified."),
         ("2.1.8", "Build 99: top bars use a soft fade instead of the hard blurred band; Translate has its own header (no system bar) with three mode chips, capsule menus for content, speed and area, and no dead Pause tile while idle; the tab bar no longer shrinks into a lone bubble; Diagnostics page chips scroll with the page instead of sitting in a pinned slab; Right now hides when nothing is captured and no longer repeats Idle; Memory counters read as words. UI only, engine untouched. Not compiled or run on a device by Claude; speed unverified."),
         ("2.1.7", "Build 98: no app behaviour change. The UI screenshot workflow now runs on every claude/ branch push (one iPhone, default text size) and also captures Settings > Appearance, so the screens can be checked without a computer. Not compiled or run on a device by Claude; speed unverified."),
         ("2.1.6", "Build 97: every Settings sub-page gets the same row treatment: translucent surface rows, bolder section headers, a selection tick on every switch, a springy accent swatch row and a full-width Reset tile. Not compiled or run on a device by Claude; speed unverified."),

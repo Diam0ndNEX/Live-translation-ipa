@@ -57,6 +57,12 @@ struct LibraryScreen: View {
     var body: some View {
         NavigationStack(path: $router.libraryPath) {
             List(selection: $selection) {
+                Section {
+                    Picker("Show", selection: $segment) { ForEach(LibrarySegment.allCases) { Text($0.rawValue).tag($0) } }
+                        .pickerStyle(.segmented)
+                        .listRowInsets(EdgeInsets(top: KitSpace.tight, leading: 0, bottom: KitSpace.tight, trailing: 0))
+                        .listRowBackground(Color.clear)
+                }
                 ForEach(groups, id: \.day) { group in
                     Section(Self.dayTitle(group.day)) {
                         ForEach(group.items) { item in
@@ -78,17 +84,10 @@ struct LibraryScreen: View {
             .kitPage()
             .listStyle(.insetGrouped)
             .modifier(ReadableColumn())
-            .safeAreaInset(edge: .top, spacing: 0) {
-                Picker("Show", selection: $segment) { ForEach(LibrarySegment.allCases) { Text($0.rawValue).tag($0) } }
-                    .pickerStyle(.segmented)
-                    .padding(.horizontal, KitSpace.margin)
-                    .padding(.vertical, KitSpace.tight)
-                    .background(.bar)
-            }
             .overlay { if items.isEmpty { emptyState } }
             .searchable(text: $query, prompt: "Search translations and notes")
             .navigationTitle("Library")
-            .navigationBarTitleDisplayMode(.inline)
+            .navigationBarTitleDisplayMode(.large)
             .navigationDestination(for: UUID.self) { id in
                 if let item = history.first(where: { $0.id == id }) { LibraryDetail(engine: engine, item: item) }
             }
