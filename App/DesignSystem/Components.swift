@@ -147,7 +147,9 @@ struct LabeledToggleRow: View {
                 Text(title)
                 if let detail { Text(detail).font(.footnote).foregroundStyle(.secondary) }
             }
-        }.frame(minHeight: 52)
+        }
+        .frame(minHeight: 48)
+        .sensoryFeedback(.selection, trigger: isOn)
     }
 }
 

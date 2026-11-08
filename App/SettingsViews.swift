@@ -7,6 +7,8 @@ extension View {
         self.listStyle(.insetGrouped)
             .environment(\.defaultMinListRowHeight, 44)
             .listSectionSpacing(.compact)
+            .headerProminence(.increased)
+            .listRowBackground(Color(.secondarySystemGroupedBackground).opacity(0.92))
             .scrollContentBackground(.hidden)
             .ambientGlow()
             .background(Color(.systemGroupedBackground))
@@ -24,8 +26,11 @@ struct ResetSection: View {
     var body: some View {
         Section {
             // The dialog belongs to the button that opens it, not to the Section.
-            Button("Reset this page", role: .destructive) { confirm = true }
-                .frame(minHeight: 44)
+            Button(role: .destructive) { confirm = true } label: {
+                Label("Reset this page", systemImage: "arrow.counterclockwise")
+                    .frame(maxWidth: .infinity, minHeight: 44)
+            }
+            .buttonStyle(PressableStyle())
                 .confirmDestructive("Reset every setting on this page?", message: "Only this page's settings return to their defaults.",
                                     isPresented: $confirm, button: "Reset") {
                     engine.resetKeys(keys); feedback.show("Page reset to defaults", severity: .success)
@@ -582,9 +587,12 @@ struct InterfaceSettings: View {
                                 .fill(LinearGradient(colors: [color.start, color.end], startPoint: .topLeading, endPoint: .bottomTrailing))
                                 .frame(width: 36, height: 36)
                                 .overlay(Circle().stroke(Color.primary, lineWidth: accent == color.rawValue ? 3 : 0))
+                                .scaleEffect(accent == color.rawValue ? 1.12 : 1)
+                                .animation(KitMotion.spring, value: accent)
                                 .frame(minWidth: 44, minHeight: 44)
                         }
-                        .buttonStyle(.plain)
+                        .buttonStyle(PressableStyle())
+                        .sensoryFeedback(.selection, trigger: accent)
                         .accessibilityLabel(color.title)
                         .accessibilityAddTraits(accent == color.rawValue ? .isSelected : [])
                     }
