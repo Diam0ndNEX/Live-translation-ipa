@@ -51,6 +51,14 @@ assert 'label: "Refresh language check in background"' in index
 assert '@AppStorage("fastOCR") private var fastOCR = false' in experimental
 assert 'fastOCR: flag("fastOCR", false)' in engine
 
+# Diagnostics: the arm flag is exported (only when ON), allowlisted, and part of the cohort so on/off runs are not compared.
+diagnostics = (root / "App/Diagnostics.swift").read_text()
+archive = (root / "App/DiagnosticArchive.swift").read_text()
+assert 'if TranslationHotPathAB.refreshAvailabilityInBackground { settings["availabilityRefreshAB"] = "on" }' in diagnostics
+assert archive.count('"availabilityRefreshAB"') == 2, "settingsKeys and cohortKeys"
+assert "deliveryFilteringMs matches confirmation-to-PiP time" in archive
+assert "hybrid_switch_guard_* values are the gap" in archive
+
 # Version 2.2.3 build 106 in the places CI checks.
 assert 'static let version = "2.2.3"' in shared and "static let build = 106" in shared
 assert project.count('"2.2.3"') == 3 and project.count('"106"') == 3

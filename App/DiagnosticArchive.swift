@@ -452,7 +452,7 @@ actor DiagnosticExportWriter {
             "rapidTextTracking", "joinAdjacentText", "activeTextFocus",
             "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
             "thermalState", "performanceTier", "reductionReasons",
-            "hotPathAB", "hybridSchedulerAB", "detailSuspended",
+            "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "detailSuspended",
             // 2.2.1 (D4, E12)
             "idleMinutes", "sessionLimit", "autoOpenPiP", "winSize", "textSize", "pipFont", "theme", "showOriginal",
             "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding",
@@ -825,6 +825,10 @@ actor DiagnosticExportWriter {
             findings.json: observed and suspected issues; heuristics, not verified errors.
             README.txt: this file.
 
+            In Hybrid Recovery, deliveryFilteringMs matches confirmation-to-PiP time: it is the wait for the
+            Apple Default model, booked under that stage name, not a separate filtering cost. The
+            hybrid_switch_guard_* values are the gap since the last Default call returned, not a delay.
+
             Diagnostics are bounded. Structured events cover at most 2400 retained
             entries; old events can be evicted. Summary counters span the whole session.
             Model batches, translation units, OCR packets and subtitle candidates
@@ -884,7 +888,7 @@ struct DiagnosticPerformanceComparison {
         "mode", "speed", "stability", "area", "customY0", "customY1", "translationTestMode",
         "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
         "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
-        "hotPathAB", "hybridSchedulerAB", "detailedCollection", "performanceTier",
+        "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "detailedCollection", "performanceTier",
         "focusedCaptionOCR", "strictCaptionIdentity", "cjkSingleCharacters", "liveWarmupLegacy"
     ]
     static let noteKeys = [
