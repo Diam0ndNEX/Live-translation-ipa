@@ -104,3 +104,19 @@ struct AmbientGlow: ViewModifier {
 extension View {
     func ambientGlow() -> some View { modifier(AmbientGlow()) }
 }
+
+extension View {
+    /// One rounded surface for a single group of content (a chart, a counter list, a control block).
+    func kitSurface(padding: CGFloat = KitSpace.row + 4) -> some View {
+        self.padding(padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+
+    /// Page treatment for a List or Form: grouped background with the soft accent glow behind it.
+    func kitPage() -> some View {
+        self.scrollContentBackground(.hidden)
+            .ambientGlow()
+            .background(Color(.systemGroupedBackground))
+    }
+}

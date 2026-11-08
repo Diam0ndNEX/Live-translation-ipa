@@ -38,6 +38,7 @@ struct TuneSheet: View {
                     ScenesStrip(store: engine.presets)
                 }
             }
+            .kitPage()
             .navigationTitle("Reading and window")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }

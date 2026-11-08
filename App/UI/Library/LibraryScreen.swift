@@ -75,6 +75,7 @@ struct LibraryScreen: View {
                     }
                 }
             }
+            .kitPage()
             .listStyle(.insetGrouped)
             .modifier(ReadableColumn())
             .safeAreaInset(edge: .top, spacing: 0) {

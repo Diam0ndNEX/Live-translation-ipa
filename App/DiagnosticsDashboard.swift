@@ -202,7 +202,7 @@ private struct LineCard: View {
                 }
             }
         }
-        .padding(.vertical, KitSpace.tight)
+        .kitSurface()
     }
 }
 
@@ -244,7 +244,7 @@ private struct HistogramCard: View {
                 .frame(height: 120)
             }
         }
-        .padding(.vertical, KitSpace.tight)
+        .kitSurface()
     }
 }
 
@@ -268,7 +268,7 @@ private struct DonutCard: View {
                 .frame(height: 210)
             }
         }
-        .padding(.vertical, KitSpace.tight)
+        .kitSurface()
     }
 }
 
@@ -294,7 +294,7 @@ private struct BarListCard: View {
                 .frame(height: CGFloat(rows.count) * 34 + 20)
             }
         }
-        .padding(.vertical, KitSpace.tight)
+        .kitSurface()
     }
 }
 
@@ -396,7 +396,7 @@ private struct LiveFeedSection: View {
             Hint("Translator: " + pulse.activity)
             Hint(pulse.status)
         }
-        .padding(.vertical, KitSpace.tight)
+        .kitSurface()
     }
 }
 
@@ -479,6 +479,7 @@ private struct DiagnosticsBody: View {
             }
             .modifier(ReadableColumn())
             .ambientGlow()
+            .background(Color(.systemGroupedBackground))
             .animation(KitMotion.spring, value: pageRaw)
             .navigationTitle("Diagnostics")
             .navigationBarTitleDisplayMode(.large)
@@ -587,7 +588,7 @@ private struct DiagnosticsBody: View {
                     ForEach(DiagPage.allCases) { p in pageChip(p).id(p) }
                 }
                 .padding(.horizontal, KitSpace.margin)
-                .padding(.vertical, KitSpace.tight)
+                .kitSurface()
             }
             .background(.bar)
             .onAppear { proxy.scrollTo(page, anchor: .center) }
@@ -623,7 +624,7 @@ private struct DiagnosticsBody: View {
     private var livePage: some View {
         VStack(alignment: .leading, spacing: KitSpace.group) {
             PhaseHeader(phase: facts.phase, mode: facts.system.shortName)
-            OverviewAnswer(diag: diag, captureAlive: facts.captureAlive)
+            OverviewAnswer(diag: diag, captureAlive: facts.captureAlive).kitSurface()
             attentionSection
             LiveFeedSection()
             pipelineStrip
@@ -643,7 +644,7 @@ private struct DiagnosticsBody: View {
             Hint(facts.availability)
             Hint("Legacy reference: 1.7.2 (58), e94542ce. Apple default does not identify an effective model.")
         }
-        .padding(.vertical, KitSpace.tight)
+        .kitSurface()
     }
 
     private var statusLine: String {
@@ -675,7 +676,7 @@ private struct DiagnosticsBody: View {
                           symbol: "archivebox", enabled: !diag.exportInProgress) { Task { await diag.exportZIP() } }
             Hint(diag.archiveStatus)
         }
-        .padding(.vertical, KitSpace.tight)
+        .kitSurface()
     }
 
     private func evidenceNumber(_ title: String, _ value: Double) -> some View {
@@ -714,7 +715,7 @@ private struct DiagnosticsBody: View {
             Hint("Latency covers successful frame enqueues. Replaced work is excluded, so lower latency alone does not establish better subtitle continuity. Candidates, sentence hits and model requests count different events.")
         }
         .font(.footnote)
-        .padding(.vertical, KitSpace.tight)
+        .kitSurface()
     }
 
     private func apply(_ f: Fix) {
@@ -785,11 +786,11 @@ private struct DiagnosticsBody: View {
                 LabeledContent(outcome.rawValue, value: String(diag.memoryOutcomesForUI(outcome)))
             }
             Text(diag.archiveStatus).font(.caption).foregroundStyle(.secondary)
-        }.padding(.vertical, KitSpace.tight)
+        }.kitSurface()
     }
 
     private var sessionsPage: some View {
-        TestRunsPage(diag: diag, showReport: $showTestReport, confirmDeleteUnpinned: $confirmDeleteSessions).padding(.vertical, KitSpace.tight)
+        TestRunsPage(diag: diag, showReport: $showTestReport, confirmDeleteUnpinned: $confirmDeleteSessions).kitSurface()
     }
 
     private var liveFraction: Double {
@@ -839,7 +840,7 @@ private struct DiagnosticsBody: View {
                 node("Show", "rectangle.on.rectangle", facts.pipActive ? (d.n > 0 ? "\(Int(d.avg)) ms" : "–") : "closed", showColor)
             }
         }
-        .padding(.vertical, KitSpace.tight)
+        .kitSurface()
     }
 
     private struct CounterRow: Identifiable {
@@ -874,6 +875,7 @@ private struct DiagnosticsBody: View {
                 StatTile(title: row.title, value: row.value, tint: row.tint, icon: row.icon)
             }
         }
+        .kitSurface()
     }
 
     private var percentileTable: some View {
@@ -907,7 +909,7 @@ private struct DiagnosticsBody: View {
                 }
             }
         }
-        .padding(.vertical, KitSpace.tight)
+        .kitSurface()
     }
 
     // MARK: Speed
@@ -924,7 +926,7 @@ private struct DiagnosticsBody: View {
             HistogramCard(title: "How long the total delay is", values: slice(diag.latency).map { $0.v }, color: Color.orange)
             if facts.system != .legacy {
                 Text("Model-inference timings include successful backend requests even if an obsolete result was not displayed. Memory-only translations add no model sample. Total delay ends at PiP buffer enqueue.")
-                    .font(.caption).foregroundStyle(.secondary).padding(.vertical, KitSpace.tight)
+                    .font(.caption).foregroundStyle(.secondary).kitSurface()
             }
             PairedTimingCard(samples: diag.pipeline.filter { $0.date >= rangeStart })
             granularityCard
@@ -971,7 +973,7 @@ private struct DiagnosticsBody: View {
             Text("Buckets use actual elapsed time. For precise event order and durations, export events.csv; for longer sessions, use 15-second intervals. Individual buckets may have too few timings for useful P95.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .padding(.vertical, KitSpace.tight)
+        .kitSurface()
     }
 
     // MARK: Timeline
@@ -1016,7 +1018,7 @@ private struct DiagnosticsBody: View {
                 }
             }
         }
-        .padding(.vertical, KitSpace.tight)
+        .kitSurface()
     }
 
     private var perMinuteCard: some View {
@@ -1038,7 +1040,7 @@ private struct DiagnosticsBody: View {
                 .frame(height: 120)
             }
         }
-        .padding(.vertical, KitSpace.tight)
+        .kitSurface()
     }
 
     private var timelinePage: some View {
@@ -1115,7 +1117,7 @@ private struct DiagnosticsBody: View {
             }
             ForEach(Array(shown.prefix(limit))) { e in eventRow(e) }
         }
-        .padding(.vertical, KitSpace.tight)
+        .kitSurface()
     }
 
     // MARK: Pipeline
@@ -1130,7 +1132,7 @@ private struct DiagnosticsBody: View {
                 }
             }
             Text("Times measure app processing and frame enqueue, not physical screen presentation. Full bounded timeline is in CSV.").font(.caption).foregroundStyle(.secondary)
-        }.padding(.vertical, KitSpace.tight)
+        }.kitSurface()
     }
 
     private var adaptivePipelineCard: some View {
@@ -1155,7 +1157,7 @@ private struct DiagnosticsBody: View {
             Text("Capture packets over 8 KB: \(s.largePackets) · failed sends: \(s.packetSendErrors)").font(.caption).foregroundStyle(.secondary)
             Text("Pixel-verified confirmations: \(s.pixelConfirmations) · fell back to OCR: \(s.pixelRejections) · OCR skipped while caption unchanged: \(s.watchSkippedOCR) · OCR started on caption change: \(s.watchTriggeredOCR)").font(.caption).foregroundStyle(.secondary)
             Text("Recorder self-time · simple \(String(format: "%.1f", diag.recorderCosts.simpleMs)) ms · detailed \(String(format: "%.1f", diag.recorderCosts.detailedMs)) ms. Excludes chart drawing and model work; these are different workloads.").font(.caption).foregroundStyle(.secondary)
-        }.padding(.vertical, KitSpace.tight)
+        }.kitSurface()
     }
 
     private var pipelinePage: some View {
@@ -1199,7 +1201,7 @@ private struct DiagnosticsBody: View {
                 LabeledContent("Unchanged frames skipped", value: "\(s.skippedFrames)")
             }
             .font(.footnote)
-            .padding(.vertical, KitSpace.tight)
+            .kitSurface()
             if diag.detailedCollection {
                 candidateTraceCard
             }
@@ -1243,7 +1245,7 @@ private struct DiagnosticsBody: View {
                 }
             }
         }
-        .padding(.vertical, KitSpace.tight)
+        .kitSurface()
     }
 
     // MARK: Language
@@ -1267,12 +1269,13 @@ private struct DiagnosticsBody: View {
                          ? (s.sessionKind == "–" ? "Default" : (s.sessionKind.contains("iOS 26") ? "Direct" : "Hosted"))
                          : facts.system.shortName, icon: "cpu")
             }
+            .kitSurface()
             VStack(alignment: .leading, spacing: 6) {
                 Text(facts.sourceCode == "auto" ? "Source: Automatic" : "Source: \(facts.sourceCode.uppercased()) selected")
                     .font(.subheadline.weight(.semibold))
                 Text(facts.sourceCode == "auto" ? "With language lock enabled, four confident matching detections within six qualifying readings lock the source. Clear language changes translate immediately; three mismatches release the lock. The target language is never locked." : "Automatic detection is off. Selected-language inputs still count in the graph.")
                     .font(.caption).foregroundStyle(.secondary)
-            }.padding(.vertical, KitSpace.tight)
+            }.kitSurface()
             BarListCard(title: "Source languages used · session", rows: Array(counts), color: Color.purple)
             BarListCard(title: "How the source was chosen", rows: SourceLanguageOrigin.allCases.map {
                 BarRow(name: $0.title, value: diag.sourceUsage.origins[$0, default: 0])
@@ -1295,7 +1298,7 @@ private struct DiagnosticsBody: View {
                     }
                 }
             }
-            .padding(.vertical, KitSpace.tight)
+            .kitSurface()
         }
     }
 
@@ -1362,7 +1365,7 @@ private struct DiagnosticsBody: View {
                 .frame(height: 110)
             }
         }
-        .padding(.vertical, KitSpace.tight)
+        .kitSurface()
     }
 
     private var devicePage: some View {
@@ -1385,7 +1388,7 @@ private struct DiagnosticsBody: View {
                 LabeledContent("Battery now", value: b < 0 ? "–" : "\(Int(b * 100))%")
             }
             .font(.footnote)
-            .padding(.vertical, KitSpace.tight)
+            .kitSurface()
         }
     }
 

@@ -56,6 +56,7 @@ struct TranslateScreen: View {
             }
             .scrollBounceBehavior(.basedOnSize)
             .ambientGlow()
+            .background(Color(.systemGroupedBackground))
             .safeAreaInset(edge: .bottom) {
                 ComposeBar(engine: engine, composing: $composing)
             }
@@ -153,6 +154,7 @@ struct TranslateScreen: View {
                 VStack(alignment: .leading, spacing: 0) { contentMenu; speedMenu; areaMenu }
             }
         }
+        .kitSurface()
     }
 
     private var contentMenu: some View {
@@ -208,10 +210,10 @@ struct TranslateScreen: View {
                 Spacer(minLength: KitSpace.tight)
                 Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
             }
-            .frame(minHeight: 44)
+            .kitSurface()
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
     }
 
     // MARK: Live, starting, paused, attention
@@ -228,6 +230,7 @@ struct TranslateScreen: View {
         }
         LiveCaption(translated: snap.translated, original: snap.original, showOriginal: showOriginal,
                     stage: snap.stage, held: snap.held)
+            .kitSurface(padding: KitSpace.margin)
         actionRow
     }
 
@@ -331,6 +334,7 @@ private struct RecentList: View {
                     .accessibilityElement(children: .combine)
                 }
             }
+            .kitSurface()
         }
     }
 }

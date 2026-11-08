@@ -70,6 +70,7 @@ struct OnboardingView: View {
                     }
                 }
             }
+            .kitPage()
             .navigationTitle("Set up ScreenLingo")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {

@@ -116,6 +116,7 @@ struct LanguageSheet: View {
                 }
             }
         }
+        .kitPage()
         .searchable(text: $query, prompt: "Search languages")
         .refreshable { await engine.refreshStatus() }
         .onChange(of: p.statuses) { _, new in downloading = downloading.filter { new[$0] != .installed } }

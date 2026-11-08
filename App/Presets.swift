@@ -369,6 +369,7 @@ struct PresetEditor: View {
                          : "With languages on, applying this scene switches to \(pair.source.uppercased()) → \(pair.target.uppercased()).")
                 }
             }
+            .kitPage()
             .navigationTitle(editingID == nil ? "New scene" : "Edit scene")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -443,6 +444,7 @@ struct PresetManagerView: View {
                 Text("Use this to move scenes to another phone or keep them after reinstalling.")
             }
         }
+        .kitPage()
         .navigationTitle("Scenes")
         .navigationBarTitleDisplayMode(.large)
         .sheet(item: $editor) { PresetEditor(store: store, mode: $0).environmentObject(engine) }

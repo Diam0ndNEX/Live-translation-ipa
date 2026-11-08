@@ -75,6 +75,7 @@ struct SessionSheet: View {
                     Button { router.go(.diagnostics) } label: { LensRow(title: "Open Diagnostics", symbol: "waveform.path.ecg") }
                 }
             }
+            .kitPage()
             .navigationTitle("Session")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }

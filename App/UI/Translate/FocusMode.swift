@@ -126,6 +126,7 @@ struct FocusMode: View {
                     Picker("Width", selection: $width) { Text("Full").tag("full"); Text("Narrow").tag("narrow") }
                 }
             }
+            .kitPage()
             .navigationTitle("Text")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { showOptions = false } } }
