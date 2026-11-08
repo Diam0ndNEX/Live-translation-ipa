@@ -167,7 +167,7 @@ struct LibraryScreen: View {
             } description: {
                 Text("Translations appear here. Nothing is kept during a private session.")
             } actions: {
-                Button("Start translating") { router.go(.translate) }.buttonStyle(.borderedProminent)
+                Button("Start capture") { router.go(.translate) }.buttonStyle(.borderedProminent)
             }
         }
     }
@@ -222,20 +222,25 @@ struct LibraryDetail: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: KitSpace.group) {
-                Text(current.translated).font(.title.weight(.semibold)).textSelection(.enabled)
-                Text(current.original).font(.title3).foregroundStyle(.secondary).textSelection(.enabled)
+                VStack(alignment: .leading, spacing: KitSpace.row) {
+                    Text(current.translated).font(.title.weight(.semibold)).textSelection(.enabled)
+                    Divider()
+                    Text(current.original).font(.title3).foregroundStyle(.secondary).textSelection(.enabled)
+                }
+                .kitSurface(padding: KitSpace.margin)
                 VStack(alignment: .leading, spacing: KitSpace.tight) {
                     Text("Note").font(.headline)
                     TextField("Add context or vocabulary…", text: $note, axis: .vertical)
                         .lineLimit(3...8)
-                        .padding(KitSpace.row)
-                        .background(Color(uiColor: .secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                 }
+                .kitSurface()
                 Text(footer).font(.footnote).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(KitSpace.margin)
         }
+        .ambientGlow()
+        .background(Color(.systemGroupedBackground))
         .navigationTitle("Translation")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {

@@ -1,18 +1,29 @@
-// ScreenLingo – App – Platform bridges (2.1.0)
+// ScreenLingo – App – Platform bridges (2.1.4)
 import SwiftUI
 import ReplayKit
 
 // MARK: - Broadcast picker (real system button, so one genuine tap starts capture)
+/// The system picker keeps its inner button at its first size; this makes the button fill the whole view,
+/// so a tap anywhere on a larger circle reaches ReplayKit.
+final class FullSizeBroadcastPicker: RPSystemBroadcastPickerView {
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        for sub in subviews { sub.frame = bounds }
+    }
+}
+
 struct BroadcastPicker: UIViewRepresentable {
     var onTap: () -> Void = {}
+    /// True when a custom glyph is drawn underneath and the system one must not show.
+    var hidesGlyph = false
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
     func makeUIView(context: Context) -> RPSystemBroadcastPickerView {
-        let v = RPSystemBroadcastPickerView(frame: CGRect(x: 0, y: 0, width: 60, height: 60))
+        let v = FullSizeBroadcastPicker(frame: CGRect(x: 0, y: 0, width: 60, height: 60))
         v.preferredExtension = Self.extensionID()
         v.showsMicrophoneButton = false
-        v.tintColor = .white
+        v.tintColor = hidesGlyph ? .clear : .white
         context.coordinator.onTap = onTap
         context.coordinator.attach(to: v)
         return v

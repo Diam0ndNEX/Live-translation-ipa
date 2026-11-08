@@ -38,10 +38,11 @@ struct StartButton: View {
                 .offset(x: live ? 0 : 3)
                 .accessibilityHidden(true)
             // The real picker sits on top with its own glyph hidden, so taps reach ReplayKit.
-            BroadcastPicker(onTap: onTap)
+            BroadcastPicker(onTap: onTap, hidesGlyph: true)
                 .frame(width: size, height: size)
-                .opacity(0.02)
-                .accessibilityLabel(live ? "Stop translating" : "Start translating")
+                .clipShape(Circle())
+                .contentShape(Circle())
+                .accessibilityLabel(live ? "Stop capture" : "Start capture")
                 .accessibilityHint("Opens the system broadcast sheet")
         }
         .frame(width: size * 1.9, height: size * 1.9)

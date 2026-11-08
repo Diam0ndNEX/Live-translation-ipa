@@ -76,27 +76,14 @@ struct TranslateScreen: View {
 
     // MARK: Toolbar
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        if snap.phase.isSession {
-            ToolbarItemGroup(placement: .topBarTrailing) {
-                Button { engine.paused.toggle() } label: {
-                    Label(snap.paused ? "Resume" : "Pause", systemImage: snap.paused ? "play.fill" : "pause.fill")
-                }
-                .help(snap.paused ? "Resume translating" : "Pause translating")
-                Button { snap.pipActive ? engine.pip.stop() : engine.startPiP() } label: {
-                    Label(snap.pipActive ? "Close window" : "Show window", systemImage: snap.pipActive ? "pip.exit" : "pip.enter")
-                }
-                .help(snap.pipActive ? "Close the floating window" : "Show the floating window")
-            }
-        } else {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Button { router.present(.more) } label: { Label("Reading and window", systemImage: "slider.horizontal.3") }
-                    Button { router.present(.status) } label: { Label("Session", systemImage: "timer") }
-                    Button { focus = true } label: { Label("Focus mode", systemImage: "text.book.closed") }
-                    Button { router.present(.test) } label: { Label("Test the three modes", systemImage: "checklist") }
-                } label: {
-                    Label("More", systemImage: "ellipsis.circle")
-                }
+        ToolbarItem(placement: .topBarTrailing) {
+            Menu {
+                Button { router.present(.more) } label: { Label("Reading and window", systemImage: "slider.horizontal.3") }
+                Button { router.present(.status) } label: { Label("Session", systemImage: "timer") }
+                Button { focus = true } label: { Label("Focus mode", systemImage: "text.book.closed") }
+                Button { router.present(.test) } label: { Label("Test the three modes", systemImage: "checklist") }
+            } label: {
+                Label("More", systemImage: "ellipsis.circle")
             }
         }
     }
@@ -107,7 +94,7 @@ struct TranslateScreen: View {
         VStack(spacing: KitSpace.tight) {
             StartButton(live: false, onTap: startTapped)
                 .modifier(MorphTarget(namespace: reduceMotion ? nil : morph))
-            Text("Start translating").font(.title2.weight(.semibold))
+            Text("Start capture").font(.title2.weight(.semibold))
             Text("Opens the system sheet: choose ScreenLingo Capture, then Start Broadcast.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -115,6 +102,7 @@ struct TranslateScreen: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity)
+        controlTiles
         controls
         ScenesStrip(store: engine.presets)
         testRow
@@ -231,6 +219,7 @@ struct TranslateScreen: View {
         LiveCaption(translated: snap.translated, original: snap.original, showOriginal: showOriginal,
                     stage: snap.stage, held: snap.held)
             .kitSurface(padding: KitSpace.margin)
+        controlTiles
         actionRow
     }
 
@@ -286,6 +275,34 @@ struct TranslateScreen: View {
                 .frame(maxWidth: .infinity, minHeight: 44)
         }
         .disabled(!enabled)
+    }
+
+    /// Pause, floating window (PiP) and session: always on screen, as on the old Live tab.
+    private var controlTiles: some View {
+        HStack(spacing: KitSpace.tight) {
+            tile(snap.paused ? "Resume" : "Pause", snap.paused ? "play.fill" : "pause.fill", enabled: snap.phase.isSession) {
+                engine.paused.toggle()
+            }
+            tile(snap.pipActive ? "Close window" : "Floating window", snap.pipActive ? "pip.exit" : "pip.enter") {
+                if snap.pipActive { engine.pip.stop() } else { engine.startPiP() }
+            }
+            tile("Session", "list.bullet.rectangle") { router.present(.status) }
+        }
+    }
+
+    private func tile(_ title: String, _ symbol: String, enabled: Bool = true, run: @escaping () -> Void) -> some View {
+        Button { Feedback.tap(); run() } label: {
+            VStack(spacing: 6) {
+                Image(systemName: symbol).font(.title3.weight(.semibold)).contentTransition(.symbolEffect(.replace))
+                Text(title).font(.caption.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .frame(maxWidth: .infinity, minHeight: 64)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(PressableStyle())
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.4)
+        .accessibilityLabel(title)
     }
 
     private var finishSetupRow: some View {
