@@ -209,6 +209,7 @@ struct LibraryDetail: View {
     @EnvironmentObject private var feedback: FeedbackCenter
     @StateObject private var store: EngineSlice<[HistoryItem]>
     @State private var note: String
+    @State private var noteSave: Task<Void, Never>?
 
     init(engine: TranslatorEngine, item: HistoryItem) {
         self.engine = engine
@@ -260,9 +261,24 @@ struct LibraryDetail: View {
                 Button { Sharer.shareImage(engine.image(for: current)) } label: { Label("Picture", systemImage: "photo") }
             }
         }
+        // 2.2.0: every keystroke used to rewrite the whole saved history (up to 1,000 items) on the main thread.
+        // The note is now saved 0.6 s after typing stops, and immediately when the screen closes.
         .onChange(of: note) { _, value in
-            if let index = engine.history.firstIndex(where: { $0.id == item.id }) { engine.history[index].note = String(value.prefix(2000)) }
+            noteSave?.cancel()
+            noteSave = Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(600))
+                guard !Task.isCancelled else { return }
+                commitNote(value)
+            }
         }
+        .onDisappear { noteSave?.cancel(); commitNote(note) }
+    }
+
+    private func commitNote(_ value: String) {
+        let trimmed = String(value.prefix(2000))
+        guard let index = engine.history.firstIndex(where: { $0.id == item.id }),
+              (engine.history[index].note ?? "") != trimmed else { return }
+        engine.history[index].note = trimmed
     }
 
     private var footer: String {
