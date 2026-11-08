@@ -64,19 +64,23 @@ for name in ("InfoCardModifier", "ScreenScaffold", "SectionHeader", "SettingsTil
     for path, text in files.items():
         if re.search(rf"\bstruct {name}\b", text):
             fail("§13.4.2", path, f"deleted component {name} is defined again")
+# Owner decision after build 91: the Diagnostics page chips come back (pinned, one page at a time),
+# so the chip bar is required, not forbidden. Other screens must not grow their own chip bars.
 for path, text in files.items():
-    if re.search(r"\bfunc pageChip\b|\bvar pageBar\b", text):
-        fail("R6", path, "Diagnostics page chips are back")
+    if path.name != "DiagnosticsDashboard.swift" and re.search(r"\bfunc pageChip\b|\bvar pageBar\b", text):
+        fail("R6", path, "page chips outside Diagnostics")
 
 # §13.3 / U10: one language picker implementation.
 pickers = sum(len(re.findall(r"struct (LanguagePicker|LanguageSheet)\b", t)) for t in files.values())
 if pickers != 1:
     failures.append(f"U10: expected exactly one language picker implementation (LanguageSheet), found {pickers}")
 
-# R6: Diagnostics has no summary that stays above every page; lenses are pushed pages.
+# R6: Diagnostics has no big summary pinned above every page; only the compact chip bar is pinned.
 dash = (app / "DiagnosticsDashboard.swift").read_text()
-if "NavigationLink { lensPage(lens) }" not in dash:
-    failures.append("R6: DiagnosticsDashboard.swift: lenses are not pushed pages")
+if "pinnedViews: [.sectionHeaders]" not in dash or "private var pageBar" not in dash:
+    failures.append("R6: DiagnosticsDashboard.swift: the pinned page chip bar is missing")
+if re.search(r"HealthRing\(", dash):
+    failures.append("R6: DiagnosticsDashboard.swift: a health ring is pinned above the pages")
 # R7: no health score shown, and mode names without the build id in the UI.
 if re.search(r"\bscore:\s*a\.score\b", dash):
     failures.append("R7: DiagnosticsDashboard.swift: a health score is shown")

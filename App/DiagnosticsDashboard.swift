@@ -1,4 +1,4 @@
-// ScreenLingo – App – Diagnostics (2.1.0, spec §13.5.4: one answer, then lenses as pushed pages)
+// ScreenLingo – App – Diagnostics (2.1.0 build 92: pinned page chips, Live page first)
 import SwiftUI
 import Charts
 
@@ -344,17 +344,15 @@ enum DiagPage: String, CaseIterable, Identifiable {
     case overview, speed, timeline, pipeline, language, device, memory, sessions, log
     var id: String { rawValue }
     var title: String {
-        switch self { case .overview: "Right now"; case .sessions: "Test runs"; case .log: "Event log"; default: rawValue.capitalized }
+        switch self { case .overview: "Live"; case .sessions: "Test runs"; case .log: "Event log"; default: rawValue.capitalized }
     }
-    /// The lens list on the overview, in order (§13.5.4).
-    static let lenses: [DiagPage] = [.speed, .timeline, .pipeline, .language, .device, .memory, .sessions, .log]
     /// Lenses with time charts get their own range control.
     var ranged: Bool { self == .speed || self == .timeline || self == .device }
     /// Lenses that only fill with Detailed collection.
-    var needsDetails: Bool { self != .memory && self != .sessions && self != .language }
+    var needsDetails: Bool { self != .overview && self != .memory && self != .sessions && self != .language }
     var icon: String {
         switch self {
-        case .overview: "square.grid.2x2"
+        case .overview: "dot.radiowaves.left.and.right"
         case .speed: "speedometer"
         case .timeline: "timeline.selection"
         case .pipeline: "arrow.triangle.branch"
@@ -434,6 +432,7 @@ private struct DiagnosticsBody: View {
     @StateObject private var tick: ObjectSlice<Diagnostics, DiagTick>
     @AppStorage("diagnosticsEnabled") private var collectionEnabled = true
     @AppStorage("detailedCollection") private var collectDetails = false
+    @AppStorage("diagPage") private var pageRaw = DiagPage.overview.rawValue
     @AppStorage("diagRange") private var rangeRaw = DiagRange.fiveMin.rawValue
     @State private var kinds: Set<EventKind> = []
     @State private var query = ""
@@ -448,6 +447,7 @@ private struct DiagnosticsBody: View {
         _tick = StateObject(wrappedValue: ObjectSlice(diag, milliseconds: 500) { DiagTick.read($0) })
     }
 
+    private var page: DiagPage { DiagPage(rawValue: pageRaw) ?? .overview }
     private var range: DiagRange { DiagRange(rawValue: rangeRaw) ?? .fiveMin }
     private var rangeStart: Date {
         range == .session ? diag.started : Date().addingTimeInterval(-Double(range.rawValue))
@@ -460,38 +460,25 @@ private struct DiagnosticsBody: View {
     }
 
     // MARK: Body
-    /// Opens on one answer: what state the session is in and the typical delay, then only what needs attention,
-    /// then the lenses. Each lens is its own pushed page with its own title; nothing here stays above it (R6).
+    /// Chip bar pinned under the title, one page at a time (the layout the owner asked to keep).
+    /// Live opens first and carries the headline answer, what needs attention, and the old Live numbers.
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    PhaseHeader(phase: facts.phase, mode: facts.system.shortName)
-                    if collectionEnabled {
-                        OverviewAnswer(diag: diag, captureAlive: facts.captureAlive)
-                    } else {
-                        Toggle("Collect diagnostics", isOn: $collectionEnabled)
-                        Text("Collection is off. Translation and capture continue.").font(.footnote).foregroundStyle(.secondary)
-                    }
-                }
-                attentionSection
-                Section("Lenses") {
-                    ForEach(DiagPage.lenses) { lens in
-                        NavigationLink { lensPage(lens) } label: {
-                            LensRow(title: lens.title, value: lensValue(lens), symbol: lens.icon)
-                        }
-                    }
-                }
-                if !collectDetails && collectionEnabled {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: KitSpace.row, pinnedViews: [.sectionHeaders]) {
                     Section {
-                        Toggle("Detailed collection", isOn: $collectDetails)
-                    } footer: {
-                        Text("Adds the graphs, timings and event log. Turn it on before a test run.")
+                        VStack(alignment: .leading, spacing: KitSpace.group) { pageBody }
+                            .padding(.horizontal, KitSpace.margin)
+                            .padding(.top, KitSpace.tight)
+                            .padding(.bottom, KitSpace.group)
+                    } header: {
+                        if collectionEnabled { pageBar }
                     }
                 }
             }
             .modifier(ReadableColumn())
             .navigationTitle("Diagnostics")
+            .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button { Sharer.shareFile(text: diag.report(engine: engine), name: "translator-report-\(Sharer.stamp()).txt") } label: {
@@ -542,83 +529,95 @@ private struct DiagnosticsBody: View {
     }
 
     /// Only shown when there is evidence: an issue the recorder actually found.
+    /// Before any capture it stays neutral: no red without evidence.
     @ViewBuilder private var attentionSection: some View {
         let a = diag.assessment(alive: facts.captureAlive, paused: facts.paused)
+        let evidence = facts.captureAlive || diag.s.translations > 0
         if collectionEnabled && !a.issues.isEmpty {
-            Section("Needs attention") {
+            VStack(alignment: .leading, spacing: KitSpace.tight) {
+                Text("Needs attention").font(.headline)
                 ForEach(Array(a.issues.prefix(3))) { issue in
-                    HStack(alignment: .firstTextBaseline, spacing: KitSpace.row) {
-                        Image(systemName: issue.severity == 2 ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
-                            .foregroundStyle(issue.severity == 2 ? Color.red : Color.orange)
+                    HStack(alignment: .top, spacing: KitSpace.row) {
+                        Image(systemName: !evidence ? "info.circle.fill" : (issue.severity == 2 ? "xmark.octagon.fill" : "exclamationmark.triangle.fill"))
+                            .foregroundStyle(!evidence ? Color.secondary : (issue.severity == 2 ? Color.red : Color.orange))
                             .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(issue.title).font(.body)
+                            Text(issue.title).font(.subheadline.weight(.semibold))
                             Text(issue.detail).font(.footnote).foregroundStyle(.secondary)
                         }
                         Spacer(minLength: KitSpace.tight)
                         if let fix = issue.fix {
-                            Button(fix.label) { apply(fix) }.buttonStyle(.bordered).font(.subheadline)
+                            Button(fix.label) { apply(fix) }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
                         }
                     }
-                    .frame(minHeight: 44)
                 }
             }
         }
     }
 
-    /// The one-line live value next to each lens.
-    private func lensValue(_ lens: DiagPage) -> String {
-        switch lens {
-        case .overview: return ""
-        case .speed:
-            let d = Diagnostics.summarize(diag.latency)
-            return d.n > 0 ? "\(Int(d.p50)) ms median" : "–"
-        case .timeline: return "\(tick.value.events) events"
-        case .pipeline:
-            let o = Diagnostics.summarize(Array(diag.ocr.suffix(20)))
-            let t = Diagnostics.summarize(Array(diag.translate.suffix(20)))
-            return o.n + t.n > 0 ? "Reading \(Int(o.avg)) · Translating \(Int(t.avg))" : "–"
-        case .language:
-            let pair = "\(facts.sourceCode == "auto" ? "Auto" : facts.sourceCode.uppercased()) → \(facts.targetCode.uppercased())"
-            return pair + (facts.sourceCode == "auto" || facts.sourceReady ? " · ready" : " · needs pack")
-        case .device: return thermalName
-        case .memory: return "\(facts.memoryCount.formatted()) remembered"
-        case .sessions: return "\(tick.value.runs) saved"
-        case .log: return "\(tick.value.events) entries"
+    // MARK: Chips and pages
+    private func pageChip(_ p: DiagPage) -> some View {
+        Button { pageRaw = p.rawValue } label: {
+            Label(p.title, systemImage: p.icon)
+                .font(.footnote.weight(.semibold))
+                .padding(.horizontal, KitSpace.row)
+                .frame(minHeight: 36)
+                .foregroundStyle(page == p ? Color.white : Color.primary)
+                .background(page == p ? Color.accentColor : Color(.secondarySystemFill), in: Capsule())
         }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(page == p ? .isSelected : [])
     }
 
-    private func lensStatus(_ lens: DiagPage) -> String {
-        let value = lensValue(lens)
-        let phase = facts.phase.word
-        return value.isEmpty || value == "–" ? phase : "\(phase) · \(value)"
-    }
-
-    /// A lens: its own large title, its own range control, an inline switch when it needs Detailed collection.
-    private func lensPage(_ lens: DiagPage) -> some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: KitSpace.group) {
-                // One-line status under the large title: the same live value the overview row shows.
-                Text(lensStatus(lens))
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                if lens.ranged { rangePicker }
-                if lens.needsDetails && !collectDetails {
-                    Toggle(isOn: $collectDetails) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Detailed collection")
-                            Text("Graphs on this page need it.").font(.footnote).foregroundStyle(.secondary)
-                        }
-                    }
-                    .frame(minHeight: 44)
+    private var pageBar: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: KitSpace.tight) {
+                    ForEach(DiagPage.allCases) { p in pageChip(p).id(p) }
                 }
-                pageContent(lens)
+                .padding(.horizontal, KitSpace.margin)
+                .padding(.vertical, KitSpace.tight)
             }
-            .padding(.horizontal, KitSpace.margin)
-            .padding(.bottom, KitSpace.group)
+            .background(.bar)
+            .onAppear { proxy.scrollTo(page, anchor: .center) }
         }
-        .navigationTitle(lens.title)
-        .navigationBarTitleDisplayMode(.large)
+    }
+
+    @ViewBuilder private var pageBody: some View {
+        if !collectionEnabled {
+            VStack(alignment: .leading, spacing: KitSpace.row) {
+                Text("Diagnostics collection is off. Translation and capture continue.")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                Button("Turn on") { collectionEnabled = true }.buttonStyle(.borderedProminent)
+            }
+        } else {
+            if page.ranged { rangePicker }
+            if page.needsDetails && !collectDetails {
+                HStack(spacing: KitSpace.row) {
+                    Text("Graphs and the event log need Detailed collection.")
+                        .font(.footnote).foregroundStyle(.secondary)
+                    Spacer(minLength: KitSpace.tight)
+                    Button("Turn on") { collectDetails = true }.buttonStyle(.bordered).controlSize(.small)
+                }
+            }
+            pageContent(page)
+        }
+    }
+
+    /// Everything the old Live page showed: headline, attention, what is read and shown, pipeline, evidence, counters.
+    private var livePage: some View {
+        VStack(alignment: .leading, spacing: KitSpace.group) {
+            PhaseHeader(phase: facts.phase, mode: facts.system.shortName)
+            OverviewAnswer(diag: diag, captureAlive: facts.captureAlive)
+            attentionSection
+            LiveFeedSection()
+            pipelineStrip
+            evidenceCard
+            sessionGrid
+            systemCard
+        }
     }
 
     // MARK: Simple
@@ -734,16 +733,12 @@ private struct DiagnosticsBody: View {
 
     @ViewBuilder private func pageContent(_ lens: DiagPage) -> some View {
         switch lens {
-        case .overview: evidenceCard
+        case .overview: livePage
         case .speed:
-            sessionGrid
             percentileTable
             speedPage
         case .timeline: timelinePage
         case .pipeline:
-            LiveFeedSection()
-            pipelineStrip
-            systemCard
             evidenceDetails
             pipelinePage
             adaptivePipelineCard
@@ -834,23 +829,37 @@ private struct DiagnosticsBody: View {
         .padding(.vertical, KitSpace.tight)
     }
 
+    private struct CounterRow: Identifiable {
+        let title: String
+        let value: String
+        var tint: Color = Color.primary
+        let icon: String
+        var id: String { title }
+    }
+
+    /// One list of session counters. Built as data so the row count never hits the ViewBuilder limit.
     private var sessionGrid: some View {
         let s = diag.s
         let hits = s.cacheHits + s.savedHits + s.specHits + s.cacheMisses
-        return VStack(spacing: 0) {
-            StatTile(title: "Time live", value: "\(Int(liveFraction * 100))%", tint: Color.green, icon: "dot.radiowaves.left.and.right")
-            StatTile(title: "Started", value: diag.started.formatted(date: .omitted, time: .shortened), icon: "clock")
-            StatTile(title: "Translations", value: "\(s.translations)", tint: Color.cyan, icon: "character.bubble")
-            StatTile(title: "Sentences", value: "\(s.sentences)", icon: "text.alignleft")
-            StatTile(title: "Characters", value: "\(s.chars)", icon: "textformat")
-            StatTile(title: "Cache hits", value: hits == 0 ? "–" : "\(Int(Double(s.cacheHits + s.savedHits + s.specHits) / Double(hits) * 100))%",
-                     tint: Color.purple, icon: "memorychip")
-            StatTile(title: "Capture drops", value: "\(s.captureDrops)",
-                     tint: s.captureDrops > 0 ? Color.orange : Color.primary, icon: "bolt.slash")
-            StatTile(title: "Failures", value: "\(s.failures)",
-                     tint: s.failures > 0 ? Color.red : Color.primary, icon: "exclamationmark.triangle")
-            StatTile(title: "Pre-translated", value: "\(s.specHits)", tint: Color.cyan, icon: "forward.fill")
-            StatTile(title: "Remembered", value: "\(facts.memoryCount)", tint: Color.mint, icon: "externaldrive")
+        let reuse = hits == 0 ? "–" : "\(Int(Double(s.cacheHits + s.savedHits + s.specHits) / Double(hits) * 100))%"
+        let rows: [CounterRow] = [
+            CounterRow(title: "Time live", value: "\(Int(liveFraction * 100))%", tint: Color.green, icon: "dot.radiowaves.left.and.right"),
+            CounterRow(title: "Started", value: diag.started.formatted(date: .omitted, time: .shortened), icon: "clock"),
+            CounterRow(title: "Translations", value: "\(s.translations)", tint: Color.cyan, icon: "character.bubble"),
+            CounterRow(title: "Sentences", value: "\(s.sentences)", icon: "text.alignleft"),
+            CounterRow(title: "Characters", value: "\(s.chars)", icon: "textformat"),
+            CounterRow(title: "Cache hits", value: reuse, tint: Color.purple, icon: "memorychip"),
+            CounterRow(title: "Capture drops", value: "\(s.captureDrops)", tint: s.captureDrops > 0 ? Color.orange : Color.primary, icon: "bolt.slash"),
+            CounterRow(title: "Failures", value: "\(s.failures)", tint: s.failures > 0 ? Color.red : Color.primary, icon: "exclamationmark.triangle"),
+            CounterRow(title: "Pre-translated", value: "\(s.specHits)", tint: Color.cyan, icon: "forward.fill"),
+            CounterRow(title: "Remembered", value: "\(facts.memoryCount)", tint: Color.mint, icon: "externaldrive")
+        ]
+        return VStack(alignment: .leading, spacing: 0) {
+            Text("This session").font(.headline).padding(.bottom, KitSpace.tight)
+            ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                if index > 0 { Divider() }
+                StatTile(title: row.title, value: row.value, tint: row.tint, icon: row.icon)
+            }
         }
     }
 

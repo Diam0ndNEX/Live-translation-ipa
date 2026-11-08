@@ -107,7 +107,7 @@ enum Fix: String {
         case .fixedRotation: "Turn off auto-rotation"
         case .narrowArea: "Read the bottom third only"
         case .openLanguages: "Open Languages"
-        case .startCapture: "Go to Live"
+        case .startCapture: "Open Translate"
         case .translateAhead: "Turn on translate-ahead"
         }
     }
