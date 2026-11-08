@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "2.1.1"
-    static let build = 92
+    static let version = "2.1.2"
+    static let build = 93
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("2.1.2", "Build 93: the whole app gets more life. Settings is rebuilt as colour-tile rows in rounded groups (Translation, Reading, Floating caption, Look and feel, Device and data, Advanced) under a summary of your current setup, without the oversized system buttons; every settings page has tighter rows. A soft accent glow sits behind Translate, Diagnostics and Settings, the Diagnostics page chip slides between pages with a haptic tick, pages fade in, rows spring when pressed, and the mode picker ticks. Not run on a device by Claude; speed unverified."),
         ("2.1.1", "Build 92: refinement after owner feedback on build 91. Diagnostics gets its page chips back, pinned under the title (Live, Speed, Timeline, Pipeline, Language, Device, Memory, Test runs, Log), and the Live page again shows what is read and shown, the pipeline strip, test evidence, session counters and the system. Idle Diagnostics is neutral, not red. Translate shows the Legacy, Hybrid and Low Latency picker with its note, Content, Speed and Area menus, and the three-mode test row again. Library rows are smaller and the blank band above the list is gone. Diagnostics buttons are normal-size and 'Go to Live' now says 'Open Translate'. Not run on a device by Claude; speed unverified."),
         ("2.1.0", "Build 91: the interface is rebuilt, not restyled. Four tabs: Translate (idle, starting, live, paused and attention are one screen with the language pair as the title, a Start button, the live caption, Focus mode and a compose bar for typed, photo and file text), Library (Saved and Recent), Diagnostics (one answer first, then lenses as their own pages) and Settings (one grouped list in five groups, with a live preview of the floating caption). Languages is a sheet from the pair. Onboarding is one screen with three live checks. The Start button morphs into the live header, Translate and Focus mode turn to landscape, wide screens get one 640 pt column, and Settings search finds single settings. Old screens and card components are deleted. Settings keys and stored data are unchanged; the only engine edit is one status message. Not run on a device by Claude; speed unverified."),
         ("2.0.0", "Build 90: fixes a Swift syntax error in the More sheet (an extra brace) that stopped the CI build of builds 88 and 89. No other change. Not compiled or run on a device."),
