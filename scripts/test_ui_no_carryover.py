@@ -42,7 +42,7 @@ if re.search(r'Label\("Activity"', root_src) or ".tag(3)" in root_src:
 
 # U3: leaf tabs observe snapshots, not the whole engine
 for name in ("UI/Translate/TranslateScreen.swift", "UI/Translate/FocusMode.swift", "UI/Translate/SessionSheet.swift",
-             "Languages/LanguagesView.swift", "Library/LibraryView.swift", "Onboarding/OnboardingView.swift"):
+             "UI/Languages/LanguageSheet.swift", "Library/LibraryView.swift", "Onboarding/OnboardingView.swift"):
     t = (app / name).read_text()
     if re.search(r"@EnvironmentObject[^\n]*TranslatorEngine", t) or "@ObservedObject var engine" in t:
         fail("U3", f"{name} observes the whole engine")
@@ -67,12 +67,14 @@ for p, t in ui.items():
 if (app / "UIParts.swift").exists():
     fail("U5", "UIParts.swift (old theme) still exists")
 
-# U6: Languages tap never silently changes a language
-lang = (app / "Languages/LanguagesView.swift").read_text()
+# U6 / 2.1.0 §13.5.2: the side being edited is always visible (From | Into) and every change offers Undo
+lang = (app / "UI/Languages/LanguageSheet.swift").read_text()
 if "onTapGesture" in lang:
     fail("U6", "Languages rows use a silent tap gesture")
-if "Translate into" not in lang or "Translate from" not in lang:
-    fail("U6", "Languages tap does not offer both from and into")
+if "LanguageSide.source" not in lang or "LanguageSide.target" not in lang or '"Undo"' not in lang:
+    fail("U6", "Languages has no visible From/Into side or no Undo")
+if (app / "Languages/LanguagesView.swift").exists():
+    fail("§13.3", "the old Languages tab view still exists")
 
 # U7: Library destructive actions
 lib = (app / "Library/LibraryView.swift").read_text()

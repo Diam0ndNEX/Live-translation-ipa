@@ -145,7 +145,7 @@ private struct SheetHost: View {
         case .reader: FocusMode(engine: engine)
         case .captureArea: AreaSheet()
         case .testRuns: TestRunsScreen(diag: engine.diag)
-        case .languages: LanguagesView(engine: engine)
+        case .languages: LanguageSheet(engine: engine)
         }
     }
 }
