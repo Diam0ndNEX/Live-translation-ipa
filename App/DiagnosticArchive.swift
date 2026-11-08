@@ -416,7 +416,11 @@ actor DiagnosticExportWriter {
                 "warmup_source_unresolved", "warmup_predicted_source", "warmup_preempted",
                 "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started", "legacy_idle_completed",
                 "legacy_idle_deferred", "app_interface_visible", "external_capture_period", "app_started", "capture_config_changed",
-                "capture_idle", "capture_live", "capture_paused", "capture_frozen"
+                "capture_idle", "capture_live", "capture_paused", "capture_frozen",
+                "legacy_queued_speculation_superseded", "legacy_speculation_low_confidence",
+                "legacy_speculation_saved_memory_backoff", "legacy_speculation_low_yield_backoff",
+                // found by guard C2 in 2.2.1: emitted by the engine, accepted by Diagnostics, dropped here
+                "legacy_shared_session_used"
             ]).union(stageCodes)
         let safeEvents = snapshot.events.suffix(2400).map { event in
             StructuredDiagnosticEvent(id: event.id, timestamp: event.timestamp,
@@ -449,6 +453,10 @@ actor DiagnosticExportWriter {
             "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
             "thermalState", "performanceTier", "reductionReasons",
             "hotPathAB", "hybridSchedulerAB", "detailSuspended",
+            // 2.2.1 (D4, E12)
+            "idleMinutes", "sessionLimit", "autoOpenPiP", "winSize", "textSize", "pipFont", "theme", "showOriginal",
+            "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding",
+            "focusedCaptionOCR", "strictCaptionIdentity", "thermalStart", "thermalEnd", "thermalMax",
             "appRequestedCaptureIntervalMs", "appRequestedCaptureEdgePx"
         ]
         let safeSettings = snapshot.settings.filter { pair in
@@ -473,6 +481,7 @@ actor DiagnosticExportWriter {
         // currently uses fixed keys, but the archive boundary must not rely
         // on future callers never accidentally supplying a source-text key.
         let extraCounters: Set<String> = [
+            "structured_events_dropped", "id_map_resets", "legacy_context_resets", "subtitle_traces_dropped",
             "runCheckpointCaptureMicros", "legacyInventoryPending", "legacyInventoryOtherTarget", "legacyInventoryOtherSource",
             "legacyInventoryOutsideLength", "legacyInventoryCandidates", "legacySkipKeyContext",
             "legacySkipCleanup", "legacySkipSegmentation", "legacySkipModel",
@@ -864,16 +873,51 @@ struct DiagnosticPerformanceComparison {
     let medianChanges: [String: Double]
     let meanChanges: [String: Double]
     let p90Changes: [String: Double]
+    /// Differences that are shown but never block a comparison (thermal path, start state, window size, ...).
+    let notes: [String]
+
+    /// 2.2.1 (D3): two runs are comparable when these settings are equal. Everything else that differs is a note.
+    /// Before 2.2.1 the whole settings dictionary had to match, which included the end thermal state and the
+    /// starting RAM entries, so almost every comparison was withheld.
+    static let cohortKeys = [
+        "mode", "speed", "stability", "area", "customY0", "customY1", "translationTestMode",
+        "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
+        "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
+        "hotPathAB", "hybridSchedulerAB", "detailedCollection", "performanceTier",
+        "focusedCaptionOCR", "strictCaptionIdentity", "cjkSingleCharacters"
+    ]
+    static let noteKeys = [
+        "thermalStart", "thermalEnd", "thermalMax", "appRequestedCaptureIntervalMs", "appRequestedCaptureEdgePx",
+        "startingRAMEntries", "winSize", "showOriginal"
+    ]
+
+    /// The cohort keys whose values differ between two runs (a missing value counts as "–").
+    static func cohortMismatches(_ a: DiagnosticSessionExport, _ b: DiagnosticSessionExport) -> [String] {
+        cohortKeys.filter { (a.settings[$0] ?? "–") != (b.settings[$0] ?? "–") }
+    }
+
+    static func differenceNotes(_ a: DiagnosticSessionExport, _ b: DiagnosticSessionExport) -> [String] {
+        var notes = noteKeys.compactMap { key -> String? in
+            let x = a.settings[key] ?? "–", y = b.settings[key] ?? "–"
+            return x == y ? nil : "\(key): \(x) -> \(y)"
+        }
+        if a.appVersion != b.appVersion { notes.append("app version: \(a.appVersion) -> \(b.appVersion)") }
+        return notes
+    }
 
     init(baseline: DiagnosticSessionExport, current: DiagnosticSessionExport) {
+        notes = Self.differenceNotes(baseline, current)
         guard let baselineModel = baseline.hardwareModel, !baselineModel.isEmpty,
               baselineModel == current.hardwareModel,
               baseline.systemVersion == current.systemVersion,
               baseline.measurementBoundary == current.measurementBoundary,
-              baseline.settings == current.settings
+              Self.cohortMismatches(baseline, current).isEmpty
         else {
             comparable = false
-            reason = "Hardware model, OS, settings or measurement boundaries differ or are unavailable; comparison withheld"
+            let mismatches = Self.cohortMismatches(baseline, current)
+            reason = mismatches.isEmpty
+                ? "Hardware model, OS or measurement boundaries differ or are unavailable; comparison withheld"
+                : "Settings that change the result differ (" + mismatches.joined(separator: ", ") + "); comparison withheld"
             p95Changes = [:]
             medianChanges = [:]; meanChanges = [:]; p90Changes = [:]
             return
@@ -958,14 +1002,37 @@ enum DiagnosticIssueDetector {
             add("confirmed_continuity_loss", "suspected", unpresented,
                 "Confirmed candidate work was superseded before PiP enqueue. This is not a ground-truth missed-subtitle rate.")
         }
+        // 2.2.1 (D7): findings about how trustworthy the run itself is.
+        let captionsShown = session.counters["enqueuedCandidateFrames", default: 0]
+        let hasTiming = session.distributions["enqueueLatencyMs"] != nil
+        if captionsShown > 0, !hasTiming, session.settings["detailedCollection"] != "true" {
+            add("detailed_collection_off", "observed", captionsShown,
+                "Detailed collection was off, so this run has no latency distribution. Turn it on in Diagnostics and run again.")
+        }
+        if session.settings["detailSuspended"] == "true" {
+            add("detail_suspended_thermal", "observed", 1,
+                "Detailed collection was requested but the phone reached Serious or Critical thermal state and switched it off. Later parts of the run have no timing.")
+        }
+        let manualCount = session.counters["manualTranslations", default: 0]
+        if manualCount > 0 {
+            add("manual_translations_in_run", "observed", manualCount,
+                "Compose, photo/file or language-pair translations ran during this run. They are counted apart and not in the latency totals.")
+        }
+        let runSeconds = session.endedAt.timeIntervalSince(session.startedAt)
+        // A zero length means the export carries no duration at all, which is not the same as a short run.
+        if (captionsShown > 0 || hasTiming), runSeconds > 0, runSeconds < 180 {
+            add("short_run", "observed", Int(runSeconds),
+                "The run was shorter than 3 minutes. Percentiles from so little time move a lot between runs.")
+        }
         let failedEnqueues = max(0, session.counters["enqueueFailed", default: 0])
         if failedEnqueues > 0 {
             add("pip_enqueue_failure", "observed", failedEnqueues,
                 "The PiP renderer rejected one or more buffer enqueue attempts. A successful retry may have followed.")
         }
+        // 2.2.1 (D7, suspected): the old rule (P95 > max(1800, 2.5 x median)) never flagged Hybrid's 1.5 s tail.
         if let enqueue = session.distributions["enqueueLatencyMs"], enqueue.count >= 20,
            let median = enqueue.p50, median > 0,
-           let p95 = enqueue.p95, p95 > max(1800, median * 2.5) {
+           let p95 = enqueue.p95, p95 > max(1000, median * 2) {
             add("enqueue_slow_tail", "suspected", enqueue.count,
                 "OCR-to-PiP enqueue P95 is high relative to the median. Examine slow intervals and candidate handoffs.")
         }
@@ -1133,6 +1200,10 @@ enum DiagnosticTraceReview {
         "heartbeat_timeout", "capture_connected", "idle_auto_pause", "session_time_limit",
         "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical", "detail_suspended_thermal",
         "confirmed", "speculative", "ready", "enqueued", "cancelled",
+        "legacy_queued_speculation_superseded", "legacy_speculation_low_confidence",
+        "legacy_speculation_saved_memory_backoff", "legacy_speculation_low_yield_backoff",
+        // found by guard C2 in 2.2.1: recorded by Diagnostics but missing from the trace review
+        "confirmed_handoff_deferred", "handoff_expired", "handoff_replayed", "preserved_confirmed_work",
         "observed", "cache_hit", "computed", "ramHit", "persistentHit",
         "legacyHit", "normalizedHit", "speculativeHit", "miss", "timeout",
         "compatibilityRejected", "databaseUnavailable", "persisted",
@@ -1268,6 +1339,36 @@ enum CombinedDiagnosticReport {
         var captions: [CaptionRow] = []
         var decisions: [DecisionRow] = []
         var fingerprints = Set<String>()
+        /// 2.2.1 (D9): per caption ref, the gap since the previous Default call ended and whether Low Latency
+        /// started while a Default call was still running. Both come from events that already exist.
+        var exitGaps: [String: Double] = [:]
+        var overlapped = Set<String>()
+    }
+
+    /// 2.2.1 (D9): bands for the Hybrid question "does the Low Latency recovery cost more right after Default?".
+    static let hybridBandNames = ["in flight", "0-150 ms", "150-500 ms", "500-1500 ms", "none/older"]
+
+    static func hybridBand(overlapped: Bool, gapMs: Double?) -> String {
+        if overlapped { return "in flight" }
+        guard let gap = gapMs, gap >= 0 else { return "none/older" }
+        if gap < 150 { return "0-150 ms" }
+        if gap < 500 { return "150-500 ms" }
+        if gap < 1500 { return "500-1500 ms" }
+        return "none/older"
+    }
+
+    /// Low Latency confirmed-lane service time per band, paired by caption.
+    static func hybridBands(_ parsed: Parsed) -> [(band: String, n: Int, median: Double?, max: Double?)] {
+        let calls = parsed.calls.filter { $0.lane == "confirmed" && $0.strategy == "lowLatency" }
+        var byBand: [String: [Double]] = [:]
+        for call in calls {
+            let band = hybridBand(overlapped: parsed.overlapped.contains(call.caption), gapMs: parsed.exitGaps[call.caption])
+            byBand[band, default: []].append(call.serviceMs)
+        }
+        return hybridBandNames.map { name in
+            let values = byBand[name] ?? []
+            return (name, values.count, median(values), values.max())
+        }
     }
 
     /// Rebuild model calls, caption timelines and Hybrid decisions from the
@@ -1330,6 +1431,10 @@ enum CombinedDiagnosticReport {
                     serviceMs: service, queueMs: call.queueMs, warm: call.warm, caption: ref))
             case "confirmed":
                 if row.confirmedMs == nil { row.confirmedMs = t }
+            case "hybrid_previous_default_exit_gap_ms":
+                if let gap = event.durationMs { parsed.exitGaps[ref] = gap }
+            case "hybrid_cross_strategy_overlap":
+                parsed.overlapped.insert(ref)
             case "hybrid_switch_guard_default":
                 row.recoveryStrategy = "appleDefault"; row.guardGapMs = event.durationMs
             case "hybrid_switch_guard_low_latency":
@@ -1423,6 +1528,19 @@ enum CombinedDiagnosticReport {
             out.append("⚠️ A session started with test memory already filled; its reuse numbers are not comparable.")
         }
 
+        // 2.2.1 (D8): the variables the next A/B tests change, and a warning for sessions with no timing.
+        out.append("")
+        out.append("| | hot path | Hybrid scheduler | detailed | thermal start/end/max | focused/strict | identical-frame holds | manual |")
+        out.append("|---|---|---|---|---|---|---|---|")
+        for (i, session) in selected.enumerated() {
+            let s = session.settings
+            out.append("| \(labels[i]) | \(s["hotPathAB"] ?? "?") | \(s["hybridSchedulerAB"] ?? "?") | \(s["detailedCollection"] ?? "?")\(s["detailSuspended"] == "true" ? " (suspended: thermal)" : "") | \(s["thermalStart"] ?? "?")/\(s["thermalEnd"] ?? "?")/\(s["thermalMax"] ?? "?") | \(s["focusedCaptionOCR"] ?? "?")/\(s["strictCaptionIdentity"] ?? "?") | \(session.counters["identicalFrameHolds", default: 0]) | \(session.counters["manualTranslations", default: 0]) |")
+        }
+        for (i, session) in selected.enumerated() where (session.distributions["enqueueLatencyMs"]?.count ?? 0) == 0 {
+            out.append("")
+            out.append("⚠️ \(labels[i]) has n = 0: no latency samples (Detailed collection was off or no caption was enqueued). Its row in the comparison is empty, not fast.")
+        }
+
         out.append("")
         out.append("## 2. Comparison (ms)")
         out.append("")
@@ -1499,6 +1617,18 @@ enum CombinedDiagnosticReport {
         }
         out.append("```")
 
+        // 2.2.1 (D9): Low Latency recovery service by how recently a Default call ran (same 1.5 s window as the build 74-81 analysis).
+        out.append("")
+        out.append("Low Latency recovery service by distance from the previous Default call (paired by caption):")
+        out.append("")
+        out.append("| | band | n | median | max |")
+        out.append("|---|---|---|---|---|")
+        for i in selected.indices where selected[i].translationModes?.active == "hybridRecovery" {
+            for row in hybridBands(parsed[i]) {
+                out.append("| \(labels[i]) | \(row.band) | \(row.n) | \(ms(row.median)) | \(ms(row.max)) |")
+            }
+        }
+
         out.append("")
         out.append("## 7. Findings")
         for (i, session) in selected.enumerated() {
@@ -1517,6 +1647,9 @@ enum CombinedDiagnosticReport {
             let retained = session.translationModes?.events.count ?? 0
             let overwritten = session.translationModes?.counters["session_mode_trace_ring_overwritten"] ?? 0
             out.append("- \(labels[i]): \(retained) mode events retained\(retained >= 2400 ? " (2,400 cap reached; early events missing)" : ""), \(overwritten) overwritten; \(session.events.count) structured events retained. Whole-session counters are not truncated.")
+            // 2.2.1 (D6): what the bounded buffers dropped, so a short event list is never mistaken for a quiet run.
+            let c = session.counters
+            out.append("  - dropped: \(c["structured_events_dropped", default: 0]) structured events, \(c["id_map_resets", default: 0]) correlation-ID map resets, \(c["legacy_context_resets", default: 0]) Legacy context resets, \(c["subtitle_traces_dropped", default: 0]) subtitle traces.")
         }
         out.append("")
         return out.joined(separator: "\n")

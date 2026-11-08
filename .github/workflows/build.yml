@@ -33,6 +33,8 @@ jobs:
         run: python3 scripts/test_v199_performance.py
       - name: Verify v2.2.1 source contracts
         run: python3 scripts/test_v221_contracts.py
+      - name: Diagnostic allowlist guards (2.2.1 C2, C3)
+        run: python3 scripts/test_diag_allowlists.py
       - name: Library history rules and debounced save (2.2.1 E1, E15)
         run: |
           swiftc -parse-as-library Shared/HistoryPolicy.swift Tests/HistoryPolicy/main.swift -o /tmp/history-policy-tests

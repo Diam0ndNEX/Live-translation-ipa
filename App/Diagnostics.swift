@@ -265,6 +265,11 @@ final class Diagnostics: ObservableObject {
     private var lastRecordedThermalState: String?
     /// 2.2.1 (D1): Detailed collection was requested but switched itself off at Serious/Critical thermal state.
     private(set) var detailSuspendedByThermal = false
+    /// Thermal level when the current collection started and the warmest level seen since (2.2.1, D4).
+    private var thermalStartLevel: Int?
+    /// 2.2.1 (D6): what the bounded buffers threw away. Exported as counters and printed in the report's Truncation section.
+    private var structuredEventsDropped = 0, idMapResets = 0, legacyContextResets = 0, subtitleTracesDropped = 0
+    private var thermalMaxLevel = 0
     private(set) var captureReductionReasons = ["none"]
     private var requestedCaptureIntervalMs = 0
     private var requestedCaptureEdgePx = 0
@@ -317,7 +322,7 @@ final class Diagnostics: ObservableObject {
     private func stableCandidateID(_ candidate: String?) -> UUID? {
         guard let candidate else { return nil }
         if let existing = candidateIDs[candidate] { return existing }
-        if candidateIDs.count >= 2400 { candidateIDs.removeAll(keepingCapacity: true) }
+        if candidateIDs.count >= 2400 { candidateIDs.removeAll(keepingCapacity: true); idMapResets += 1 }
         let id = UUID()
         candidateIDs[candidate] = id
         return id
@@ -326,7 +331,7 @@ final class Diagnostics: ObservableObject {
     private func stableFrameID(_ index: Int?) -> UUID? {
         guard let index else { return nil }
         if let id = frameIDs[index] { return id }
-        if frameIDs.count >= 2400 { frameIDs.removeAll(keepingCapacity: true) }
+        if frameIDs.count >= 2400 { frameIDs.removeAll(keepingCapacity: true); idMapResets += 1 }
         let id = UUID(); frameIDs[index] = id
         return id
     }
@@ -334,7 +339,7 @@ final class Diagnostics: ObservableObject {
     private func stableUnitID(_ canonicalKey: String?) -> UUID? {
         guard let canonicalKey else { return nil }
         if let id = unitIDs[canonicalKey] { return id }
-        if unitIDs.count >= 2400 { unitIDs.removeAll(keepingCapacity: true) }
+        if unitIDs.count >= 2400 { unitIDs.removeAll(keepingCapacity: true); idMapResets += 1 }
         let id = UUID(); unitIDs[canonicalKey] = id
         return id
     }
@@ -355,7 +360,10 @@ final class Diagnostics: ObservableObject {
         appendStructured(candidate: safeID, frameIndex: frameIndex, stage: safeStage,
                          outcome: "observed", reason: safeStage, durationMs: nil, at: time)
         subtitleTraces.append(SubtitleTrace(candidate: safeID.uuidString, stage: safeStage, time: time, detail: detail))
-        if subtitleTraces.count > 300 { subtitleTraces.removeFirst(subtitleTraces.count - 300) }
+        if subtitleTraces.count > 300 {
+            subtitleTracesDropped += subtitleTraces.count - 300
+            subtitleTraces.removeFirst(subtitleTraces.count - 300)
+        }
     }
 
 
@@ -378,7 +386,9 @@ final class Diagnostics: ObservableObject {
             "preserved_confirmed_work", "confirmed_handoff_deferred",
             "adaptive_speculation_backoff", "slow_tail", "handoff_expired", "handoff_replayed", "enqueue_failed",
             "changing_group_preferred", "dominant_group", "queue_replaced",
-            "confirmed", "speculative", "ready", "enqueued", "cancelled"
+            "confirmed", "speculative", "ready", "enqueued", "cancelled",
+            // 2.2.1 (E10): why Legacy declined a speculation (the engine already emitted these; the allowlist dropped them)
+            "legacy_speculation_low_confidence", "legacy_speculation_saved_memory_backoff", "legacy_speculation_low_yield_backoff"
         ]
         guard allowedStages.contains(stage), allowedReasons.contains(reason) else { return }
         let token = beginRecorder(); defer { endRecorder(token) }
@@ -508,7 +518,8 @@ final class Diagnostics: ObservableObject {
             "warmup_source_unresolved", "warmup_predicted_source", "warmup_preempted",
             "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started",
             "legacy_idle_completed", "legacy_idle_deferred",
-            "legacy_confirmed_after_switch", "legacy_confirmed_no_switch", "legacy_shared_session_used"
+            "legacy_confirmed_after_switch", "legacy_confirmed_no_switch", "legacy_shared_session_used",
+            "legacy_queued_speculation_superseded" // 2.2.1 (E10): was emitted by the engine but dropped here
         ]
         guard allowed.contains(reason) else { return }
         if modeActiveSystem == "legacy", let candidate {
@@ -543,6 +554,9 @@ final class Diagnostics: ObservableObject {
 
     func noteThermalState() {
         guard enabled else { return }
+        let currentLevel = ProcessInfo.processInfo.thermalState.rawValue
+        if thermalStartLevel == nil { thermalStartLevel = currentLevel }
+        thermalMaxLevel = max(thermalMaxLevel, currentLevel)
         let reason: String
         switch ProcessInfo.processInfo.thermalState {
         case .nominal: reason = "thermal_nominal"
@@ -592,7 +606,10 @@ final class Diagnostics: ObservableObject {
             stage: stage, outcome: outcome, reasonCode: reason,
             durationMs: durationMs.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }, privacy: "metadataOnly")
         structuredEvents.append(event)
-        if structuredEvents.count > 2400 { structuredEvents.removeFirst(structuredEvents.count - 2400) }
+        if structuredEvents.count > 2400 {
+            structuredEventsDropped += structuredEvents.count - 2400
+            structuredEvents.removeFirst(structuredEvents.count - 2400)
+        }
         // Reserve 128 of the 2,400 exported events for sparse early-session
         // evidence, so an initial 90-second stall is not erased by late activity.
         if Date().timeIntervalSince(started) <= 120, openingEvents.count < 128 {
@@ -653,7 +670,7 @@ final class Diagnostics: ObservableObject {
         guard enabled, modeActiveSystem == "legacy" else { return }
         if !confirmed { lastLegacySpeculation = fingerprint }
         if legacyModeContexts[caption] == nil {
-            if legacyModeContexts.count >= 128 { legacyModeContexts.removeAll() }
+            if legacyModeContexts.count >= 128 { legacyModeContexts.removeAll(); legacyContextResets += 1 }
             legacyModeContexts[caption] = LegacyModeContext(session: session, source: source, target: target,
                 fingerprint: fingerprint, firstOCR: firstOCR, mismatch: confirmed && lastLegacySpeculation != nil && lastLegacySpeculation != fingerprint)
         }
@@ -763,6 +780,9 @@ final class Diagnostics: ObservableObject {
                     "deduplicateCopies", "contextualLanguage", "languageRecovery",
                     "continuousRotation", "smartCool", "testRunSaving",
                     "diagSamples", "heartbeatInterval", "keepAwake", "suppressOwnInterface", "temporaryMemoryTest",
+                    // 2.2.1 (D4): settings that change render time or end a run
+                    "idleMinutes", "sessionLimit", "autoOpenPiP", "winSize", "textSize", "pipFont", "theme", "showOriginal",
+                    "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding",
                     "rapidTextTracking", "joinAdjacentText", "activeTextFocus"]
         var settings: [String: String] = [:]
         for key in keys {
@@ -793,6 +813,16 @@ final class Diagnostics: ObservableObject {
         }
         settings["performanceTier"] = ThermalPerformancePolicy.tier(for: thermalState).rawValue
         if detailSuspendedByThermal { settings["detailSuspended"] = "true" }
+        // 2.2.1 (D4, E12): thermal start/end/max (a run's end state alone hides a warm run) and the two
+        // capture options the app derives per mode. They are not stored settings, so they are written here.
+        let thermalNames = ["nominal", "fair", "serious", "critical"]
+        let level = max(0, min(3, thermalState.rawValue))
+        settings["thermalStart"] = thermalNames[max(0, min(3, thermalStartLevel ?? level))]
+        settings["thermalEnd"] = thermalNames[level]
+        settings["thermalMax"] = thermalNames[max(level, thermalMaxLevel)]
+        let legacyActive = modeActiveSystem == "legacy"
+        settings["strictCaptionIdentity"] = String(!legacyActive)
+        settings["focusedCaptionOCR"] = String(!legacyActive && ((UserDefaults.standard.object(forKey: "subtitleTracking") as? Bool) ?? true))
         settings["hotPathAB"] = TranslationHotPathAB.label
         settings["hybridSchedulerAB"] = HybridSchedulingPolicy.buildVariant.rawValue
         settings["reductionReasons"] = captureReductionReasons.joined(separator: "_")
@@ -802,6 +832,10 @@ final class Diagnostics: ObservableObject {
         var counters = cumulativeCounters()
         counters.merge(legacyValidationSnapshot) { _, new in new }
         counters.merge(Dictionary(uniqueKeysWithValues: memoryOutcomes.map { ($0.key.rawValue, $0.value) })) { _, new in new }
+        counters["structured_events_dropped"] = structuredEventsDropped
+        counters["id_map_resets"] = idMapResets
+        counters["legacy_context_resets"] = legacyContextResets
+        counters["subtitle_traces_dropped"] = subtitleTracesDropped
         counters["sessionCacheHits"] = s.cacheHits
         counters["savedMemoryHits"] = s.savedHits
         counters["speculativeHits"] = s.specHits
@@ -1006,6 +1040,9 @@ final class Diagnostics: ObservableObject {
         s = Stats()
         pipeline = []
         translate = []; latency = []; transport = []
+        structuredEventsDropped = 0; idMapResets = 0; legacyContextResets = 0; subtitleTracesDropped = 0
+        thermalStartLevel = ProcessInfo.processInfo.thermalState.rawValue
+        thermalMaxLevel = thermalStartLevel ?? 0
         started = Date()
         startingRAMEntries = ramEntryCount?() ?? 0
         startRunState()
@@ -1310,6 +1347,9 @@ final class Diagnostics: ObservableObject {
         lastCaptureConnected = false
         lastRecordedThermalState = nil
         detailSuspendedByThermal = false
+        structuredEventsDropped = 0; idMapResets = 0; legacyContextResets = 0; subtitleTracesDropped = 0
+        thermalStartLevel = ProcessInfo.processInfo.thermalState.rawValue
+        thermalMaxLevel = ProcessInfo.processInfo.thermalState.rawValue
         memoryOutcomes = [:]; lookupSamples = []; writeSamples = []; historySaveSamples = []
         modelTimingSamples = [:]; completedWorkRecoveredUnits = 0
         sharedModelUnits = 0; sharedConfirmedModelUnits = 0; memoryAwareSpeculationSkipped = 0; ramCaptionBypasses = 0; exactCaptionHits = 0; exactUnitsCoalesced = 0

@@ -630,6 +630,98 @@ import Foundation
         precondition(parsedTrace.captions.first?.recoveryStrategy == "lowLatency" &&
                      parsedTrace.captions.first?.reason == "recovery_success")
 
+        // 2.2.1 D3: comparison uses the cohort keys; thermal path and RAM at start are notes, not blockers.
+        func variant(_ base: DiagnosticSessionExport, _ changes: [String: String]) -> DiagnosticSessionExport {
+            DiagnosticSessionExport(id: UUID(), startedAt: base.startedAt, endedAt: base.endedAt,
+                appVersion: base.appVersion, systemVersion: base.systemVersion, hardwareModel: base.hardwareModel,
+                settings: base.settings.merging(changes) { _, new in new }, health: base.health, counters: base.counters,
+                distributions: base.distributions, events: [], measurementBoundary: base.measurementBoundary, textCapture: false)
+        }
+        let warmRun = variant(snapshot, ["thermalEnd": "serious", "thermalMax": "serious", "startingRAMEntries": "40"])
+        let warmComparison = DiagnosticPerformanceComparison(baseline: snapshot, current: warmRun)
+        precondition(warmComparison.comparable, "D3: a different end thermal state alone must not withhold the comparison")
+        precondition(warmComparison.notes.contains { $0.hasPrefix("thermalEnd:") } &&
+                     warmComparison.notes.contains { $0.hasPrefix("startingRAMEntries:") }, "D3: differences are listed as notes")
+        let blockedOther = DiagnosticPerformanceComparison(
+            baseline: variant(snapshot, ["hybridSchedulerAB": "evidenceBounded"]),
+            current: variant(snapshot, ["hybridSchedulerAB": "recoveryFirst"]))
+        precondition(!blockedOther.comparable && blockedOther.reason.contains("hybridSchedulerAB"),
+                     "D3: a different Hybrid scheduler variant is a different cohort and the reason names it")
+        precondition(DiagnosticPerformanceComparison.cohortKeys.contains("hotPathAB") &&
+                     DiagnosticPerformanceComparison.cohortKeys.contains("detailedCollection") &&
+                     DiagnosticPerformanceComparison.cohortKeys.contains("cjkSingleCharacters"), "D3: cohort keys include the A/B and Detailed settings")
+
+        // 2.2.1 D7: findings about the run itself, and the new tail rule.
+        let trustRun = DiagnosticSessionExport(id: UUID(), startedAt: Date(timeIntervalSince1970: 1_000),
+            endedAt: Date(timeIntervalSince1970: 1_100), appVersion: "2.2.1", systemVersion: "test",
+            settings: ["detailedCollection": "false", "detailSuspended": "true"], health: MemoryDiagnosticHealth(),
+            counters: ["enqueuedCandidateFrames": 40, "manualTranslations": 2], distributions: [:], events: [],
+            measurementBoundary: "test", textCapture: false)
+        let trustCodes = Set(DiagnosticIssueDetector.assess(trustRun).map(\.code))
+        precondition(trustCodes.isSuperset(of: ["detailed_collection_off", "detail_suspended_thermal",
+                                                "manual_translations_in_run", "short_run"]), "D7: run-trust findings \(trustCodes)")
+        let tailRun = DiagnosticSessionExport(id: UUID(), startedAt: Date(), endedAt: Date(), appVersion: "2.2.1",
+            systemVersion: "test", settings: [:], health: MemoryDiagnosticHealth(), counters: [:],
+            distributions: ["enqueueLatencyMs": DiagnosticDistribution(Array(repeating: 600.0, count: 85) + Array(repeating: 1500.0, count: 15))],
+            events: [], measurementBoundary: "test", textCapture: false)
+        precondition(DiagnosticIssueDetector.assess(tailRun).contains { $0.code == "enqueue_slow_tail" },
+                     "D7: a 1.5 s tail over a 0.6 s median is flagged (it was not under the old rule)")
+
+        // 2.2.1 D9: Low Latency recovery service by distance from the previous Default call.
+        func band(_ reason: String, _ at: Double, _ duration: Double? = nil, caption: String) -> TranslationModeTrace {
+            TranslationModeTrace(mode: "hybridRecovery", testMode: "normal", session: session, caption: caption, revision: 1,
+                source: "pt", target: "en", fingerprint: safeHash, reason: reason, monotonicTime: at, firstOCR: 0, durationMs: duration, thermal: 0)
+        }
+        let bandReport = TranslationModeReport(warmups: nil, active: "hybridRecovery", pending: "hybridRecovery",
+            referenceSHA: String(repeating: "b", count: 40), migration: "persisted", events: [
+                band("requested_lowLatency", 1.0, caption: "k1"), band("hybrid_cross_strategy_overlap", 1.0, caption: "k1"),
+                band("recovery_service_ms", 1.3, 300, caption: "k1"),
+                band("requested_lowLatency", 2.0, caption: "k2"), band("hybrid_previous_default_exit_gap_ms", 2.0, 100, caption: "k2"),
+                band("recovery_service_ms", 2.2, 200, caption: "k2"),
+                band("requested_lowLatency", 3.0, caption: "k3"), band("hybrid_previous_default_exit_gap_ms", 3.0, 700, caption: "k3"),
+                band("recovery_service_ms", 3.4, 400, caption: "k3"),
+                band("requested_lowLatency", 4.0, caption: "k4"), band("recovery_service_ms", 4.1, 100, caption: "k4"),
+                band("requested_lowLatency", 5.0, caption: "k5"), band("hybrid_previous_default_exit_gap_ms", 5.0, 120, caption: "k5"),
+                band("recovery_service_ms", 5.3, 260, caption: "k5")
+            ], distributions: [:], counters: [:])
+        let bands = CombinedDiagnosticReport.hybridBands(CombinedDiagnosticReport.parse(bandReport, label: "S1"))
+        func row(_ name: String) -> (n: Int, median: Double?, max: Double?) {
+            let r = bands.first { $0.band == name }!; return (r.n, r.median, r.max)
+        }
+        precondition(row("in flight").n == 1 && row("in flight").max == 300, "D9: in flight")
+        precondition(row("0-150 ms").n == 2 && row("0-150 ms").max == 260, "D9: 0-150 ms holds k2 and k5")
+        precondition(row("150-500 ms").n == 0 && row("500-1500 ms").n == 1 && row("none/older").n == 1, "D9: other bands")
+        var bandSession = variant(snapshot, [:])
+        bandSession.translationModes = bandReport
+        let bandText = CombinedDiagnosticReport.markdown([bandSession], version: "2.2.1", build: 104, generatedAt: Date())
+        precondition(bandText.contains("| S1 | in flight | 1 |") && bandText.contains("| S1 | 0-150 ms | 2 |"), "D9: the table is in the report")
+
+        // 2.2.1 D6 and D8: truncation counters and the variables / n = 0 rows appear in the report.
+        let truncated = DiagnosticSessionExport(id: UUID(), startedAt: Date(timeIntervalSince1970: 1_000),
+            endedAt: Date(timeIntervalSince1970: 1_600), appVersion: "2.2.1", systemVersion: "test",
+            hardwareModel: "iPhoneTest1,1",
+            settings: ["hotPathAB": "L1_F1", "hybridSchedulerAB": "evidenceBounded", "detailedCollection": "false",
+                       "thermalStart": "nominal", "thermalEnd": "fair", "thermalMax": "fair"],
+            health: MemoryDiagnosticHealth(),
+            counters: ["structured_events_dropped": 7, "id_map_resets": 2, "legacy_context_resets": 1,
+                       "subtitle_traces_dropped": 4, "identicalFrameHolds": 9],
+            distributions: [:], events: [], measurementBoundary: "test", textCapture: false)
+        let truncatedText = CombinedDiagnosticReport.markdown([truncated], version: "2.2.1", build: 104, generatedAt: Date())
+        precondition(truncatedText.contains("dropped: 7 structured events, 2 correlation-ID map resets, 1 Legacy context resets, 4 subtitle traces"), "D6")
+        precondition(truncatedText.contains("L1_F1") && truncatedText.contains("nominal/fair/fair") && truncatedText.contains("| 9 |"), "D8: variables row")
+        precondition(truncatedText.contains("has n = 0"), "D8: warning row for a session without samples")
+
+        // 2.2.1 E10: the four events the engine emitted reach the exported trace instead of "redacted".
+        for code in ["legacy_queued_speculation_superseded", "legacy_speculation_low_confidence",
+                     "legacy_speculation_saved_memory_backoff", "legacy_speculation_low_yield_backoff"] {
+            let event = StructuredDiagnosticEvent(id: UUID(), timestamp: Date(), sessionID: session, candidateID: UUID(),
+                frameID: nil, unitID: nil, stage: "model_state", outcome: code, reasonCode: code, durationMs: nil, privacy: "metadataOnly")
+            var carrier = variant(snapshot, [:])
+            carrier.events = [event]
+            let exported = try await writer.decode(try await writer.encode(carrier))
+            precondition(exported.events.first?.reasonCode == code && exported.events.first?.outcome == code, "E10: \(code)")
+        }
+
         print("Diagnostic percentile, privacy, correlation, compatibility and comparison passed")
     }
 }

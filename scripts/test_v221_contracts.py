@@ -143,5 +143,23 @@ assert runviews.count("feedback.show(message.0, severity: message.1)") == 2
 card = body_of(runviews, "if runsSlice.value.activeStarted != nil", "VStack(alignment: .leading, spacing: 0)")
 assert "} else if runsSlice.value.bannerID" not in card
 
+# ---- WP3: diagnostics content ----
+assert "DiagnosticPerformanceComparison.cohortKeys" in runviews, "D3: the screen uses the same cohort list"
+assert "baseline.settings == current.settings" not in archive, "D3: the whole-dictionary comparison must not return"
+for code in ("detailed_collection_off", "detail_suspended_thermal", "manual_translations_in_run", "short_run"):
+    assert f'add("{code}"' in archive, code
+assert "p95 > max(1000, median * 2)" in archive, "D7: tail rule"
+for counter in ("structured_events_dropped", "id_map_resets", "legacy_context_resets", "subtitle_traces_dropped"):
+    assert f'counters["{counter}"]' in diagnostics and f'"{counter}"' in archive, counter
+assert "static func hybridBands" in archive and "hybridBandNames" in archive, "D9"
+assert "n = 0" in archive, "D8: warning row"
+for key in ("idleMinutes", "sessionLimit", "autoOpenPiP", "winSize", "textSize", "pipFont", "theme", "showOriginal",
+            "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding"):
+    assert diagnostics.count(f'"{key}"') >= 1 and archive.count(f'"{key}"') >= 1, f"D4: {key}"
+for key in ("focusedCaptionOCR", "strictCaptionIdentity", "thermalStart", "thermalEnd", "thermalMax"):
+    assert f'settings["{key}"]' in diagnostics and f'"{key}"' in archive, f"E12/D4: {key}"
+assert "scripts/test_diag_allowlists.py" in workflow, "C2/C3 run in CI"
+
+print("v2.2.1 WP3 contracts passed: E10, D3, D4, D6, D7, D8, D9, E12, C2, C3")
 print("v2.2.1 WP2 contracts passed: E8, D1, D2, D5, U1, U6")
 print("v2.2.1 WP1 contracts passed: E1, E15, E2, U2, U3, U4, U5")

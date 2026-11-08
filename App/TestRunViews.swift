@@ -474,9 +474,8 @@ struct TestRunDetailView: View {
 
     private var current: TestRunMeta { snapshot.value.runs.first { $0.id == run.id } ?? run }
 
-    private static let comparedSettings = ["speed", "mode", "translationTestMode", "hybridSwitchGuard", "pixelConfirmation",
-        "eventDrivenOCR", "fastOCR", "legacySharedSession", "effectiveRapidTextTracking", "effectiveJoinAdjacentText",
-        "effectiveActiveTextFocus", "temporaryMemoryTest"]
+    // 2.2.1 (D3): the same list the comparison uses, so the screen and the report agree on what "comparable" means.
+    private static let comparedSettings = DiagnosticPerformanceComparison.cohortKeys
 
     private var differing: [String] {
         guard let loaded else { return [] }
