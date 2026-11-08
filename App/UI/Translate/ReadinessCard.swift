@@ -66,12 +66,14 @@ struct ReadinessCard: View {
 struct RippleBackdrop: View {
     var live: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         if reduceMotion {
             EmptyView()
         } else {
-            TimelineView(.animation(minimumInterval: 1.0 / 30)) { context in
+            // 2.2.1 (U12): 15 fps (was 30) and paused while the scene is not active. Battery effect unmeasured.
+            TimelineView(.animation(minimumInterval: 1.0 / 15, paused: scenePhase != .active)) { context in
                 let t = context.date.timeIntervalSinceReferenceDate
                 ZStack {
                     ForEach(0..<3, id: \.self) { i in

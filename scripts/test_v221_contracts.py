@@ -288,7 +288,9 @@ assert 'diag.noteModelState("speculative_lease_conflict")' in engine and "specul
 assert '"liveWarmupLegacy": true' in engine and 'flag("liveWarmupLegacy", true)' in engine
 assert "diag.s.warmupsDuringCapture += 1" in engine and 'count("warmupsDuringCapture")' in archive
 assert '"liveWarmupLegacy"' in diagnostics and archive.count('"liveWarmupLegacy"') >= 2
-print("v2.2.1 WP6 contracts passed: D11, D12, D13, E9, E11, E18")
+ripple = read("App/UI/Translate/ReadinessCard.swift")
+assert "minimumInterval: 1.0 / 15, paused: scenePhase != .active" in ripple and "1.0 / 30" not in ripple
+print("v2.2.1 WP6 contracts passed: D11, D12, D13, E9, E11, E18, U12")
 
 print("v2.2.1 WP5 contracts passed: D10 (measurement only)")
 print("v2.2.1 WP4 contracts passed: E3, E4, E5, E6, E7, E13, E14, E16, E17, U7, U8, U9, U10")
