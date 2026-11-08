@@ -160,7 +160,7 @@ struct TestCard: View {
             if privateSession {
                 Banner(text: "Private session: runs are not saved.", severity: .warning)
             } else if saving == "off" {
-                Banner(text: "Saving test runs is off. Turn it on in Settings > Diagnostics & tests.", severity: .warning)
+                Banner(text: "Saving test runs is off. Turn it on in Settings > Diagnostics settings.", severity: .warning)
             }
             // Mode · Median · P95 · Captions, newest run per mode (§13.5.4).
             VStack(alignment: .leading, spacing: KitSpace.tight) {
@@ -464,37 +464,32 @@ struct TestRunDetailView: View {
             .joined(separator: " · ")
     }
 
-    private func number(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.title3.weight(.bold).monospacedDigit()).minimumScaleFactor(0.7).lineLimit(1)
-        }
-        .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-    }
-
     var body: some View {
         let s = snapshot.value
         NavigationStack {
             List {
+                // One answer first: the run's typical delay, then its slow tail and caption count (§13.5.8).
                 Section {
-                    VStack(alignment: .leading, spacing: Space.m) {
-                        TestRunRow(run: current)
-                        HStack(alignment: .top, spacing: Space.s) {
-                            number("Median", TestRunText.ms(current.enqueueP50Ms))
-                            number("Slow tail · P95", TestRunText.ms(current.enqueueP95Ms))
-                            number("Captions", "\(current.captions)")
-                        }
-                        if current.mixedMode {
-                            Banner(text: "Mode may be mixed in this run. Do not use it for a mode comparison.", severity: .error)
-                        }
-                        if current.startingRAMEntries > 0 {
-                            Banner(text: "Memory held \(current.startingRAMEntries) entries at start; the run is not a cold-start measurement.", severity: .warning)
-                        }
-                        if !current.trimmed.isEmpty {
-                            Banner(text: "Trimmed to fit: " + current.trimmed.joined(separator: ", "), severity: .warning)
-                        }
+                    StatLine(value: current.enqueueP50Ms.map { "\(Int($0)) ms" },
+                             caption: "Typical delay · \(TestRunText.modeTitle(current.mode))",
+                             secondary: [current.enqueueP95Ms.map { "P95 \(Int($0)) ms" } ?? "P95 –",
+                                         "\(current.captions) captions",
+                                         TestRunText.duration(current.durationSeconds)],
+                             emptyCaption: "No complete captions in this run")
+                    TestRunRow(run: current)
+                    if current.mixedMode {
+                        Label("Mode may be mixed in this run. Don't use it for a mode comparison.", systemImage: "xmark.octagon.fill")
+                            .foregroundStyle(.red).font(.subheadline)
                     }
-                } header: { Text("Result") }
+                    if current.startingRAMEntries > 0 {
+                        Label("Memory held \(current.startingRAMEntries) entries at start; not a cold-start measurement.", systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange).font(.subheadline)
+                    }
+                    if !current.trimmed.isEmpty {
+                        Label("Trimmed to fit: " + current.trimmed.joined(separator: ", "), systemImage: "scissors")
+                            .foregroundStyle(.orange).font(.subheadline)
+                    }
+                }
 
                 if let loaded {
                     let findings = DiagnosticIssueDetector.assess(loaded)
