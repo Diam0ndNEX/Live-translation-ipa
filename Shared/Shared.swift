@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "2.0.0"
-    static let build = 90
+    static let version = "2.1.0"
+    static let build = 91
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("2.1.0", "Build 91: the interface is rebuilt, not restyled. Four tabs: Translate (idle, starting, live, paused and attention are one screen with the language pair as the title, a Start button, the live caption, Focus mode and a compose bar for typed, photo and file text), Library (Saved and Recent), Diagnostics (one answer first, then lenses as their own pages) and Settings (one grouped list in five groups, with a live preview of the floating caption). Languages is a sheet from the pair. Onboarding is one screen with three live checks. Old screens and card components are deleted. Engine, settings keys and stored data are unchanged. Not compiled or run on a device by Claude; speed unverified."),
         ("2.0.0", "Build 90: fixes a Swift syntax error in the More sheet (an extra brace) that stopped the CI build of builds 88 and 89. No other change. Not compiled or run on a device."),
         ("2.0.0", "Build 89: nothing left in the old look. Buttons, cards, section headers, banners, toasts, language pickers and list rows are restyled for the whole app (larger corners, shadows, tinted actions, gradient primary button). Every Settings page opens with a header, Presets is a card screen with tap-to-apply tiles, Translation memory, Test runs, Run detail, Test report and the Simulator use the same list style, and diagnostic captions are larger. Not compiled or run on a device; no translation, capture or scheduling code changed; speed unverified."),
         ("2.0.0", "Build 88: every remaining screen redesigned. Reader has a status pill, the original in a card and a bottom control bar. Text & photos has an Original card with Photo, File, Paste and Clear tools and a larger translation. Capture area puts the shape picker first, shows what percent it reads, folds sliders away and pins Use this area to the bottom. Library has a segmented filter, richer rows and Translation/Original cards. Status and More have a headline, quick-action tiles and tool tiles. Test runs rows and the Test card show median and P95 per system as tiles. Simulator and Memory lead with number tiles. Not compiled or run on a device; no translation, capture or scheduling code changed; speed unverified."),

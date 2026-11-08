@@ -1,4 +1,4 @@
-// ScreenLingo – App – Narrow observation (2.0.0 build 90)
+// ScreenLingo – App – Narrow observation (2.1.0)
 import SwiftUI
 import Translation
 
