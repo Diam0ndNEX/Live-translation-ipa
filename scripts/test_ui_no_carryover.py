@@ -41,7 +41,8 @@ if re.search(r'Label\("Activity"', root_src) or ".tag(3)" in root_src:
     fail("U2", "Activity tab is back in the tab bar")
 
 # U3: leaf tabs observe snapshots, not the whole engine
-for name in ("Live/LiveView.swift", "Languages/LanguagesView.swift", "Library/LibraryView.swift", "Reader/ReaderView.swift", "Onboarding/OnboardingView.swift"):
+for name in ("UI/Translate/TranslateScreen.swift", "UI/Translate/FocusMode.swift", "UI/Translate/SessionSheet.swift",
+             "Languages/LanguagesView.swift", "Library/LibraryView.swift", "Onboarding/OnboardingView.swift"):
     t = (app / name).read_text()
     if re.search(r"@EnvironmentObject[^\n]*TranslatorEngine", t) or "@ObservedObject var engine" in t:
         fail("U3", f"{name} observes the whole engine")
@@ -82,11 +83,12 @@ if "Undo" not in lib:
 if (app / "LibraryViews.swift").exists():
     fail("U7", "LibraryViews.swift (old Library) still exists")
 
-# U9: Session/Workspace/Reader/Area unification and honest preview
-ws = (app / "WorkspaceViews.swift").read_text()
-if "struct SessionControls" in ws:
-    fail("U9", "old SessionControls screen still exists")
-if "not your live screen" not in ws and "not a live image" not in ws:
+# U9: Session/Workspace/Reader/Area unification and honest preview (2.1.0: Translate screen, AreaEditor)
+for old in ("WorkspaceViews.swift", "Live/LiveView.swift", "Live/LiveSheets.swift", "Reader/ReaderView.swift"):
+    if (app / old).exists():
+        fail("U9/§13.0.1", f"replaced screen {old} still exists")
+area = (app / "UI/Kit/AreaEditor.swift").read_text()
+if "not your live screen" not in area:
     fail("U9", "Capture area preview is not labelled as a preview")
 
 # U10: one language picker
@@ -142,7 +144,7 @@ for name, structs in {"SettingsViews.swift": ["ReadingSettings", "IntelligenceSe
                       "CustomizationViews.swift": ["CaptionAppearanceSettings", "ReaderWorkspaceSettings", "FeedbackStorageSettings"],
                       "ExperimentalFeaturesView.swift": ["ExperimentalFeaturesView"],
                       "SettingsCategories.swift": ["TranslationSettings", "HistoryStorageSettings"],
-                      "WorkspaceViews.swift": ["TranslationWorkspace", "CaptureAreaEditor"]}.items():
+                      "UI/Translate/TuneSheet.swift": ["TuneSheet", "AreaSheet"]}.items():
     text = (app / name).read_text()
     for st in structs:
         i = text.index(f"struct {st}")

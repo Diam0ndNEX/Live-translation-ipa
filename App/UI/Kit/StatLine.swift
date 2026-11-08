@@ -20,8 +20,8 @@ struct StatLine: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
             if samples.count > 1 {
-                Chart(Array(samples.enumerated()), id: \.offset) { point in
-                    LineMark(x: .value("Sample", point.offset), y: .value("Value", point.element))
+                Chart(Array(samples.indices), id: \.self) { index in
+                    LineMark(x: .value("Sample", index), y: .value("Value", samples[index]))
                         .interpolationMethod(.monotone)
                         .foregroundStyle(Color.accentColor)
                 }

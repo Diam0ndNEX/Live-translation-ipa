@@ -40,3 +40,14 @@ struct HeroNumber: View {
             .lineLimit(1)
     }
 }
+
+/// iOS 26: the tab bar shrinks while content scrolls (§13.1 principle 2). Older systems keep the normal bar.
+struct TabBarMinimize: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            content.tabBarMinimizeBehavior(.onScrollDown)
+        } else {
+            content
+        }
+    }
+}

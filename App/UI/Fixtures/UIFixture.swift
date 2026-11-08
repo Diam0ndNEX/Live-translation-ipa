@@ -69,6 +69,53 @@ enum UIFixture: String, CaseIterable {
     }
 }
 
+// MARK: - Fake snapshots (no capture is started; the engine is untouched)
+extension UIFixture {
+    /// Built once per launch so ids and times stay stable between redraws.
+    @MainActor static let translateFixture: TranslateSnapshot? = current?.translateSnapshot
+
+    var translateSnapshot: TranslateSnapshot? {
+        let now = Date()
+        let recent = [
+            RecentLine(id: UUID(), translated: "Hello, how are you?", original: "Olá, como vai?", date: now.addingTimeInterval(-120)),
+            RecentLine(id: UUID(), translated: "We need to leave before the rain.", original: "Precisamos sair antes da chuva.", date: now.addingTimeInterval(-400)),
+            RecentLine(id: UUID(), translated: "Did you see that?", original: "Você viu aquilo?", date: now.addingTimeInterval(-900)),
+        ]
+        var s = TranslateSnapshot(phase: .idle, sourceCode: "pt", targetCode: "en", sourceName: "Portuguese", targetName: "English",
+                                  detected: "–", packState: .ready, translated: "", original: "", stage: .reading, held: false,
+                                  paused: false, pipActive: false, sessionStarted: nil, modeName: "Low Latency",
+                                  recentPairs: ["pt>en", "en>de", "ja>en"], recent: recent)
+        switch self {
+        case .idle: return s
+        case .idlePackMissing:
+            s.sourceCode = "ja"; s.sourceName = "Japanese"; s.packState = .needsDownload; s.recent = []
+            return s
+        case .starting:
+            s.phase = .starting; s.sessionStarted = now.addingTimeInterval(-4); s.pipActive = true
+            return s
+        case .liveShort:
+            s.phase = .live; s.sessionStarted = now.addingTimeInterval(-252); s.pipActive = true
+            s.translated = "Hello, how are you today?"; s.original = "Olá, como você está hoje?"; s.stage = .showing
+            return s
+        case .liveLong:
+            s.phase = .live; s.sessionStarted = now.addingTimeInterval(-1312); s.pipActive = true; s.held = true
+            s.translated = "Wait. If the bridge is closed we have to go around through the old market, and that takes at least two more hours, so tell the others to pack light and meet us at the north gate before sunset."
+            s.original = "Espera. Se a ponte estiver fechada, temos de dar a volta pelo mercado antigo."
+            s.stage = .translating
+            return s
+        case .paused:
+            s.phase = .paused; s.paused = true; s.sessionStarted = now.addingTimeInterval(-600); s.pipActive = true
+            s.translated = "Hello, how are you today?"; s.original = "Olá, como você está hoje?"; s.stage = .showing
+            return s
+        case .attentionLost:
+            s.phase = .attention(.captureLost); s.sessionStarted = now.addingTimeInterval(-75)
+            s.translated = "Hello, how are you today?"; s.original = "Olá, como você está hoje?"
+            return s
+        default: return nil
+        }
+    }
+}
+
 /// Root hook: routes the fixture and, for `kit`, covers the app with the component gallery.
 struct FixtureHost: ViewModifier {
     let router: AppRouter

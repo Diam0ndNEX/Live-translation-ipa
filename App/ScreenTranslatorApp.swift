@@ -97,11 +97,12 @@ private struct RootContent: View {
 
     var body: some View {
         TabView(selection: $router.tab) {
-            LiveView(engine: model.engine).tabItem { Label(AppTab.translate.title, systemImage: AppTab.translate.symbol) }.tag(AppTab.translate)
+            TranslateScreen(engine: model.engine).tabItem { Label(AppTab.translate.title, systemImage: AppTab.translate.symbol) }.tag(AppTab.translate)
             LibraryView(engine: model.engine).tabItem { Label(AppTab.library.title, systemImage: AppTab.library.symbol) }.tag(AppTab.library)
             DiagnosticsView().tabItem { Label(AppTab.diagnostics.title, systemImage: AppTab.diagnostics.symbol) }.tag(AppTab.diagnostics)
             SettingsView().tabItem { Label(AppTab.settings.title, systemImage: AppTab.settings.symbol) }.tag(AppTab.settings)
         }
+        .modifier(TabBarMinimize())
         .tint(theme.tint)
         .preferredColorScheme(theme.appearance.scheme)
         .overlay(alignment: .top) { NoticeHost(center: model.feedback) }
@@ -138,12 +139,11 @@ private struct SheetHost: View {
     let engine: TranslatorEngine
     var body: some View {
         switch sheet {
-        case .more: MoreSheet(engine: engine)
-        case .status: StatusSheet(engine: engine)
+        case .more: TuneSheet(engine: engine)
+        case .status: SessionSheet(engine: engine)
         case .test: TestSheet(engine: engine)
-        case .reader: ReaderView(engine: engine)
-        case .captureArea: CaptureAreaEditor()
-        case .workspace: TranslationWorkspace(engine: engine)
+        case .reader: FocusMode(engine: engine)
+        case .captureArea: AreaSheet()
         case .testRuns: TestRunsScreen(diag: engine.diag)
         case .languages: LanguagesView(engine: engine)
         }

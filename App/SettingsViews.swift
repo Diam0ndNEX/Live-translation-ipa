@@ -418,7 +418,7 @@ struct ReadingSettings: View {
                                 "rapidTextTracking", "joinAdjacentText", "activeTextFocus"])
         }
         .settingsPage("Reading & OCR")
-        .sheet(isPresented: $showAreaEditor) { CaptureAreaEditor().environmentObject(engine) }
+        .fullScreenCover(isPresented: $showAreaEditor) { AreaSheet() }
         .onChange(of: key) { _, _ in engine.syncConfig() }
         .onChange(of: frameRot) { _, _ in engine.rotationSettingChanged() }
         .onChange(of: recognitionPolicy) { _, _ in engine.pipelineSettingsChanged() }

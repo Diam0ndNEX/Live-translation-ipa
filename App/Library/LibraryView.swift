@@ -55,7 +55,7 @@ struct LibraryView: View {
                     Picker("Show", selection: $filter) { ForEach(LibraryFilter.allCases) { Text($0.rawValue).tag($0) } }
                         .pickerStyle(.segmented)
                         .listRowBackground(Color.clear).listRowInsets(EdgeInsets(top: Space.s, leading: Space.l, bottom: Space.s, trailing: Space.l))
-                    Button { router.present(.workspace) } label: {
+                    Button { router.go(.translate) } label: {
                         ListRow(title: "Translate text, a photo or a file", subtitle: "Text & photos", symbol: "text.viewfinder") {
                             Image(systemName: "chevron.right").foregroundStyle(.tertiary)
                         }

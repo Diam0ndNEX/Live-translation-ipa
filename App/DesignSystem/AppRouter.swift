@@ -26,9 +26,12 @@ enum AppTab: String, CaseIterable, Identifiable, Hashable {
     }
 }
 
+/// Which side of the pair the language sheet edits.
+enum LanguageSide: String, Hashable { case source, target }
+
 /// Everything that opens as a sheet. One sheet at a time.
 enum AppSheet: String, Identifiable, Hashable {
-    case more, status, test, reader, captureArea, workspace, testRuns, languages
+    case more, status, test, reader, captureArea, testRuns, languages
     var id: String { rawValue }
 }
 
@@ -39,6 +42,8 @@ final class AppRouter: ObservableObject {
     }
     @Published var sheet: AppSheet?
     @Published var libraryPath = NavigationPath()
+    /// The side the language sheet opens on (the word tapped in the pair title).
+    @Published var languageSide: LanguageSide = .target
     private var pendingSheet: Task<Void, Never>?
 
     init() { tab = AppTab.restored(UserDefaults.standard.string(forKey: "appTab")) }
@@ -63,8 +68,9 @@ final class AppRouter: ObservableObject {
     }
 
     /// Opens the language sheet on Translate (replaces the old Languages tab).
-    func openLanguages() {
+    func openLanguages(_ side: LanguageSide = .target) {
         go(.translate)
+        languageSide = side
         present(.languages)
     }
 
@@ -74,11 +80,11 @@ final class AppRouter: ObservableObject {
     func open(_ url: URL) -> Bool {
         guard url.scheme == "screenlingo" else { return false }
         let target = (url.host ?? url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))).lowercased()
-        if target == "live" { go(.translate); return true }
+        if target == "live" || target == "text-photos" { go(.translate); return true }
         if target == "languages" { openLanguages(); return true }
         if let tab = AppTab(rawValue: target) { go(tab); return true }
         let sheets: [String: AppSheet] = ["more": .more, "status": .status, "test": .test, "reader": .reader,
-                                          "capture-area": .captureArea, "text-photos": .workspace,
+                                          "capture-area": .captureArea,
                                           "test-runs": .testRuns]
         guard let sheet = sheets[target] else { return false }
         if sheet == .more || sheet == .status || sheet == .test { tab = .translate }
