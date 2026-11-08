@@ -588,10 +588,20 @@ private struct DiagnosticsBody: View {
         }
     }
 
+    private func lensStatus(_ lens: DiagPage) -> String {
+        let value = lensValue(lens)
+        let phase = facts.phase.word
+        return value.isEmpty || value == "–" ? phase : "\(phase) · \(value)"
+    }
+
     /// A lens: its own large title, its own range control, an inline switch when it needs Detailed collection.
     private func lensPage(_ lens: DiagPage) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: KitSpace.group) {
+                // One-line status under the large title: the same live value the overview row shows.
+                Text(lensStatus(lens))
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
                 if lens.ranged { rangePicker }
                 if lens.needsDetails && !collectDetails {
                     Toggle(isOn: $collectDetails) {
