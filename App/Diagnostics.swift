@@ -327,7 +327,7 @@ final class Diagnostics: ObservableObject {
     private func stableCandidateID(_ candidate: String?) -> UUID? {
         guard let candidate else { return nil }
         if let existing = candidateIDs[candidate] { return existing }
-        if candidateIDs.count >= 2400 { candidateIDs.removeAll(keepingCapacity: true); idMapResets += 1 }
+        if candidateIDs.count >= 6000 { candidateIDs.removeAll(keepingCapacity: true); idMapResets += 1 }
         let id = UUID()
         candidateIDs[candidate] = id
         return id
@@ -336,7 +336,7 @@ final class Diagnostics: ObservableObject {
     private func stableFrameID(_ index: Int?) -> UUID? {
         guard let index else { return nil }
         if let id = frameIDs[index] { return id }
-        if frameIDs.count >= 2400 { frameIDs.removeAll(keepingCapacity: true); idMapResets += 1 }
+        if frameIDs.count >= 6000 { frameIDs.removeAll(keepingCapacity: true); idMapResets += 1 }
         let id = UUID(); frameIDs[index] = id
         return id
     }
@@ -344,7 +344,7 @@ final class Diagnostics: ObservableObject {
     private func stableUnitID(_ canonicalKey: String?) -> UUID? {
         guard let canonicalKey else { return nil }
         if let id = unitIDs[canonicalKey] { return id }
-        if unitIDs.count >= 2400 { unitIDs.removeAll(keepingCapacity: true); idMapResets += 1 }
+        if unitIDs.count >= 6000 { unitIDs.removeAll(keepingCapacity: true); idMapResets += 1 }
         let id = UUID(); unitIDs[canonicalKey] = id
         return id
     }
@@ -526,7 +526,8 @@ final class Diagnostics: ObservableObject {
             "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started",
             "legacy_idle_completed", "legacy_idle_deferred",
             "legacy_confirmed_after_switch", "legacy_confirmed_no_switch", "legacy_shared_session_used", "speculative_lease_conflict",
-            "legacy_queued_speculation_superseded" // 2.2.1 (E10): was emitted by the engine but dropped here
+            "legacy_queued_speculation_superseded", // 2.2.1 (E10): was emitted by the engine but dropped here
+            "legacy_confirmed_own_lane", "legacy_detached_speculation_released" // 2.2.3 (L2)
         ]
         guard allowed.contains(reason) else { return }
         if modeActiveSystem == "legacy", let candidate {
@@ -538,7 +539,7 @@ final class Diagnostics: ObservableObject {
             if reason == "confirmed_model_completed" { legacyModeEvent(candidate, reason: "recovery_service_ms", duration: durationMs) }
             if reason == "speculative_model_completed" { legacyModeEvent(candidate, reason: "speculative_service_ms", duration: durationMs) }
         }
-        if ["model_batch_completed", "confirmed_model_completed", "speculative_model_completed", "speculative_stop_released",
+        if ["model_batch_completed", "confirmed_model_completed", "speculative_model_completed", "speculative_stop_released", "legacy_detached_speculation_released",
             "legacy_confirmed_after_switch", "legacy_confirmed_no_switch"].contains(reason),
            let durationMs, durationMs.isFinite, durationMs >= 0 {
             modelTimingSamples[reason, default: []].append(durationMs)
@@ -613,11 +614,11 @@ final class Diagnostics: ObservableObject {
             stage: stage, outcome: outcome, reasonCode: reason,
             durationMs: durationMs.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }, privacy: "metadataOnly")
         structuredEvents.append(event)
-        if structuredEvents.count > 2400 {
-            structuredEventsDropped += structuredEvents.count - 2400
-            structuredEvents.removeFirst(structuredEvents.count - 2400)
+        if structuredEvents.count > 6000 {
+            structuredEventsDropped += structuredEvents.count - 6000
+            structuredEvents.removeFirst(structuredEvents.count - 6000)
         }
-        // Reserve 128 of the 2,400 exported events for sparse early-session
+        // Reserve 128 of the 6,000 exported events for sparse early-session
         // evidence, so an initial 90-second stall is not erased by late activity.
         if Date().timeIntervalSince(started) <= 120, openingEvents.count < 128 {
             earlyEventsSeen += 1
@@ -749,8 +750,8 @@ final class Diagnostics: ObservableObject {
             monotonicTime: ProcessInfo.processInfo.systemUptime, firstOCR: firstOCR,
             durationMs: duration, thermal: ProcessInfo.processInfo.thermalState.rawValue)
         modeTrace.append(entry)
-        if modeTrace.count > 2400 {
-            let discarded = modeTrace.count - 2400
+        if modeTrace.count > 6000 {
+            let discarded = modeTrace.count - 6000
             modeTrace.removeFirst(discarded)
             modeEventCounts["mode_trace_ring_overwritten", default: 0] += discarded
         }
@@ -837,6 +838,7 @@ final class Diagnostics: ObservableObject {
         if TranslationHotPathAB.refreshAvailabilityInBackground { settings["availabilityRefreshAB"] = "on" }
         if TranslationHotPathAB.hybridRelaxedBackoff { settings["hybridBackoffAB"] = "on" }
         if TranslationHotPathAB.hybridShorterGuard { settings["hybridGuardAB"] = "on" }
+        if TranslationHotPathAB.legacyConfirmedOwnLane { settings["legacyOwnLaneAB"] = "on" }
         settings["reductionReasons"] = captureReductionReasons.joined(separator: "_")
         settings["appRequestedCaptureIntervalMs"] = String(requestedCaptureIntervalMs)
         settings["appRequestedCaptureEdgePx"] = String(requestedCaptureEdgePx)
@@ -906,6 +908,7 @@ final class Diagnostics: ObservableObject {
                 "deliveryFilteringMs": DiagnosticDistribution(pipeline.map { $0.stages.delivery }),
                 "queueMs": DiagnosticDistribution(pipeline.map { $0.stages.queue }),
                 "speculativeStopReleaseMs": DiagnosticDistribution(modelTimingSamples["speculative_stop_released", default: []]),
+                "legacyDetachedSpeculationReleaseMs": DiagnosticDistribution(modelTimingSamples["legacy_detached_speculation_released", default: []]),
                 "queueBehindSpeculationMs": DiagnosticDistribution(queueWaitSamples[.speculative, default: []]),
                 "queueBehindConfirmedMs": DiagnosticDistribution(queueWaitSamples[.confirmed, default: []]),
                 "queueSchedulingMs": DiagnosticDistribution(queueWaitSamples[.scheduling, default: []]),
@@ -949,7 +952,7 @@ final class Diagnostics: ObservableObject {
     }
 
     private func exportModeEventWindow() -> [TranslationModeTrace] {
-        let recent = Array(modeTrace.suffix(2240))
+        let recent = Array(modeTrace.suffix(5840))
         var identities = Set<String>()
         let merged = openingModeTrace + recent
         return merged.filter { event in
@@ -960,10 +963,10 @@ final class Diagnostics: ObservableObject {
     }
 
     private func exportEventWindow() -> [StructuredDiagnosticEvent] {
-        let recent = Array(structuredEvents.suffix(2272))
+        let recent = Array(structuredEvents.suffix(5872))
         let existing = Set(recent.map(\.id))
         let early = openingEvents.filter { !existing.contains($0.id) }
-        return Array((early + recent).suffix(2400)).sorted { $0.timestamp < $1.timestamp }
+        return Array((early + recent).suffix(6000)).sorted { $0.timestamp < $1.timestamp }
     }
 
     func exportJSON() async {
@@ -1599,6 +1602,7 @@ final class Diagnostics: ObservableObject {
             "speculativeStopRequests": eventTotals["speculative_stop_requested", default: 0],
             "speculativeSessionsCreated": eventTotals["speculative_session_created", default: 0],
             "legacySharedSessionCalls": eventTotals["legacy_shared_session_used", default: 0],
+            "legacyConfirmedOwnLane": eventTotals["legacy_confirmed_own_lane", default: 0],
             "handoffReplayed": eventTotals["handoff_replayed", default: 0],
             "handoffExpired": eventTotals["handoff_expired", default: 0],
             "enqueueFailed": eventTotals["enqueue_failed", default: 0],

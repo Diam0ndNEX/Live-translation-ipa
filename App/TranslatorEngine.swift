@@ -2366,12 +2366,29 @@ final class TranslatorEngine: ObservableObject {
             if shared == 0 {
                 if diag.enabled { diag.s.specPreemptionRequested += 1 }
                 cancelDrain(preemptSpeculation: true)
+                detachCancelledSpeculationIfEnabled()
             }
             else { diag.noteSharedModelUnits(shared) }
         } else if currentSpeculativeText == joined {
             if diag.enabled { diag.s.specMatchingConfirmation += 1 }
         }
         startDrain()
+    }
+
+    /// 2.2.3 (L2). With the switch on (iOS 26 direct sessions only) the confirmed caption starts now instead of
+    /// after the cancelled speculative call returns. The confirmed call uses the direct session; the speculative call
+    /// owns its own disposable session, so the two never share a session. The old drain exits on resume.
+    private func detachCancelledSpeculationIfEnabled() {
+        guard TranslationHotPathAB.legacyConfirmedOwnLane, activeTranslationSystem == .legacy,
+              busy, activeQueueOwner == .speculative else { return }
+        guard #available(iOS 26.0, *) else { return }
+        drainEpoch += 1
+        detachedSpeculationAt = Date()
+        busy = false
+        drainTask = nil
+        activeQueueOwner = .scheduling
+        currentSpeculativeText = nil
+        diag.noteModelState("legacy_confirmed_own_lane")
     }
 
     @discardableResult
@@ -2455,6 +2472,11 @@ final class TranslatorEngine: ObservableObject {
         }
     }
 
+    /// 2.2.3 (L2): bumped when a cancelled speculative drain is detached so a confirmed drain can start at once.
+    /// A drain that finds its epoch changed must not touch shared drain state. Never changes with the switch off.
+    private var drainEpoch = 0
+    private var detachedSpeculationAt: Date?
+
     private func startDrain() {
         guard !busy, drainTask == nil, queued != nil || specQueued != nil else { return }
         interruptWarmupForLiveWork()
@@ -2477,15 +2499,18 @@ final class TranslatorEngine: ObservableObject {
     private func drain() async {
         guard !busy else { return }
         busy = true
+        let epoch = drainEpoch
         defer {
-            busy = false
-            activeQueueOwner = .scheduling
-            drainTask = nil
-            replayDeferredConfirmedIfPossible()
-            startDrain()
+            if epoch == drainEpoch {
+                busy = false
+                activeQueueOwner = .scheduling
+                drainTask = nil
+                replayDeferredConfirmedIfPossible()
+                startDrain()
+            }
         }
         while queued != nil || specQueued != nil {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, epoch == drainEpoch else { return }
             if deferredConfirmedPacket != nil, activeCandidatePresented, !waitingToDisplay { return }
             if let b = queued {
                 queued = nil
@@ -2502,7 +2527,11 @@ final class TranslatorEngine: ObservableObject {
                     activeQueueOwner = .speculative
                     currentSpeculativeText = sp.joined(separator: "\n")
                     await process(sp, display: false)
-                    currentSpeculativeText = nil
+                    if epoch == drainEpoch { currentSpeculativeText = nil }
+                    else if let at = detachedSpeculationAt {
+                        diag.noteModelState("legacy_detached_speculation_released",
+                                            durationMs: max(0, Date().timeIntervalSince(at) * 1000))
+                    }
                 }
             }
         }
@@ -3050,8 +3079,11 @@ final class TranslatorEngine: ObservableObject {
             modelContextInFlight = workContext
             let batch = await translateBatch(plan.unique, source: src, target: target, installed: installed,
                                              speculative: !display, partial: partialHandler)
-            modelUnitKeysInFlight.removeAll()
-            modelContextInFlight = nil
+            // 2.2.3 (L2): a detached speculative call must not erase the newer confirmed call's in-flight set.
+            if modelUnitKeysInFlight == Set(items.map { $0.key }) {
+                modelUnitKeysInFlight.removeAll()
+                modelContextInFlight = nil
+            }
             if !isCurrent() {
                 // Cancellation is cooperative: confirmed or speculative model work
                 // can finish after a different caption arrives. Recover only completed exact-key

@@ -79,6 +79,20 @@ assert 'settings["hybridBackoffAB"] = "on"' in diagnostics and 'settings["hybrid
 assert "TranslationHotPathAB.hybridRelaxedBackoff, skipped > 0, let set = skipSetAt" in system, "decay only in the arm"
 assert "static let relaxedBackoffMaxAge = 10.0" in system
 
+# L2: Legacy confirmed-own-lane arm, default OFF, iOS 26 only, epoch-guarded drain.
+assert '(UserDefaults.standard.object(forKey: legacyOwnLanePinnedKey) as? Bool) ?? false' in work
+assert '@AppStorage("legacyConfirmedOwnLane") private var legacyConfirmedOwnLane = false' in experimental
+assert 'label: "Legacy confirmed own lane"' in index
+detach = engine[engine.index("private func detachCancelledSpeculationIfEnabled"):engine.index("private func presentQueuedFromRAMIfComplete")]
+for token in ("TranslationHotPathAB.legacyConfirmedOwnLane", "activeTranslationSystem == .legacy", "activeQueueOwner == .speculative", "#available(iOS 26.0, *)", "drainEpoch += 1"):
+    assert token in detach, token
+assert engine.count("detachCancelledSpeculationIfEnabled()") == 2, "defined once, called once"
+assert 'settings["legacyOwnLaneAB"] = "on"' in diagnostics and '"legacyOwnLaneAB"' in archive
+# Event cap raised from 2,400 to 6,000 everywhere it is applied.
+assert "2400" not in "".join(l for l in diagnostics.splitlines() if "structuredEvents" in l or "modeTrace" in l or "IDs.count" in l)
+assert diagnostics.count("6000") >= 8 and "suffix(5840)" in diagnostics and "suffix(5872)" in diagnostics
+assert archive.count("suffix(6000)") >= 3
+
 # Version 2.2.3 build 106 in the places CI checks.
 assert 'static let version = "2.2.3"' in shared and "static let build = 106" in shared
 assert project.count('"2.2.3"') == 3 and project.count('"106"') == 3

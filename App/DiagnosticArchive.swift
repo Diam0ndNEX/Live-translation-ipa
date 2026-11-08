@@ -136,7 +136,7 @@ struct DiagnosticIntervalBucket: Codable {
         "specPreemptionRequested", "specMatchingConfirmation",
         "specRetainedUnits", "completedConfirmedUnitsRetained", "temporaryMemoryHits",
         "uncachedUnits", "bypassedLookups", "temporaryMemoryMisses",
-        "speculativeStopRequests", "speculativeSessionsCreated", "legacySharedSessionCalls", "memoryAwareSpeculationSkipped", "ramCaptionBypasses", "exactCaptionHits", "exactUnitsCoalesced", "sharedConfirmedInFlightUnits", "sharedInFlightUnits", "speculativeUnitsRetained",
+        "speculativeStopRequests", "speculativeSessionsCreated", "legacySharedSessionCalls", "legacyConfirmedOwnLane", "memoryAwareSpeculationSkipped", "ramCaptionBypasses", "exactCaptionHits", "exactUnitsCoalesced", "sharedConfirmedInFlightUnits", "sharedInFlightUnits", "speculativeUnitsRetained",
         "speculativeUnitsReused", "speculativeUnitsEvictedUnused",
         "handoffDeferred", "slowTailEnqueues", "manualTranslations", "identicalFrameHolds", "warmupsDuringCapture", "handoffReplayed", "handoffExpired", "enqueueFailed",
         "actualModelBatches", "confirmedModelBatches", "speculativeModelBatches",
@@ -251,7 +251,7 @@ struct TranslationModeReport: Codable {
                 CharacterSet.alphanumerics.contains($0) || $0 == "-" || $0 == "_"
             }
         }
-        let safe = Array(events.suffix(2400)).filter {
+        let safe = Array(events.suffix(6000)).filter {
             ["legacy", "hybridRecovery", "lowLatency"].contains($0.mode ?? active) &&
             ["normal", "temporaryMemory", "freshRequests"].contains($0.testMode ?? "normal") &&
             Self.reasons.contains($0.reason) && code($0.caption) && code($0.source, limit: 32) && code($0.target, limit: 32) &&
@@ -420,9 +420,10 @@ actor DiagnosticExportWriter {
                 "legacy_queued_speculation_superseded", "legacy_speculation_low_confidence",
                 "legacy_speculation_saved_memory_backoff", "legacy_speculation_low_yield_backoff",
                 // found by guard C2 in 2.2.1: emitted by the engine, accepted by Diagnostics, dropped here
-                "legacy_shared_session_used", "speculative_lease_conflict"
+                "legacy_shared_session_used", "speculative_lease_conflict",
+                "legacy_confirmed_own_lane", "legacy_detached_speculation_released"
             ]).union(stageCodes)
-        let safeEvents = snapshot.events.suffix(2400).map { event in
+        let safeEvents = snapshot.events.suffix(6000).map { event in
             StructuredDiagnosticEvent(id: event.id, timestamp: event.timestamp,
                 sessionID: event.sessionID, candidateID: event.candidateID,
                 frameID: event.frameID, unitID: event.unitID,
@@ -452,7 +453,7 @@ actor DiagnosticExportWriter {
             "rapidTextTracking", "joinAdjacentText", "activeTextFocus",
             "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
             "thermalState", "performanceTier", "reductionReasons",
-            "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "hybridBackoffAB", "hybridGuardAB", "detailSuspended",
+            "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "hybridBackoffAB", "hybridGuardAB", "legacyOwnLaneAB", "detailSuspended",
             // 2.2.1 (D4, E12)
             "idleMinutes", "sessionLimit", "autoOpenPiP", "winSize", "textSize", "pipFont", "theme", "showOriginal",
             "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding",
@@ -513,7 +514,7 @@ actor DiagnosticExportWriter {
             "hybridOverlappedRecoveryMs", "hybridMeasuredOverlapMs", "modeCancellationReleaseMs",
             "modePlanBuiltMs", "modePlanReusedMs", "modeCommitToPiPMs",
             "modeConfirmationToPiPMs", "modeReadyToPiPMs", "hybridMatchingWaitMs",
-            "speculativeStopReleaseMs", "queueBehindSpeculationMs", "queueBehindConfirmedMs", "queueSchedulingMs",
+            "speculativeStopReleaseMs", "legacyDetachedSpeculationReleaseMs", "queueBehindSpeculationMs", "queueBehindConfirmedMs", "queueSchedulingMs",
             "legacyConfirmedAfterSessionSwitchMs", "legacyConfirmedNoSwitchMs",
             "hybridUnsubmittedHedgeMs", "hybridPreviousDefaultExitGapMs", "hybridPostDefaultRecoveryServiceMs",
             "hybridNoOverlapRecoveryServiceMs", "hybridUnexplainedSlowRecoveryMs"
@@ -829,7 +830,7 @@ actor DiagnosticExportWriter {
             Apple Default model, booked under that stage name, not a separate filtering cost. The
             hybrid_switch_guard_* values are the gap since the last Default call returned, not a delay.
 
-            Diagnostics are bounded. Structured events cover at most 2400 retained
+            Diagnostics are bounded. Structured events cover at most 6000 retained (2.2.3: raised from 2400)
             entries; old events can be evicted. Summary counters span the whole session.
             Model batches, translation units, OCR packets and subtitle candidates
             count different kinds of work; never add or equate those quantities.
@@ -888,7 +889,7 @@ struct DiagnosticPerformanceComparison {
         "mode", "speed", "stability", "area", "customY0", "customY1", "translationTestMode",
         "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
         "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
-        "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "hybridBackoffAB", "hybridGuardAB", "detailedCollection", "performanceTier",
+        "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "hybridBackoffAB", "hybridGuardAB", "legacyOwnLaneAB", "detailedCollection", "performanceTier",
         "focusedCaptionOCR", "strictCaptionIdentity", "cjkSingleCharacters", "liveWarmupLegacy"
     ]
     static let noteKeys = [
@@ -1190,7 +1191,7 @@ struct DiagnosticReviewedCandidate: Identifiable {
     let status: String
 }
 
-/// Off the live path: only process the recorder's bounded last 2400 events.
+/// Off the live path: only process the recorder's bounded last 6000 events.
 /// This is an explanation of *instrumented* stages, not a reconstruction of
 /// unobserved OCR, model accuracy, or the physical PiP display.
 enum DiagnosticTraceReview {
@@ -1224,7 +1225,7 @@ enum DiagnosticTraceReview {
     ]
     static func review(_ input: [StructuredDiagnosticEvent], limit: Int = 12)
         -> [DiagnosticReviewedCandidate] {
-        let bounded = input.suffix(2400)
+        let bounded = input.suffix(6000)
             .filter { $0.privacy == "metadataOnly" && $0.candidateID != nil }
         var byCandidate: [UUID: [StructuredDiagnosticEvent]] = [:]
         for event in bounded {
@@ -1666,7 +1667,7 @@ enum CombinedDiagnosticReport {
         for (i, session) in selected.enumerated() {
             let retained = session.translationModes?.events.count ?? 0
             let overwritten = session.translationModes?.counters["session_mode_trace_ring_overwritten"] ?? 0
-            out.append("- \(labels[i]): \(retained) mode events retained\(retained >= 2400 ? " (2,400 cap reached; early events missing)" : ""), \(overwritten) overwritten; \(session.events.count) structured events retained. Whole-session counters are not truncated.")
+            out.append("- \(labels[i]): \(retained) mode events retained\(retained >= 6000 ? " (6,000 cap reached; early events missing)" : ""), \(overwritten) overwritten; \(session.events.count) structured events retained. Whole-session counters are not truncated.")
             // 2.2.1 (D6): what the bounded buffers dropped, so a short event list is never mistaken for a quiet run.
             let c = session.counters
             out.append("  - dropped: \(c["structured_events_dropped", default: 0]) structured events, \(c["id_map_resets", default: 0]) correlation-ID map resets, \(c["legacy_context_resets", default: 0]) Legacy context resets, \(c["subtitle_traces_dropped", default: 0]) subtitle traces.")

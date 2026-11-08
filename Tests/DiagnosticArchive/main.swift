@@ -101,7 +101,7 @@ import Foundation
                      performanceRestored.events.count == 3 &&
                      performanceRestored.events.allSatisfy { $0.privacy == "metadataOnly" },
                      "New duration/throughput counters must survive sanitization without private text")
-        let traceLimit = 2400
+        let traceLimit = 6000
         let longEvents = (0..<(traceLimit + 5)).map { index in
             StructuredDiagnosticEvent(id: UUID(), timestamp: Date().addingTimeInterval(Double(index)),
                 sessionID: session, candidateID: UUID(), frameID: nil, unitID: nil,
@@ -117,7 +117,7 @@ import Foundation
         precondition(boundedSnapshot.events.count == traceLimit &&
                      abs((boundedSnapshot.events.first?.timestamp.timeIntervalSince1970 ?? 0) -
                          longEvents[5].timestamp.timeIntervalSince1970) < 1.0,
-                     "Long diagnostics retain the most recent 2400 structured events")
+                     "Long diagnostics retain the most recent 6000 structured events")
         let bytes = try await writer.encode(snapshot)
         let recovered = try await writer.decode(bytes)
         precondition(recovered.id == session && recovered.events.count == 1)
@@ -305,7 +305,7 @@ import Foundation
             events: [], distributions: [:],
             counters: ["mode_trace_ring_overwritten": 37]).sanitized()
         precondition(ringOverflow.counters["session_mode_trace_ring_overwritten"] == 37,
-            "Full-session event loss must survive the 2400-event privacy ring boundary")
+            "Full-session event loss must survive the 6000-event privacy ring boundary")
         let fallbackCounters: [String: Int] = [
             "hybrid_default_fallback": 5, "recovery_decision_source_mismatch": 12]
         let fallbackEvidence = DiagnosticSessionExport(

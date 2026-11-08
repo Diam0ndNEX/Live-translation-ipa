@@ -123,6 +123,9 @@ enum TranslationHotPathAB {
     static let hybridBackoffPinnedKey = "hybridRelaxedBackoffPinned"
     static let hybridGuardSettingKey = "hybridShorterGuard"
     static let hybridGuardPinnedKey = "hybridShorterGuardPinned"
+    // 2.2.3 (L2): Legacy only, default OFF = current behaviour.
+    static let legacyOwnLaneSettingKey = "legacyConfirmedOwnLane"
+    static let legacyOwnLanePinnedKey = "legacyConfirmedOwnLanePinned"
 
     private static func pinned(_ key: String) -> Bool {
         (UserDefaults.standard.object(forKey: key) as? Bool) ?? true
@@ -135,6 +138,7 @@ enum TranslationHotPathAB {
         defaults.set((defaults.object(forKey: availabilityRefreshSettingKey) as? Bool) ?? false, forKey: availabilityRefreshPinnedKey)
         defaults.set((defaults.object(forKey: hybridBackoffSettingKey) as? Bool) ?? false, forKey: hybridBackoffPinnedKey)
         defaults.set((defaults.object(forKey: hybridGuardSettingKey) as? Bool) ?? false, forKey: hybridGuardPinnedKey)
+        defaults.set((defaults.object(forKey: legacyOwnLaneSettingKey) as? Bool) ?? false, forKey: legacyOwnLanePinnedKey)
     }
 
     static var reuseStandaloneLowLatencyPlan: Bool {
@@ -156,6 +160,11 @@ enum TranslationHotPathAB {
     /// 2.2.3 (L3): Hybrid skips fewer early Apple Default requests after wasted ones. Default OFF.
     static var hybridRelaxedBackoff: Bool {
         (UserDefaults.standard.object(forKey: hybridBackoffPinnedKey) as? Bool) ?? false
+    }
+    /// 2.2.3 (L2): a Legacy confirmed caption starts without waiting for a cancelled, different-text speculative
+    /// call to finish unwinding. iOS 26 direct sessions only. Default OFF.
+    static var legacyConfirmedOwnLane: Bool {
+        (UserDefaults.standard.object(forKey: legacyOwnLanePinnedKey) as? Bool) ?? false
     }
     /// 2.2.3 (L4): shorter Hybrid switch-guard window and post-Default settling wait. Default OFF.
     static var hybridShorterGuard: Bool {

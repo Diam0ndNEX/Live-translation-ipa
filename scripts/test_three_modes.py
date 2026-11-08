@@ -13,8 +13,27 @@ def function(source, name):
     end = source.find('\n    private func ', start + 1)
     return source[start:end if end != -1 else len(source)]
 engine = read('App/TranslatorEngine.swift')
+# 2.2.3 (L2, owner-approved): `drain` and `process` may differ from e94542ce ONLY by these listed edits. Undoing exactly
+# these edits must give back the original function, so nothing else in the Legacy drain/assembly algorithm changed.
+L2_UNDO = {
+    'drain': [
+        ("        let epoch = drainEpoch\n        defer {\n            if epoch == drainEpoch {\n                busy = false\n                activeQueueOwner = .scheduling\n                drainTask = nil\n                replayDeferredConfirmedIfPossible()\n                startDrain()\n            }\n        }\n",
+         "        defer {\n            busy = false\n            activeQueueOwner = .scheduling\n            drainTask = nil\n            replayDeferredConfirmedIfPossible()\n            startDrain()\n        }\n"),
+        ("guard !Task.isCancelled, epoch == drainEpoch else { return }", "guard !Task.isCancelled else { return }"),
+        ("                    if epoch == drainEpoch { currentSpeculativeText = nil }\n                    else if let at = detachedSpeculationAt {\n                        diag.noteModelState(\"legacy_detached_speculation_released\",\n                                            durationMs: max(0, Date().timeIntervalSince(at) * 1000))\n                    }\n",
+         "                    currentSpeculativeText = nil\n"),
+    ],
+    'process': [
+        ("            // 2.2.3 (L2): a detached speculative call must not erase the newer confirmed call's in-flight set.\n            if modelUnitKeysInFlight == Set(items.map { $0.key }) {\n                modelUnitKeysInFlight.removeAll()\n                modelContextInFlight = nil\n            }\n",
+         "            modelUnitKeysInFlight.removeAll()\n            modelContextInFlight = nil\n"),
+    ],
+}
 for name in ['process', 'drain', 'cachedCaption']:
-    assert function(engine, name).replace('SharedTranslationWork.unitKey', 'PipelineSafety.cacheKey') == function(old('App/TranslatorEngine.swift'), name), name + ' Legacy model drain/assembly algorithm changed beyond verified exact-key delegation'
+    current = function(engine, name)
+    for after, before in L2_UNDO.get(name, []):
+        assert current.count(after) == 1, name + ': expected 2.2.3 L2 edit missing: ' + after[:60]
+        current = current.replace(after, before)
+    assert current.replace('SharedTranslationWork.unitKey', 'PipelineSafety.cacheKey') == function(old('App/TranslatorEngine.swift'), name), name + ' Legacy model drain/assembly algorithm changed beyond the listed 2.2.3 L2 edits'
 # The only Legacy speculate() changes in v1.9.7 are reason-coded skips;
 # confirmed drain, exact-cache safety and physical lease remain immutable.
 legacy_speculate = function(engine, 'speculate')
