@@ -48,6 +48,7 @@ struct TranslateScreen: View {
                     } else {
                         idleHero
                     }
+                    if !composing { ReadinessCard(prep: snap.prep, phase: snap.phase) }
                     controls
                     if snap.phase.isSession { controlTiles }
                     ScenesStrip(store: engine.presets)
@@ -120,6 +121,7 @@ struct TranslateScreen: View {
         VStack(spacing: KitSpace.unit) {
             StartButton(live: false, onTap: startTapped)
                 .modifier(MorphTarget(namespace: reduceMotion ? nil : morph))
+                .background { RippleBackdrop(live: false).frame(width: 260, height: 260) }
             Text("Tap to start").font(.title3.weight(.semibold))
             Text("Choose ScreenLingo Capture in the system sheet, then Start Broadcast.")
                 .font(.footnote)
@@ -255,6 +257,7 @@ struct TranslateScreen: View {
                             elapsed: snap.sessionStarted.map { context.date.timeIntervalSince($0) },
                             mode: snap.modeName, action: { router.present(.status) }, morph: morph)
             }
+            WaveformBars(active: snap.phase == .live && snap.stage != .showing)
             Spacer(minLength: KitSpace.tight)
             if snap.phase == .live || snap.phase == .paused {
                 StartButton(live: true, size: 52, onTap: {})

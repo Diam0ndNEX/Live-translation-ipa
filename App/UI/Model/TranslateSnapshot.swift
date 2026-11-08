@@ -27,6 +27,7 @@ struct TranslateSnapshot: Equatable {
     var modeName: String
     var recentPairs: [String]
     var recent: [RecentLine]
+    var prep = PrepFacts()
 
     var hasOutput: Bool { !translated.isEmpty }
     var canSwap: Bool { sourceCode != "auto" }
@@ -58,7 +59,31 @@ struct TranslateSnapshot: Equatable {
             detected: pair.detected, packState: pair.packState,
             translated: e.translated, original: e.original, stage: stage, held: e.frozen, paused: e.paused,
             pipActive: e.pipActive, sessionStarted: e.sessionStarted,
-            modeName: e.activeTranslationSystem.shortName, recentPairs: pair.recent, recent: Array(recent))
+            modeName: e.activeTranslationSystem.shortName, recentPairs: pair.recent, recent: Array(recent),
+            prep: PrepFacts.read(e))
+    }
+}
+
+/// What the engine is preparing (languages, sessions, first model run, warm-up), as plain values.
+struct PrepFacts: Equatable {
+    var title = ""
+    var detail = ""
+    var phase = TranslationActivity.Phase.waiting
+    var since: Date? = nil
+    var warmup = ""
+    var languages = TranslationReadiness.Step.pending
+    var sessions = TranslationReadiness.Step.pending
+    var execution = TranslationReadiness.Step.pending
+    var conditions = ""
+
+    @MainActor static func read(_ e: TranslatorEngine) -> PrepFacts {
+        let activity = e.translationActivity
+        let ready = e.displayedReadiness
+        return PrepFacts(
+            title: activity.title, detail: activity.detail, phase: activity.phase, since: activity.since,
+            warmup: e.activeTranslationSystem == .legacy ? "" : e.initialWarmupProgress,
+            languages: ready.languages, sessions: ready.sessions, execution: ready.execution,
+            conditions: e.currentRuntimeConditions.isEmpty ? e.translationConditions : e.currentRuntimeConditions)
     }
 }
 

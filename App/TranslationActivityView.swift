@@ -60,7 +60,7 @@ struct TranslationActivityView: View {
 }
 
 
-private struct ReadinessStepView: View {
+struct ReadinessStepView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let title: String
     let step: TranslationReadiness.Step
