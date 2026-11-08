@@ -1,0 +1,66 @@
+name: UI screenshots
+# ScreenLingo 2.1.0 spec §13.8: fixture screenshots and contact sheets on the iPhone simulator.
+on:
+  workflow_dispatch:
+  push:
+    branches: ["claude/screenlingo-v2.1.0"]
+    paths:
+      - "App/**"
+      - "Shared/**"
+      - "project.yml"
+      - "scripts/ui_screenshots.sh"
+      - "scripts/make_contact_sheet.py"
+      - ".github/workflows/ui-screenshots.yml"
+  pull_request:
+    paths: ["App/UI/**"]
+concurrency:
+  group: ui-screenshots-${{ github.ref }}
+  cancel-in-progress: true
+permissions:
+  contents: read
+jobs:
+  screenshots:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.6"
+      - name: Generate app icon and install Pillow
+        run: |
+          python3 -m venv .venv
+          . .venv/bin/activate
+          pip install pillow
+          python scripts/make_icon.py App/Assets.xcassets
+      - run: brew install xcodegen && xcodegen generate
+      - name: Capture every fixture (2 devices × Light/Dark × default/AX3 text)
+        timeout-minutes: 45
+        run: bash scripts/ui_screenshots.sh
+      - name: Build contact sheets
+        run: |
+          . .venv/bin/activate
+          python scripts/make_contact_sheet.py ui-screenshots
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## UI screenshots"
+            echo "Devices used:"
+            sed 's/^/- /' ui-screenshots/devices.txt 2>/dev/null || echo "- none (capture failed)"
+            echo "PNG count: $(find ui-screenshots -name '*.png' 2>/dev/null | wc -l | tr -d ' ')"
+            echo "Download **ui-contact-sheets** for one image per device."
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ui-contact-sheets
+          path: ui-screenshots/contact-*.jpg
+          if-no-files-found: error
+          retention-days: 90
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ui-screenshots
+          path: ui-screenshots
+          if-no-files-found: warn
+          retention-days: 90

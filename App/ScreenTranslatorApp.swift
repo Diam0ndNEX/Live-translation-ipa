@@ -117,6 +117,9 @@ private struct RootContent: View {
                 .preferredColorScheme(theme.appearance.scheme)
                 .tint(theme.tint)
         }
+        #if SCREENLINGO_FIXTURES
+        .task { UIFixture.apply(router: model.router) }
+        #endif
     }
 }
 
