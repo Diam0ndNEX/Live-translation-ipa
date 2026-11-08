@@ -110,7 +110,7 @@ import Foundation
 
         // 3. Retention: pinned runs survive; unpinned are pruned by count and by size.
         do {
-            let store = TestRunStore(directory: tempDirectory())
+            let store = TestRunStore(directory: tempDirectory(), maximumUnpinnedRuns: TestRunStore.keepUnpinned)
             let test = UUID()
             var ids: [UUID] = []
             for index in 0..<45 {

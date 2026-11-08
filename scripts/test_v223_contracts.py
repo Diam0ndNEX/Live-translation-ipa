@@ -96,6 +96,9 @@ assert archive.count("suffix(6000)") >= 3
 store = (root / "App/TestRunStore.swift").read_text()
 assert "maximumRunBytes: Int = TestRunStore.unlimitedRunBytes" in store and "static let unlimitedRunBytes = Int.max" in store
 
+assert "maximumTotalBytes: Int = Int.max" in store and "maximumUnpinnedRuns: Int = Int.max" in store, "no default storage limits"
+assert "100 MB" not in (root / "App/TestRunViews.swift").read_text()
+
 # Version 2.2.3 build 106 in the places CI checks.
 assert 'static let version = "2.2.3"' in shared and "static let build = 106" in shared
 assert project.count('"2.2.3"') == 3 and project.count('"106"') == 3

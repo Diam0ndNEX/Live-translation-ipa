@@ -122,7 +122,7 @@ struct TestRunMeta: Codable, Identifiable, Equatable {
 
 struct TestRunIndex: Codable {
     var runs: [TestRunMeta] = []
-    /// Shown in the list footer after automatic pruning, e.g. "2 older runs removed to stay under 100 MB".
+    /// Shown in the list footer after automatic pruning, e.g. "2 older runs removed to stay under the configured storage limit" (only when a limit is set).
     var pruneNote: String? = nil
 }
 
@@ -132,7 +132,9 @@ private struct StoredTestRun: Codable {
 }
 
 actor TestRunStore {
+    /// Only used by tests that pass it as `maximumUnpinnedRuns`. 2.2.3: no run-count limit by default.
     static let keepUnpinned = 40
+    private let maximumUnpinnedRuns: Int
     static let importedMarker = "migrated-diagnostic-sessions-v1"
 
     private let directory: URL
@@ -148,7 +150,9 @@ actor TestRunStore {
     /// the trimming steps. Whole older runs are still pruned by count and total size (see `pruned`).
     static let unlimitedRunBytes = Int.max
 
-    init(directory: URL, maximumRunBytes: Int = TestRunStore.unlimitedRunBytes, maximumTotalBytes: Int = 100 * 1024 * 1024) {
+    init(directory: URL, maximumRunBytes: Int = TestRunStore.unlimitedRunBytes, maximumTotalBytes: Int = Int.max,
+         maximumUnpinnedRuns: Int = Int.max) {
+        self.maximumUnpinnedRuns = maximumUnpinnedRuns
         self.directory = directory
         self.maximumRunBytes = maximumRunBytes
         self.maximumTotalBytes = maximumTotalBytes
@@ -381,20 +385,20 @@ actor TestRunStore {
 
     // MARK: retention
 
-    /// Pinned runs are never removed. Unpinned: newest 40 and at most 100 MB in total.
+    /// 2.2.3: no limits by default, so nothing is removed automatically. Limits apply only when passed to init (tests).
     private func pruned(_ input: TestRunIndex) -> TestRunIndex {
         var value = input
         let unpinned = value.runs.filter { !$0.pinned }.sorted { $0.endedAt > $1.endedAt }
         var removed: [TestRunMeta] = []
         var kept = unpinned
-        while kept.count > Self.keepUnpinned { removed.append(kept.removeLast()) }
+        while kept.count > maximumUnpinnedRuns { removed.append(kept.removeLast()) }
         func total() -> Int { value.runs.reduce(0) { $0 + $1.bytes } - removed.reduce(0) { $0 + $1.bytes } }
         while total() > maximumTotalBytes, let oldest = kept.popLast() { removed.append(oldest) }
         guard !removed.isEmpty else { return value }
         for run in removed { try? FileManager.default.removeItem(at: runURL(run.id)) }
         let ids = Set(removed.map(\.id))
         value.runs.removeAll { ids.contains($0.id) }
-        value.pruneNote = "\(removed.count) older run\(removed.count == 1 ? "" : "s") removed to stay under 100 MB / \(Self.keepUnpinned) runs"
+        value.pruneNote = "\(removed.count) older run\(removed.count == 1 ? "" : "s") removed to stay under the configured storage limit"
         return value
     }
 

@@ -421,8 +421,8 @@ struct TestRunsScreen: View {
                 }
                 AdvancedSection(title: "Storage") {
                     let bytes = s.runs.reduce(0) { $0 + $1.bytes }
-                    LabeledContent("Used", value: "\(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)) of 100 MB")
-                    Hint("The newest 40 unpinned runs are kept. Pinned runs are never removed automatically.")
+                    LabeledContent("Used", value: "\(ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file))")
+                    Hint("Runs are kept until you delete them. Pinned runs are never removed by Delete all unpinned.")
                     if let note = s.pruneNote { Banner(text: note, severity: .warning) }
                 }
             }
