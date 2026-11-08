@@ -41,13 +41,38 @@ struct HeroNumber: View {
     }
 }
 
-/// iOS 26: the tab bar shrinks while content scrolls (§13.1 principle 2). Older systems keep the normal bar.
+/// 2.1.8: the tab bar stays put. Shrinking it left a lone round bubble over the content, which looked broken.
 struct TabBarMinimize: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26, *) {
-            content.tabBarMinimizeBehavior(.onScrollDown)
+            content.tabBarMinimizeBehavior(.never)
         } else {
             content
         }
     }
+}
+
+/// iOS 26: a soft fade under the top bar instead of the hard edge with a hairline. Older systems are unchanged.
+struct SoftTopEdge: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26, *) {
+            content.scrollEdgeEffectStyle(.soft, for: .top)
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    func softTopEdge() -> some View { modifier(SoftTopEdge()) }
+}
+
+/// "ramHit" -> "Ram hit". Raw counter keys never show in the UI.
+func humanizedKey(_ raw: String) -> String {
+    var out = ""
+    for ch in raw {
+        if ch.isUppercase, !out.isEmpty { out.append(" ") }
+        out.append(ch)
+    }
+    return out.prefix(1).uppercased() + out.dropFirst().lowercased()
 }

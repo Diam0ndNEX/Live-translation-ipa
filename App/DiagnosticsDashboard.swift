@@ -388,14 +388,18 @@ struct DiagnosticsView: View {
 /// What is being read and shown right now. The only other section that reads the fast-changing engine values.
 private struct LiveFeedSection: View {
     @EngineFacts(PulseFacts.read) private var pulse
+    var active: Bool = true
     var body: some View {
+        if active || !pulse.lastRaw.isEmpty || !pulse.translated.isEmpty { feed }
+    }
+    private var feed: some View {
         VStack(alignment: .leading, spacing: Space.s) {
             Text("Right now").font(.headline)
             ListRow(title: "Reads", subtitle: pulse.lastRaw.isEmpty ? "Nothing yet" : pulse.lastRaw, symbol: "text.viewfinder") { EmptyView() }
             Divider()
             ListRow(title: "Shows", subtitle: pulse.translated.isEmpty ? "Nothing yet" : pulse.translated, symbol: "character.bubble") { EmptyView() }
             Hint("Translator: " + pulse.activity)
-            Hint(pulse.status)
+            if pulse.status != "Idle" && !pulse.activity.hasPrefix(pulse.status) { Hint(pulse.status) }
         }
         .kitSurface()
     }
@@ -462,20 +466,17 @@ private struct DiagnosticsBody: View {
     }
 
     // MARK: Body
-    /// Chip bar pinned under the title, one page at a time (the layout the owner asked to keep).
+    /// Chip row under the title, one page at a time. It scrolls with the page (2.1.8): no pinned slab.
     /// Live opens first and carries the headline answer, what needs attention, and the old Live numbers.
     var body: some View {
         NavigationStack {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: KitSpace.row, pinnedViews: [.sectionHeaders]) {
-                    Section {
-                        VStack(alignment: .leading, spacing: KitSpace.group) { pageBody }
-                            .padding(.horizontal, KitSpace.margin)
-                            .padding(.top, KitSpace.tight)
-                            .padding(.bottom, KitSpace.group)
-                    } header: {
-                        if collectionEnabled { pageBar }
-                    }
+                VStack(alignment: .leading, spacing: KitSpace.row) {
+                    if collectionEnabled { pageBar }
+                    VStack(alignment: .leading, spacing: KitSpace.group) { pageBody }
+                        .padding(.horizontal, KitSpace.margin)
+                        .padding(.top, KitSpace.tight)
+                        .padding(.bottom, KitSpace.group)
                 }
             }
             .modifier(ReadableColumn())
@@ -589,9 +590,8 @@ private struct DiagnosticsBody: View {
                     ForEach(DiagPage.allCases) { p in pageChip(p).id(p) }
                 }
                 .padding(.horizontal, KitSpace.margin)
-                .kitSurface()
             }
-            .background(.bar)
+            .scrollClipDisabled()
             .onAppear { proxy.scrollTo(page, anchor: .center) }
             .onChange(of: pageRaw) { _, _ in withAnimation(KitMotion.spring) { proxy.scrollTo(page, anchor: .center) } }
             .sensoryFeedback(.selection, trigger: pageRaw)
@@ -627,7 +627,7 @@ private struct DiagnosticsBody: View {
             PhaseHeader(phase: facts.phase, mode: facts.system.shortName)
             OverviewAnswer(diag: diag, captureAlive: facts.captureAlive).kitSurface()
             attentionSection
-            LiveFeedSection()
+            LiveFeedSection(active: facts.captureAlive)
             pipelineStrip
             evidenceCard
             sessionGrid
@@ -784,7 +784,7 @@ private struct DiagnosticsBody: View {
             }
             Text("Pending writes are not yet durable. RAM eviction never means permanent deletion. Lookup outcomes count translation units; persistence counters count write operations.").font(.caption).foregroundStyle(.secondary)
             ForEach(MemoryDiagnosticOutcome.allCases, id: \.self) { outcome in
-                LabeledContent(outcome.rawValue, value: String(diag.memoryOutcomesForUI(outcome)))
+                LabeledContent(humanizedKey(outcome.rawValue), value: String(diag.memoryOutcomesForUI(outcome)))
             }
             Text(diag.archiveStatus).font(.caption).foregroundStyle(.secondary)
         }.kitSurface()

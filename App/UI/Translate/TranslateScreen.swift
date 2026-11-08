@@ -38,6 +38,7 @@ struct TranslateScreen: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: KitSpace.group) {
+                    header
                     if setupState == "skipped" { finishSetupRow }
                     if composing {
                         ComposeResult(engine: engine, translated: snap.translated, original: snap.original) { endCompose() }
@@ -62,8 +63,8 @@ struct TranslateScreen: View {
             }
             .navigationTitle("Translate")
             .navigationBarTitleDisplayMode(.inline)
+            .toolbar(.hidden, for: .navigationBar)
             .modifier(AllowsLandscape())
-            .toolbar { toolbar }
             .fullScreenCover(isPresented: $focus) { FocusMode(engine: engine) }
             .onChange(of: translationSystem) { _, _ in engine.translationSystemChanged() }
             .onChange(of: area) { _, _ in engine.syncConfig() }
@@ -74,35 +75,55 @@ struct TranslateScreen: View {
         }
     }
 
-    // MARK: Toolbar
-    @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        ToolbarItem(placement: .topBarTrailing) {
-            Menu {
-                Button { router.present(.more) } label: { Label("Reading and window", systemImage: "slider.horizontal.3") }
-                Button { router.present(.status) } label: { Label("Session", systemImage: "timer") }
-                Button { focus = true } label: { Label("Focus mode", systemImage: "text.book.closed") }
-                Button { router.present(.test) } label: { Label("Test the three modes", systemImage: "checklist") }
-            } label: {
-                Label("More", systemImage: "ellipsis.circle")
-            }
+    // MARK: Header (replaces the system bar on this screen: no blur, no hairline, no glass slab)
+    private var header: some View {
+        HStack(spacing: KitSpace.tight) {
+            Image(systemName: "character.bubble.fill")
+                .font(.title3)
+                .foregroundStyle(Color.accentColor)
+                .accessibilityHidden(true)
+            Text("ScreenLingo").font(.headline)
+            Spacer(minLength: KitSpace.tight)
+            moreMenu
         }
+        .frame(minHeight: 44)
+    }
+
+    private var moreMenu: some View {
+        Menu {
+            Button { router.present(.more) } label: { Label("Reading and window", systemImage: "slider.horizontal.3") }
+            Button { router.present(.status) } label: { Label("Session", systemImage: "timer") }
+            Button {
+                if snap.pipActive { engine.pip.stop() } else { engine.startPiP() }
+            } label: {
+                Label(snap.pipActive ? "Close floating window" : "Open floating window", systemImage: snap.pipActive ? "pip.exit" : "pip.enter")
+            }
+            Button { focus = true } label: { Label("Focus mode", systemImage: "text.book.closed") }
+            Button { router.present(.test) } label: { Label("Test the three modes", systemImage: "checklist") }
+        } label: {
+            Label("More", systemImage: "ellipsis.circle")
+                .labelStyle(.iconOnly)
+                .font(.title3)
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("More")
     }
 
     // MARK: Idle
     @ViewBuilder private var idleContent: some View {
         pairTitle
-        VStack(spacing: KitSpace.tight) {
+        VStack(spacing: KitSpace.unit) {
             StartButton(live: false, onTap: startTapped)
                 .modifier(MorphTarget(namespace: reduceMotion ? nil : morph))
-            Text("Start capture").font(.title2.weight(.semibold))
-            Text("Opens the system sheet: choose ScreenLingo Capture, then Start Broadcast.")
-                .font(.subheadline)
+            Text("Tap to start").font(.title3.weight(.semibold))
+            Text("Choose ScreenLingo Capture in the system sheet, then Start Broadcast.")
+                .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity)
-        controlTiles
         controls
         ScenesStrip(store: engine.presets)
         testRow
@@ -125,24 +146,41 @@ struct TranslateScreen: View {
         }
     }
 
-    /// Translation system as a segmented control with a one-line note, then three compact menus.
+    /// Translation system as three tappable mode chips with a one-line note, then three capsule menus.
     private var controls: some View {
         VStack(alignment: .leading, spacing: KitSpace.row) {
-            Picker("Translation system", selection: $translationSystem) {
-                Text("Legacy").tag(TranslationSystem.legacy.rawValue)
-                Text("Hybrid").tag(TranslationSystem.hybridRecovery.rawValue)
-                Text("Low Latency").tag(TranslationSystem.lowLatency.rawValue)
+            HStack(spacing: KitSpace.tight) {
+                modeChip("Legacy", "clock.arrow.circlepath", .legacy)
+                modeChip("Hybrid", "arrow.triangle.merge", .hybridRecovery)
+                modeChip("Low Latency", "bolt.fill", .lowLatency)
             }
-            .pickerStyle(.segmented)
-            .sensoryFeedback(.selection, trigger: translationSystem)
             Text(modeNote(TranslationSystem(rawValue: translationSystem) ?? .legacy))
                 .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             ViewThatFits(in: .horizontal) {
-                HStack(spacing: KitSpace.group) { contentMenu; speedMenu; areaMenu; Spacer(minLength: 0) }
-                VStack(alignment: .leading, spacing: 0) { contentMenu; speedMenu; areaMenu }
+                HStack(spacing: KitSpace.tight) { contentMenu; speedMenu; areaMenu; Spacer(minLength: 0) }
+                VStack(alignment: .leading, spacing: KitSpace.tight) { contentMenu; speedMenu; areaMenu }
             }
         }
-        .kitSurface()
+    }
+
+    private func modeChip(_ title: String, _ symbol: String, _ system: TranslationSystem) -> some View {
+        let on = translationSystem == system.rawValue
+        return Button {
+            withAnimation(KitMotion.state(reduceMotion)) { translationSystem = system.rawValue }
+        } label: {
+            VStack(spacing: 6) {
+                Image(systemName: symbol).font(.title3.weight(.semibold))
+                Text(title).font(.footnote.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
+            }
+            .foregroundStyle(on ? Color.white : Color.primary)
+            .frame(maxWidth: .infinity, minHeight: 68)
+            .background(on ? Color.accentColor : Color(.secondarySystemGroupedBackground),
+                        in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        }
+        .buttonStyle(PressableStyle())
+        .sensoryFeedback(.selection, trigger: on)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(on ? .isSelected : [])
     }
 
     private var contentMenu: some View {
@@ -176,13 +214,17 @@ struct TranslateScreen: View {
     }
 
     private func menuLabel(_ title: String, _ value: String) -> some View {
-        HStack(spacing: KitSpace.unit) {
-            Text(title).foregroundStyle(.secondary)
-            Text(value).foregroundStyle(Color.accentColor)
-            Image(systemName: "chevron.up.chevron.down").font(.caption).foregroundStyle(Color.accentColor)
+        let symbol = title == "Content" ? "film" : (title == "Speed" ? "gauge.with.dots.needle.50percent" : "viewfinder")
+        return HStack(spacing: 6) {
+            Image(systemName: symbol).font(.footnote).foregroundStyle(Color.accentColor)
+            Text(value).lineLimit(1)
+            Image(systemName: "chevron.down").font(.caption).foregroundStyle(.secondary)
         }
         .font(.subheadline.weight(.medium))
-        .frame(minHeight: 44)
+        .foregroundStyle(Color.primary)
+        .padding(.horizontal, KitSpace.row)
+        .frame(minHeight: 40)
+        .background(Color(.secondarySystemGroupedBackground), in: Capsule())
     }
 
     /// The saved three-mode test, one tap from Translate.

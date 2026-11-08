@@ -77,8 +77,11 @@ if pickers != 1:
 
 # R6: Diagnostics has no big summary pinned above every page; only the compact chip bar is pinned.
 dash = (app / "DiagnosticsDashboard.swift").read_text()
-if "pinnedViews: [.sectionHeaders]" not in dash or "private var pageBar" not in dash:
-    failures.append("R6: DiagnosticsDashboard.swift: the pinned page chip bar is missing")
+# 2.1.8: the chip row scrolls with the page; a pinned slab is what the owner called "stuck at the top".
+if "pinnedViews" in dash:
+    failures.append("R6: DiagnosticsDashboard.swift: the page chip bar is pinned again")
+if "private var pageBar" not in dash:
+    failures.append("R6: DiagnosticsDashboard.swift: the page chip bar is missing")
 if re.search(r"HealthRing\(", dash):
     failures.append("R6: DiagnosticsDashboard.swift: a health ring is pinned above the pages")
 # R7: no health score shown, and mode names without the build id in the UI.

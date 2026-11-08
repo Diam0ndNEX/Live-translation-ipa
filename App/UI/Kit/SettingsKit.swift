@@ -89,7 +89,7 @@ struct SettingsGroup<Content: View>: View {
 struct AmbientGlow: ViewModifier {
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
     func body(content: Content) -> some View {
-        content.background(alignment: .top) {
+        content.softTopEdge().background(alignment: .top) {
             if !reduceTransparency {
                 LinearGradient(colors: [Color.accentColor.opacity(0.22), Color.accentColor.opacity(0)],
                                startPoint: .top, endPoint: .bottom)

@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "2.1.7"
-    static let build = 98
+    static let version = "2.1.8"
+    static let build = 99
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("2.1.8", "Build 99: top bars use a soft fade instead of the hard blurred band; Translate has its own header (no system bar) with three mode chips, capsule menus for content, speed and area, and no dead Pause tile while idle; the tab bar no longer shrinks into a lone bubble; Diagnostics page chips scroll with the page instead of sitting in a pinned slab; Right now hides when nothing is captured and no longer repeats Idle; Memory counters read as words. UI only, engine untouched. Not compiled or run on a device by Claude; speed unverified."),
         ("2.1.7", "Build 98: no app behaviour change. The UI screenshot workflow now runs on every claude/ branch push (one iPhone, default text size) and also captures Settings > Appearance, so the screens can be checked without a computer. Not compiled or run on a device by Claude; speed unverified."),
         ("2.1.6", "Build 97: every Settings sub-page gets the same row treatment: translucent surface rows, bolder section headers, a selection tick on every switch, a springy accent swatch row and a full-width Reset tile. Not compiled or run on a device by Claude; speed unverified."),
         ("2.1.5", "Build 96: the Languages sheet rows animate and give feedback on selection (bounced check, press feel, capsule Get buttons and recent-pair chips); Diagnostics charts animate as samples arrive. Settings sub-pages keep the shared grouped page and glow. Not compiled or run on a device by Claude; speed unverified."),

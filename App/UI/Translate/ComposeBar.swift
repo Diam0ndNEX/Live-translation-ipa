@@ -51,7 +51,10 @@ struct ComposeBar: View {
         .disabled(recognizing)
         .padding(.horizontal, KitSpace.margin)
         .padding(.vertical, KitSpace.tight)
-        .background(.bar)
+        .background {
+            LinearGradient(colors: [Color(.systemGroupedBackground).opacity(0), Color(.systemGroupedBackground)],
+                           startPoint: .top, endPoint: .center)
+        }
         .onChange(of: input) { _, value in if value.count > 12000 { input = String(value.prefix(12000)) } }
         .onChange(of: photo) { _, value in
             guard let value else { return }
