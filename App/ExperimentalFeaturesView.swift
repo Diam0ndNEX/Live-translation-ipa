@@ -33,6 +33,8 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("hotPathReuseLowLatencyPlan") private var hotPathReuseLowLatencyPlan = true
     @AppStorage("hotPathReuseLegacyUnits") private var hotPathReuseLegacyUnits = true
     @AppStorage("liveWarmupLegacy") private var liveWarmupLegacy = true
+    // 2.2.3 (L5): default OFF = current behaviour. Pinned at session start like the other A/B variants.
+    @AppStorage("backgroundAvailabilityRefresh") private var backgroundAvailabilityRefresh = false
 
     // Previous opt-in Smart pipeline controls are experimental, not core defaults.
     @AppStorage("adaptiveConfirmation") private var adaptiveConfirmation = false
@@ -144,6 +146,10 @@ struct ExperimentalFeaturesView: View {
                     title: "Legacy warm-up during capture",
                     explanation: "On (default): Legacy may run a short warm-up translation while capture is live and quiet. Off: no warm-up while capturing, for comparison. Unverified effect.",
                     enabled: $liveWarmupLegacy)
+                ExperimentalOption(
+                    title: "Refresh language check in background",
+                    explanation: "Off (default): the language-pack check is repeated when a translation needs it after 30 seconds, as before. On: it is refreshed in the background while nothing is translating, so a translation does not wait for it. Same translations either way. Unverified effect.",
+                    enabled: $backgroundAvailabilityRefresh)
             } header: { Text("A/B test variants") } footer: {
                 Text("For comparing builds on the same video. A change applies from the next session, never during one. Each run's report names the variant it used.")
             }
@@ -166,7 +172,8 @@ struct ExperimentalFeaturesView: View {
                 "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
                 "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
                 "adaptiveConfirmation", "confirmationDeadline", "continuousRotation",
-                "hybridSchedulerVariant", "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy"
+                "hybridSchedulerVariant", "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy",
+                "backgroundAvailabilityRefresh"
             ])
         }
         .settingsPage("Experimental features")

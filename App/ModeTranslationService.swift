@@ -73,6 +73,11 @@ final class ModeTranslationService {
     }
 
     private let installedCheckTTL: Double = 30
+    /// 2.2.3 (L5, UNVERIFIED): with the pinned backgroundAvailabilityRefresh switch on (default off), a cached
+    /// "installed" check at least this old is refreshed after a model call returns, so the first request after the
+    /// 30 s TTL does not pay the availability check itself. Must stay below installedCheckTTL.
+    private let availabilityRefreshAfter: Double = 20
+    private var availabilityRefreshing = Set<String>()
     var warmupEvent: ((InitialWarmupEvent) -> Void)?
     var modelRequestCompleted: ((String, String, RequestedTranslationStrategy, Double) -> Void)?
     private(set) var warmupSkipDescription = ""
@@ -81,6 +86,34 @@ final class ModeTranslationService {
     var hostedDefault: (([String], Locale.Language, Locale.Language, Bool) async -> [String]?)?
     /// Checks only not-yet-submitted requests. Already-running calls must drain.
     var mayStartModel: ((ModeCaption, Bool) -> Bool)?
+
+    /// 2.2.3 (L5): refreshes the cached availability result for one language pair and strategy in the background.
+    /// Runs only while nothing is translating, never extends a stale entry for a pack that is no longer installed,
+    /// and drops its result if the service was reset while the check was running.
+    private func refreshAvailabilityIfStale(source: Locale.Language, target: Locale.Language,
+                                            strategy: RequestedTranslationStrategy, key: String) {
+        guard TranslationHotPathAB.refreshAvailabilityInBackground,
+              let verifiedAt = recentlyInstalled[key],
+              ProcessInfo.processInfo.systemUptime - verifiedAt >= availabilityRefreshAfter,
+              !availabilityRefreshing.contains(key),
+              !speculative.busy, !confirmed.busy, !warmupLane.busy, hostedTask == nil else { return }
+        availabilityRefreshing.insert(key)
+        let revision = generation
+        Task { @MainActor in
+            defer { self.availabilityRefreshing.remove(key) }
+            let availability: LanguageAvailability
+            if #available(iOS 26.4, *), strategy == .lowLatency {
+                availability = LanguageAvailability(preferredStrategy: .lowLatency)
+            } else { availability = LanguageAvailability() }
+            let refreshed = await availability.status(from: source, to: target)
+            guard revision == self.generation else { return }
+            if refreshed == .installed {
+                self.recentlyInstalled[key] = ProcessInfo.processInfo.systemUptime
+            } else {
+                self.recentlyInstalled.removeValue(forKey: key)
+            }
+        }
+    }
 
     func cancel(speculation: Bool) {
         let lane = speculation ? speculative : confirmed
@@ -607,6 +640,8 @@ final class ModeTranslationService {
                         }
                     }
                     self.activity.end(activityID)
+                    // 2.2.3 (L5): no-op unless the pinned switch is on; never delays finish().
+                    self.refreshAvailabilityIfStale(source: source, target: target, strategy: strategy, key: availabilityKey)
                     finish(lane.invalidated ? nil : output)
                 }
             }

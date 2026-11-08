@@ -35,6 +35,7 @@ enum SettingsSearchIndex {
         SettingsSearchEntry(label: "Legacy warm-up during capture", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Multiple nearby text groups", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Pixel-verified confirmation", page: .experimental, pageTitle: "Experimental features"),
+        SettingsSearchEntry(label: "Refresh language check in background", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Reuse Legacy prepared units", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Reuse the Low Latency plan", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Subtitle-area change detection", page: .experimental, pageTitle: "Experimental features"),
