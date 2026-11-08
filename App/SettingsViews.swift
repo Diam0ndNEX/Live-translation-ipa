@@ -64,6 +64,7 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
+                settingResults
                 translation
                 reading
                 caption
@@ -81,6 +82,44 @@ struct SettingsView: View {
             #if SCREENLINGO_FIXTURES
             .navigationDestination(isPresented: .constant(UIFixture.current == .settingsCaption)) { CaptionAppearanceSettings() }
             #endif
+        }
+    }
+
+    /// Search finds the setting itself, then opens the page that holds it (§13.5.5).
+    @ViewBuilder private var settingResults: some View {
+        let found = SettingsSearchIndex.matches(query)
+        if !found.isEmpty {
+            Section("Settings") {
+                ForEach(found.prefix(30)) { entry in
+                    NavigationLink(destination: page(entry.page)) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(entry.label).font(.body)
+                            Text(entry.pageTitle).font(.footnote).foregroundStyle(.secondary)
+                        }
+                        .frame(minHeight: 44, alignment: .leading)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private func page(_ page: SettingsPage) -> some View {
+        switch page {
+        case .reading: ReadingSettings()
+        case .textRules: IntelligenceSettings()
+        case .timing: ResponsivenessSettings()
+        case .window: WindowSettings()
+        case .style: CaptionAppearanceSettings()
+        case .appearance: InterfaceSettings()
+        case .feedback: FeedbackStorageSettings()
+        case .reader: ReaderWorkspaceSettings()
+        case .performance: PerformanceSettings()
+        case .privacy: PrivacySettings()
+        case .history: HistoryStorageSettings()
+        case .backup: BackupSettings()
+        case .system: TranslationSettings()
+        case .diagnostics: DiagnosticsSettings()
+        case .experimental: ExperimentalFeaturesView()
         }
     }
 
