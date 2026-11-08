@@ -130,8 +130,7 @@ struct SettingsView: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(KitSpace.row)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .kitSurface()
         .accessibilityElement(children: .combine)
     }
 

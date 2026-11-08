@@ -80,7 +80,6 @@ struct FocusMode: View {
                 .frame(minHeight: 44)
         }
         .padding(.horizontal, KitSpace.margin)
-        .background(.bar)
     }
 
     private var bottomBar: some View {
@@ -94,9 +93,11 @@ struct FocusMode: View {
             bar("Text", "textformat.size", enabled: true) { showOptions = true }
         }
         .buttonStyle(.bordered)
+        .padding(.horizontal, KitSpace.tight)
+        .padding(.vertical, KitSpace.unit)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
         .padding(.horizontal, KitSpace.margin)
         .padding(.vertical, KitSpace.tight)
-        .background(.bar)
     }
 
     private func bar(_ title: String, _ symbol: String, enabled: Bool, run: @escaping () -> Void) -> some View {

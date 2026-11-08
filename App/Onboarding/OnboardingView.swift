@@ -91,7 +91,6 @@ struct OnboardingView: View {
                 .disabled(!allDone)
                 .padding(.horizontal, KitSpace.margin)
                 .padding(.vertical, KitSpace.tight)
-                .background(.bar)
             }
             .sheet(isPresented: $languagesOpen) { LanguageSheet(engine: engine) }
             .sensoryFeedback(.success, trigger: allDone)
