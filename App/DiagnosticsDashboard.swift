@@ -490,6 +490,7 @@ private struct DiagnosticsBody: View {
                     }
                 }
             }
+            .modifier(ReadableColumn())
             .navigationTitle("Diagnostics")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {

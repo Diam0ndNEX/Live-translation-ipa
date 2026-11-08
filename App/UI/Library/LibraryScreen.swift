@@ -76,6 +76,7 @@ struct LibraryScreen: View {
                 }
             }
             .listStyle(.insetGrouped)
+            .modifier(ReadableColumn())
             .safeAreaInset(edge: .top, spacing: 0) {
                 Picker("Show", selection: $segment) { ForEach(LibrarySegment.allCases) { Text($0.rawValue).tag($0) } }
                     .pickerStyle(.segmented)

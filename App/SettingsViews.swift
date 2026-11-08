@@ -75,6 +75,7 @@ struct SettingsView: View {
                     }
                 }
             }
+            .modifier(ReadableColumn())
             .searchable(text: $query, prompt: "Search settings")
             .navigationTitle("Settings")
             #if SCREENLINGO_FIXTURES

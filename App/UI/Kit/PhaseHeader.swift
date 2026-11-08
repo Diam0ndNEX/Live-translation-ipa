@@ -7,6 +7,8 @@ struct PhaseHeader: View {
     var elapsed: TimeInterval? = nil
     var mode: String? = nil
     var action: (() -> Void)? = nil
+    /// When set, the glyph shares its geometry with the Start button so idle → live morphs (§13.4.1).
+    var morph: Namespace.ID? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -15,6 +17,7 @@ struct PhaseHeader: View {
             HStack(spacing: KitSpace.tight) {
                 Image(systemName: phase.symbol)
                     .foregroundStyle(phase.tone.color)
+                    .modifier(MorphTarget(namespace: reduceMotion ? nil : morph))
                     .symbolEffect(.pulse, options: .repeating, isActive: phase == .live && !reduceMotion)
                     .accessibilityHidden(true)
                 Text(line)
@@ -56,5 +59,18 @@ struct PhaseHeader: View {
         f.unitsStyle = .full
         f.allowedUnits = [.hour, .minute, .second]
         return f.string(from: max(0, t)) ?? ""
+    }
+}
+
+/// Shared geometry between the Start button and the phase glyph. Without a namespace it does nothing
+/// (Reduce Motion falls back to the screen's cross-fade).
+struct MorphTarget: ViewModifier {
+    let namespace: Namespace.ID?
+    func body(content: Content) -> some View {
+        if let namespace {
+            content.matchedGeometryEffect(id: "phase-glyph", in: namespace)
+        } else {
+            content
+        }
     }
 }

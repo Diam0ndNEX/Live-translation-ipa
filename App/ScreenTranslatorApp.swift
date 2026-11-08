@@ -6,6 +6,8 @@ import UIKit
 
 @main
 struct ScreenTranslatorApp: App {
+    /// Narrows orientations to portrait except on Translate and Focus mode.
+    @UIApplicationDelegateAdaptor(ScreenLingoAppDelegate.self) private var appDelegate
     var body: some Scene { WindowGroup { RootView() } }
 }
 

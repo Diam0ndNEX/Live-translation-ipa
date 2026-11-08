@@ -16,6 +16,7 @@ struct TranslateScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var focus = false
     @State private var composing = false
+    @Namespace private var morph
 
     init(engine: TranslatorEngine) {
         self.engine = engine
@@ -46,6 +47,7 @@ struct TranslateScreen: View {
                 .padding(.horizontal, KitSpace.margin)
                 .padding(.top, KitSpace.tight)
                 .padding(.bottom, KitSpace.group)
+                .modifier(ReadableColumn())
                 .animation(KitMotion.state(reduceMotion), value: snap.phase)
             }
             .scrollBounceBehavior(.basedOnSize)
@@ -54,6 +56,7 @@ struct TranslateScreen: View {
             }
             .navigationTitle("Translate")
             .navigationBarTitleDisplayMode(.inline)
+            .modifier(AllowsLandscape())
             .toolbar { toolbar }
             .fullScreenCover(isPresented: $focus) { FocusMode(engine: engine) }
             .onChange(of: translationSystem) { _, _ in engine.translationSystemChanged() }
@@ -97,6 +100,7 @@ struct TranslateScreen: View {
         pairTitle
         VStack(spacing: KitSpace.tight) {
             StartButton(live: false, onTap: startTapped)
+                .modifier(MorphTarget(namespace: reduceMotion ? nil : morph))
             Text("Start translating").font(.title2.weight(.semibold))
             Text("Opens the system sheet: choose ScreenLingo Capture, then Start Broadcast.")
                 .font(.subheadline)
@@ -164,7 +168,7 @@ struct TranslateScreen: View {
         TimelineView(.periodic(from: .now, by: 1)) { context in
             PhaseHeader(phase: snap.phase,
                         elapsed: snap.sessionStarted.map { context.date.timeIntervalSince($0) },
-                        mode: snap.modeName) { router.present(.status) }
+                        mode: snap.modeName, action: { router.present(.status) }, morph: morph)
         }
         if case .attention(let reason) = snap.phase { attentionAction(reason) }
         if snap.phase == .starting {

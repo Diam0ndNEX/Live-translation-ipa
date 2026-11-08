@@ -67,6 +67,7 @@ struct FocusMode: View {
         .onDisappear { hideTask?.cancel() }
         .sheet(isPresented: $showOptions) { options }
         .statusBarHidden(!controlsVisible)
+        .modifier(AllowsLandscape())
         .accessibilityAction(named: "Show controls") { showControls() }
     }
 
