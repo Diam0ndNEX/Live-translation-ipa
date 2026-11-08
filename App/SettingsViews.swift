@@ -1,10 +1,15 @@
-// ScreenLingo – App – Settings (2.1.0, spec §13.5.5: one grouped list, five groups, native pages)
+// ScreenLingo – App – Settings (2.1.2: colour-tile rows in rounded groups, one hero summary, native pages)
 import SwiftUI
 
 extension View {
     /// Every settings page is a native grouped list with a large title; no header card (R9).
     func settingsPage(_ title: String) -> some View {
         self.listStyle(.insetGrouped)
+            .environment(\.defaultMinListRowHeight, 44)
+            .listSectionSpacing(.compact)
+            .scrollContentBackground(.hidden)
+            .ambientGlow()
+            .background(Color(.systemGroupedBackground))
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle(title)
             .navigationBarTitleDisplayMode(.large)
@@ -33,9 +38,10 @@ private struct PresetsLinkRow: View {
     @ObservedObject var store: PresetStore
     var body: some View {
         NavigationLink { PresetManagerView(store: store) } label: {
-            LensRow(title: "Scenes", value: store.active.map { store.isModified ? "\($0.name) · changed" : $0.name } ?? "\(store.all.count)",
-                    symbol: "square.stack.3d.up")
+            SettingsRow(title: "Scenes", value: store.active.map { store.isModified ? "\($0.name) · changed" : $0.name } ?? "\(store.all.count)",
+                        symbol: "square.stack.3d.up", tint: .indigo)
         }
+        .buttonStyle(PressableStyle())
     }
 }
 
@@ -63,20 +69,31 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
-                settingResults
-                translation
-                reading
-                caption
-                app
-                advancedGroup
-                Section {
-                    NavigationLink(destination: AboutSettings()) {
-                        LensRow(title: "About ScreenLingo", value: AppVersion.full, symbol: "info.circle")
+            ScrollView {
+                VStack(alignment: .leading, spacing: KitSpace.group) {
+                    if query.isEmpty { hero }
+                    settingResults
+                    translation
+                    reading
+                    caption
+                    look
+                    care
+                    advancedGroup
+                    if query.isEmpty {
+                        SettingsGroup {
+                            link("About ScreenLingo", "info.circle", .gray, value: AppVersion.full, destination: AboutSettings())
+                        }
                     }
                 }
+                .padding(.horizontal, KitSpace.margin)
+                .padding(.top, KitSpace.tight)
+                .padding(.bottom, KitSpace.group)
+                .modifier(ReadableColumn())
+                .animation(KitMotion.spring, value: query.isEmpty)
             }
-            .modifier(ReadableColumn())
+            .scrollDismissesKeyboard(.interactively)
+            .ambientGlow()
+            .background(Color(.systemGroupedBackground))
             .searchable(text: $query, prompt: "Search settings")
             .navigationTitle("Settings")
             #if SCREENLINGO_FIXTURES
@@ -85,19 +102,54 @@ struct SettingsView: View {
         }
     }
 
+    /// One row that opens a page. The press feedback comes from the style, not from a big button shape.
+    private func link<D: View>(_ title: String, _ symbol: String, _ tint: Color, value: String = "",
+                               destination: @autoclosure @escaping () -> D) -> some View {
+        NavigationLink { destination() } label: { SettingsRow(title: title, value: value, symbol: symbol, tint: tint) }
+            .buttonStyle(PressableStyle())
+    }
+
+    /// What is set up right now, at a glance. The one hero object on this screen.
+    private var hero: some View {
+        let defaults = UserDefaults.standard
+        let content = TranslateMode(rawValue: defaults.string(forKey: "mode") ?? "")?.title ?? TranslateMode.movie.title
+        let speed = SpeedPreset(rawValue: defaults.string(forKey: "speed") ?? "")?.title ?? SpeedPreset.balanced.title
+        let source = engine.sourceCode == "auto" ? "Auto" : engine.sourceCode.uppercased()
+        return HStack(spacing: KitSpace.row) {
+            IconTile(symbol: "character.bubble.fill", tint: .accentColor).scaleEffect(1.35).padding(KitSpace.unit)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(source) → \(engine.targetCode.uppercased())").font(.title3.weight(.semibold))
+                Text("\(engine.pendingTranslationSystem.shortName) · \(content) · \(speed)")
+                    .font(.subheadline).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(KitSpace.row)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .accessibilityElement(children: .combine)
+    }
+
     /// Search finds the setting itself, then opens the page that holds it (§13.5.5).
     @ViewBuilder private var settingResults: some View {
         let found = SettingsSearchIndex.matches(query)
         if !found.isEmpty {
-            Section("Settings") {
+            SettingsGroup(title: "Settings") {
                 ForEach(found.prefix(30)) { entry in
                     NavigationLink(destination: page(entry.page)) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(entry.label).font(.body)
-                            Text(entry.pageTitle).font(.footnote).foregroundStyle(.secondary)
+                        HStack(spacing: KitSpace.row) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.label).font(.body)
+                                Text(entry.pageTitle).font(.footnote).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: KitSpace.tight)
+                            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(.tertiary)
                         }
-                        .frame(minHeight: 44, alignment: .leading)
+                        .padding(.horizontal, KitSpace.row)
+                        .padding(.vertical, 9)
+                        .frame(minHeight: 48)
+                        .contentShape(Rectangle())
                     }
+                    .buttonStyle(PressableStyle())
                 }
             }
         }
@@ -124,103 +176,75 @@ struct SettingsView: View {
     }
 
     @ViewBuilder private var translation: some View {
-        Section("Translation") {
+        SettingsGroup(title: "Translation") {
             if shows("System", "legacy hybrid low latency mode translate ahead speculation model warm memory") {
-                NavigationLink(destination: TranslationSettings()) {
-                    LensRow(title: "System", value: engine.pendingTranslationSystem.shortName, symbol: "cpu")
-                }
+                link("System", "cpu", .blue, value: engine.pendingTranslationSystem.shortName, destination: TranslationSettings())
             }
             if shows("Language packs", "languages download offline pair source target") {
-                NavigationLink(destination: LanguageSheet(engine: engine, inSheet: false)) {
-                    LensRow(title: "Language packs", symbol: "globe")
-                }
+                link("Language packs", "globe", .teal, destination: LanguageSheet(engine: engine, inSheet: false))
             }
             if shows("Scenes", "presets profiles saved configurations") {
                 PresetsLinkRow(store: engine.presets)
             }
             if shows("Memory", "translation memory remembered cache database") {
-                NavigationLink(destination: MemoryManagementView()) {
-                    LensRow(title: "Memory", value: "\(engine.memoryCount.formatted()) remembered", symbol: "externaldrive")
-                }
+                link("Memory", "externaldrive", .purple, value: "\(engine.memoryCount.formatted()) remembered", destination: MemoryManagementView())
             }
         }
     }
 
     @ViewBuilder private var reading: some View {
-        Section("Reading") {
+        SettingsGroup(title: "Reading") {
             if shows("Area, recognition and speed", "capture movie subtitles frames ocr recognition tracking confirmation speed") {
-                NavigationLink(destination: ReadingSettings()) {
-                    LensRow(title: "Area and recognition", value: areaTitle, symbol: "viewfinder")
-                }
+                link("Area and recognition", "viewfinder", .green, value: areaTitle, destination: ReadingSettings())
             }
             if shows("Text rules and names", "understanding glossary slang protect names source fixes language detection recovery") {
-                NavigationLink(destination: IntelligenceSettings()) {
-                    LensRow(title: "Text rules and names", symbol: "character.book.closed")
-                }
+                link("Text rules and names", "character.book.closed", .pink, destination: IntelligenceSettings())
             }
             if shows("Timing", "min display clear heartbeat steady captions handoff subtitle timing") {
-                NavigationLink(destination: ResponsivenessSettings()) {
-                    LensRow(title: "Timing", symbol: "timer")
-                }
+                link("Timing", "timer", .orange, destination: ResponsivenessSettings())
             }
         }
     }
 
     @ViewBuilder private var caption: some View {
-        Section {
+        SettingsGroup(title: "Floating caption",
+                      footer: query.isEmpty ? "Both pages show a live preview of the floating caption." : nil) {
             if shows("Window", "floating window picture in picture pip size theme position") {
-                NavigationLink(destination: WindowSettings()) {
-                    LensRow(title: "Window", symbol: "pip")
-                }
+                link("Window", "pip", .cyan, destination: WindowSettings())
             }
             if shows("Style", "font size weight alignment spacing padding original caption layout") {
-                NavigationLink(destination: CaptionAppearanceSettings()) {
-                    LensRow(title: "Style", symbol: "textformat.size")
-                }
+                link("Style", "textformat.size", .indigo, destination: CaptionAppearanceSettings())
             }
-        } header: {
-            Text("Floating caption")
-        } footer: {
-            if query.isEmpty { Text("Both pages show a live preview of the floating caption.") }
         }
     }
 
-    @ViewBuilder private var app: some View {
-        Section("App") {
+    @ViewBuilder private var look: some View {
+        SettingsGroup(title: "Look and feel") {
             if shows("Appearance", "interface accent color dark light system theme") {
-                NavigationLink(destination: InterfaceSettings()) {
-                    LensRow(title: "Appearance", value: theme.appearance.title, symbol: "paintpalette")
-                }
+                link("Appearance", "paintpalette", .purple, value: theme.appearance.title, destination: InterfaceSettings())
             }
             if shows("Haptics and feedback", "vibration speak copy clipboard voice sharing") {
-                NavigationLink(destination: FeedbackStorageSettings()) {
-                    LensRow(title: "Haptics and feedback", symbol: "hand.tap")
-                }
+                link("Haptics and feedback", "hand.tap", .red, destination: FeedbackStorageSettings())
             }
             if shows("Reader and photos", "focus reader photo ocr reading layout") {
-                NavigationLink(destination: ReaderWorkspaceSettings()) {
-                    LensRow(title: "Reader and photos", symbol: "text.book.closed")
-                }
+                link("Reader and photos", "text.book.closed", .teal, destination: ReaderWorkspaceSettings())
             }
+        }
+    }
+
+    @ViewBuilder private var care: some View {
+        SettingsGroup(title: "Device and data") {
             if shows("Performance and battery", "speed cool power thermal idle awake energy heat") {
-                NavigationLink(destination: PerformanceSettings()) {
-                    LensRow(title: "Performance and battery", symbol: "bolt")
-                }
+                link("Performance and battery", "bolt.fill", .green, destination: PerformanceSettings())
             }
             if shows("Privacy", "private session diagnostic text speaker") {
-                NavigationLink(destination: PrivacySettings()) {
-                    LensRow(title: "Privacy", symbol: "hand.raised")
-                }
+                link("Privacy", "hand.raised.fill", .blue, destination: PrivacySettings())
             }
             if shows("History and storage", "saved translations retention limit delete library") {
-                NavigationLink(destination: HistoryStorageSettings()) {
-                    LensRow(title: "History and storage", symbol: "clock.arrow.circlepath")
-                }
+                link("History and storage", "clock.arrow.circlepath", .gray, destination: HistoryStorageSettings())
             }
             if shows("Backup", "export import reset settings restore") {
-                NavigationLink(destination: BackupSettings()) {
-                    LensRow(title: "Backup and reset", symbol: "externaldrive.badge.timemachine")
-                }
+                link("Backup and reset", "externaldrive.badge.timemachine", .gray, destination: BackupSettings())
             }
         }
     }
@@ -229,33 +253,31 @@ struct SettingsView: View {
     @ViewBuilder private var advancedGroup: some View {
         let open = advanced.on || !query.isEmpty
         if open {
-            Section("Advanced") {
+            SettingsGroup(title: "Advanced") {
                 if shows("Diagnostics settings", "metrics benchmark export test runs fresh translation temporary memory") {
-                    NavigationLink(destination: DiagnosticsSettings()) {
-                        LensRow(title: "Diagnostics settings", symbol: "waveform.path.ecg")
-                    }
+                    link("Diagnostics settings", "waveform.path.ecg", .red, destination: DiagnosticsSettings())
                 }
                 if shows("Experimental features", "beta experiments smart pipeline lyrics incremental pip rotation") {
-                    NavigationLink(destination: ExperimentalFeaturesView()) {
-                        LensRow(title: "Experimental features", symbol: "flask")
-                    }
+                    link("Experimental features", "flask", .orange, destination: ExperimentalFeaturesView())
                 }
                 if shows("Pipeline simulator", "simulate test pipeline") {
-                    NavigationLink(destination: PipelineSimulatorView()) {
-                        LensRow(title: "Pipeline simulator", symbol: "point.3.connected.trianglepath.dotted")
-                    }
+                    link("Pipeline simulator", "point.3.connected.trianglepath.dotted", .indigo, destination: PipelineSimulatorView())
                 }
                 if shows("Test runs", "compare modes legacy hybrid low latency") {
-                    Button { router.present(.testRuns) } label: { LensRow(title: "Test runs", symbol: "checklist") }
-                        .foregroundStyle(.primary)
+                    Button { router.present(.testRuns) } label: { SettingsRow(title: "Test runs", symbol: "checklist", tint: .teal) }
+                        .buttonStyle(PressableStyle())
                 }
             }
         }
         if query.isEmpty {
-            Section {
-                Toggle("Show advanced settings", isOn: $advanced.on)
-            } footer: {
-                Text("Diagnostics, experiments and the simulator. Hidden settings keep their values.")
+            SettingsGroup(footer: "Diagnostics, experiments and the simulator. Hidden settings keep their values.") {
+                HStack(spacing: KitSpace.row) {
+                    IconTile(symbol: "slider.horizontal.3", tint: .gray)
+                    Toggle("Show advanced settings", isOn: $advanced.on).sensoryFeedback(.selection, trigger: advanced.on)
+                }
+                .padding(.horizontal, KitSpace.row)
+                .padding(.vertical, 9)
+                .frame(minHeight: 48)
             }
         }
     }
