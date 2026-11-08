@@ -159,6 +159,10 @@ struct TranslateScreen: View {
             }
             Text(modeNote(TranslationSystem(rawValue: translationSystem) ?? .legacy))
                 .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if snap.phase.isSession, (TranslationSystem(rawValue: translationSystem) ?? .legacy).shortName != snap.modeName {
+                Label("This session keeps using \(snap.modeName). The new mode starts with the next session.", systemImage: "info.circle")
+                    .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: KitSpace.tight) { contentMenu; speedMenu; areaMenu; Spacer(minLength: 0) }
                 VStack(alignment: .leading, spacing: KitSpace.tight) { contentMenu; speedMenu; areaMenu }

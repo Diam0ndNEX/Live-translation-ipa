@@ -62,7 +62,7 @@ struct ComposeBar: View {
             ocrRequestID = requestID
             recognizing = true
             ocrTask = Task {
-                defer { if ocrRequestID == requestID { recognizing = false } }
+                defer { if ocrRequestID == requestID { recognizing = false; photo = nil } }
                 do {
                     guard let data = try await value.loadTransferable(type: Data.self), !Task.isCancelled else { return }
                     await readImage(data, requestID: requestID)
@@ -76,8 +76,13 @@ struct ComposeBar: View {
                 let url = try result.get()
                 let access = url.startAccessingSecurityScopedResource()
                 defer { if access { url.stopAccessingSecurityScopedResource() } }
+                if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > 25_000_000 {
+                    feedback.show("That file is too large to read. Try one under 25 MB.", severity: .warning)
+                    return
+                }
                 let data = try Data(contentsOf: url)
-                if let text = String(data: data, encoding: .utf8), url.pathExtension.lowercased() == "txt" {
+                let isText = UTType(filenameExtension: url.pathExtension.lowercased())?.conforms(to: .text) ?? false
+                if isText, let text = String(data: data, encoding: .utf8) {
                     input = String(text.prefix(12000))
                 } else {
                     ocrTask?.cancel()
@@ -144,7 +149,11 @@ struct ComposeBar: View {
             if text.isEmpty { feedback.show("No readable text found. Try a sharper image.", severity: .warning) }
             else if photoAutoTranslate { send() }
         } catch {
-            if !Task.isCancelled && ocrRequestID == requestID { feedback.show(error.localizedDescription, severity: .error) }
+            if !Task.isCancelled && ocrRequestID == requestID {
+                let unreadable = (error as? CocoaError)?.code == .fileReadCorruptFile
+                feedback.show(unreadable ? "ScreenLingo can read images and plain text files. This file is neither." : error.localizedDescription,
+                              severity: .error)
+            }
         }
     }
 }
