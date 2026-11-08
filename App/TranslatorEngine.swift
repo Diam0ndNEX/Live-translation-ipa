@@ -1443,7 +1443,7 @@ final class TranslatorEngine: ObservableObject {
             return
         }
         if n >= 8 {
-            status = "PiP couldn't start – stay on the Live tab and tap Start again"
+            status = "The floating window couldn't start. Stay on Translate and tap Start again."
             done(); return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.attemptPiP(n + 1, done) }
