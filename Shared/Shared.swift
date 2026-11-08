@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "2.1.6"
-    static let build = 97
+    static let version = "2.1.7"
+    static let build = 98
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("2.1.7", "Build 98: no app behaviour change. The UI screenshot workflow now runs on every claude/ branch push (one iPhone, default text size) and also captures Settings > Appearance, so the screens can be checked without a computer. Not compiled or run on a device by Claude; speed unverified."),
         ("2.1.6", "Build 97: every Settings sub-page gets the same row treatment: translucent surface rows, bolder section headers, a selection tick on every switch, a springy accent swatch row and a full-width Reset tile. Not compiled or run on a device by Claude; speed unverified."),
         ("2.1.5", "Build 96: the Languages sheet rows animate and give feedback on selection (bounced check, press feel, capsule Get buttons and recent-pair chips); Diagnostics charts animate as samples arrive. Settings sub-pages keep the shared grouped page and glow. Not compiled or run on a device by Claude; speed unverified."),
         ("2.1.4", "Build 95: the Start button hit area now fills the whole circle (the system picker's inner button used to stay small), so a tap anywhere starts capture and the floating window. Translate shows Start capture, Pause or Resume, Floating window and Session tiles again; the toolbar is one More menu. Library detail uses rounded surfaces. Not compiled or run on a device by Claude; speed unverified."),

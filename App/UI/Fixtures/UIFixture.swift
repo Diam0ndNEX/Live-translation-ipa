@@ -26,6 +26,7 @@ enum UIFixture: String, CaseIterable {
     case diagnosticsBad = "diagnostics-bad"
     case settingsRoot = "settings-root"
     case settingsCaption = "settings-caption"
+    case settingsInterface = "settings-interface"
     case languagesSheet = "languages-sheet"
     case onboarding
     case areaEditor = "area-editor"
@@ -46,7 +47,7 @@ enum UIFixture: String, CaseIterable {
             return .library
         case .diagnosticsIdle, .diagnosticsLive, .diagnosticsBad:
             return .diagnostics
-        case .settingsRoot, .settingsCaption:
+        case .settingsRoot, .settingsCaption, .settingsInterface:
             return .settings
         case .languagesSheet:
             return .translate

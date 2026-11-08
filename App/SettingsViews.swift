@@ -103,6 +103,7 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             #if SCREENLINGO_FIXTURES
             .navigationDestination(isPresented: .constant(UIFixture.current == .settingsCaption)) { CaptionAppearanceSettings() }
+            .navigationDestination(isPresented: .constant(UIFixture.current == .settingsInterface)) { InterfaceSettings() }
             #endif
         }
     }

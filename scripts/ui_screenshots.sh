@@ -5,10 +5,12 @@
 set -euo pipefail
 
 OUT=${OUT:-ui-screenshots}
+# QUICK=1: only the iPhone 16 Pro class device and default text size (about a quarter of the time).
+TEXTS="default ax3"; [ "${QUICK:-0}" = 1 ] && TEXTS="default"
 BUNDLE=com.diam0ndnex.screenlingo
 FIXTURES=(idle idle-pack-missing starting live-short live-long paused attention-lost
           library-empty library-many diagnostics-idle diagnostics-live diagnostics-bad
-          settings-root settings-caption languages-sheet onboarding area-editor kit)
+          settings-root settings-caption settings-interface languages-sheet onboarding area-editor kit)
 rm -rf "$OUT"
 mkdir -p "$OUT"
 printf '%s\n' "${FIXTURES[@]}" > "$OUT/fixtures.txt"
@@ -58,7 +60,7 @@ shoot_device() {
     xcrun simctl install "$udid" "$APP"
     for scheme in light dark; do
         xcrun simctl ui "$udid" appearance "$scheme"
-        for text in default ax3; do
+        for text in $TEXTS; do
             if [ "$text" = ax3 ]; then size=accessibility-extra-large; else size=large; fi
             xcrun simctl ui "$udid" content_size "$size"
             local dir="$OUT/$slug/$scheme-$text"
@@ -80,6 +82,6 @@ shoot_device() {
     xcrun simctl delete "$udid" || true
 }
 
-shoot_device iphone-se "iPhone SE (3rd generation)|iPhone SE (2nd generation)|iPhone 16e"
+[ "${QUICK:-0}" = 1 ] || shoot_device iphone-se "iPhone SE (3rd generation)|iPhone SE (2nd generation)|iPhone 16e"
 shoot_device iphone-16-pro "iPhone 16 Pro|iPhone 17 Pro|iPhone 15 Pro"
 echo "Screenshots: $(find "$OUT" -name '*.png' | wc -l | tr -d ' ')"

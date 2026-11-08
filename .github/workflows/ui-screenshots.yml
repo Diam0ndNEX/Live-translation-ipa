@@ -3,7 +3,7 @@ name: UI screenshots
 on:
   workflow_dispatch:
   push:
-    branches: ["claude/screenlingo-v2.1.0"]
+    branches: ["claude/**"]
     paths:
       - "App/**"
       - "Shared/**"
@@ -36,6 +36,8 @@ jobs:
       - run: brew install xcodegen && xcodegen generate
       - name: Capture every fixture (2 devices × Light/Dark × default/AX3 text)
         timeout-minutes: 45
+        env:
+          QUICK: ${{ github.event_name == 'push' && '1' || '0' }}
         run: bash scripts/ui_screenshots.sh
       - name: Build contact sheets
         run: |
