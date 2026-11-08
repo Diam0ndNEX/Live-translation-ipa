@@ -25,7 +25,6 @@ struct PipelineSimulatorView: View {
     }
     var body: some View {
         List {
-            SettingsPageHeader(symbol: "point.3.connected.trianglepath.dotted", title: "Pipeline simulator", summary: "Plays out settings and timing on paper.")
             Section {
                 headline
                 Picker("Panel", selection: $panel) {

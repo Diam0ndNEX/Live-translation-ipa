@@ -76,7 +76,6 @@ struct MemoryManagementView: View {
 
     var body: some View {
         List {
-            SettingsPageHeader(symbol: "externaldrive", title: "Translation memory", summary: "Sentences ScreenLingo has already translated and can reuse.")
             Section {
                 MemorySummary(facts: facts)
                     .listRowInsets(EdgeInsets(top: Space.m, leading: Space.l, bottom: Space.m, trailing: Space.l))
