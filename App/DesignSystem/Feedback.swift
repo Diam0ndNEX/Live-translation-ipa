@@ -1,4 +1,4 @@
-// ScreenLingo – App – Feedback: haptics, one toast/banner queue (2.0.0 build 89)
+// ScreenLingo – App – Feedback: haptics, one toast/banner queue (2.0.0 build 90)
 import SwiftUI
 import UIKit
 

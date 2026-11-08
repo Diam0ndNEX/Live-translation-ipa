@@ -1,4 +1,4 @@
-// Navigation and narrow-observation tests (v2.0.0 build 89, spec §12.10).
+// Navigation and narrow-observation tests (v2.0.0 build 90, spec §12.10).
 // Compiled standalone on the macOS runner with:
 //   swiftc -parse-as-library App/DesignSystem/AppRouter.swift App/DesignSystem/ObjectSlice.swift Tests/Navigation/main.swift
 import Foundation

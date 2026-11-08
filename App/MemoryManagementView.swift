@@ -1,4 +1,4 @@
-// ScreenLingo – App – Translation memory (2.0.0 build 89)
+// ScreenLingo – App – Translation memory (2.0.0 build 90)
 import SwiftUI
 import UniformTypeIdentifiers
 

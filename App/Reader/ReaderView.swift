@@ -1,4 +1,4 @@
-// ScreenLingo – App – Focus reader (2.0.0 build 89)
+// ScreenLingo – App – Focus reader (2.0.0 build 90)
 import SwiftUI
 
 /// Large, calm text. All reading options live in one controls sheet.

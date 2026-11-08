@@ -1,4 +1,4 @@
-// ScreenLingo – App – Live sheets: More, Status (with session), Test (2.0.0 build 89)
+// ScreenLingo – App – Live sheets: More, Status (with session), Test (2.0.0 build 90)
 import SwiftUI
 
 // MARK: - More
@@ -21,7 +21,7 @@ struct MoreSheet: View {
     var body: some View {
         SheetScaffold(title: "More") {
             List {
-                Section { {
+                Section {
                     HStack(spacing: Space.s) {
                         tool("doc.on.doc", "Copy", enabled: capture.value.hasOutput) {
                             UIPasteboard.general.string = engine.translated; feedback.show("Translation copied", severity: .success)
