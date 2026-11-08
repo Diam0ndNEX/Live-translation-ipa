@@ -67,6 +67,10 @@ jobs:
         run: |
           swiftc -parse-as-library App/DesignSystem/AppRouter.swift App/DesignSystem/ObjectSlice.swift Tests/Navigation/main.swift -o /tmp/navigation-tests
           /tmp/navigation-tests
+      - name: UI model tests (2.1.0 SessionPhase)
+        run: |
+          swiftc -parse-as-library Shared/CaptureReadiness.swift App/UI/Model/SessionPhase.swift Tests/UIModel/main.swift -o /tmp/ui-model-tests
+          /tmp/ui-model-tests
       - name: Check SQLite memory migration
         run: bash scripts/test_memory.sh
       - name: Check local capture transport

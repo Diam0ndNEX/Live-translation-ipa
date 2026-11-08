@@ -29,6 +29,8 @@ enum UIFixture: String, CaseIterable {
     case languagesSheet = "languages-sheet"
     case onboarding
     case areaEditor = "area-editor"
+    /// Every 2.1.0 kit component on one scrolling page (step 1).
+    case kit
 
     /// The fixture named on the command line, if any.
     static var current: UIFixture? {
@@ -38,7 +40,7 @@ enum UIFixture: String, CaseIterable {
     /// Where the build 90 interface can show this fixture.
     var baselineTab: AppTab {
         switch self {
-        case .idle, .idlePackMissing, .starting, .liveShort, .liveLong, .paused, .attentionLost, .onboarding, .areaEditor:
+        case .idle, .idlePackMissing, .starting, .liveShort, .liveLong, .paused, .attentionLost, .onboarding, .areaEditor, .kit:
             return .live
         case .libraryEmpty, .libraryMany:
             return .library
@@ -60,6 +62,17 @@ enum UIFixture: String, CaseIterable {
         guard let fixture = current else { return }
         router.go(fixture.baselineTab)
         if let sheet = fixture.baselineSheet { router.present(sheet) }
+    }
+}
+
+/// Root hook: routes the fixture and, for `kit`, covers the app with the component gallery.
+struct FixtureHost: ViewModifier {
+    let router: AppRouter
+    @State private var showKit = UIFixture.current == .kit
+    func body(content: Content) -> some View {
+        content
+            .task { UIFixture.apply(router: router) }
+            .fullScreenCover(isPresented: $showKit) { KitGallery() }
     }
 }
 #endif

@@ -8,7 +8,7 @@ OUT=${OUT:-ui-screenshots}
 BUNDLE=com.diam0ndnex.screenlingo
 FIXTURES=(idle idle-pack-missing starting live-short live-long paused attention-lost
           library-empty library-many diagnostics-idle diagnostics-live diagnostics-bad
-          settings-root settings-caption languages-sheet onboarding area-editor)
+          settings-root settings-caption languages-sheet onboarding area-editor kit)
 rm -rf "$OUT"
 mkdir -p "$OUT"
 printf '%s\n' "${FIXTURES[@]}" > "$OUT/fixtures.txt"
