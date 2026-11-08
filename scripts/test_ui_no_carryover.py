@@ -42,7 +42,7 @@ if re.search(r'Label\("Activity"', root_src) or ".tag(3)" in root_src:
 
 # U3: leaf tabs observe snapshots, not the whole engine
 for name in ("UI/Translate/TranslateScreen.swift", "UI/Translate/FocusMode.swift", "UI/Translate/SessionSheet.swift",
-             "UI/Languages/LanguageSheet.swift", "Library/LibraryView.swift", "Onboarding/OnboardingView.swift"):
+             "UI/Languages/LanguageSheet.swift", "UI/Library/LibraryScreen.swift", "Onboarding/OnboardingView.swift"):
     t = (app / name).read_text()
     if re.search(r"@EnvironmentObject[^\n]*TranslatorEngine", t) or "@ObservedObject var engine" in t:
         fail("U3", f"{name} observes the whole engine")
@@ -77,13 +77,14 @@ if (app / "Languages/LanguagesView.swift").exists():
     fail("§13.3", "the old Languages tab view still exists")
 
 # U7: Library destructive actions
-lib = (app / "Library/LibraryView.swift").read_text()
+lib = (app / "UI/Library/LibraryScreen.swift").read_text()
 if "Delete visible unstarred" in lib:
     fail("U7", "bulk delete is back in a filter menu")
 if "Undo" not in lib:
     fail("U7", "Library delete has no Undo")
-if (app / "LibraryViews.swift").exists():
-    fail("U7", "LibraryViews.swift (old Library) still exists")
+for old in ("LibraryViews.swift", "Library/LibraryView.swift"):
+    if (app / old).exists():
+        fail("U7", f"{old} (old Library) still exists")
 
 # U9: Session/Workspace/Reader/Area unification and honest preview (2.1.0: Translate screen, AreaEditor)
 for old in ("WorkspaceViews.swift", "Live/LiveView.swift", "Live/LiveSheets.swift", "Reader/ReaderView.swift"):

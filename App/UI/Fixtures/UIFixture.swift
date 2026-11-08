@@ -73,6 +73,24 @@ enum UIFixture: String, CaseIterable {
 extension UIFixture {
     /// Built once per launch so ids and times stay stable between redraws.
     @MainActor static let translateFixture: TranslateSnapshot? = current?.translateSnapshot
+    @MainActor static let libraryFixture: [HistoryItem]? = current?.libraryItems
+
+    var libraryItems: [HistoryItem]? {
+        switch self {
+        case .libraryEmpty: return []
+        case .libraryMany:
+            let lines = [("Olá, como vai?", "Hello, how are you?"), ("Precisamos sair antes da chuva.", "We need to leave before the rain."),
+                         ("Você viu aquilo?", "Did you see that?"), ("A ponte está fechada.", "The bridge is closed."),
+                         ("Onde fica a estação?", "Where is the station?")]
+            let now = Date()
+            return (0..<200).map { i in
+                let line = lines[i % lines.count]
+                return HistoryItem(original: line.0, translated: line.1, date: now.addingTimeInterval(Double(-i) * 1800),
+                                   starred: i % 7 == 0, sourceLanguage: "pt", targetLanguage: "en")
+            }
+        default: return nil
+        }
+    }
 
     var translateSnapshot: TranslateSnapshot? {
         let now = Date()

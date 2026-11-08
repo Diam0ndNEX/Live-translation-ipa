@@ -98,7 +98,7 @@ private struct RootContent: View {
     var body: some View {
         TabView(selection: $router.tab) {
             TranslateScreen(engine: model.engine).tabItem { Label(AppTab.translate.title, systemImage: AppTab.translate.symbol) }.tag(AppTab.translate)
-            LibraryView(engine: model.engine).tabItem { Label(AppTab.library.title, systemImage: AppTab.library.symbol) }.tag(AppTab.library)
+            LibraryScreen(engine: model.engine).tabItem { Label(AppTab.library.title, systemImage: AppTab.library.symbol) }.tag(AppTab.library)
             DiagnosticsView().tabItem { Label(AppTab.diagnostics.title, systemImage: AppTab.diagnostics.symbol) }.tag(AppTab.diagnostics)
             SettingsView().tabItem { Label(AppTab.settings.title, systemImage: AppTab.settings.symbol) }.tag(AppTab.settings)
         }
