@@ -24,6 +24,17 @@ struct TestRunsSnapshot: Equatable {
 }
 
 enum TestRunText {
+    /// 2.2.1 (U1): the sentence and severity shown after every Save, whichever screen it came from.
+    static func saveMessage(_ result: TestRunSaveResult) -> (String, Severity) {
+        switch result {
+        case .saved(let meta):
+            return (meta.noTiming ? "Run saved, but without timing (Detailed collection was off)"
+                                  : "Run saved · \(modeTitle(meta.mode)) · \(duration(meta.durationSeconds))",
+                    meta.noTiming ? .warning : .success)
+        case .skipped(_, let detail): return (detail, .warning)
+        case .failed(let reason): return ("Run not saved: \(Self.reason(reason))", .error)
+        }
+    }
     static func modeTitle(_ mode: String) -> String {
         switch mode {
         case "legacy": return "Legacy"
@@ -65,6 +76,8 @@ private struct RunBadges: View {
         if !run.trimmed.isEmpty { items.append(("Trimmed", .orange)) }
         if run.startingRAMEntries > 0 { items.append(("Memory filled at start", .orange)) }
         if run.mixedMode { items.append(("Mixed mode", .red)) }
+        if run.noTiming { items.append(("No timing", .orange)) }
+        if let warm = run.thermalRangeLabel { items.append((warm, .orange)) }
         return items
     }
 
@@ -194,12 +207,21 @@ struct TestCard: View {
                     StatusPill(text: "Recording \(TestRunText.modeTitle(run.mode)) · \(TestRunText.duration(context.date.timeIntervalSince(run.startedAt))) · \(runsSlice.value.captionCount) captions",
                                symbol: "record.circle", severity: .error)
                 }
-            } else if runsSlice.value.bannerID != nil, let banner = diag.lastRunBanner {
+            }
+            // 2.2.1 (U1): the result of a Save stays visible while a run is recording (it used to be hidden then).
+            if runsSlice.value.bannerID != nil, let banner = diag.lastRunBanner {
                 bannerView(banner)
             }
 
             VStack(alignment: .leading, spacing: 0) {
-                Button { Task { await diag.saveRunNow() }; Feedback.tap() } label: { LensRow(title: "Save this run", symbol: "tray.and.arrow.down") }
+                Button {
+                    Task {
+                        let result = await diag.saveRunNow()
+                        let message = TestRunText.saveMessage(result)
+                        feedback.show(message.0, severity: message.1)
+                    }
+                    Feedback.tap()
+                } label: { LensRow(title: "Save this run", symbol: "tray.and.arrow.down") }
                 Divider()
                 Button { confirmClear = true } label: { LensRow(title: "Clear test memory", symbol: "eraser") }
                     .disabled(memory.value.captureAlive)
@@ -264,7 +286,8 @@ struct TestCard: View {
 /// The headline of the Test Runs screens: the newest saved run of each system, median first.
 struct LatestPerSystem: View {
     let runs: [TestRunMeta]
-    private func latest(_ mode: String) -> TestRunMeta? { runs.filter { $0.mode == mode }.max { $0.endedAt < $1.endedAt } }
+    // 2.2.1 (D1): a run without timing has no median, so it never stands in for a system's latest result.
+    private func latest(_ mode: String) -> TestRunMeta? { runs.filter { $0.mode == mode && !$0.noTiming }.max { $0.endedAt < $1.endedAt } }
     var body: some View {
         VStack(spacing: 0) {
             ForEach(Array(TestRunText.modes.enumerated()), id: \.element) { index, mode in
@@ -292,6 +315,7 @@ struct TestRunsPage: View {
     @Binding var showReport: Bool
     @Binding var confirmDeleteUnpinned: Bool
     @StateObject private var snapshot: ObjectSlice<Diagnostics, TestRunsSnapshot>
+    @EnvironmentObject private var feedback: FeedbackCenter
     @State private var showRuns = false
 
     init(diag: Diagnostics, showReport: Binding<Bool>, confirmDeleteUnpinned: Binding<Bool>) {
@@ -310,7 +334,13 @@ struct TestRunsPage: View {
             LatestPerSystem(runs: s.runs.filter { $0.testID == s.currentID })
             HStack(spacing: Space.s) {
                 SecondaryButton(title: "Open test runs", symbol: "list.bullet") { showRuns = true }
-                SecondaryButton(title: "Save run", symbol: "tray.and.arrow.down") { Task { await diag.saveRunNow() } }
+                SecondaryButton(title: "Save run", symbol: "tray.and.arrow.down") {
+                    Task {
+                        let result = await diag.saveRunNow()
+                        let message = TestRunText.saveMessage(result)
+                        feedback.show(message.0, severity: message.1)
+                    }
+                }
             }
             SecondaryButton(title: "Export test report", symbol: "doc.text") { showReport = true }
             Hint(s.archive)

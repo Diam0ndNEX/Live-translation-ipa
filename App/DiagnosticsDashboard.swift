@@ -443,6 +443,7 @@ private struct DiagnosticsBody: View {
     @State private var kinds: Set<EventKind> = []
     @State private var query = ""
     @State private var confirmReset = false
+    @State private var pendingCollection: PendingCollectionChange?
     @State private var showSimulator = false
     @State private var confirmDeleteSessions = false
     @State private var bucketSeconds = 1
@@ -495,8 +496,8 @@ private struct DiagnosticsBody: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Menu {
                         Section("Detail level") {
-                            Toggle("Collect diagnostics", isOn: $collectionEnabled)
-                            Toggle("Detailed collection", isOn: $collectDetails).disabled(!collectionEnabled)
+                            Toggle("Collect diagnostics", isOn: $collectionEnabled.guardedByActiveRun(diag, pending: $pendingCollection))
+                            Toggle("Detailed collection", isOn: $collectDetails.guardedByActiveRun(diag, pending: $pendingCollection)).disabled(!collectionEnabled)
                         }
                         Section("Export") {
                             Button { Task { await diag.exportZIP() } } label: {
@@ -522,8 +523,8 @@ private struct DiagnosticsBody: View {
             }
             .sheet(isPresented: $showSimulator) { NavigationStack { PipelineSimulatorView() } }
             .sheet(isPresented: $showTestReport) { TestRunReportSheet(diag: diag) }
-            .onChange(of: collectionEnabled) { _, _ in engine.diagnosticsSettingsChanged() }
-            .onChange(of: collectDetails) { _, _ in engine.diagnosticsSettingsChanged() }
+            // 2.2.1 (D2): only the root handlers in ScreenTranslatorApp apply a collection change.
+            .confirmCollectionChange($pendingCollection)
             .confirmDestructive("Delete all unpinned test runs?", message: "Pinned runs, translation memory, history and settings are not changed.",
                                 isPresented: $confirmDeleteSessions, button: "Delete unpinned runs") {
                 Task { await diag.deleteAllUnpinnedRuns() }
@@ -604,7 +605,7 @@ private struct DiagnosticsBody: View {
             VStack(alignment: .leading, spacing: KitSpace.row) {
                 Text("Diagnostics collection is off. Translation and capture continue.")
                     .font(.subheadline).foregroundStyle(.secondary)
-                Button("Turn on") { collectionEnabled = true }.buttonStyle(.borderedProminent)
+                Button("Turn on") { $collectionEnabled.guardedByActiveRun(diag, pending: $pendingCollection).wrappedValue = true }.buttonStyle(.borderedProminent)
             }
         } else {
             if page.ranged { rangePicker }
@@ -613,7 +614,7 @@ private struct DiagnosticsBody: View {
                     Text("Graphs and the event log need Detailed collection.")
                         .font(.footnote).foregroundStyle(.secondary)
                     Spacer(minLength: KitSpace.tight)
-                    Button("Turn on") { collectDetails = true }.buttonStyle(.bordered).controlSize(.small)
+                    Button("Turn on") { $collectDetails.guardedByActiveRun(diag, pending: $pendingCollection).wrappedValue = true }.buttonStyle(.bordered).controlSize(.small)
                 }
             }
             pageContent(page)

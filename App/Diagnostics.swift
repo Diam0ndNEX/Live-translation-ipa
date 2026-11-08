@@ -163,6 +163,7 @@ struct Stats: Equatable {
     var legacyLowConfidenceSkips = 0, legacyBusySpeculationSkips = 0
     var legacyDuplicateSpeculationSkips = 0
     var slowTailEnqueues = 0
+    var manualTranslations = 0
     var specPreemptionRequested = 0, specMatchingConfirmation = 0
     var specRetainedUnits = 0
     var legacyBatchEntries = 0, legacyBatchVerified = 0, legacyBatchSkipped = 0
@@ -262,6 +263,8 @@ final class Diagnostics: ObservableObject {
     private var eventTotals: [String: Int] = [:]
     private var lastCaptureConnected = false
     private var lastRecordedThermalState: String?
+    /// 2.2.1 (D1): Detailed collection was requested but switched itself off at Serious/Critical thermal state.
+    private(set) var detailSuspendedByThermal = false
     private(set) var captureReductionReasons = ["none"]
     private var requestedCaptureIntervalMs = 0
     private var requestedCaptureEdgePx = 0
@@ -393,7 +396,7 @@ final class Diagnostics: ObservableObject {
             "heartbeat_timeout", "capture_connected", "idle_auto_pause", "session_time_limit",
             "app_started", "app_interface_visible", "external_capture_period", "capture_config_changed", "capture_idle", "capture_live",
             "capture_paused", "capture_frozen",
-            "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical"
+            "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical", "detail_suspended_thermal"
         ]
         guard allowed.contains(reason) else { return }
         appendStructured(stage: "runtime_state", outcome: reason, reason: reason,
@@ -547,6 +550,12 @@ final class Diagnostics: ObservableObject {
         case .serious: reason = "thermal_serious"
         case .critical: reason = "thermal_critical"
         @unknown default: return
+        }
+        let hot = reason == "thermal_serious" || reason == "thermal_critical"
+        let requested = UserDefaults.standard.bool(forKey: "detailedCollection")
+        if hot, requested, !detailSuspendedByThermal {
+            detailSuspendedByThermal = true
+            noteRuntimeState("detail_suspended_thermal")
         }
         guard lastRecordedThermalState != reason else { return }
         lastRecordedThermalState = reason
@@ -783,6 +792,7 @@ final class Diagnostics: ObservableObject {
         @unknown default: settings["thermalState"] = "unknown"
         }
         settings["performanceTier"] = ThermalPerformancePolicy.tier(for: thermalState).rawValue
+        if detailSuspendedByThermal { settings["detailSuspended"] = "true" }
         settings["hotPathAB"] = TranslationHotPathAB.label
         settings["hybridSchedulerAB"] = HybridSchedulingPolicy.buildVariant.rawValue
         settings["reductionReasons"] = captureReductionReasons.joined(separator: "_")
@@ -991,6 +1001,11 @@ final class Diagnostics: ObservableObject {
     /// Capture connected: a run starts. Keeps the opening warm-up trace already collected for this broadcast.
     func beginRun() {
         if activeRun != nil { endRun(reason: "newRunStarted") }
+        // 2.2.1 (E8): numbers gathered before capture connected (compose, tests) must not count in the run.
+        // The warm-up trace is kept; only the totals and the latency series start from zero.
+        s = Stats()
+        pipeline = []
+        translate = []; latency = []; transport = []
         started = Date()
         startingRAMEntries = ramEntryCount?() ?? 0
         startRunState()
@@ -1128,7 +1143,8 @@ final class Diagnostics: ObservableObject {
         let current = testRuns.filter { $0.testID == currentTestID }
         let pool = current.isEmpty ? testRuns : current
         var seen = Set<String>(), ids: [UUID] = []
-        for run in pool.sorted(by: { $0.endedAt > $1.endedAt }) where seen.insert(run.mode).inserted { ids.append(run.id) }
+        // 2.2.1 (D1): runs without timing are not comparable and are left out.
+        for run in pool.sorted(by: { $0.endedAt > $1.endedAt }) where !run.noTiming && seen.insert(run.mode).inserted { ids.append(run.id) }
         return ids
     }
 
@@ -1293,6 +1309,7 @@ final class Diagnostics: ObservableObject {
         intervalBaseline = [:]; oneSecondBaseline = [:]; fiveSecondBaseline = [:]
         lastCaptureConnected = false
         lastRecordedThermalState = nil
+        detailSuspendedByThermal = false
         memoryOutcomes = [:]; lookupSamples = []; writeSamples = []; historySaveSamples = []
         modelTimingSamples = [:]; completedWorkRecoveredUnits = 0
         sharedModelUnits = 0; sharedConfirmedModelUnits = 0; memoryAwareSpeculationSkipped = 0; ramCaptionBypasses = 0; exactCaptionHits = 0; exactUnitsCoalesced = 0
@@ -1489,6 +1506,7 @@ final class Diagnostics: ObservableObject {
             "legacyBusySpeculationSkips": s.legacyBusySpeculationSkips,
             "legacyDuplicateSpeculationSkips": s.legacyDuplicateSpeculationSkips,
             "slowTailEnqueues": s.slowTailEnqueues,
+            "manualTranslations": s.manualTranslations,
             "legacyBatchEntries": s.legacyBatchEntries,
             "legacyBatchVerified": s.legacyBatchVerified,
             "legacyBatchSkipped": s.legacyBatchSkipped,

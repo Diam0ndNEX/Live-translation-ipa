@@ -3376,8 +3376,13 @@ final class TranslatorEngine: ObservableObject {
         if packet?.candidateID == activeCandidateID {
             activeCandidatePresented = true
         }
-        if diag.enabled { diag.s.enqueuedCandidateFrames += 1 }
-        if total >= 1200 {
+        // 2.2.1 (E8): compose text, photo/file text and "Test the language pair" are not capture work. They are
+        // counted on their own and never enter the latency, pipeline or enqueue totals of a Test Run.
+        let isManualEntry = packet == nil || (packet?.candidateID?.hasPrefix("manual-") ?? false)
+        if isManualEntry {
+            if diag.enabled { diag.s.manualTranslations += 1 }
+        } else if diag.enabled { diag.s.enqueuedCandidateFrames += 1 }
+        if !isManualEntry, total >= 1200 {
             if diag.enabled { diag.s.slowTailEnqueues += 1 }
             diag.notePipelineDecision(candidate: packet?.candidateID,
                 frameIndex: packet?.frames, stage: "pip_enqueue",
@@ -3386,8 +3391,10 @@ final class TranslatorEngine: ObservableObject {
         if activeTranslationSystem == .legacy, let candidate = packet?.candidateID {
             diag.legacyModeEnqueued(candidate, duration: total, source: sourceCode == "auto" ? detectedLang : sourceCode)
         }
-        diag.recordPipeline(latency.last)
-        if total > 0 { diag.recordLatency(ms: total) }
+        if !isManualEntry {
+            diag.recordPipeline(latency.last)
+            if total > 0 { diag.recordLatency(ms: total) }
+        }
         if history.first?.original != text {
             sessionTranslations += 1; sessionCharacters += text.count
             if memoryTestMode.allowsHistoryInsertion && !flag("privateSession", false) {
@@ -4559,6 +4566,11 @@ final class TranslatorEngine: ObservableObject {
 
     // MARK: Test
     func runTest() {
+        // 2.2.1 (E8): a language-pair test is manual work and must not land inside a live Test Run.
+        if captureAlive {
+            status = "Stop the broadcast first, then test the language pair."
+            return
+        }
         let samples = ["en": "Hello, how are you today?", "pt": "Olá, como você está hoje?",
                        "es": "Hola, ¿cómo estás hoy?", "fr": "Bonjour, comment allez-vous aujourd'hui ?",
                        "de": "Hallo, wie geht es dir heute?", "it": "Ciao, come stai oggi?",

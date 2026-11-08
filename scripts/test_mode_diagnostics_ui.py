@@ -92,7 +92,9 @@ assert "modeDiagnosticEpochs[modeSessionID] = diag.started" in settings
 assert "func resetDiagnostics()" in settings
 ui = section(dashboard, "private struct DiagnosticsBody: View", "// MARK: Simple")
 assert "engine.resetDiagnostics()" in ui
-assert "engine.diagnosticsSettingsChanged()" in ui
+# 2.2.1 (D2): changed from `in ui` to `not in ui`. The handler used to sit here AND in ScreenTranslatorApp, so every
+# toggle reset and ended the run twice (the second end produced a 0 s run). Only the root handlers remain.
+assert "engine.diagnosticsSettingsChanged()" not in ui
 assert "v1.5.0" not in ui
 assert "AppVersion.full" not in ui or "AppVersion.full" in dashboard
 assert "Measured model processing:" in dashboard

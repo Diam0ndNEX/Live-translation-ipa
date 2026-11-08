@@ -21,6 +21,13 @@ slice = read("App/DesignSystem/EngineSlice.swift")
 categories = read("App/SettingsCategories.swift")
 policy = read("Shared/HistoryPolicy.swift")
 workflow = read(".github/workflows/build.yml")
+diagnostics = read("App/Diagnostics.swift")
+archive = read("App/DiagnosticArchive.swift")
+runstore = read("App/TestRunStore.swift")
+runviews = read("App/TestRunViews.swift")
+dashboard = read("App/DiagnosticsDashboard.swift")
+settings_views = read("App/SettingsViews.swift")
+guard_file = read("App/CollectionChangeGuard.swift")
 
 
 def body_of(source, start_marker, end_marker):
@@ -93,4 +100,48 @@ assert "func historySavingChanged()" in engine
 assert "Tests/HistoryPolicy/main.swift" in workflow
 assert "scripts/test_v221_contracts.py" in workflow
 
+# ---- WP2: test-run integrity ----
+
+# E8: manual work is counted on its own and stays out of run totals; runs start from zero.
+shown = body_of(engine, "private func show(", "func runTest()")
+assert "let isManualEntry = packet == nil" in shown and 'hasPrefix("manual-")' in shown
+assert "diag.s.manualTranslations += 1" in shown
+assert "if !isManualEntry {\n            diag.recordPipeline(latency.last)" in shown
+assert "} else if diag.enabled { diag.s.enqueuedCandidateFrames += 1 }" in shown
+run_test = body_of(engine, "func runTest()", "static let fallbackLanguages")
+assert "if captureAlive" in run_test and "Stop the broadcast first" in run_test
+begin = body_of(diagnostics, "func beginRun()", "private func startRunState()")
+assert "s = Stats()" in begin and "latency = []" in begin and "pipeline = []" in begin
+assert "initialWarmupTrace" not in begin, "E8: the warm-up trace must be kept"
+assert '"manualTranslations"' in diagnostics and '"manualTranslations"' in archive
+
+# D1: no timing -> badge, left out of the latest-per-system and default report selection.
+assert "var noTiming: Bool { captions > 0 && enqueueP50Ms == nil }" in runstore
+assert 'items.append(("No timing"' in runviews
+assert "!$0.noTiming" in runviews
+assert "!run.noTiming" in body_of(diagnostics, "var defaultReportSelection", "func exportTestReport")
+assert "detail_suspended_thermal" in diagnostics and "detail_suspended_thermal" in archive
+assert 'settings["detailSuspended"]' in diagnostics and '"detailSuspended"' in archive
+
+# D5: thermal range stored on the run, additive and optional so old runs decode.
+for field in ("thermalMin: Int?", "thermalMax: Int?", "secondsAtFairOrAbove: Double?", "secondsAtSeriousOrAbove: Double?"):
+    assert field in runstore, field
+assert "thermalRangeLabel" in runviews
+
+# D2: one handler per toggle (ScreenTranslatorApp); none in the dashboard or the settings controls.
+assert app.count("diagnosticsSettingsChanged()") == 2
+assert "diagnosticsSettingsChanged()" not in dashboard
+assert "diagnosticsSettingsChanged()" not in settings_views
+
+# U6: confirmation while a run is recording.
+assert "This ends the current run." in guard_file and "diag.activeRun != nil" in guard_file
+assert dashboard.count("guardedByActiveRun") >= 4 and settings_views.count("guardedByActiveRun") == 2
+
+# U1: every Save shows its result, and the banner stays up while recording.
+assert runviews.count("TestRunText.saveMessage(result)") == 2
+assert runviews.count("feedback.show(message.0, severity: message.1)") == 2
+card = body_of(runviews, "if runsSlice.value.activeStarted != nil", "VStack(alignment: .leading, spacing: 0)")
+assert "} else if runsSlice.value.bannerID" not in card
+
+print("v2.2.1 WP2 contracts passed: E8, D1, D2, D5, U1, U6")
 print("v2.2.1 WP1 contracts passed: E1, E15, E2, U2, U3, U4, U5")

@@ -22,18 +22,19 @@ import Foundation
         }
     }
 
-    static func buckets(_ count: Int, seconds: Double) -> [DiagnosticIntervalBucket] {
+    static func buckets(_ count: Int, seconds: Double, thermal: (Int) -> Int = { _ in 0 }) -> [DiagnosticIntervalBucket] {
         (0..<count).map { index in
             DiagnosticIntervalBucket(startedAt: Date(timeIntervalSince1970: 1_700_000_000 + Double(index) * seconds),
                 elapsedSeconds: seconds, counters: ["ocrPackets": index % 9, "candidateEnqueued": index % 3],
-                thermalLevel: 0, lowPower: false, captureConnected: true)
+                thermalLevel: thermal(index), lowPower: false, captureConnected: true)
         }
     }
 
     /// A synthetic run at the full caps from the spec: 2,400 + 2,400 events, 300 + 180 + 20 buckets.
     static func fullRun(mode: String = "legacy", seconds: Double = 300, id: UUID = UUID(), events: Int = 2400,
                         modeCounters: [String: Int] = [:], modeDistributions: [String: DiagnosticDistribution] = [:],
-                        counters: [String: Int]? = nil) -> DiagnosticSessionExport {
+                        counters: [String: Int]? = nil, withLatency: Bool = true,
+                        thermal: @escaping (Int) -> Int = { _ in 0 }) -> DiagnosticSessionExport {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let report = TranslationModeReport(active: mode, pending: mode, referenceSHA: String(repeating: "b", count: 40),
             migration: "persisted", events: (0..<events).map { modeEvent(id, $0, mode: mode) },
@@ -44,8 +45,9 @@ import Foundation
             hardwareModel: "iPhoneTest1,1", settings: ["thermalState": "nominal", "speed": "balanced", "startingRAMEntries": "0"],
             health: MemoryDiagnosticHealth(),
             counters: counters ?? ["enqueuedCandidateFrames": 54, "captureFrames": 3000],
-            distributions: ["enqueueLatencyMs": DiagnosticDistribution(samples), "ocrMs": DiagnosticDistribution(samples)],
-            events: structuredEvents(id, count: events), intervals: buckets(20, seconds: 15),
+            distributions: withLatency ? ["enqueueLatencyMs": DiagnosticDistribution(samples), "ocrMs": DiagnosticDistribution(samples)]
+                                       : ["ocrMs": DiagnosticDistribution(samples)],
+            events: structuredEvents(id, count: events), intervals: buckets(20, seconds: 15, thermal: thermal),
             oneSecondIntervals: buckets(300, seconds: 1), fiveSecondIntervals: buckets(180, seconds: 5),
             measurementBoundary: "First OCR sighting to PiP sample-buffer enqueue", textCapture: false)
     }
@@ -301,6 +303,32 @@ import Foundation
             await store.delete(ids: [b.id])
             let remaining = await store.index().runs.map(\.id)
             precondition(remaining == [a.id])
+        }
+
+        // 2.2.1 D1: captions shown but no latency collected (Detailed off) -> "No timing", left out of default reports.
+        do {
+            let untimed = meta(fullRun(withLatency: false))
+            precondition(untimed.captions == 54 && untimed.enqueueP50Ms == nil && untimed.noTiming, "D1: untimed run is flagged")
+            let timed = meta(fullRun())
+            precondition(!timed.noTiming && timed.enqueueP50Ms != nil, "D1: a run with latency is not flagged")
+            precondition(TestRunPolicy.skipReason(meta: untimed, privateSession: false, savingMode: "automatic",
+                                                  diagnosticsEnabled: true) == nil, "D1: an untimed run is still saved")
+        }
+
+        // 2.2.1 D5: thermal range and time above fair/serious from the 15 s buckets; old files still decode.
+        do {
+            let warm = meta(fullRun(thermal: { $0 < 10 ? 0 : ($0 < 16 ? 1 : 2) }))
+            precondition(warm.thermalMin == 0 && warm.thermalMax == 2, "D5: range")
+            precondition(warm.secondsAtFairOrAbove == 150 && warm.secondsAtSeriousOrAbove == 60, "D5: seconds at fair/serious")
+            precondition(warm.thermalRangeLabel == "Warm: nominal -> serious", "D5: label \(warm.thermalRangeLabel ?? "nil")")
+            precondition(meta(fullRun()).thermalRangeLabel == nil, "D5: an all-nominal run has no badge")
+            // An older run file has none of the four fields.
+            let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+            var json = try JSONSerialization.jsonObject(with: encoder.encode(warm)) as! [String: Any]
+            for key in ["thermalMin", "thermalMax", "secondsAtFairOrAbove", "secondsAtSeriousOrAbove"] { json[key] = nil }
+            let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+            let old = try decoder.decode(TestRunMeta.self, from: JSONSerialization.data(withJSONObject: json))
+            precondition(old.thermalMin == nil && old.thermalRangeLabel == nil && old.id == warm.id, "D5: old run decodes")
         }
         print("TestRuns: all checks passed")
     }

@@ -138,7 +138,7 @@ struct DiagnosticIntervalBucket: Codable {
         "uncachedUnits", "bypassedLookups", "temporaryMemoryMisses",
         "speculativeStopRequests", "speculativeSessionsCreated", "legacySharedSessionCalls", "memoryAwareSpeculationSkipped", "ramCaptionBypasses", "exactCaptionHits", "exactUnitsCoalesced", "sharedConfirmedInFlightUnits", "sharedInFlightUnits", "speculativeUnitsRetained",
         "speculativeUnitsReused", "speculativeUnitsEvictedUnused",
-        "handoffDeferred", "slowTailEnqueues", "handoffReplayed", "handoffExpired", "enqueueFailed",
+        "handoffDeferred", "slowTailEnqueues", "manualTranslations", "handoffReplayed", "handoffExpired", "enqueueFailed",
         "actualModelBatches", "confirmedModelBatches", "speculativeModelBatches",
         "warmupModelBatches", "first30sModelBatches", "cancelledModelBatches",
         "legacyBatchEntries", "legacyBatchVerified", "legacyBatchSkipped",
@@ -404,7 +404,7 @@ actor DiagnosticExportWriter {
                 "filtered", "confirmed", "speculative", "ready", "enqueued",
                 "cancelled", "redacted", "completed", "deferred_early_candidate",
                 "heartbeat_timeout", "capture_connected", "idle_auto_pause", "session_time_limit",
-                "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical",
+                "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical", "detail_suspended_thermal",
                 "changing_group_preferred", "dominant_group", "queue_replaced",
                 "preserved_confirmed_work", "confirmed_handoff_deferred",
                 "adaptive_speculation_backoff", "slow_tail", "handoff_expired", "handoff_replayed", "enqueue_failed",
@@ -448,7 +448,7 @@ actor DiagnosticExportWriter {
             "rapidTextTracking", "joinAdjacentText", "activeTextFocus",
             "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
             "thermalState", "performanceTier", "reductionReasons",
-            "hotPathAB", "hybridSchedulerAB",
+            "hotPathAB", "hybridSchedulerAB", "detailSuspended",
             "appRequestedCaptureIntervalMs", "appRequestedCaptureEdgePx"
         ]
         let safeSettings = snapshot.settings.filter { pair in
@@ -1131,7 +1131,7 @@ enum DiagnosticTraceReview {
         "rejected_empty", "rejected_revision", "rejected_unstable",
         "rejected_low_confidence", "rejected_stale", "filtered", "deferred_early_candidate",
         "heartbeat_timeout", "capture_connected", "idle_auto_pause", "session_time_limit",
-        "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical",
+        "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical", "detail_suspended_thermal",
         "confirmed", "speculative", "ready", "enqueued", "cancelled",
         "observed", "cache_hit", "computed", "ramHit", "persistentHit",
         "legacyHit", "normalizedHit", "speculativeHit", "miss", "timeout",

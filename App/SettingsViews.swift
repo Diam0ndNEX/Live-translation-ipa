@@ -779,16 +779,17 @@ struct DiagnosticsCollectionControls: View {
     @EngineHandle private var engine
     @AppStorage("diagnosticsEnabled") private var enabled = true
     @AppStorage("detailedCollection") private var detailed = false
+    @State private var pendingCollection: PendingCollectionChange?
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Toggle("Simple diagnostics", isOn: $enabled)
-            Toggle("Detailed diagnostics", isOn: $detailed).disabled(!enabled)
+            Toggle("Simple diagnostics", isOn: $enabled.guardedByActiveRun(engine.diag, pending: $pendingCollection))
+            Toggle("Detailed diagnostics", isOn: $detailed.guardedByActiveRun(engine.diag, pending: $pendingCollection)).disabled(!enabled)
             Text(enabled ? (detailed ? "Records summary counters, graphs, device samples and events." : "Summary counters only. Graph sampling, device polling and event history are off.") : "Diagnostic collection is off. Capture and translation continue.")
                 .font(.caption).foregroundStyle(.secondary)
             Text("Changing collection starts a fresh diagnostic session. Detailed collection requires Simple diagnostics.")
                 .font(.caption).foregroundStyle(.secondary)
         }
-        .onChange(of: enabled) { _, _ in engine.diagnosticsSettingsChanged() }
-        .onChange(of: detailed) { _, _ in engine.diagnosticsSettingsChanged() }
+        // 2.2.1 (D2): the root handlers in ScreenTranslatorApp apply the change once.
+        .confirmCollectionChange($pendingCollection)
     }
 }

@@ -58,6 +58,25 @@ struct TestRunMeta: Codable, Identifiable, Equatable {
     /// Modes seen during the run other than the starting one. Should always be empty.
     var modeChanges: [String]
     var bytes: Int
+    /// 2.2.1 (D5): warmest and coolest thermal level seen during the run (0 nominal ... 3 critical) and the seconds
+    /// spent at fair-or-above and at serious-or-above, from the 15 s interval buckets. Optional so runs saved
+    /// before 2.2.1 still decode; they show only the end state.
+    var thermalMin: Int? = nil
+    var thermalMax: Int? = nil
+    var secondsAtFairOrAbove: Double? = nil
+    var secondsAtSeriousOrAbove: Double? = nil
+
+    /// 2.2.1 (D1): captions were shown but no latency was collected (Detailed collection was off), so the run has no
+    /// median or P95. Such a run is saved with a "No timing" badge and is left out of the default report selection.
+    var noTiming: Bool { captions > 0 && enqueueP50Ms == nil }
+
+    /// "Warm: nominal -> fair" or nil when the whole run stayed nominal or the run has no thermal range (old runs).
+    var thermalRangeLabel: String? {
+        guard let lo = thermalMin, let hi = thermalMax, hi > 0 else { return nil }
+        let names = ["nominal", "fair", "serious", "critical"]
+        let low = names[max(0, min(lo, 3))], high = names[max(0, min(hi, 3))]
+        return lo == hi ? "Warm: \(high)" : "Warm: \(low) -> \(high)"
+    }
 
     var reportInfo: RunReportInfo {
         RunReportInfo(id: id, testName: testName, label: label, endReason: endReason,
@@ -81,6 +100,11 @@ struct TestRunMeta: Codable, Identifiable, Equatable {
         let pair = first.map { "\($0.source)>\($0.target)" } ?? "?"
         let latency = snapshot.distributions["enqueueLatencyMs"]
         let captions = max(snapshot.counters["enqueuedCandidateFrames"] ?? 0, latency?.count ?? 0)
+        // D5: thermal range and time above fair/serious from the interval buckets (15 s each).
+        let buckets = snapshot.intervals ?? []
+        let levels = buckets.map(\.thermalLevel)
+        let secondsFair = Double(buckets.filter { $0.thermalLevel >= 1 }.count) * 15
+        let secondsSerious = Double(buckets.filter { $0.thermalLevel >= 2 }.count) * 15
         return TestRunMeta(id: snapshot.id, testID: testID, testName: testName, mode: mode,
             startedAt: snapshot.startedAt, endedAt: snapshot.endedAt,
             durationSeconds: max(0, snapshot.endedAt.timeIntervalSince(snapshot.startedAt)),
@@ -89,7 +113,10 @@ struct TestRunMeta: Codable, Identifiable, Equatable {
             pinned: pinned, completeness: completeness, trimmed: [], captions: captions,
             enqueueP50Ms: latency?.p50, enqueueP95Ms: latency?.p95,
             thermal: snapshot.settings["thermalState"] ?? "?",
-            startingRAMEntries: startingRAMEntries, modeChanges: modeChanges, bytes: 0)
+            startingRAMEntries: startingRAMEntries, modeChanges: modeChanges, bytes: 0,
+            thermalMin: levels.min(), thermalMax: levels.max(),
+            secondsAtFairOrAbove: buckets.isEmpty ? nil : secondsFair,
+            secondsAtSeriousOrAbove: buckets.isEmpty ? nil : secondsSerious)
     }
 }
 
