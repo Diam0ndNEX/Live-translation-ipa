@@ -675,8 +675,8 @@ private struct DiagnosticsBody: View {
             ud.set("0", forKey: "frameRot")
             engine.rotationSettingChanged()
         case .narrowArea: ud.set("bottom", forKey: "area")
-        case .openLanguages: router.go(.languages); return
-        case .startCapture: router.go(.live); return
+        case .openLanguages: router.openLanguages(); return
+        case .startCapture: router.go(.translate); return
         case .translateAhead: ud.set(true, forKey: "translateAhead")
         }
         engine.syncConfig()

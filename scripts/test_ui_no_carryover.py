@@ -26,11 +26,13 @@ for p, t in files.items():
     if "selectTab" in t:
         fail("U1/U2", f"selectTab still used in {rel(p)}")
 
-# U2: five typed tabs, Diagnostics among them (build 88); the old Activity tab stays gone
+# U2 / 2.1.0 §13.3: four typed tabs (Translate, Library, Diagnostics, Settings); Languages is a sheet; Activity stays gone
 root_src = (app / "ScreenTranslatorApp.swift").read_text()
 tags = re.findall(r"\.tag\(AppTab\.\w+\)", root_src)
-if len(tags) != 5:
-    fail("U2", f"root TabView must have exactly 5 typed tabs, found {len(tags)}")
+if len(tags) != 4:
+    fail("U2", f"root TabView must have exactly 4 typed tabs, found {len(tags)}")
+if ".tag(AppTab.languages)" in root_src:
+    fail("§13.3", "Languages is a tab again; it must be a sheet")
 if ".tag(AppTab.diagnostics)" not in root_src:
     fail("U2", "Diagnostics is not a top-level tab")
 if "case .diagnostics: DiagnosticsView()" in root_src:

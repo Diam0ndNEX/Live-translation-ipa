@@ -187,7 +187,7 @@ private struct PairSection: View {
                 items: pair.languages, swapDisabled: pair.source == "auto"
             ) { engine.swapLanguages(); Feedback.tap() }
             HStack {
-                Button { router.go(.languages) } label: {
+                Button { router.present(.languages) } label: {
                     StatusPill(text: pair.packState.title, symbol: pair.packState.symbol, severity: pair.packState.severity)
                 }.buttonStyle(.plain).accessibilityHint("Opens Languages")
                 Spacer()

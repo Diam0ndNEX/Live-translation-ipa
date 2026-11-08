@@ -1,4 +1,4 @@
-// Navigation and narrow-observation tests (v2.0.0 build 90, spec §12.10).
+// Navigation and narrow-observation tests (2.1.0, spec §13.3 and §12.10).
 // Compiled standalone on the macOS runner with:
 //   swiftc -parse-as-library App/DesignSystem/AppRouter.swift App/DesignSystem/ObjectSlice.swift Tests/Navigation/main.swift
 import Foundation
@@ -22,15 +22,17 @@ struct NavigationTests {
     static func main() async {
         UserDefaults.standard.removeObject(forKey: "appTab")
 
-        // Tabs: five, stable order, typed. Diagnostics is a tab, not a page inside Settings.
-        check(AppTab.allCases == [.live, .library, .languages, .diagnostics, .settings], "five tabs in order Live, Library, Languages, Diagnostics, Settings")
+        // Tabs: four, stable order, typed (§13.3). Languages is a sheet, Diagnostics stays a tab.
+        check(AppTab.allCases == [.translate, .library, .diagnostics, .settings], "four tabs in order Translate, Library, Diagnostics, Settings")
+        check(AppTab.restored("live") == .translate && AppTab.restored("languages") == .translate, "build 90 tabs restore to Translate")
+        check(AppTab.restored(nil) == .translate && AppTab.restored("library") == .library, "default and current tabs restore")
         check(AppTab.allCases.allSatisfy { !$0.title.isEmpty && !$0.symbol.isEmpty }, "every tab has a title and symbol")
 
         let router = AppRouter()
-        check(router.tab == .live, "starts on Live")
-        router.go(.languages)
-        check(router.tab == .languages && router.sheet == nil, "go(.languages) selects the tab")
-        check(UserDefaults.standard.string(forKey: "appTab") == "languages", "selected tab is remembered")
+        check(router.tab == .translate, "starts on Translate")
+        router.go(.library)
+        check(router.tab == .library && router.sheet == nil, "go(.library) selects the tab")
+        check(UserDefaults.standard.string(forKey: "appTab") == "library", "selected tab is remembered")
 
         // A sheet opens immediately when none is open.
         router.present(.more)
@@ -52,7 +54,10 @@ struct NavigationTests {
 
         // Deep links.
         check(router.open(URL(string: "screenlingo://library")!) && router.tab == .library, "deep link opens a tab")
-        check(router.open(URL(string: "screenlingo://status")!) && router.tab == .live && router.sheet == .status, "deep link opens a sheet on Live")
+        check(router.open(URL(string: "screenlingo://status")!) && router.tab == .translate && router.sheet == .status, "deep link opens a sheet on Translate")
+        router.dismissSheet()
+        check(router.open(URL(string: "screenlingo://live")!) && router.tab == .translate, "old live link opens Translate")
+        check(router.open(URL(string: "screenlingo://languages")!) && router.tab == .translate && router.sheet == .languages, "old languages link opens the language sheet")
         router.dismissSheet()
         check(router.open(URL(string: "screenlingo://diagnostics")!) && router.tab == .diagnostics && router.sheet == nil, "deep link opens the Diagnostics tab")
         check(!router.open(URL(string: "screenlingo://nowhere")!), "unknown deep link is rejected")
@@ -61,7 +66,7 @@ struct NavigationTests {
         // A pending replacement is cancelled by go().
         router.present(.status)
         router.present(.reader)
-        router.go(.live)
+        router.go(.translate)
         try? await Task.sleep(for: .milliseconds(700))
         check(router.sheet == nil, "go() cancels a pending sheet")
 

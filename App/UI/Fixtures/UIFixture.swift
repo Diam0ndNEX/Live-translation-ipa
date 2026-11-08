@@ -41,7 +41,7 @@ enum UIFixture: String, CaseIterable {
     var baselineTab: AppTab {
         switch self {
         case .idle, .idlePackMissing, .starting, .liveShort, .liveLong, .paused, .attentionLost, .onboarding, .areaEditor, .kit:
-            return .live
+            return .translate
         case .libraryEmpty, .libraryMany:
             return .library
         case .diagnosticsIdle, .diagnosticsLive, .diagnosticsBad:
@@ -49,12 +49,16 @@ enum UIFixture: String, CaseIterable {
         case .settingsRoot, .settingsCaption:
             return .settings
         case .languagesSheet:
-            return .languages
+            return .translate
         }
     }
 
     var baselineSheet: AppSheet? {
-        self == .areaEditor ? .captureArea : nil
+        switch self {
+        case .areaEditor: return .captureArea
+        case .languagesSheet: return .languages
+        default: return nil
+        }
     }
 
     /// Called once from the root view. Onboarding is driven by the `-onboarded NO` launch argument, not here.
