@@ -55,6 +55,7 @@ struct TranslateScreen: View {
                 .animation(KitMotion.state(reduceMotion), value: snap.phase)
             }
             .scrollBounceBehavior(.basedOnSize)
+            .ambientGlow()
             .safeAreaInset(edge: .bottom) {
                 ComposeBar(engine: engine, composing: $composing)
             }
@@ -144,6 +145,7 @@ struct TranslateScreen: View {
                 Text("Low Latency").tag(TranslationSystem.lowLatency.rawValue)
             }
             .pickerStyle(.segmented)
+            .sensoryFeedback(.selection, trigger: translationSystem)
             Text(modeNote(TranslationSystem(rawValue: translationSystem) ?? .legacy))
                 .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             ViewThatFits(in: .horizontal) {

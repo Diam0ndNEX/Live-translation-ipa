@@ -51,7 +51,7 @@ for path, text in files.items():
         if ".preferredColorScheme(.dark)" in code:
             fail("U5", path, f"line {n}: forced dark scheme")
         # R4 (heuristic): content must keep the system bottom inset under the tab bar; only backgrounds may ignore it.
-        if ".ignoresSafeArea(" in code and ui_file and not re.search(r"(Color|background|Background)[^\n]*ignoresSafeArea", code):
+        if ".ignoresSafeArea(" in code and ui_file and "edges: .top" not in code and not re.search(r"(Color|background|Background)[^\n]*ignoresSafeArea", code):
             fail("R4", path, f"line {n}: content ignores the safe area (heuristic check)")
 
     # R8: no tile grid anywhere in Settings.

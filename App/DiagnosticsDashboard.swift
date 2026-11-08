@@ -441,6 +441,7 @@ private struct DiagnosticsBody: View {
     @State private var confirmDeleteSessions = false
     @State private var bucketSeconds = 1
     @State private var showTestReport = false
+    @Namespace private var chipSpace
 
     init(diag: Diagnostics) {
         self.diag = diag
@@ -477,6 +478,8 @@ private struct DiagnosticsBody: View {
                 }
             }
             .modifier(ReadableColumn())
+            .ambientGlow()
+            .animation(KitMotion.spring, value: pageRaw)
             .navigationTitle("Diagnostics")
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
@@ -559,15 +562,21 @@ private struct DiagnosticsBody: View {
 
     // MARK: Chips and pages
     private func pageChip(_ p: DiagPage) -> some View {
-        Button { pageRaw = p.rawValue } label: {
+        Button { withAnimation(KitMotion.spring) { pageRaw = p.rawValue } } label: {
             Label(p.title, systemImage: p.icon)
                 .font(.footnote.weight(.semibold))
                 .padding(.horizontal, KitSpace.row)
                 .frame(minHeight: 36)
                 .foregroundStyle(page == p ? Color.white : Color.primary)
-                .background(page == p ? Color.accentColor : Color(.secondarySystemFill), in: Capsule())
+                .background {
+                    if page == p {
+                        Capsule().fill(Color.accentColor).matchedGeometryEffect(id: "selectedChip", in: chipSpace)
+                    } else {
+                        Capsule().fill(Color(.secondarySystemFill))
+                    }
+                }
         }
-        .buttonStyle(.plain)
+        .buttonStyle(PressableStyle())
         .accessibilityAddTraits(page == p ? .isSelected : [])
     }
 
@@ -582,6 +591,8 @@ private struct DiagnosticsBody: View {
             }
             .background(.bar)
             .onAppear { proxy.scrollTo(page, anchor: .center) }
+            .onChange(of: pageRaw) { _, _ in withAnimation(KitMotion.spring) { proxy.scrollTo(page, anchor: .center) } }
+            .sensoryFeedback(.selection, trigger: pageRaw)
         }
     }
 
@@ -603,6 +614,8 @@ private struct DiagnosticsBody: View {
                 }
             }
             pageContent(page)
+                .id(page)
+                .transition(.opacity.combined(with: .offset(y: 10)))
         }
     }
 
