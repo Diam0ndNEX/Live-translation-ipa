@@ -38,7 +38,8 @@ struct AdvancedBlock<Content: View>: View {
     var body: some View {
         if mode.on {
             VStack(alignment: .leading, spacing: Space.m) {
-                SectionHeader(title: "Advanced · \(title)", detail: footer)
+                Text("Advanced · \(title)").font(.headline)
+                if let footer { Text(footer).font(.footnote).foregroundStyle(.secondary) }
                 content()
             }
         } else {

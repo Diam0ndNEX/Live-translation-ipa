@@ -61,23 +61,13 @@ struct PipelineSimulatorView: View {
     /// The answer first: did a frame get enqueued and how long the modeled path takes. The caveats come right after.
     private var headline: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            HStack(spacing: Space.s) {
-                headlineTile("Modeled enqueue", result.lanes.isEmpty ? "No frame" : "\(Int(result.totalMs)) ms")
-                headlineTile("Caption shown", result.displayAccepted ? "Yes" : "No",
-                             tint: result.displayAccepted ? Palette.success : Color.secondary)
-            }
+            StatLine(value: result.lanes.isEmpty ? nil : "\(Int(result.totalMs)) ms",
+                     caption: "Modeled time to the floating window",
+                     secondary: [result.displayAccepted ? "Caption shown" : "Caption not shown"],
+                     emptyCaption: "No frame reaches the floating window")
             Banner(text: "Decision simulation, not a device benchmark. A private settings copy drives the same policy helpers as the live pipeline; OCR quality, processing costs and model output are assumptions. Nothing is captured, downloaded, translated, saved or spoken.",
                    severity: .info)
         }
-    }
-    private func headlineTile(_ title: String, _ value: String, tint: Color = .primary) -> some View {
-        VStack(alignment: .leading, spacing: Space.xs) {
-            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            Text(value).font(.title.weight(.bold).monospacedDigit()).foregroundStyle(tint).minimumScaleFactor(0.6).lineLimit(1)
-        }
-        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
-        .padding(Space.m)
-        .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
     }
     private var pipelinePanel: some View {
         Group {
@@ -140,7 +130,7 @@ struct PipelineSimulatorView: View {
                     }
                     .frame(maxWidth:.infinity,alignment:alignment)
                     .padding(max(8,min(40,PipelineSimulation.number(options,"pipPadding",24))))
-                    .background(Palette.surface,in:RoundedRectangle(cornerRadius:16))
+                    .background(Color(uiColor: .secondarySystemBackground),in:RoundedRectangle(cornerRadius:16))
                     Text("Illustrative caption placeholder. The real PiP renderer applies your complete font/theme/weight/scale settings; the inspector lists their values. No translated wording is generated here.").font(.caption).foregroundStyle(.secondary)
                 } else { Text("No replacement caption: follow the stopped or rejected stage above.").font(.footnote) }
             }
@@ -223,7 +213,7 @@ struct PipelineSimulatorView: View {
         Button { editing=SimulationSetting(id:key) } label: {
             VStack(alignment:.leading,spacing:3) {
                 HStack { Text(key).font(.subheadline);Spacer();Text(options[key] ?? "default").font(.caption).foregroundStyle(.secondary).lineLimit(2) }
-                Text(PipelineSimulation.effect(for:key)).font(.caption2).foregroundStyle(.secondary)
+                Text(PipelineSimulation.effect(for:key)).font(.caption).foregroundStyle(.secondary)
             }
         }.buttonStyle(.plain)
     }
@@ -296,7 +286,7 @@ private struct SimulatorSettingEditor: View {
                 Text("Simulator only. Numeric values follow policy clamps; unsupported text values use the simulator's documented defaults. Rendering and interface preferences are inspected, not used to invent OCR/model timing benefits.").font(.footnote).foregroundStyle(.secondary)
             }
         }
-        .scrollContentBackground(.hidden).background(Palette.background.ignoresSafeArea())
+        
         .navigationTitle(key).navigationBarTitleDisplayMode(.inline)
         .toolbar { ToolbarItem(placement:.topBarTrailing){Button("Done"){dismiss()}} }
     }

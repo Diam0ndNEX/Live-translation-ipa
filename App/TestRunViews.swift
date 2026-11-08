@@ -162,26 +162,32 @@ struct TestCard: View {
             } else if saving == "off" {
                 Banner(text: "Saving test runs is off. Turn it on in Settings > Diagnostics & tests.", severity: .warning)
             }
-            VStack(alignment: .leading, spacing: Space.m) {
-                SectionHeader(title: "Three systems, same content")
-                HStack(spacing: Space.s) {
+            // Mode · Median · P95 · Captions, newest run per mode (§13.5.4).
+            VStack(alignment: .leading, spacing: KitSpace.tight) {
+                Text("Three systems, same content").font(.headline)
+                Grid(alignment: .leading, horizontalSpacing: KitSpace.row, verticalSpacing: KitSpace.tight) {
+                    GridRow {
+                        Text("Mode"); Text("Median"); Text("P95"); Text("Captions")
+                    }
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(.secondary)
                     ForEach(TestRunText.modes, id: \.self) { mode in
                         let run = saved(mode)
-                        VStack(spacing: Space.xs) {
-                            Image(systemName: run != nil ? "checkmark.circle.fill" : TestRunText.modeIcon(mode))
-                                .font(.title3).foregroundStyle(run != nil ? Palette.success : Color.secondary)
-                                .accessibilityLabel(run != nil ? "Saved" : "Not saved yet")
-                            Text(TestRunText.modeTitle(mode)).font(.footnote.weight(.semibold)).lineLimit(1).minimumScaleFactor(0.8)
-                            Text(run.map { TestRunText.ms($0.enqueueP50Ms) } ?? "Not run").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                        GridRow {
+                            Label(TestRunText.modeTitle(mode), systemImage: run != nil ? "checkmark.circle.fill" : "circle")
+                                .foregroundStyle(run != nil ? Color.primary : Color.secondary)
+                            Text(run.map { TestRunText.ms($0.enqueueP50Ms) } ?? "–")
+                            Text(run.map { TestRunText.ms($0.enqueueP95Ms) } ?? "–")
+                            Text(run.map { "\($0.captions)" } ?? "–")
                         }
-                        .frame(maxWidth: .infinity, minHeight: 84)
-                        .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
+                        .font(.subheadline.monospacedDigit())
+                        .accessibilityElement(children: .combine)
                     }
                 }
                 if let next = nextMode {
-                    Text("Next: \(TestRunText.modeTitle(next))").font(.footnote).foregroundStyle(.secondary)
+                    Text("Next: run \(TestRunText.modeTitle(next)) on the same content.").font(.footnote).foregroundStyle(.secondary)
                 }
-            }.infoCard()
+            }
 
             if runsSlice.value.activeStarted != nil, let run = diag.activeRun {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -192,11 +198,15 @@ struct TestCard: View {
                 bannerView(banner)
             }
 
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: Space.s) {
-                SecondaryButton(title: "Save run", symbol: "tray.and.arrow.down") { Task { await diag.saveRunNow() }; Feedback.tap() }
-                SecondaryButton(title: "Clear test memory", symbol: "eraser", enabled: !memory.value.captureAlive) { confirmClear = true }
-                SecondaryButton(title: "Export report", symbol: "doc.text") { showReport = true }
-                SecondaryButton(title: "Test runs", symbol: "list.bullet") { showRuns = true }
+            VStack(alignment: .leading, spacing: 0) {
+                Button { Task { await diag.saveRunNow() }; Feedback.tap() } label: { LensRow(title: "Save this run", symbol: "tray.and.arrow.down") }
+                Divider()
+                Button { confirmClear = true } label: { LensRow(title: "Clear test memory", symbol: "eraser") }
+                    .disabled(memory.value.captureAlive)
+                Divider()
+                Button { showReport = true } label: { LensRow(title: "Export report", symbol: "doc.text") }
+                Divider()
+                Button { showRuns = true } label: { LensRow(title: "All test runs", symbol: "list.bullet") }
             }
             Text(memory.value.captureAlive ? "Stop the broadcast before clearing test memory."
                                            : "\(memory.value.temporaryEntries) temporary memory entries")
@@ -294,8 +304,9 @@ struct TestRunsPage: View {
     var body: some View {
         let s = snapshot.value
         VStack(alignment: .leading, spacing: Space.m) {
-            SectionHeader(title: "Test: \(s.currentName)",
-                          detail: "A run is one broadcast in one translation system. Saved runs are metadata only: no screen images, recognized text or translations. Private sessions are never saved.")
+            Text("Test: \(s.currentName)").font(.headline)
+            Text("A run is one broadcast in one translation system. Saved runs are metadata only: no screen images, recognized text or translations. Private sessions are never saved.")
+                .font(.footnote).foregroundStyle(.secondary)
             LatestPerSystem(runs: s.runs.filter { $0.testID == s.currentID })
             HStack(spacing: Space.s) {
                 SecondaryButton(title: "Open test runs", symbol: "list.bullet") { showRuns = true }
@@ -459,8 +470,6 @@ struct TestRunDetailView: View {
             Text(value).font(.title3.weight(.bold).monospacedDigit()).minimumScaleFactor(0.7).lineLimit(1)
         }
         .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-        .padding(Space.s)
-        .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
     }
 
     var body: some View {

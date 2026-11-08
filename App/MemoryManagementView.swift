@@ -78,7 +78,6 @@ struct MemoryManagementView: View {
         List {
             Section {
                 MemorySummary(facts: facts)
-                    .listRowInsets(EdgeInsets(top: Space.m, leading: Space.l, bottom: Space.m, trailing: Space.l))
                 if let failure = facts.failure { Banner(text: failure, severity: .warning) }
                 if let health = facts.health, softLimit > 0, health.totalEntries >= softLimit {
                     Banner(text: "Storage management threshold reached. No entries were deleted.", severity: .info)
@@ -452,36 +451,32 @@ struct MemoryTransferDocument: FileDocument {
 
 
 
-/// The numbers worth seeing first: how much is remembered, whether it is healthy, and anything waiting to be written.
+/// Opens on one number and a verdict, e.g. "3,204 remembered · healthy" (§13.5.8).
 private struct MemorySummary: View {
     let facts: MemoryFacts
     private var integrityOK: Bool { facts.health.map { $0.integrity == "ok" } ?? false }
-    private func number(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.title2.weight(.bold).monospacedDigit()).minimumScaleFactor(0.7).lineLimit(1)
-        }
-        .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
-        .padding(Space.s)
-        .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.m, style: .continuous))
+    private var verdict: (text: String, tone: PhaseTone) {
+        guard let health = facts.health else { return ("preparing", .neutral) }
+        if !integrityOK { return ("integrity: \(health.integrity.replacingOccurrences(of: "_", with: " "))", .caution) }
+        if health.failedWrites > 0 || facts.failure != nil { return ("check the details below", .caution) }
+        return ("healthy", .neutral)
     }
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.m) {
-            HStack(alignment: .top, spacing: Space.s) {
-                number("Remembered", facts.count.formatted())
-                number("Pending writes", facts.pendingWrites.formatted())
-                number("Database", facts.health.map { ByteCountFormatter.string(fromByteCount: $0.databaseBytes, countStyle: .file) } ?? "–")
+        VStack(alignment: .leading, spacing: KitSpace.tight) {
+            HeroNumber(text: facts.count.formatted())
+            HStack(spacing: KitSpace.unit) {
+                Text("remembered ·").foregroundStyle(.secondary)
+                Text(verdict.text).foregroundStyle(verdict.tone == .neutral ? Color.secondary : verdict.tone.color)
             }
-            if let health = facts.health {
-                StatusPill(text: "Integrity: \(health.integrity.replacingOccurrences(of: "_", with: " "))",
-                           symbol: integrityOK ? "checkmark.shield" : "questionmark.circle",
-                           severity: integrityOK ? .success : .info)
-                if health.legacyUnverified > 0 {
-                    Hint("\(health.legacyUnverified.formatted()) older entries are kept but not reused until they are verified.")
-                }
-            } else {
-                StatusPill(text: "Memory is preparing", symbol: "hourglass", severity: .info)
-            }
+            .font(.subheadline)
+            Text([facts.pendingWrites > 0 ? "\(facts.pendingWrites.formatted()) waiting to be written" : nil,
+                  facts.health.map { ByteCountFormatter.string(fromByteCount: $0.databaseBytes, countStyle: .file) + " on disk" },
+                  facts.health.flatMap { $0.legacyUnverified > 0 ? "\($0.legacyUnverified.formatted()) older entries not reused until verified" : nil }]
+                .compactMap { $0 }.joined(separator: "  ·  "))
+                .font(.footnote)
+                .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
     }
 }

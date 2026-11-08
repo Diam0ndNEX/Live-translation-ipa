@@ -5,31 +5,6 @@ final class LatencyMonitor: ObservableObject {
     @Published var last = LatencyBreakdown()
 }
 
-struct LatencyReadout: View {
-    @ObservedObject var monitor: LatencyMonitor
-    var body: some View {
-        HStack(spacing: 12) {
-            metric("READ", monitor.last.recognition)
-            Spacer(minLength: 0)
-            metric("PROCESS", monitor.last.translation)
-            Spacer(minLength: 0)
-            metric("TOTAL", monitor.last.total)
-        }
-        .padding(.horizontal, 18).padding(.vertical, 14)
-        .background(Palette.surface, in: RoundedRectangle(cornerRadius: 18))
-        .accessibilityElement(children: .combine)
-    }
-    private func metric(_ title: String, _ value: Double) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(.caption2.weight(.bold)).tracking(1).foregroundStyle(.secondary)
-            HStack(alignment: .firstTextBaseline, spacing: 3) {
-                Text(value > 0 ? "\(Int(value))" : "—").font(.system(.title3, design: .rounded, weight: .semibold)).monospacedDigit()
-                Text("ms").font(.caption).foregroundStyle(.secondary)
-            }
-        }
-    }
-}
-
 struct LatencyDetail: View {
     @ObservedObject var monitor: LatencyMonitor
     var body: some View {
@@ -76,7 +51,7 @@ struct PairedTimingCard: View {
                 Text("Averages use \(samples.count) matched displayed results. Confirmation includes earlier OCR passes and spacing between them. Translation-ahead can overlap confirmation. This replaces the old residual ‘Waiting & display’ estimate.")
                     .font(.caption).foregroundStyle(.secondary)
             }
-        }.infoCard()
+        }.padding(.vertical, KitSpace.tight)
     }
     private func stage(_ title: String, _ value: Double) -> some View {
         HStack { Text(title); Spacer(); Text("\(Int(value)) ms").monospacedDigit() }.font(.footnote)
