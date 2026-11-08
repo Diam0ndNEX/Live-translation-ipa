@@ -30,7 +30,6 @@ struct TranslationSettings: View {
 
     var body: some View {
         List {
-            SettingsPageHeader(symbol: "character.bubble", title: "Translation & memory", summary: "Which system translates and what it remembers.")
             Section {
                 Picker("Translation system", selection: $translationSystem) {
                     ForEach(TranslationSystem.allCases, id: \.rawValue) { system in
@@ -102,7 +101,6 @@ struct HistoryStorageSettings: View {
 
     var body: some View {
         List {
-            SettingsPageHeader(symbol: "clock.arrow.circlepath", title: "History & storage", summary: "Library history and stored data.")
             Section {
                 Toggle("Save translation history", isOn: $saveHistory)
                 Picker("Keep unstarred entries", selection: $retentionDays) {
@@ -197,7 +195,6 @@ private struct DiagnosticsSettingsPage: View {
     var body: some View {
         let facts = recorder.value
         List {
-            SettingsPageHeader(symbol: "waveform.path.ecg", title: "Diagnostics & tests", summary: "Test runs, exports and comparison switches.")
             Section {
                 ListRow(title: "Live dashboard", subtitle: "Speed, memory and the timeline of this session",
                         symbol: "chart.xyaxis.line") { Image(systemName: "chevron.right").foregroundStyle(.secondary) }

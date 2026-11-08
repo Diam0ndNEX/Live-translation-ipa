@@ -1,42 +1,13 @@
-// ScreenLingo – App – Settings (2.0.0 build 90)
+// ScreenLingo – App – Settings (2.1.0, spec §13.5.5: one grouped list, five groups, native pages)
 import SwiftUI
 
 extension View {
+    /// Every settings page is a native grouped list with a large title; no header card (R9).
     func settingsPage(_ title: String) -> some View {
-        self.scrollContentBackground(.hidden)
-            .listStyle(.insetGrouped)
-            .listSectionSpacing(.custom(Space.l))
-            .headerProminence(.increased)
-            .environment(\.defaultMinListRowHeight, 52)
-            .background(Palette.background.ignoresSafeArea())
+        self.listStyle(.insetGrouped)
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-    }
-}
-
-/// First row of every Settings sub-page: what this page is for, at a glance.
-struct SettingsPageHeader: View {
-    let symbol: String
-    let title: String
-    let summary: String
-    var body: some View {
-        Section {
-            HStack(spacing: Space.m) {
-                Image(systemName: symbol).font(.title2.weight(.semibold)).foregroundStyle(.white)
-                    .frame(width: 52, height: 52)
-                    .background(LinearGradient(colors: [Color.accentColor, Color.accentColor.opacity(0.7)], startPoint: .topLeading, endPoint: .bottomTrailing),
-                                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                    .accessibilityHidden(true)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(title).font(.title3.weight(.bold))
-                    Text(summary).font(.subheadline).foregroundStyle(.secondary)
-                }
-            }
-            .padding(.vertical, Space.xs)
-            .listRowBackground(Color.clear)
-            .accessibilityElement(children: .combine)
-        }
+            .navigationBarTitleDisplayMode(.large)
     }
 }
 
@@ -48,7 +19,7 @@ struct ResetSection: View {
     var body: some View {
         Section {
             // The dialog belongs to the button that opens it, not to the Section.
-            Button("Reset this page to defaults", role: .destructive) { confirm = true }
+            Button("Reset this page", role: .destructive) { confirm = true }
                 .frame(minHeight: 44)
                 .confirmDestructive("Reset every setting on this page?", message: "Only this page's settings return to their defaults.",
                                     isPresented: $confirm, button: "Reset") {
@@ -62,228 +33,190 @@ private struct PresetsLinkRow: View {
     @ObservedObject var store: PresetStore
     var body: some View {
         NavigationLink { PresetManagerView(store: store) } label: {
-            SettingsTile(title: "Presets", symbol: "square.stack.3d.up.fill",
-                         detail: store.active.map { store.isModified ? "\($0.name) · modified" : $0.name } ?? "\(store.all.count) available")
-        }.buttonStyle(.plain)
+            LensRow(title: "Scenes", value: store.active.map { store.isModified ? "\($0.name) · changed" : $0.name } ?? "\(store.all.count)",
+                    symbol: "square.stack.3d.up")
+        }
     }
 }
 
-// MARK: - Settings home
-/// One card in the Settings grid: icon, name, one line about what is inside.
-private struct SettingsTile: View {
+/// One searchable entry of the Settings list.
+private struct SettingsEntry: Identifiable {
     let title: String
     let symbol: String
-    let detail: String
-    var body: some View {
-        VStack(alignment: .leading, spacing: Space.s) {
-            Image(systemName: symbol)
-                .font(.title3.weight(.semibold))
-                .foregroundStyle(Color.accentColor)
-                .frame(width: 44, height: 44)
-                .background(Color.accentColor.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.s, style: .continuous))
-                .accessibilityHidden(true)
-            Text(title).font(.headline).multilineTextAlignment(.leading)
-            Text(detail).font(.footnote).foregroundStyle(.secondary)
-                .multilineTextAlignment(.leading).fixedSize(horizontal: false, vertical: true)
-            Spacer(minLength: 0)
-        }
-        .frame(maxWidth: .infinity, minHeight: 132, alignment: .topLeading)
-        .infoCard()
-        .contentShape(Rectangle())
-        .accessibilityElement(children: .combine)
-    }
+    let keywords: String
+    var id: String { title }
 }
 
-private struct SettingsNavRow<Destination: View>: View {
-    let title: String
-    let detail: String
-    let symbol: String
-    let destination: Destination
-
-    var body: some View {
-        NavigationLink {
-            destination
-        } label: {
-            SettingsTile(title: title, symbol: symbol, detail: detail)
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-/// Settings are organized around tasks, not the order features were developed.
-/// Search includes previous page names so navigation remains discoverable.
+/// One grouped list in five groups (§13.5.5). Search finds a row by its title or by plain words for what it holds.
 struct SettingsView: View {
     @EnvironmentObject var engine: TranslatorEngine
     @EnvironmentObject private var router: AppRouter
+    @EnvironmentObject private var advanced: AdvancedMode
+    @EnvironmentObject private var theme: ThemeStore
     @State private var query = ""
-    private var chevron: some View { Image(systemName: "chevron.right").foregroundStyle(.tertiary) }
+    /// Read-only: each key keeps its one owner page (scripts/test_experimental_settings.py).
+    private var areaTitle: String { (OCRArea(rawValue: UserDefaults.standard.string(forKey: "area") ?? "") ?? .smart).title }
 
-    private func matches(_ title: String, _ keywords: String) -> Bool {
+    private func shows(_ title: String, _ keywords: String) -> Bool {
         query.isEmpty || (title + " " + keywords).localizedCaseInsensitiveContains(query)
-    }
-
-    private var translateMatches: Bool {
-        matches("Reading & OCR", "capture movie subtitles frames recognition tracking confirmation")
-        || matches("Languages & text rules", "understanding glossary slang protect names source fixes automatic recovery")
-        || matches("Translation & memory", "translate ahead pretranslation warm up cache remember SQLite speculative model")
-        || matches("Presets", "profiles saved configurations")
-    }
-    private var subtitleMatches: Bool {
-        matches("Floating subtitles", "picture in picture PiP font size theme appearance window")
-        || matches("Subtitle timing", "min display clear heartbeat steady captions handoff responsive")
-        || matches("Feedback & sharing", "haptics speak copy clipboard voice vibration")
-    }
-    private var personalizeMatches: Bool {
-        matches("App appearance", "interface accent color dark light system theme haptics")
-        || matches("Reader & photos", "workspace photo OCR reading")
-        || matches("History & storage", "saved translations retention limit delete memory library")
-    }
-    private var advancedMatches: Bool {
-        matches("Performance & battery", "speed cool power thermal idle awake energy")
-        || matches("Experimental Features", "smart pipeline beta low latency lyrics incremental PiP advanced model rotation")
-        || matches("Diagnostics & tests", "metrics benchmark export sessions simulator validation fresh translation")
-    }
-    private var supportMatches: Bool {
-        matches("Privacy", "private session text diagnostic speaker")
-        || matches("Backup & restore", "export import reset settings")
-        || matches("About & help", "version changelog guide")
-    }
-    private var anyMatch: Bool {
-        testsMatch || translateMatches || subtitleMatches || personalizeMatches || advancedMatches || supportMatches
-    }
-
-    private var testsMatch: Bool {
-        matches("Tests & diagnostics", "test runs dashboard compare modes export zip report simulator memory management evidence")
-    }
-
-    private func group<C: View>(_ title: String, @ViewBuilder _ content: () -> C) -> some View {
-        VStack(alignment: .leading, spacing: Space.m) {
-            SectionHeader(title: title)
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: Space.m, alignment: .top), GridItem(.flexible(), spacing: Space.m, alignment: .top)],
-                      spacing: Space.m) { content() }
-        }
     }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(alignment: .leading, spacing: Space.xl) {
-                    if query.isEmpty {
-                        HStack(spacing: Space.l) {
-                            BrandMark().frame(width: 56, height: 56)
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("ScreenLingo").font(.title3.weight(.semibold))
-                                Text(AppVersion.full).font(.footnote.monospacedDigit()).foregroundStyle(.secondary)
-                            }
-                            Spacer(minLength: 0)
-                        }.infoCard()
-                    }
-
-                    if translateMatches {
-                        group("Read & translate") {
-                            if matches("Reading & OCR", "capture movie subtitles frames recognition tracking confirmation") {
-                                SettingsNavRow(title: "Reading & OCR", detail: "Screen area, recognition speed and text tracking",
-                                               symbol: "viewfinder", destination: ReadingSettings())
-                            }
-                            if matches("Languages & text rules", "understanding glossary slang protect names source fixes automatic recovery") {
-                                SettingsNavRow(title: "Languages & text rules", detail: "Detection, corrections, glossary and protected names",
-                                               symbol: "character.book.closed", destination: IntelligenceSettings())
-                            }
-                            if matches("Translation & memory", "translate ahead pretranslation warm up cache remember SQLite speculative model") {
-                                SettingsNavRow(title: "Translation & memory", detail: "Translate ahead, model readiness and remembered text",
-                                               symbol: "translate", destination: TranslationSettings())
-                            }
-                            if matches("Presets", "profiles saved configurations") {
-                                PresetsLinkRow(store: engine.presets)
-                            }
-                        }
-                    }
-
-                    if subtitleMatches {
-                        group("Subtitles & output") {
-                            if matches("Floating subtitles", "picture in picture PiP font size theme appearance window") {
-                                SettingsNavRow(title: "Floating subtitles", detail: "PiP window, typography and subtitle appearance",
-                                               symbol: "rectangle.on.rectangle", destination: WindowSettings())
-                            }
-                            if matches("Subtitle timing", "min display clear heartbeat steady captions handoff responsive") {
-                                SettingsNavRow(title: "Subtitle timing", detail: "When captions appear and how they transition",
-                                               symbol: "timer", destination: ResponsivenessSettings())
-                            }
-                            if matches("Feedback & sharing", "haptics speak copy clipboard voice vibration") {
-                                SettingsNavRow(title: "Feedback & sharing", detail: "Speech, copying and vibration",
-                                               symbol: "speaker.wave.2", destination: FeedbackStorageSettings())
-                            }
-                        }
-                    }
-
-                    if personalizeMatches {
-                        group("Personalize & library") {
-                            if matches("App appearance", "interface accent color dark light system theme haptics") {
-                                SettingsNavRow(title: "App appearance", detail: "Light or dark, accent color and haptics",
-                                               symbol: "paintpalette", destination: InterfaceSettings())
-                            }
-                            if matches("Reader & photos", "workspace photo OCR reading") {
-                                SettingsNavRow(title: "Reader & photos", detail: "Reading layout and photo translation",
-                                               symbol: "text.book.closed", destination: ReaderWorkspaceSettings())
-                            }
-                            if matches("History & storage", "saved translations retention limit delete memory library") {
-                                SettingsNavRow(title: "History & storage", detail: "History retention, memory and storage limits",
-                                               symbol: "clock.arrow.circlepath", destination: HistoryStorageSettings())
-                            }
-                        }
-                    }
-
-                    if advancedMatches {
-                        group("Performance & advanced") {
-                            if matches("Performance & battery", "speed cool power thermal idle awake energy") {
-                                SettingsNavRow(title: "Performance & battery", detail: "Adaptive performance, heat and idle power",
-                                               symbol: "bolt", destination: PerformanceSettings())
-                            }
-                            if matches("Experimental Features", "smart pipeline beta low latency lyrics incremental PiP advanced model rotation") {
-                                SettingsNavRow(title: "Experimental Features", detail: "Opt-in features that still need device testing",
-                                               symbol: "flask", destination: ExperimentalFeaturesView())
-                            }
-                            if matches("Diagnostics & tests", "metrics benchmark export sessions simulator validation fresh translation") {
-                                SettingsNavRow(title: "Diagnostics & tests", detail: "What is collected, test-run saving and the simulator",
-                                               symbol: "waveform.path.ecg", destination: DiagnosticsSettings())
-                            }
-                        }
-                    }
-
-                    if testsMatch {
-                        group("Tests & diagnostics") {
-                            Button { router.go(.diagnostics) } label: {
-                                SettingsTile(title: "Live dashboard", symbol: "chart.xyaxis.line", detail: "Health, timing and exports while you translate")
-                            }.buttonStyle(.plain)
-                            Button { router.present(.testRuns) } label: {
-                                SettingsTile(title: "Test runs", symbol: "checklist", detail: "Compare Legacy, Hybrid and Low Latency on the same content")
-                            }.buttonStyle(.plain)
-                        }
-                    }
-
-                    if supportMatches {
-                        group("Privacy & support") {
-                            if matches("Privacy", "private session text diagnostic speaker") {
-                                SettingsNavRow(title: "Privacy", detail: "Private sessions and diagnostic content",
-                                               symbol: "hand.raised", destination: PrivacySettings())
-                            }
-                            if matches("Backup & restore", "export import reset settings") {
-                                SettingsNavRow(title: "Backup & restore", detail: "Export, import and reset settings",
-                                               symbol: "square.and.arrow.up", destination: BackupSettings())
-                            }
-                            if matches("About & help", "version changelog guide") {
-                                SettingsNavRow(title: "About & help", detail: "Version, changelog and how to use ScreenLingo",
-                                               symbol: "info.circle", destination: AboutSettings())
-                            }
-                        }
+            List {
+                translation
+                reading
+                caption
+                app
+                advancedGroup
+                Section {
+                    NavigationLink(destination: AboutSettings()) {
+                        LensRow(title: "About ScreenLingo", value: AppVersion.full, symbol: "info.circle")
                     }
                 }
-                .padding(.horizontal, Space.l).padding(.vertical, Space.m)
             }
-            .overlay { if !anyMatch { ContentUnavailableView.search(text: query) } }
-            .background(Palette.background.ignoresSafeArea())
-            .searchable(text: $query, prompt: "Search settings and features")
+            .searchable(text: $query, prompt: "Search settings")
             .navigationTitle("Settings")
+            #if SCREENLINGO_FIXTURES
+            .navigationDestination(isPresented: .constant(UIFixture.current == .settingsCaption)) { CaptionAppearanceSettings() }
+            #endif
+        }
+    }
+
+    @ViewBuilder private var translation: some View {
+        Section("Translation") {
+            if shows("System", "legacy hybrid low latency mode translate ahead speculation model warm memory") {
+                NavigationLink(destination: TranslationSettings()) {
+                    LensRow(title: "System", value: engine.pendingTranslationSystem.shortName, symbol: "cpu")
+                }
+            }
+            if shows("Language packs", "languages download offline pair source target") {
+                NavigationLink(destination: LanguageSheet(engine: engine, inSheet: false)) {
+                    LensRow(title: "Language packs", symbol: "globe")
+                }
+            }
+            if shows("Scenes", "presets profiles saved configurations") {
+                PresetsLinkRow(store: engine.presets)
+            }
+            if shows("Memory", "translation memory remembered cache database") {
+                NavigationLink(destination: MemoryManagementView()) {
+                    LensRow(title: "Memory", value: "\(engine.memoryCount.formatted()) remembered", symbol: "externaldrive")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var reading: some View {
+        Section("Reading") {
+            if shows("Area, recognition and speed", "capture movie subtitles frames ocr recognition tracking confirmation speed") {
+                NavigationLink(destination: ReadingSettings()) {
+                    LensRow(title: "Area and recognition", value: areaTitle, symbol: "viewfinder")
+                }
+            }
+            if shows("Text rules and names", "understanding glossary slang protect names source fixes language detection recovery") {
+                NavigationLink(destination: IntelligenceSettings()) {
+                    LensRow(title: "Text rules and names", symbol: "character.book.closed")
+                }
+            }
+            if shows("Timing", "min display clear heartbeat steady captions handoff subtitle timing") {
+                NavigationLink(destination: ResponsivenessSettings()) {
+                    LensRow(title: "Timing", symbol: "timer")
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var caption: some View {
+        Section {
+            if shows("Window", "floating window picture in picture pip size theme position") {
+                NavigationLink(destination: WindowSettings()) {
+                    LensRow(title: "Window", symbol: "pip")
+                }
+            }
+            if shows("Style", "font size weight alignment spacing padding original caption layout") {
+                NavigationLink(destination: CaptionAppearanceSettings()) {
+                    LensRow(title: "Style", symbol: "textformat.size")
+                }
+            }
+        } header: {
+            Text("Floating caption")
+        } footer: {
+            if query.isEmpty { Text("Both pages show a live preview of the floating caption.") }
+        }
+    }
+
+    @ViewBuilder private var app: some View {
+        Section("App") {
+            if shows("Appearance", "interface accent color dark light system theme") {
+                NavigationLink(destination: InterfaceSettings()) {
+                    LensRow(title: "Appearance", value: theme.appearance.title, symbol: "paintpalette")
+                }
+            }
+            if shows("Haptics and feedback", "vibration speak copy clipboard voice sharing") {
+                NavigationLink(destination: FeedbackStorageSettings()) {
+                    LensRow(title: "Haptics and feedback", symbol: "hand.tap")
+                }
+            }
+            if shows("Reader and photos", "focus reader photo ocr reading layout") {
+                NavigationLink(destination: ReaderWorkspaceSettings()) {
+                    LensRow(title: "Reader and photos", symbol: "text.book.closed")
+                }
+            }
+            if shows("Performance and battery", "speed cool power thermal idle awake energy heat") {
+                NavigationLink(destination: PerformanceSettings()) {
+                    LensRow(title: "Performance and battery", symbol: "bolt")
+                }
+            }
+            if shows("Privacy", "private session diagnostic text speaker") {
+                NavigationLink(destination: PrivacySettings()) {
+                    LensRow(title: "Privacy", symbol: "hand.raised")
+                }
+            }
+            if shows("History and storage", "saved translations retention limit delete library") {
+                NavigationLink(destination: HistoryStorageSettings()) {
+                    LensRow(title: "History and storage", symbol: "clock.arrow.circlepath")
+                }
+            }
+            if shows("Backup", "export import reset settings restore") {
+                NavigationLink(destination: BackupSettings()) {
+                    LensRow(title: "Backup and reset", symbol: "externaldrive.badge.timemachine")
+                }
+            }
+        }
+    }
+
+    /// Collapsed until the switch is on; the switch is the last row of the list. Search always finds these rows.
+    @ViewBuilder private var advancedGroup: some View {
+        let open = advanced.on || !query.isEmpty
+        if open {
+            Section("Advanced") {
+                if shows("Diagnostics settings", "metrics benchmark export test runs fresh translation temporary memory") {
+                    NavigationLink(destination: DiagnosticsSettings()) {
+                        LensRow(title: "Diagnostics settings", symbol: "waveform.path.ecg")
+                    }
+                }
+                if shows("Experimental features", "beta experiments smart pipeline lyrics incremental pip rotation") {
+                    NavigationLink(destination: ExperimentalFeaturesView()) {
+                        LensRow(title: "Experimental features", symbol: "flask")
+                    }
+                }
+                if shows("Pipeline simulator", "simulate test pipeline") {
+                    NavigationLink(destination: PipelineSimulatorView()) {
+                        LensRow(title: "Pipeline simulator", symbol: "point.3.connected.trianglepath.dotted")
+                    }
+                }
+                if shows("Test runs", "compare modes legacy hybrid low latency") {
+                    Button { router.present(.testRuns) } label: { LensRow(title: "Test runs", symbol: "checklist") }
+                        .foregroundStyle(.primary)
+                }
+            }
+        }
+        if query.isEmpty {
+            Section {
+                Toggle("Show advanced settings", isOn: $advanced.on)
+            } footer: {
+                Text("Diagnostics, experiments and the simulator. Hidden settings keep their values.")
+            }
         }
     }
 }
@@ -331,7 +264,6 @@ struct ReadingSettings: View {
 
     var body: some View {
         List {
-            SettingsPageHeader(symbol: "text.viewfinder", title: "Reading & OCR", summary: "How ScreenLingo finds the text on your screen.")
             Section {
                 Picker("Content style defaults", selection: contentStyleSelection) {
                     ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) }
@@ -447,7 +379,6 @@ struct IntelligenceSettings: View {
 
     var body: some View {
         List {
-            SettingsPageHeader(symbol: "globe", title: "Languages & text rules", summary: "Language handling, names and text clean-up.")
             Section {
                 Toggle("Clean up reading mistakes", isOn: $cleanOCR)
                 Hint("Fixes common mix-ups such as 0 and O before translating.")
@@ -506,25 +437,12 @@ struct WindowSettings: View {
     @AppStorage("clearHold") private var clearHold = 1.0
 
     private var styleKey: String { "\(theme)|\(textSize)|\(pipFont)|\(highlightNames)" }
-    private var previewImage: UIImage {
-        var style = PiPStyle.make(theme: PiPTheme(rawValue: theme) ?? .dark,
-                                  size: PiPTextSize(rawValue: textSize) ?? .auto,
-                                  font: PiPFont(rawValue: pipFont) ?? .standard)
-        style.highlightNames = highlightNames
-        return PiPRenderer.image(original: "Rem: O-o Subaru é filho de um Deus?",
-                                 translated: "Rem: W-wait, is Subaru the son of a God? Why didn't he ever tell us?",
-                                 showOriginal: showOriginal,
-                                 size: (WindowSize(rawValue: winSize) ?? .normal).size, style: style)
-    }
-
     var body: some View {
         List {
-            SettingsPageHeader(symbol: "pip", title: "Floating subtitles", summary: "Size, position and behaviour of the floating window.")
-            Section("Live preview") {
-                Image(uiImage: previewImage)
-                    .resizable().scaledToFit()
-                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            Section {
+                CaptionPreview()
                     .listRowInsets(EdgeInsets())
+                    .listRowBackground(Color.clear)
             }
             Section("Look") {
                 Picker("Window size", selection: $winSize) {
@@ -586,7 +504,6 @@ struct InterfaceSettings: View {
 
     var body: some View {
         List {
-            SettingsPageHeader(symbol: "paintbrush", title: "App appearance", summary: "Theme, accent colour and feel of the app.")
             Section {
                 Picker("Appearance", selection: $appearance) {
                     ForEach(Appearance.allCases) { Text($0.title).tag($0.rawValue) }
@@ -634,7 +551,6 @@ struct PerformanceSettings: View {
 
     var body: some View {
         List {
-            SettingsPageHeader(symbol: "battery.100", title: "Performance & battery", summary: "Trade speed against heat and battery.")
             Section {
                 Toggle("Adapt to device conditions", isOn: $adaptive)
                 Hint("Does less work when the phone gets hot, memory is low or Low Power Mode is on.")
@@ -681,7 +597,6 @@ struct BackupSettings: View {
 
     var body: some View {
         List {
-            SettingsPageHeader(symbol: "externaldrive.badge.timemachine", title: "Backup & reset", summary: "Save, restore or reset your settings.")
             Section {
                 Button { Sharer.shareFile(text: engine.exportSettings(), name: "screen-translator-settings.json") } label: {
                     Label("Share all settings", systemImage: "square.and.arrow.up")
@@ -721,7 +636,6 @@ struct AboutSettings: View {
 
     var body: some View {
         List {
-            SettingsPageHeader(symbol: "info.circle", title: "About & help", summary: "Version, changelog and help.")
             Section("Version") {
                 LabeledContent("App", value: AppVersion.full)
                 LabeledContent("Capture extension",
@@ -761,7 +675,6 @@ struct PrivacySettings: View {
 
     var body: some View {
         List {
-            SettingsPageHeader(symbol: "hand.raised", title: "Privacy", summary: "What stays on your phone.")
             Section {
                 Toggle("Private session", isOn: $privateSession)
                 Hint("New translations are not added to your Library or saved translation memory. Things saved earlier stay.")
