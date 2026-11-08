@@ -327,10 +327,17 @@ struct HybridAdmissionPolicy {
     private(set) var rejected = 0
     private(set) var recentContention = 0
     private var lastRejectedIdentity: String?
+    /// 2.2.3 (L3): when the relaxed-backoff arm is on, a backoff older than this many seconds is dropped. UNVERIFIED value.
+    private var skipSetAt: Double?
+    static let relaxedBackoffMaxAge = 10.0
 
     /// A repeated OCR packet must not exhaust a backoff intended to cover
     /// distinct subtitle candidates. Identity contains metadata, never text.
-    mutating func admit(identity: String? = nil) -> Bool {
+    mutating func admit(identity: String? = nil, now: Double = ProcessInfo.processInfo.systemUptime) -> Bool {
+        if TranslationHotPathAB.hybridRelaxedBackoff, skipped > 0, let set = skipSetAt,
+           now - set > Self.relaxedBackoffMaxAge {
+            skipped = 0; skipSetAt = nil; lastRejectedIdentity = nil
+        }
         if let identity, identity == lastRejectedIdentity { return false }
         guard skipped > 0 else {
             lastRejectedIdentity = nil
@@ -354,6 +361,7 @@ struct HybridAdmissionPolicy {
         if consecutiveWaste >= 3 {
             // 2.2.3 (L3): the arm skips 4 instead of 8 early requests. UNVERIFIED value.
             skipped = max(skipped, TranslationHotPathAB.hybridRelaxedBackoff ? 4 : 8)
+            skipSetAt = ProcessInfo.processInfo.systemUptime
             consecutiveWaste = 0
         }
     }
@@ -371,6 +379,7 @@ struct HybridAdmissionPolicy {
         // whether Apple Default is once again useful for the current scene.
         let relaxed = TranslationHotPathAB.hybridRelaxedBackoff
         skipped = max(skipped, actualOverlap >= 600 ? (relaxed ? 6 : 12) : (relaxed ? 2 : 4))
+        skipSetAt = ProcessInfo.processInfo.systemUptime
         recentContention = min(8, recentContention + 1)
         consecutiveWaste = 0
     }

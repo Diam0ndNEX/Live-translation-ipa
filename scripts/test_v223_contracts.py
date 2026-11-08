@@ -76,6 +76,9 @@ assert "gapMs < effectiveSwitchGuardWindowMs else { return .lowLatency }" in sys
 assert '"hybridBackoffAB"' in archive and '"hybridGuardAB"' in archive
 assert 'settings["hybridBackoffAB"] = "on"' in diagnostics and 'settings["hybridGuardAB"] = "on"' in diagnostics
 
+assert "TranslationHotPathAB.hybridRelaxedBackoff, skipped > 0, let set = skipSetAt" in system, "decay only in the arm"
+assert "static let relaxedBackoffMaxAge = 10.0" in system
+
 # Version 2.2.3 build 106 in the places CI checks.
 assert 'static let version = "2.2.3"' in shared and "static let build = 106" in shared
 assert project.count('"2.2.3"') == 3 and project.count('"106"') == 3
