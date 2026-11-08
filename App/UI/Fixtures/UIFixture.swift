@@ -34,6 +34,11 @@ enum UIFixture: String, CaseIterable {
     case composeActive = "compose-active"
     /// Every 2.1.0 kit component on one scrolling page (step 1).
     case kit
+    // 2.2.1: states the update changed. The first three show the message a person sees after a Test Run save.
+    case runSaved = "run-saved"
+    case runNoTiming = "run-no-timing"
+    case runSkipped = "run-skipped"
+    case attentionWindowClosed = "attention-window-closed"
 
     /// The fixture named on the command line, if any.
     static var current: UIFixture? {
@@ -43,11 +48,11 @@ enum UIFixture: String, CaseIterable {
     /// Where the build 90 interface can show this fixture.
     var baselineTab: AppTab {
         switch self {
-        case .idle, .idlePackMissing, .starting, .liveShort, .liveLong, .paused, .attentionLost, .onboarding, .areaEditor, .composeActive, .kit:
+        case .idle, .idlePackMissing, .starting, .liveShort, .liveLong, .paused, .attentionLost, .onboarding, .areaEditor, .composeActive, .kit, .attentionWindowClosed:
             return .translate
         case .libraryEmpty, .libraryMany:
             return .library
-        case .diagnosticsIdle, .diagnosticsLive, .diagnosticsBad:
+        case .diagnosticsIdle, .diagnosticsLive, .diagnosticsBad, .runSaved, .runNoTiming, .runSkipped:
             return .diagnostics
         case .settingsRoot, .settingsCaption, .settingsInterface:
             return .settings
@@ -136,12 +141,36 @@ extension UIFixture {
             s.phase = .attention(.captureLost); s.sessionStarted = now.addingTimeInterval(-75)
             s.translated = "Hello, how are you today?"; s.original = "Olá, como você está hoje?"
             return s
+        case .attentionWindowClosed:
+            s.phase = .attention(.windowClosed); s.sessionStarted = now.addingTimeInterval(-75)
+            s.translated = "Hello, how are you today?"; s.original = "Olá, como você está hoje?"
+            return s
         default: return nil
         }
     }
 }
 
 extension UIFixture {
+    /// The Test Run save result this fixture shows as a notice (nil for the other fixtures).
+    var runSaveResult: TestRunSaveResult? {
+        func meta(p50: Double?) -> TestRunMeta {
+            let now = Date()
+            return TestRunMeta(id: UUID(), testID: UUID(), testName: "Fixture", mode: "lowLatency",
+                               startedAt: now.addingTimeInterval(-300), endedAt: now, durationSeconds: 300,
+                               endReason: "stopped", appVersion: AppVersion.version, systemVersion: "fixture",
+                               hardwareModel: "fixture", languagePair: "pt>en", label: "", pinned: false,
+                               completeness: "complete", trimmed: [], captions: 84, enqueueP50Ms: p50,
+                               enqueueP95Ms: p50.map { $0 * 2 }, thermal: "nominal", startingRAMEntries: 0,
+                               modeChanges: [], bytes: 2048)
+        }
+        switch self {
+        case .runSaved: return .saved(meta(p50: 380))
+        case .runNoTiming: return .saved(meta(p50: nil))
+        case .runSkipped: return .skipped(.tooShort, detail: "Run too short to save – 42 s")
+        default: return nil
+        }
+    }
+
     /// Fills the recorder's in-memory series with sample timings (fixture builds only; nothing is saved).
     @MainActor static func seedDiagnostics(_ d: Diagnostics, bad: Bool) {
         let now = Date()
@@ -164,6 +193,7 @@ extension UIFixture {
 struct FixtureHost: ViewModifier {
     let router: AppRouter
     let engine: TranslatorEngine
+    let feedback: FeedbackCenter
     @State private var showKit = UIFixture.current == .kit
     func body(content: Content) -> some View {
         content
@@ -172,6 +202,10 @@ struct FixtureHost: ViewModifier {
                     UIFixture.seedDiagnostics(engine.diag, bad: fixture == .diagnosticsBad)
                 }
                 UIFixture.apply(router: router)
+                if let result = UIFixture.current?.runSaveResult {
+                    let (text, severity) = TestRunText.saveMessage(result)
+                    feedback.show(text, severity: severity)
+                }
             }
             .fullScreenCover(isPresented: $showKit) { KitGallery() }
     }

@@ -373,8 +373,9 @@ import Foundation
         let safeDistribution = try await writer.decode(try await writer.encode(unsafeDistribution))
         precondition(safeDistribution.distributions["private subtitle text"] == nil,
                      "Dynamic metric labels must not bypass the privacy allowlist")
+        let tooSmallAt = Date() // one instant: two Date() calls differ by microseconds and would make a tiny non-zero run (short_run is correct for that)
         let tooSmall = DiagnosticSessionExport(
-            id: UUID(), startedAt: Date(), endedAt: Date(),
+            id: UUID(), startedAt: tooSmallAt, endedAt: tooSmallAt,
             appVersion: "1.5.0", systemVersion: "test",
             settings: [:], health: MemoryDiagnosticHealth(),
             counters: ["confirmedCandidatePackets": 6, "supersededUnpresentedConfirmed": 1],

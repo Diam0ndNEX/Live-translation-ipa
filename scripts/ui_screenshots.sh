@@ -10,7 +10,8 @@ TEXTS="default ax3"; [ "${QUICK:-0}" = 1 ] && TEXTS="default"
 BUNDLE=com.diam0ndnex.screenlingo
 FIXTURES=(idle idle-pack-missing starting live-short live-long paused attention-lost
           library-empty library-many diagnostics-idle diagnostics-live diagnostics-bad
-          settings-root settings-caption settings-interface languages-sheet onboarding area-editor compose-active kit)
+          settings-root settings-caption settings-interface languages-sheet onboarding area-editor compose-active kit
+          run-saved run-no-timing run-skipped attention-window-closed)
 rm -rf "$OUT"
 mkdir -p "$OUT"
 printf '%s\n' "${FIXTURES[@]}" > "$OUT/fixtures.txt"
@@ -73,7 +74,8 @@ shoot_device() {
                 xcrun simctl launch "$udid" "$BUNDLE" -uiFixture "$fixture" -onboarded "$onboarded" -detailedCollection "$detailed" \
                     -appearance system > /dev/null
                 # Sheets open after a short router delay; give every fixture the same settle time.
-                sleep 4
+                # Notices disappear after 3 s, so those fixtures are shot sooner.
+                case "$fixture" in run-saved|run-no-timing|run-skipped) sleep 2.5 ;; *) sleep 4 ;; esac
                 xcrun simctl io "$udid" screenshot "$dir/$fixture.png" > /dev/null
             done
         done
