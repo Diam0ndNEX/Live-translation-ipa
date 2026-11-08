@@ -217,7 +217,10 @@ final class TranslatorEngine: ObservableObject {
     @Published private(set) var legacyEstimatedRemainingMinutes: Double?
     @Published private(set) var legacyValidationElapsedSeconds = 0.0
     @Published private(set) var warmupLastDurationMs: Double?
-    @Published var captureAlive = false
+    @Published var captureAlive = false {
+        // 2.2.2: leaving the app during a live session opens the floating window by itself (if the setting is on).
+        didSet { if captureAlive != oldValue { pip.setAutomaticStart(captureAlive && flag("autoOpenPiP", true)) } }
+    }
     @Published private(set) var captureStatus = CaptureReadiness.State.idle
     private var captureReadiness = CaptureReadiness()
     @Published var frames = 0
@@ -1167,6 +1170,12 @@ final class TranslatorEngine: ObservableObject {
         }
         pip.setSize(windowSize.size)
         pip.onStatus = { [weak self] s in Task { @MainActor in self?.status = s } }
+        pip.onStartFailed = { [weak self] in
+            Task { @MainActor in
+                self?.diag.noteRuntimeState("pip_start_failed")
+                self?.toast("The floating window could not open. Stay in ScreenLingo and try again.")
+            }
+        }
         pip.onActiveChange = { [weak self] a in
             Task { @MainActor in
                 self?.pipActive = a
@@ -1465,20 +1474,36 @@ final class TranslatorEngine: ObservableObject {
     }
 
     func startPiP(then done: @escaping () -> Void = {}) {
+        // 2.2.2: a failed audio session used to be swallowed. The window can still work without it, so the start goes
+        // on, but the failure is recorded.
         let s = AVAudioSession.sharedInstance()
-        try? s.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
-        try? s.setActive(true)
+        do {
+            try s.setCategory(.playback, mode: .moviePlayback, options: [.mixWithOthers])
+            try s.setActive(true)
+        } catch {
+            diag.noteRuntimeState("pip_audio_session_failed")
+        }
         pip.setSize(windowSize.size)
         attemptPiP(0, done)
     }
     private func attemptPiP(_ n: Int, _ done: @escaping () -> Void) {
         if pip.isActive { done(); return }
-        if pip.start() {
+        switch pip.start() {
+        case .started, .alreadyActive:
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { done() }
             return
+        case .unsupported:
+            diag.noteRuntimeState("pip_start_unsupported")
+            toast("The floating window is not available on this device")
+            done(); return
+        case .notPossible:
+            break
         }
         if n >= 8 {
-            status = "The floating window couldn't start. Stay on Translate and tap Start again."
+            // 2.2.2: say why. A layer that is not on screen can never start; otherwise iOS said no.
+            diag.noteRuntimeState(pip.isHosted ? "pip_start_not_possible" : "pip_start_not_hosted")
+            status = "The floating window could not open."
+            toast("The floating window could not open. Stay in ScreenLingo and try again.")
             done(); return
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.attemptPiP(n + 1, done) }

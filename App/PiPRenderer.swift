@@ -1,4 +1,6 @@
 // Screen Translator – App – v0.9.0
+// 2.2.2: the display layer is hosted at the app root (PiPHost), start() says why it could not start, and automatic
+// start from inline is only on while a capture session is alive.
 import AVKit
 import UIKit
 import SwiftUI
@@ -115,6 +117,12 @@ struct PiPStyle {
     }
 }
 
+/// What `PiPRenderer.start()` did. `notPossible` is the normal answer while iOS is still getting ready (or while the
+/// video layer is not on screen); the engine retries it and records why it gave up.
+enum PiPStartResult: Equatable {
+    case started, alreadyActive, unsupported, notPossible
+}
+
 /// Draws translated text into frames and feeds them to a system Picture-in-Picture window.
 final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegate, AVPictureInPictureControllerDelegate {
     let displayLayer = AVSampleBufferDisplayLayer()
@@ -133,7 +141,14 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
     var style = PiPStyle.make(theme: .dark, size: .auto)
     var onStatus: ((String) -> Void)?
     var onActiveChange: ((Bool) -> Void)?
+    /// 2.2.2: iOS refused a start that looked possible (the reason text is never stored, only that it happened).
+    var onStartFailed: (() -> Void)?
     var isActive: Bool { pip?.isPictureInPictureActive ?? false }
+    /// The system only allows the window while this layer is part of a visible view (see PiPHost).
+    var isHosted: Bool { displayLayer.superlayer != nil }
+    /// 2.2.2: on only while a capture session is alive, so leaving the app during a session opens the window
+    /// by itself, and ScreenLingo never opens it when nothing is being captured.
+    func setAutomaticStart(_ on: Bool) { pip?.canStartPictureInPictureAutomaticallyFromInline = on }
 
     override init() {
         super.init()
@@ -153,7 +168,7 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
         pip = AVPictureInPictureController(contentSource: source)
         pip?.delegate = self
         pip?.requiresLinearPlayback = true
-        pip?.canStartPictureInPictureAutomaticallyFromInline = true
+        pip?.canStartPictureInPictureAutomaticallyFromInline = false   // 2.2.2: the engine turns it on during a session
 
         render(original: "", translated: lastTranslated, showOriginal: false)
         // PiP needs a steady stream of frames or it shows a spinner / stalls.
@@ -169,13 +184,15 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
     }
 
     @discardableResult
-    func start() -> Bool {
+    func start() -> PiPStartResult {
         guard AVPictureInPictureController.isPictureInPictureSupported() else {
-            onStatus?("PiP isn't supported on this device"); return false
+            onStatus?("PiP isn't supported on this device"); return .unsupported
         }
-        guard let pip, pip.isPictureInPicturePossible else { return false }
+        guard let pip else { return .unsupported }
+        if pip.isPictureInPictureActive { return .alreadyActive }
+        guard pip.isPictureInPicturePossible else { return .notPossible }
         pip.startPictureInPicture()
-        return true
+        return .started
     }
     func stop() { pip?.stopPictureInPicture() }
 
@@ -428,6 +445,7 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
     func pictureInPictureController(_ c: AVPictureInPictureController,
                                     failedToStartPictureInPictureWithError error: Error) {
         onStatus?("PiP failed: \(error.localizedDescription)")
+        onStartFailed?()
     }
 
     // MARK: AVPictureInPictureSampleBufferPlaybackDelegate
@@ -442,6 +460,7 @@ final class PiPRenderer: NSObject, AVPictureInPictureSampleBufferPlaybackDelegat
 }
 
 /// The display layer must live in a visible view hierarchy for PiP to be possible.
+/// 2.2.2: the app root mounts it once with `PiPHost`, so the floating window can open from every tab and sheet.
 struct PiPPreview: UIViewRepresentable {
     let layer: AVSampleBufferDisplayLayer
     func makeUIView(context: Context) -> LayerHostView { let v = LayerHostView(); v.host(layer); return v }
@@ -453,3 +472,16 @@ final class LayerHostView: UIView {
     override func layoutSubviews() { super.layoutSubviews(); hosted?.frame = bounds }
 }
 
+
+/// 2.2.2: a tiny, nearly transparent, non-interactive host for the PiP video layer. It is not hidden (iOS refuses PiP
+/// for a hidden layer) and it never takes a touch or a VoiceOver stop.
+struct PiPHost: View {
+    let layer: AVSampleBufferDisplayLayer
+    var body: some View {
+        PiPPreview(layer: layer)
+            .frame(width: 4, height: 4)
+            .opacity(0.02)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+    }
+}

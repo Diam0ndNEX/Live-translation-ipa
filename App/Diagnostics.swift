@@ -412,7 +412,8 @@ final class Diagnostics: ObservableObject {
             "app_started", "app_interface_visible", "external_capture_period", "capture_config_changed", "capture_idle", "capture_live",
             "capture_paused", "capture_frozen",
             "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical", "detail_suspended_thermal",
-            "pip_auto_open_skipped_not_active"
+            "pip_auto_open_skipped_not_active",
+            "pip_start_unsupported", "pip_start_not_possible", "pip_start_not_hosted", "pip_start_failed", "pip_audio_session_failed"
         ]
         guard allowed.contains(reason) else { return }
         appendStructured(stage: "runtime_state", outcome: reason, reason: reason,

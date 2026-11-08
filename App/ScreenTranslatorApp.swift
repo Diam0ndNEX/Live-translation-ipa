@@ -114,6 +114,9 @@ private struct RootContent: View {
         .preferredColorScheme(theme.appearance.scheme)
         .overlay(alignment: .top) { NoticeHost(center: model.feedback) }
         .background(TranslationHost())
+        // 2.2.2: the floating window can only start while its video layer is on screen. Nothing mounted it since the
+        // 2.1.0 rebuild, so every "Open floating window" button silently failed. The root keeps it alive on every tab.
+        .overlay(alignment: .bottomTrailing) { PiPHost(layer: model.engine.pip.displayLayer) }
         .sheet(item: $router.sheet) { SheetHost(sheet: $0, engine: model.engine) }
         .fullScreenCover(isPresented: Binding(get: { !onboarded }, set: { if !$0 { onboarded = true } })) {
             OnboardingView(engine: model.engine, done: $onboarded)
