@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "2.2.0"
-    static let build = 103
+    static let version = "2.2.1"
+    static let build = 104
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("2.2.1", "Build 104: fixes for lost or wrong state (history saves, typing mode, stale toasts), Test Run integrity (manual entries no longer count as capture, thermal and no-timing labels), richer Diagnostics (settings that differ between runs are named, new counters), Settings and Translate now agree with each other, single Chinese/Japanese/Korean characters can be translated, and memory-store timing is recorded. Run-time switches for the A/B variants are under Experimental features and apply from the next session. Not compiled or run when written; speed effects are unmeasured until Diagnostics from all three modes exist."),
         ("2.2.0", "Build 103: Start capture and the floating window are now two separate buttons on Translate (one tap used to do both, and iOS may refuse to open the window while the capture sheet is coming up); \"Show window\" appears if capture runs without it. Also small fixes on Translate and the compose bar. The mode chips now say when a new mode only starts with the next session; picking the same photo twice works again; any plain text file can be imported (not only .txt), files over 25 MB are refused with a message, and an unreadable file gets a plain explanation. Library notes are saved 0.6 s after you stop typing instead of on every key. The capture extension keeps listening for settings after a receive error (it used to stop for the rest of the broadcast). Translation engine untouched. Not compiled or run on a device by Claude; speed unverified."),
         ("2.1.11", "Build 102: the last full-width blurred bars are gone. Focus mode has a plain top row and a floating bottom card, Onboarding's Done button sits on the page, and the Settings summary card is a normal card. UI only, engine untouched. Not compiled or run on a device by Claude; speed unverified."),
         ("2.1.10", "Build 101: Translate is no longer bare. The preparation card is back (current step, warm-up progress, Languages / Session / Model run progress bars, runtime conditions), the Start button has slow ripples, and a small waveform moves while the live caption is being read or translated. All motion stops with Reduce Motion. UI only, engine untouched. Not compiled or run on a device by Claude; speed unverified."),
