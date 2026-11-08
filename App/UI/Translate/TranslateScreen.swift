@@ -8,6 +8,9 @@ struct TranslateScreen: View {
     @EnvironmentObject private var router: AppRouter
     @EnvironmentObject private var feedback: FeedbackCenter
     @StateObject private var slice: EngineSlice<TranslateSnapshot>
+    @StateObject private var test: ObjectSlice<Diagnostics, TestSnapshot>
+    @AppStorage("mode") private var mode = TranslateMode.movie.rawValue
+    @AppStorage("speed") private var speed = SpeedPreset.balanced.rawValue
     @AppStorage("translationSystem") private var translationSystem = TranslationSystem.legacy.rawValue
     @AppStorage("area") private var area = OCRArea.smart.rawValue
     @AppStorage("setupState") private var setupState = ""
@@ -21,6 +24,7 @@ struct TranslateScreen: View {
     init(engine: TranslatorEngine) {
         self.engine = engine
         _slice = StateObject(wrappedValue: EngineSlice(engine) { TranslateSnapshot.read($0) })
+        _test = StateObject(wrappedValue: ObjectSlice(engine.diag) { TestSnapshot.read($0) })
     }
 
     private var snap: TranslateSnapshot {
@@ -109,8 +113,9 @@ struct TranslateScreen: View {
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity)
-        systemAndArea
+        controls
         ScenesStrip(store: engine.presets)
+        testRow
     }
 
     private var pairTitle: some View {
@@ -122,23 +127,48 @@ struct TranslateScreen: View {
                                  onSwap: { engine.swapLanguages() })
     }
 
-    /// Two menus on one line: System and Area.
-    private var systemAndArea: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: KitSpace.group) { systemMenu; areaMenu; Spacer(minLength: 0) }
-            VStack(alignment: .leading, spacing: KitSpace.tight) { systemMenu; areaMenu }
+    private func modeNote(_ s: TranslationSystem) -> String {
+        switch s {
+        case .legacy: return "The proven original pipeline."
+        case .hybridRecovery: return "Apple Default translates early; Low Latency steps in when that guess is wrong or missing."
+        case .lowLatency: return "Low Latency translates both the early guess and the confirmed text."
         }
     }
 
-    private var systemMenu: some View {
-        Menu {
-            Picker("System", selection: $translationSystem) {
-                ForEach(TranslationSystem.allCases, id: \.rawValue) { Text($0.shortName).tag($0.rawValue) }
+    /// Translation system as a segmented control with a one-line note, then three compact menus.
+    private var controls: some View {
+        VStack(alignment: .leading, spacing: KitSpace.row) {
+            Picker("Translation system", selection: $translationSystem) {
+                Text("Legacy").tag(TranslationSystem.legacy.rawValue)
+                Text("Hybrid").tag(TranslationSystem.hybridRecovery.rawValue)
+                Text("Low Latency").tag(TranslationSystem.lowLatency.rawValue)
             }
-        } label: {
-            menuLabel("System", (TranslationSystem(rawValue: translationSystem) ?? .legacy).shortName)
+            .pickerStyle(.segmented)
+            Text(modeNote(TranslationSystem(rawValue: translationSystem) ?? .legacy))
+                .font(.footnote).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: KitSpace.group) { contentMenu; speedMenu; areaMenu; Spacer(minLength: 0) }
+                VStack(alignment: .leading, spacing: 0) { contentMenu; speedMenu; areaMenu }
+            }
         }
-        .accessibilityLabel("Translation system")
+    }
+
+    private var contentMenu: some View {
+        Menu {
+            Picker("Content", selection: $mode) { ForEach(TranslateMode.allCases) { Text($0.title).tag($0.rawValue) } }
+        } label: {
+            menuLabel("Content", (TranslateMode(rawValue: mode) ?? .movie).title)
+        }
+        .accessibilityLabel("Content type")
+    }
+
+    private var speedMenu: some View {
+        Menu {
+            Picker("Reading speed", selection: $speed) { ForEach(SpeedPreset.allCases) { Text($0.title).tag($0.rawValue) } }
+        } label: {
+            menuLabel("Speed", (SpeedPreset(rawValue: speed) ?? .balanced).title)
+        }
+        .accessibilityLabel("Reading speed")
     }
 
     private var areaMenu: some View {
@@ -157,10 +187,29 @@ struct TranslateScreen: View {
         HStack(spacing: KitSpace.unit) {
             Text(title).foregroundStyle(.secondary)
             Text(value).foregroundStyle(Color.accentColor)
-            Image(systemName: "chevron.up.chevron.down").font(.footnote).foregroundStyle(Color.accentColor)
+            Image(systemName: "chevron.up.chevron.down").font(.caption).foregroundStyle(Color.accentColor)
         }
         .font(.subheadline.weight(.medium))
         .frame(minHeight: 44)
+    }
+
+    /// The saved three-mode test, one tap from Translate.
+    private var testRow: some View {
+        Button { router.present(.test) } label: {
+            HStack(spacing: KitSpace.row) {
+                Image(systemName: "checklist").foregroundStyle(Color.accentColor).frame(width: 28).accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("\(test.value.name) · \(test.value.savedModes) of 3 modes saved").font(.subheadline.weight(.semibold))
+                    Text(test.value.recording ? "Recording this run" : "Run the same content through all three modes")
+                        .font(.footnote).foregroundStyle(.secondary)
+                }
+                Spacer(minLength: KitSpace.tight)
+                Image(systemName: "chevron.right").font(.footnote).foregroundStyle(.tertiary)
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     // MARK: Live, starting, paused, attention
