@@ -164,6 +164,8 @@ struct Stats: Equatable {
     var legacyDuplicateSpeculationSkips = 0
     var slowTailEnqueues = 0
     var manualTranslations = 0
+    var identicalFrameHolds = 0 // 2.2.1 (E9)
+    var warmupsDuringCapture = 0 // 2.2.1 (E18)
     var specPreemptionRequested = 0, specMatchingConfirmation = 0
     var specRetainedUnits = 0
     var legacyBatchEntries = 0, legacyBatchVerified = 0, legacyBatchSkipped = 0
@@ -178,7 +180,7 @@ struct Stats: Equatable {
     var confirmedCandidatePackets = 0, deferredEarlyCandidates = 0
     var supersededUnpresentedConfirmed = 0, enqueuedCandidateFrames = 0
     var movieSelections = 0, movieTemporalOverrides = 0, movieRejectedSmall = 0
-    var queueReplacements = 0, visualChanges = 0, earlyVisualWakes = 0, emptyOCRPasses = 0
+    var queueReplacements = 0, visualChanges = 0, earlyVisualWakes = 0, earlyVisualWakesSuppressed = 0, emptyOCRPasses = 0
     var largePackets = 0, packetSendErrors = 0
     var pixelConfirmations = 0, pixelRejections = 0, watchSkippedOCR = 0, watchTriggeredOCR = 0
     var firstSightVisualChangeLagMs = 0.0
@@ -522,7 +524,7 @@ final class Diagnostics: ObservableObject {
             "warmup_source_unresolved", "warmup_predicted_source", "warmup_preempted",
             "model_batch_first_30s", "legacy_batch_committed", "legacy_idle_started",
             "legacy_idle_completed", "legacy_idle_deferred",
-            "legacy_confirmed_after_switch", "legacy_confirmed_no_switch", "legacy_shared_session_used",
+            "legacy_confirmed_after_switch", "legacy_confirmed_no_switch", "legacy_shared_session_used", "speculative_lease_conflict",
             "legacy_queued_speculation_superseded" // 2.2.1 (E10): was emitted by the engine but dropped here
         ]
         guard allowed.contains(reason) else { return }
@@ -755,7 +757,7 @@ final class Diagnostics: ObservableObject {
         if Date().timeIntervalSince(started) < 120, openingModeTrace.count < 160,
            (reason.hasPrefix("recovery_decision_") || reason.hasPrefix("pip_enqueue_") ||
             reason == "pip_held_unchanged" || reason == "confirmed" ||
-            reason == "hybrid_cross_strategy_overlap" || reason == "hybrid_speculation_throttled" ||
+            reason == "hybrid_cross_strategy_overlap" || reason == "hybrid_default_default_overlap" || reason == "hybrid_speculation_throttled" ||
             reason == "hybrid_speculation_backend_busy" || reason == "backend_lane_admission_rejected" ||
             reason == "speculative_model_completed" || reason == "confirmed_model_completed") {
             openingModeTrace.append(entry)
@@ -786,7 +788,7 @@ final class Diagnostics: ObservableObject {
                     "diagSamples", "heartbeatInterval", "keepAwake", "suppressOwnInterface", "temporaryMemoryTest",
                     // 2.2.1 (D4): settings that change render time or end a run
                     "idleMinutes", "sessionLimit", "autoOpenPiP", "winSize", "textSize", "pipFont", "theme", "showOriginal",
-                    "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding", "cjkSingleCharacters",
+                    "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding", "cjkSingleCharacters", "liveWarmupLegacy",
                     "rapidTextTracking", "joinAdjacentText", "activeTextFocus"]
         var settings: [String: String] = [:]
         for key in keys {
@@ -863,6 +865,7 @@ final class Diagnostics: ObservableObject {
         counters["queueReplacements"] = s.queueReplacements
         counters["visualChanges"] = s.visualChanges
         counters["earlyVisualWakes"] = s.earlyVisualWakes
+        counters["earlyVisualWakesSuppressed"] = s.earlyVisualWakesSuppressed
         counters["largePackets"] = s.largePackets
         counters["packetSendErrors"] = s.packetSendErrors
         counters["pixelConfirmations"] = s.pixelConfirmations
@@ -1402,6 +1405,7 @@ final class Diagnostics: ObservableObject {
         s.retryCount = p.retryCount ?? s.retryCount
         s.visualChanges = p.visualChanges ?? s.visualChanges
         s.earlyVisualWakes = p.earlyVisualWakes ?? s.earlyVisualWakes
+        s.earlyVisualWakesSuppressed = p.earlyVisualWakesSuppressed ?? s.earlyVisualWakesSuppressed
         s.largePackets = p.largePackets ?? s.largePackets
         s.packetSendErrors = p.sendErrors ?? s.packetSendErrors
         s.pixelConfirmations = p.pixelConfirmations ?? s.pixelConfirmations
@@ -1567,6 +1571,8 @@ final class Diagnostics: ObservableObject {
             "legacyDuplicateSpeculationSkips": s.legacyDuplicateSpeculationSkips,
             "slowTailEnqueues": s.slowTailEnqueues,
             "manualTranslations": s.manualTranslations,
+            "identicalFrameHolds": s.identicalFrameHolds,
+            "warmupsDuringCapture": s.warmupsDuringCapture,
             "legacyBatchEntries": s.legacyBatchEntries,
             "legacyBatchVerified": s.legacyBatchVerified,
             "legacyBatchSkipped": s.legacyBatchSkipped,

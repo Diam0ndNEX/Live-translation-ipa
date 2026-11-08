@@ -37,6 +37,7 @@ expected = {
         "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
         "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
         "adaptiveConfirmation", "confirmationDeadline", "continuousRotation",
+        "hybridSchedulerVariant", "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy",
     },
     "SettingsViews.swift": {
         "adaptiveOCR", "subtitleTracking", "deduplicateCopies",

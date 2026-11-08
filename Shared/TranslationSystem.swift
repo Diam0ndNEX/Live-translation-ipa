@@ -193,14 +193,28 @@ enum HybridSchedulingPolicy {
         variant == .reference195 || !confirmedDemand
     }
 
-    /// These are build-time reference variants, not user-facing modes.
+    /// 2.2.1 (D13): the variant is a run-time setting (Advanced > Experimental features), copied into a pinned value
+    /// when a session starts so a change applies from the next session and never mid-run. The compile flags still
+    /// override it for the CI reference builds. These are internal A/B variants, not user-facing modes.
+    static let settingKey = "hybridSchedulerVariant"
+    static let pinnedKey = "hybridSchedulerVariantPinned"
+
+    static func configuredVariant(_ defaults: UserDefaults = .standard) -> HybridSchedulerVariant {
+        defaults.string(forKey: settingKey).flatMap(HybridSchedulerVariant.init(rawValue:)) ?? .evidenceBounded
+    }
+
+    /// Called when a session starts.
+    static func pinSetting(_ defaults: UserDefaults = .standard) {
+        defaults.set(configuredVariant(defaults).rawValue, forKey: pinnedKey)
+    }
+
     static var buildVariant: HybridSchedulerVariant {
         #if SCREENLINGO_HYBRID_REFERENCE
         return .reference195
         #elseif SCREENLINGO_HYBRID_RECOVERY_FIRST
         return .recoveryFirst
         #else
-        return .evidenceBounded
+        return UserDefaults.standard.string(forKey: pinnedKey).flatMap(HybridSchedulerVariant.init(rawValue:)) ?? .evidenceBounded
         #endif
     }
 

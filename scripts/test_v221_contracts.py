@@ -252,6 +252,44 @@ assert "memoryTimeoutShare" in archive
 assert "sqlite3_busy_timeout(connection, 4)" in store and "timeoutMilliseconds: Double = 8" in store
 assert store.count("sqlite3_open_v2") <= 2 or True
 
+# ---- WP6: engine and extension additions ----
+shared_work = read("Shared/SharedTranslationWork.swift")
+shared_system = read("Shared/TranslationSystem.swift")
+experimental = read("App/ExperimentalFeaturesView.swift")
+# D13: runtime A/B switches pinned at session start, defaults unchanged, compile flags still override.
+assert "static func pinSettings(" in shared_work and "static func pinSetting(" in shared_system
+assert "return pinned(planPinnedKey)" in shared_work and "return pinned(unitsPinnedKey)" in shared_work
+assert "#if SCREENLINGO_REFERENCE_LL_PLAN" in shared_work and "#if SCREENLINGO_REFERENCE_LEGACY_UNITS" in shared_work
+assert "#if SCREENLINGO_HYBRID_REFERENCE" in shared_system and "#elseif SCREENLINGO_HYBRID_RECOVERY_FIRST" in shared_system
+assert "?? .evidenceBounded" in shared_system and "?? true" in shared_work
+assert "HybridSchedulingPolicy.pinSetting()" in engine and "TranslationHotPathAB.pinSettings()" in engine
+assert "modeCoordinator.hybridVariant = HybridSchedulingPolicy.buildVariant" in engine
+for key in ("hybridSchedulerVariant", "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits"):
+    assert experimental.count(f'"{key}"') >= 2 and engine.count(f'"{key}"') >= 2, key
+assert "applies from the next session, never during one" in experimental
+
+# D11: suppressed early wakes are counted (measurement only) and reach the export.
+capture = read("BroadcastExtension/SampleHandler.swift")
+shared_main = read("Shared/Shared.swift")
+assert "visualWakeSuppressedCount += 1" in capture and "earlyVisualWakesSuppressed: visualWakeSuppressedCount" in capture
+assert "var earlyVisualWakesSuppressed: Int?" in shared_main
+assert diagnostics.count("earlyVisualWakesSuppressed") >= 3 and '"earlyVisualWakesSuppressed"' in archive
+# D12: Default-vs-Default marker, with an allowlisted reason and a finding.
+service = read("App/ModeTranslationService.swift")
+assert 'report("hybrid_default_default_overlap", nil)' in service
+assert archive.count("hybrid_default_default_overlap") >= 3 and "hybrid_default_default_overlap" in diagnostics
+# E9: identical-frame holds are counted where the held frame is detected.
+assert "diag.s.identicalFrameHolds += 1" in engine and '"identicalFrameHolds"' in archive
+# E11: no precondition crash in the speculative owner; a conflict is logged.
+owner = read("Shared/SpeculativeSessionOwner.swift")
+assert "precondition" not in owner and "func takeConflict()" in owner
+assert 'diag.noteModelState("speculative_lease_conflict")' in engine and "speculative_lease_conflict" in archive
+# E18: setting default on, counter, report line, cohort key.
+assert '"liveWarmupLegacy": true' in engine and 'flag("liveWarmupLegacy", true)' in engine
+assert "diag.s.warmupsDuringCapture += 1" in engine and 'count("warmupsDuringCapture")' in archive
+assert '"liveWarmupLegacy"' in diagnostics and archive.count('"liveWarmupLegacy"') >= 2
+print("v2.2.1 WP6 contracts passed: D11, D12, D13, E9, E11, E18")
+
 print("v2.2.1 WP5 contracts passed: D10 (measurement only)")
 print("v2.2.1 WP4 contracts passed: E3, E4, E5, E6, E7, E13, E14, E16, E17, U7, U8, U9, U10")
 print("v2.2.1 WP3 contracts passed: E10, D3, D4, D6, D7, D8, D9, E12, C2, C3")

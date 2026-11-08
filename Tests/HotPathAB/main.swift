@@ -247,6 +247,43 @@ private func hybridTimeline(variant: HybridSchedulerVariant, matching: Bool,
         let newTicket = lease.begin()!
         precondition(lease.finish(newTicket, successful: true))
 
+        // 2.2.1 D13: the A/B variants are run-time settings, pinned when a session starts. The compile flags used by the
+        // reference CI builds override them, so this block only runs in the default build.
+        #if !SCREENLINGO_HYBRID_REFERENCE && !SCREENLINGO_HYBRID_RECOVERY_FIRST && !SCREENLINGO_REFERENCE_LL_PLAN && !SCREENLINGO_REFERENCE_LEGACY_UNITS
+        do {
+            let suite = UserDefaults(suiteName: "screenlingo-d13-\(UUID().uuidString)")!
+            precondition(HybridSchedulingPolicy.configuredVariant(suite) == .evidenceBounded, "D13: the default is evidenceBounded")
+            precondition(HybridSchedulingPolicy.buildVariant == .evidenceBounded, "D13: nothing pinned reads as the default")
+            for variant in [HybridSchedulerVariant.reference195, .recoveryFirst, .evidenceBounded] {
+                suite.set(variant.rawValue, forKey: HybridSchedulingPolicy.settingKey)
+                precondition(HybridSchedulingPolicy.configuredVariant(suite) == variant, "D13: \(variant) is selectable")
+            }
+            suite.set("not-a-variant", forKey: HybridSchedulingPolicy.settingKey)
+            precondition(HybridSchedulingPolicy.configuredVariant(suite) == .evidenceBounded, "D13: an unknown value falls back to the default")
+            // Pinning copies the setting; a later change does not reach the running value until the next pin.
+            let standard = UserDefaults.standard
+            standard.set("recoveryFirst", forKey: HybridSchedulingPolicy.settingKey)
+            precondition(HybridSchedulingPolicy.buildVariant == .evidenceBounded, "D13: changing the setting alone changes nothing")
+            HybridSchedulingPolicy.pinSetting()
+            precondition(HybridSchedulingPolicy.buildVariant == .recoveryFirst, "D13: the next session uses the new variant")
+            standard.removeObject(forKey: HybridSchedulingPolicy.settingKey)
+            standard.removeObject(forKey: HybridSchedulingPolicy.pinnedKey)
+            precondition(HybridSchedulingPolicy.buildVariant == .evidenceBounded)
+            // Hot path flags: defaults are today's optimized paths, the label records what runs.
+            precondition(TranslationHotPathAB.reuseStandaloneLowLatencyPlan && TranslationHotPathAB.reuseLegacyPreparedUnits &&
+                         TranslationHotPathAB.label == "L1_F1", "D13: hot path defaults unchanged")
+            standard.set(false, forKey: TranslationHotPathAB.planSettingKey)
+            standard.set(false, forKey: TranslationHotPathAB.unitsSettingKey)
+            precondition(TranslationHotPathAB.label == "L1_F1", "D13: hot path settings do not apply mid-run")
+            TranslationHotPathAB.pinSettings()
+            precondition(!TranslationHotPathAB.reuseStandaloneLowLatencyPlan && !TranslationHotPathAB.reuseLegacyPreparedUnits &&
+                         TranslationHotPathAB.label == "L0_F0", "D13: both switches selectable and recorded in the label")
+            for key in [TranslationHotPathAB.planSettingKey, TranslationHotPathAB.unitsSettingKey,
+                        TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey] { standard.removeObject(forKey: key) }
+            precondition(TranslationHotPathAB.label == "L1_F1")
+        }
+        #endif
+
         print("v1.9.6 timed software A/B matrix passed: LL, Legacy, Hybrid A/C, exact multi-line plans, correction, memory and late model completion")
         print("Synthetic values are not physical Apple model latency measurements")
     }

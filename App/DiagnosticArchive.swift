@@ -138,7 +138,7 @@ struct DiagnosticIntervalBucket: Codable {
         "uncachedUnits", "bypassedLookups", "temporaryMemoryMisses",
         "speculativeStopRequests", "speculativeSessionsCreated", "legacySharedSessionCalls", "memoryAwareSpeculationSkipped", "ramCaptionBypasses", "exactCaptionHits", "exactUnitsCoalesced", "sharedConfirmedInFlightUnits", "sharedInFlightUnits", "speculativeUnitsRetained",
         "speculativeUnitsReused", "speculativeUnitsEvictedUnused",
-        "handoffDeferred", "slowTailEnqueues", "manualTranslations", "handoffReplayed", "handoffExpired", "enqueueFailed",
+        "handoffDeferred", "slowTailEnqueues", "manualTranslations", "identicalFrameHolds", "warmupsDuringCapture", "handoffReplayed", "handoffExpired", "enqueueFailed",
         "actualModelBatches", "confirmedModelBatches", "speculativeModelBatches",
         "warmupModelBatches", "first30sModelBatches", "cancelledModelBatches",
         "legacyBatchEntries", "legacyBatchVerified", "legacyBatchSkipped",
@@ -213,7 +213,7 @@ struct TranslationModeReport: Codable {
         "mode_trace_ring_overwritten",
         "strategy_cache_hit_appleDefault", "strategy_cache_hit_lowLatency",
         "strategy_cache_populated_appleDefault", "strategy_cache_populated_lowLatency",
-        "hybrid_cross_strategy_overlap", "hybrid_overlapped_recovery_ms", "hybrid_simultaneous_model_overlap_ms",
+        "hybrid_cross_strategy_overlap", "hybrid_default_default_overlap", "hybrid_overlapped_recovery_ms", "hybrid_simultaneous_model_overlap_ms",
         "hybrid_preserve_confirmed_session", "hybrid_hedged_recovery",
         "hybrid_obsolete_speculation_draining", "hybrid_losing_request_draining",
         "hybrid_no_fast_pack_fallback",
@@ -303,7 +303,7 @@ struct TranslationModeReport: Codable {
             "strategy_cache_hit_appleDefault", "strategy_cache_hit_lowLatency",
             "strategy_cache_populated_appleDefault", "strategy_cache_populated_lowLatency",
             "speculation_superseded_before_confirmation", "speculative_model_submitted", "confirmed_model_submitted",
-            "hybrid_cross_strategy_overlap", "hybrid_overlapped_recovery_ms", "hybrid_simultaneous_model_overlap_ms",
+            "hybrid_cross_strategy_overlap", "hybrid_default_default_overlap", "hybrid_overlapped_recovery_ms", "hybrid_simultaneous_model_overlap_ms",
         "hybrid_no_fast_pack_fallback",
             "pip_held_unchanged", "backend_availability_ms", "backend_task_dispatch_ms",
             "backend_installed_cache_hit", "backend_lane_wait_ms", "backend_lane_admission_rejected",
@@ -420,7 +420,7 @@ actor DiagnosticExportWriter {
                 "legacy_queued_speculation_superseded", "legacy_speculation_low_confidence",
                 "legacy_speculation_saved_memory_backoff", "legacy_speculation_low_yield_backoff",
                 // found by guard C2 in 2.2.1: emitted by the engine, accepted by Diagnostics, dropped here
-                "legacy_shared_session_used"
+                "legacy_shared_session_used", "speculative_lease_conflict"
             ]).union(stageCodes)
         let safeEvents = snapshot.events.suffix(2400).map { event in
             StructuredDiagnosticEvent(id: event.id, timestamp: event.timestamp,
@@ -456,7 +456,7 @@ actor DiagnosticExportWriter {
             // 2.2.1 (D4, E12)
             "idleMinutes", "sessionLimit", "autoOpenPiP", "winSize", "textSize", "pipFont", "theme", "showOriginal",
             "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding",
-            "focusedCaptionOCR", "strictCaptionIdentity", "thermalStart", "thermalEnd", "thermalMax", "cjkSingleCharacters",
+            "focusedCaptionOCR", "strictCaptionIdentity", "thermalStart", "thermalEnd", "thermalMax", "cjkSingleCharacters", "liveWarmupLegacy",
             "appRequestedCaptureIntervalMs", "appRequestedCaptureEdgePx"
         ]
         let safeSettings = snapshot.settings.filter { pair in
@@ -489,7 +489,7 @@ actor DiagnosticExportWriter {
             "supersededSpeculativePipelines", "confirmedCandidatePackets",
             "deferredEarlyCandidates", "supersededUnpresentedConfirmed",
             "enqueuedCandidateFrames", "unchangedSkippedFrames",
-            "cadenceSkippedFrames", "earlyVisualWakes", "largePackets", "packetSendErrors",
+            "cadenceSkippedFrames", "earlyVisualWakes", "earlyVisualWakesSuppressed", "largePackets", "packetSendErrors",
             "pixelConfirmations", "pixelRejections", "watchSkippedOCR", "watchTriggeredOCR", "pausedSkippedFrames", "emptyReads",
             "contrastRetries", "emptyOCRPasses"
         ]
@@ -713,6 +713,7 @@ actor DiagnosticExportWriter {
             - Confirmed model, no other session nearby: \(metric("legacyConfirmedNoSwitchMs"))
             - Speculative sessions created: \(count("speculativeSessionsCreated"))
             - Confirmed calls on the shared prediction session: \(count("legacySharedSessionCalls"))
+            - Warm-up model calls that started while capture was live (2.2.1, E18): \(count("warmupsDuringCapture"))
 
             ## OCR (v2.0.0)
             - Pixel-verified confirmations / fell back to OCR: \(count("pixelConfirmations")) / \(count("pixelRejections"))
@@ -884,7 +885,7 @@ struct DiagnosticPerformanceComparison {
         "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
         "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
         "hotPathAB", "hybridSchedulerAB", "detailedCollection", "performanceTier",
-        "focusedCaptionOCR", "strictCaptionIdentity", "cjkSingleCharacters"
+        "focusedCaptionOCR", "strictCaptionIdentity", "cjkSingleCharacters", "liveWarmupLegacy"
     ]
     static let noteKeys = [
         "thermalStart", "thermalEnd", "thermalMax", "appRequestedCaptureIntervalMs", "appRequestedCaptureEdgePx",
@@ -1066,6 +1067,11 @@ enum DiagnosticIssueDetector {
            Double(fallbacks) / Double(recoveryDecisions) >= 0.25 {
             add("hybrid_fallback_storm", "suspected", fallbacks,
                 "At least a quarter of the observed Hybrid recovery decisions needed Apple Default fallback. Verify fast-language assets and error events.")
+        }
+        let defaultDefault = session.translationModes?.counters["hybrid_default_default_overlap"] ?? 0
+        if defaultDefault > 0 {
+            add("hybrid_default_default_overlap", "observed", defaultDefault,
+                "A confirmed Apple Default request started while the speculative lane was also running Apple Default. Compare the confirmation time of these captions with the others.")
         }
         let observedOverlap = session.translationModes?.counters["hybrid_cross_strategy_overlap"] ?? 0
         let measuredOverlap = session.distributions["hybridMeasuredOverlapMs"]?.count ?? 0

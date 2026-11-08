@@ -28,6 +28,11 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("legacySharedSession") private var legacySharedSession = true
     @AppStorage("subtitleAwareChangeDetection") private var subtitleAwareChangeDetection = false
     @AppStorage("preserveRelatedMovieGroups") private var preserveRelatedMovieGroups = false
+    // 2.2.1 (D13): run-time A/B variants. They are copied when a session starts, never changed mid-run.
+    @AppStorage("hybridSchedulerVariant") private var hybridSchedulerVariant = "evidenceBounded"
+    @AppStorage("hotPathReuseLowLatencyPlan") private var hotPathReuseLowLatencyPlan = true
+    @AppStorage("hotPathReuseLegacyUnits") private var hotPathReuseLegacyUnits = true
+    @AppStorage("liveWarmupLegacy") private var liveWarmupLegacy = true
 
     // Previous opt-in Smart pipeline controls are experimental, not core defaults.
     @AppStorage("adaptiveConfirmation") private var adaptiveConfirmation = false
@@ -122,6 +127,28 @@ struct ExperimentalFeaturesView: View {
             } header: { Text("Older optional experiments") }
 
             Section {
+                Picker("Hybrid scheduler", selection: $hybridSchedulerVariant) {
+                    Text("Evidence bounded (default)").tag("evidenceBounded")
+                    Text("Recovery first").tag("recoveryFirst")
+                    Text("Reference 1.9.5").tag("reference195")
+                }
+                ExperimentalOption(
+                    title: "Reuse the Low Latency plan",
+                    explanation: "On (default): Low Latency reuses the prepared plan for the same caption. Off prepares it again each time, for comparison.",
+                    enabled: $hotPathReuseLowLatencyPlan)
+                ExperimentalOption(
+                    title: "Reuse Legacy prepared units",
+                    explanation: "On (default): Legacy reuses prepared text units. Off prepares them again each time, for comparison.",
+                    enabled: $hotPathReuseLegacyUnits)
+                ExperimentalOption(
+                    title: "Legacy warm-up during capture",
+                    explanation: "On (default): Legacy may run a short warm-up translation while capture is live and quiet. Off: no warm-up while capturing, for comparison. Unverified effect.",
+                    enabled: $liveWarmupLegacy)
+            } header: { Text("A/B test variants") } footer: {
+                Text("For comparing builds on the same video. A change applies from the next session, never during one. Each run's report names the variant it used.")
+            }
+
+            Section {
                 VStack(alignment: .leading, spacing: 5) {
                     Text("Pipeline profiling").font(.subheadline.weight(.medium))
                     Text("Always on: records timing numbers for Xcode Instruments. No caption text is included.")
@@ -138,7 +165,8 @@ struct ExperimentalFeaturesView: View {
                 "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard",
                 "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
                 "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
-                "adaptiveConfirmation", "confirmationDeadline", "continuousRotation"
+                "adaptiveConfirmation", "confirmationDeadline", "continuousRotation",
+                "hybridSchedulerVariant", "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy"
             ])
         }
         .settingsPage("Experimental features")

@@ -48,6 +48,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var lastVisualChangeAt = Date.distantPast
     private var effectiveOCRIntervalMs = 0.0
     private var visualWakeCount = 0
+    private var visualWakeSuppressedCount = 0 // 2.2.1 (D11): early wakes the per-second cap refused
     private var lastVisualWakeProbe = Date.distantPast
     private var visualWakeWindowStart = Date.distantPast
     private var visualWakeWindowCount = 0
@@ -202,6 +203,16 @@ class SampleHandler: RPBroadcastSampleHandler {
                 count: visualWakeWindowCount,
                 elapsedSeconds: now.timeIntervalSince(visualWakeWindowStart)) &&
             now.timeIntervalSince(lastVisualWakeProbe) >= 0.065
+        #endif
+        #if !SCREENLINGO_REFERENCE_CAPTURE_CADENCE
+        // 2.2.1 (D11): count the wakes the cap suppressed. Measurement only; it changes no decision.
+        if !ordinaryDue && !mayProbeEarly && candidateCount == 0 &&
+            now.timeIntervalSince(lastVisualWakeProbe) >= 0.065 &&
+            SubtitleAcquisitionPolicy.allowsEarlyVisualWake(
+                elapsed: elapsed, planned: interval, lastOCRMilliseconds: lastOcrMs,
+                rapidTextTracking: rapidText, pressure: pressure) {
+            visualWakeSuppressedCount += 1
+        }
         #endif
         guard ordinaryDue || mayProbeEarly || watchTriggered else { cadenceSkipped += 1; return }
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
@@ -664,7 +675,7 @@ class SampleHandler: RPBroadcastSampleHandler {
                                              recognitionReason: recognitionReason, confirmationReason: confirmationReason,
                                              unchangedSkipped: unchangedSkipped, cadenceSkipped: cadenceSkipped, pausedSkipped: pausedSkipped,
                                              emptyReads: feedback.failures, retryCount: retryCount,
-                                             visualChanges: visualChanges, earlyVisualWakes: visualWakeCount,
+                                             visualChanges: visualChanges, earlyVisualWakes: visualWakeCount, earlyVisualWakesSuppressed: visualWakeSuppressedCount,
                                              totalEmptyOCRPasses: totalEmptyOCRPasses,
                                              lastVisualChangeAt: lastVisualChangeAt == .distantPast ?
                                                 nil : lastVisualChangeAt.timeIntervalSince1970,

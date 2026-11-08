@@ -487,6 +487,12 @@ final class ModeTranslationService {
             speculative.busy && speculative.requestedStrategy == .appleDefault
         let previousDefaultGap: Double? = competingDefault ? nil : gapBeforeSettlement
         if competingDefault { report("hybrid_cross_strategy_overlap", nil) }
+        // 2.2.1 (D12): a confirmed Default request starting while the speculative lane also runs Default.
+        // Marker only; scheduling is unchanged.
+        if caption.system == .hybridRecovery && !speculation && strategy == .appleDefault &&
+           speculative.busy && speculative.requestedStrategy == .appleDefault {
+            report("hybrid_default_default_overlap", nil)
+        }
         install(lane, source: source, target: target, strategy: strategy)
         guard let session = lane.session else { return nil }
         let sharedDefaultTicket: UUID?

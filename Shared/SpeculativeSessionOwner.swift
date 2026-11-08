@@ -31,9 +31,19 @@ final class SpeculativeSessionOwner<Session: AnyObject> {
 
     init(cancel: @escaping @MainActor (Session) -> Void) { self.cancel = cancel }
 
+    /// 2.2.1 (E11): set when begin() found the owner busy. Read once with takeConflict().
+    private var conflicted = false
+
+    func takeConflict() -> Bool { defer { conflicted = false }; return conflicted }
+
     func begin(key: String, make: () -> Session) -> Lease {
-        precondition(active == nil, "Speculative requests must remain serialized")
-        guard let ticket = sharedLease.begin() else { preconditionFailure("Actual Apple Default call still owns the speculative session") }
+        // 2.2.1 (E11): a second request while one is active (or while the physical Default call still
+        // owns the session) used to trap. It now gets its own fresh session. That
+        // lease is never stored as active, so finish() ignores it and it is never reused or cancelled here.
+        guard active == nil, let ticket = sharedLease.begin() else {
+            conflicted = true
+            return Lease(session: make(), key: key, epoch: epoch, ticket: UUID())
+        }
         // Never start a prediction on a session lent to a confirmed request.
         let session = !lent && idle?.key == key ? idle!.session : make()
         idle = nil

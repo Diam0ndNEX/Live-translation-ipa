@@ -104,12 +104,31 @@ struct AppleDefaultLeaseState {
 /// the optimized implementations; define each reference flag separately with
 /// SWIFT_ACTIVE_COMPILATION_CONDITIONS to isolate L0 and F0 without a setting,
 /// model-strategy change, or an extra runtime branch in the selected path.
+///
+/// 2.2.1 (D13): the same two switches can also be set at run time (Advanced > Experimental features). The setting is
+/// copied into a "pinned" value when a session starts, so a change applies from the next session and never mid-run.
+/// The compile flags above still override both, for the CI reference builds. Defaults are the optimized paths.
 enum TranslationHotPathAB {
+    static let planSettingKey = "hotPathReuseLowLatencyPlan"
+    static let unitsSettingKey = "hotPathReuseLegacyUnits"
+    static let planPinnedKey = "hotPathReuseLowLatencyPlanPinned"
+    static let unitsPinnedKey = "hotPathReuseLegacyUnitsPinned"
+
+    private static func pinned(_ key: String) -> Bool {
+        (UserDefaults.standard.object(forKey: key) as? Bool) ?? true
+    }
+
+    /// Called when a session starts: the settings become the values the hot path reads.
+    static func pinSettings(_ defaults: UserDefaults = .standard) {
+        defaults.set((defaults.object(forKey: planSettingKey) as? Bool) ?? true, forKey: planPinnedKey)
+        defaults.set((defaults.object(forKey: unitsSettingKey) as? Bool) ?? true, forKey: unitsPinnedKey)
+    }
+
     static var reuseStandaloneLowLatencyPlan: Bool {
         #if SCREENLINGO_REFERENCE_LL_PLAN
         return false
         #else
-        return true
+        return pinned(planPinnedKey)
         #endif
     }
 
@@ -117,7 +136,7 @@ enum TranslationHotPathAB {
         #if SCREENLINGO_REFERENCE_LEGACY_UNITS
         return false
         #else
-        return true
+        return pinned(unitsPinnedKey)
         #endif
     }
 

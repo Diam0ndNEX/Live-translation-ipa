@@ -93,11 +93,11 @@ final class TranslatorEngine: ObservableObject {
         "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode", "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "smartCool", "steadyCaptions", "languageRecovery", "deduplicateCopies", "continuousRotation", "contextualLanguage"
     ]
     /// App look & behaviour that presets do not touch.
-    static let interfaceKeys = ["memoryRAMCapacity", "memorySoftLimit", "testRunSaving", "suppressOwnInterface", "directPiPBuffer", "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession", "legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "temporaryMemoryTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment", "appearance", "cjkSingleCharacters"]
+    static let interfaceKeys = ["memoryRAMCapacity", "memorySoftLimit", "testRunSaving", "suppressOwnInterface", "directPiPBuffer", "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession", "legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "temporaryMemoryTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment", "appearance", "cjkSingleCharacters", "hybridSchedulerVariant", "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy"]
     static var settingKeys: [String] { presetKeys + interfaceKeys }
     static let defaults: [String: Any] = [
         "suppressOwnInterface": true, "memoryRAMCapacity": 3000, "memorySoftLimit": 100000, "testRunSaving": "automatic", "directPiPBuffer": false, "hybridSwitchGuard": true,
-        "pixelConfirmation": true, "eventDrivenOCR": true, "fastOCR": false, "legacySharedSession": true,
+        "pixelConfirmation": true, "eventDrivenOCR": true, "fastOCR": false, "legacySharedSession": true, "liveWarmupLegacy": true,
         "source": "auto", "target": "en", "mode": "movie", "area": "smart", "customY0": 0.0, "customY1": 0.5,
         "speed": "balanced", "stability": 2, "minTextH": 0.0, "ignoreList": "", "frameRot": "auto",
         "dropNoise": true, "boost": 1, "skipUnchanged": true, "subtitleAwareChangeDetection": false, "preserveRelatedMovieGroups": false, "rapidTextTracking": true, "joinAdjacentText": true, "activeTextFocus": true, "cleanOCR": true, "slang": true,
@@ -110,7 +110,7 @@ final class TranslatorEngine: ObservableObject {
         "displayPolicy": "immediate", "pipWeight": "bold", "pipAlignment": "left", "pipLineSpacing": 0.0,
         "pipPadding": 24.0, "originalFraction": 0.27, "pipScale": 1.0, "speakerAccent": "blue", "heartbeatInterval": 1.0,
         "readerFont": "rounded", "readerSpacing": 8.0, "readerWidth": "full", "historyCapacity": 500,
-        "diagSamples": 600, "appearance": "system", "cjkSingleCharacters": true, "homeMetrics": true, "homeQuickExpanded": false,
+        "diagSamples": 600, "appearance": "system", "cjkSingleCharacters": true, "hybridSchedulerVariant": "evidenceBounded", "hotPathReuseLowLatencyPlan": true, "hotPathReuseLegacyUnits": true, "homeMetrics": true, "homeQuickExpanded": false,
         "homeDetailsExpanded": false, "hapticStrength": "light", "autoCopyFormat": "translation", "interruptSpeech": true,
         "photoOCREdge": 2400, "photoAutoTranslate": false,
         "adaptiveOCR": true, "adaptiveConfirmation": false, "subtitleTracking": true, "selectiveSpeculation": true,
@@ -473,6 +473,10 @@ final class TranslatorEngine: ObservableObject {
         if activeTranslationSystem != selection.0 { diag.endRun(reason: "modeChanged"); refreshModeDiagnosticEpoch() } // a run never mixes modes
         activeTranslationSystem = selection.0
         modeCoordinator.system = selection.0
+        // 2.2.1 (D13): the A/B settings are read here, at the start of a session, so a change never applies mid-run.
+        HybridSchedulingPolicy.pinSetting()
+        TranslationHotPathAB.pinSettings()
+        modeCoordinator.hybridVariant = HybridSchedulingPolicy.buildVariant
         diag.modeActiveSystem = selection.0.rawValue
         diag.modePendingSystem = selection.0.rawValue
         diag.modeMigration = selection.1
@@ -3162,6 +3166,7 @@ final class TranslatorEngine: ObservableObject {
                     }
                     return TranslationSession(installedSource: source, target: target)
                 }
+                if speculativeSessions.takeConflict() { diag.noteModelState("speculative_lease_conflict") }
                 if activeTranslationSystem == .legacy, modelReadiness.source != source.minimalIdentifier || modelReadiness.target != target.minimalIdentifier {
                     modelReadiness = TranslationReadiness(source: source.minimalIdentifier, target: target.minimalIdentifier)
                 }
@@ -3366,6 +3371,7 @@ final class TranslatorEngine: ObservableObject {
                                       showOriginal: showOriginal, size: windowSize.size,
                                       style: proposedStyle) {
             lastShowReusedFrame = true
+            if diag.enabled { diag.s.identicalFrameHolds += 1 } // 2.2.1 (E9)
             lastTextDate = Date()
             if timing.packet?.candidateID == activeCandidateID { activeCandidatePresented = true }
             replayDeferredConfirmedIfPossible()
@@ -4274,12 +4280,18 @@ final class TranslatorEngine: ObservableObject {
         }
         guard installed else { modelReadiness.prepare(.languagesUnavailable); return }
         modelReadiness.prepare(.languagesInstalled)
+        // 2.2.1 (E18): with "liveWarmupLegacy" off, Legacy does not start a synthetic model call during live capture.
+        if captureAlive, !flag("liveWarmupLegacy", true) {
+            warmupStatus = "Ready"
+            return
+        }
         // Direct sessions can warm independently; the iOS 18 hosted path has one continuation.
         guard #available(iOS 26.0, *) else { return }
         lastWarm = Date()
         let t0 = Date()
         warmupStatus = predicted ? "Predictive warm-up…" : "Warming up…"
         modelReadiness.prepare(.creatingSessions)
+        if captureAlive, diag.enabled { diag.s.warmupsDuringCapture += 1 } // 2.2.1 (E18): evidence for the report
         diag.noteModelState("warmup_started")
         if predicted { diag.noteModelState("warmup_predicted_source") }
         let session: TranslationSession
