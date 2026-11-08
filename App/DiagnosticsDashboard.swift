@@ -190,6 +190,7 @@ private struct LineCard: View {
                     }
                 }
                 .chartYAxis { AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) }
+                .animation(.smooth(duration: 0.35), value: samples.count)
                 .frame(height: 110)
                 HStack {
                     stat("min", sm.min)

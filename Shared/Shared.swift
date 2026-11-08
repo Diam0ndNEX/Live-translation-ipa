@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "2.1.4"
-    static let build = 95
+    static let version = "2.1.5"
+    static let build = 96
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("2.1.5", "Build 96: the Languages sheet rows animate and give feedback on selection (bounced check, press feel, capsule Get buttons and recent-pair chips); Diagnostics charts animate as samples arrive. Settings sub-pages keep the shared grouped page and glow. Not compiled or run on a device by Claude; speed unverified."),
         ("2.1.4", "Build 95: the Start button hit area now fills the whole circle (the system picker's inner button used to stay small), so a tap anywhere starts capture and the floating window. Translate shows Start capture, Pause or Resume, Floating window and Session tiles again; the toolbar is one More menu. Library detail uses rounded surfaces. Not compiled or run on a device by Claude; speed unverified."),
         ("2.1.3", "Build 94: every screen gets the same treatment. Diagnostics pages, the Translate controls, test row, recent list and live caption sit on rounded surfaces over a grouped background; Library, the Languages sheet, the Session and Tune sheets, Focus settings, Scenes and Onboarding share the grouped page with the soft accent glow. Not run on a device by Claude; speed unverified."),
         ("2.1.2", "Build 93: the whole app gets more life. Settings is rebuilt as colour-tile rows in rounded groups (Translation, Reading, Floating caption, Look and feel, Device and data, Advanced) under a summary of your current setup, without the oversized system buttons; every settings page has tighter rows. A soft accent glow sits behind Translate, Diagnostics and Settings, the Diagnostics page chip slides between pages with a haptic tick, pages fade in, rows spring when pressed, and the mode picker ticks. Not run on a device by Claude; speed unverified."),

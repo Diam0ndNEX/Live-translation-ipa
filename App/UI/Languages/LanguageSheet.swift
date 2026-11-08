@@ -74,6 +74,7 @@ struct LanguageSheet: View {
                             ForEach(p.recent, id: \.self) { recent in
                                 Button(LanguageNames.pairLabel(recent)) { engine.applyPair(recent) }
                                     .buttonStyle(.bordered)
+                                    .buttonBorderShape(.capsule)
                                     .font(.subheadline.weight(.medium))
                                     .frame(minHeight: 44)
                             }
@@ -117,6 +118,7 @@ struct LanguageSheet: View {
             }
         }
         .kitPage()
+        .animation(KitMotion.spring, value: current)
         .searchable(text: $query, prompt: "Search languages")
         .refreshable { await engine.refreshStatus() }
         .onChange(of: p.statuses) { _, new in downloading = downloading.filter { new[$0] != .installed } }
@@ -150,14 +152,17 @@ struct LanguageSheet: View {
                     }
                     Spacer(minLength: KitSpace.tight)
                     if item.code == current {
-                        Image(systemName: "checkmark").font(.body.weight(.semibold)).foregroundStyle(Color.accentColor)
+                        Image(systemName: "checkmark.circle.fill").font(.title3).foregroundStyle(Color.accentColor)
+                            .symbolEffect(.bounce, value: current)
+                            .transition(.scale.combined(with: .opacity))
                             .accessibilityLabel("Selected")
                     }
                 }
                 .frame(minHeight: 48)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(PressableStyle())
+            .sensoryFeedback(.selection, trigger: current)
             .accessibilityHint(side == .source ? "Translate from this language" : "Translate into this language")
             if item.code != "auto" { packControl(item) }
         }
@@ -170,7 +175,9 @@ struct LanguageSheet: View {
                 ProgressView().accessibilityLabel("Downloading")
             } else {
                 Button("Get") { downloading.insert(item.code); engine.download(item.code) }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
+                    .buttonBorderShape(.capsule)
+                    .controlSize(.small)
                     .font(.subheadline.weight(.semibold))
                     .accessibilityLabel("Download \(item.name)")
             }
