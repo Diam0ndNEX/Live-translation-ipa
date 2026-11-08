@@ -144,7 +144,11 @@ actor TestRunStore {
     private var simulateDiskFull = false
 
     /// The limits are parameters only so tests can exercise trimming and size pruning with small data.
-    init(directory: URL, maximumRunBytes: Int = 8 * 1024 * 1024, maximumTotalBytes: Int = 100 * 1024 * 1024) {
+    /// 2.2.3: a saved run is never trimmed by default (no per-run size limit). Tests pass a small limit to exercise
+    /// the trimming steps. Whole older runs are still pruned by count and total size (see `pruned`).
+    static let unlimitedRunBytes = Int.max
+
+    init(directory: URL, maximumRunBytes: Int = TestRunStore.unlimitedRunBytes, maximumTotalBytes: Int = 100 * 1024 * 1024) {
         self.directory = directory
         self.maximumRunBytes = maximumRunBytes
         self.maximumTotalBytes = maximumTotalBytes

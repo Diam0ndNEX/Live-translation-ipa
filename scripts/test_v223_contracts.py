@@ -93,6 +93,9 @@ assert "2400" not in "".join(l for l in diagnostics.splitlines() if "structuredE
 assert diagnostics.count("6000") >= 8 and "suffix(5840)" in diagnostics and "suffix(5872)" in diagnostics
 assert archive.count("suffix(6000)") >= 3
 
+store = (root / "App/TestRunStore.swift").read_text()
+assert "maximumRunBytes: Int = TestRunStore.unlimitedRunBytes" in store and "static let unlimitedRunBytes = Int.max" in store
+
 # Version 2.2.3 build 106 in the places CI checks.
 assert 'static let version = "2.2.3"' in shared and "static let build = 106" in shared
 assert project.count('"2.2.3"') == 3 and project.count('"106"') == 3
