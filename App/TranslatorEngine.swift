@@ -839,7 +839,11 @@ final class TranslatorEngine: ObservableObject {
                     if saved { diag.s.savedHits += 1 } else { diag.s.cacheHits += 1 }
                     let outcome: MemoryDiagnosticOutcome = provenance == "persistent" ? .persistentHit : (provenance == "legacy" ? .legacyHit : (provenance == "normalized" ? .normalizedHit : .ramHit))
                     diag.recordMemory(outcome, candidate: caption.caption)
-                } else { diag.s.cacheMisses += 1; diag.recordMemory(.miss, candidate: caption.caption) }
+                } else {
+                    diag.s.cacheMisses += 1
+                    // 2.3.1: Legacy records .bypassed when memory reuse is switched off; these modes recorded .miss.
+                    diag.recordMemory((memoryTestMode.allowsReuse && !bypassMemory) ? .miss : .bypassed, candidate: caption.caption)
+                }
                 if memoryTestMode == .temporaryMemory {
                     if origin == "speculation" || origin == "compatible_memory" ||
                        origin == "session_low_latency" || origin == "session_apple_default" { diag.noteTemporaryReuse() }
@@ -2374,6 +2378,7 @@ final class TranslatorEngine: ObservableObject {
             else { diag.noteSharedModelUnits(shared) }
         } else if currentSpeculativeText == joined {
             if diag.enabled { diag.s.specMatchingConfirmation += 1 }
+            diag.noteLegacySpeculationInFlightMatch(candidate: queuedPacket?.candidateID)
         }
         startDrain()
     }

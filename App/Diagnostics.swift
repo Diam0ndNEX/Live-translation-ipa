@@ -687,6 +687,8 @@ final class Diagnostics: ObservableObject {
         var mismatch = false
         /// 2.3.0: text fingerprint of this caption's latest unconfirmed sighting; nil when it had none.
         var earlyFingerprint: String?
+        /// 2.3.1: the early translation of the same text was still running when the confirmed caption arrived.
+        var speculationInFlight = false
     }
     private var legacyModeContexts: [String: LegacyModeContext] = [:]
     /// 2.3.0: insertion order of `legacyModeContexts`, so the oldest entries can be dropped first.
@@ -718,6 +720,13 @@ final class Diagnostics: ObservableObject {
         legacyModeEvent(caption, reason: confirmed ? "confirmed" : "speculation_admitted")
     }
 
+    /// 2.3.1: Legacy counterpart of Hybrid's speculation_match_in_flight. Called when a confirmed caption arrives while
+    /// the early translation of exactly that text is still running. Only tags the caption's diagnostics context.
+    func noteLegacySpeculationInFlightMatch(candidate: String?) {
+        guard enabled, modeActiveSystem == "legacy", let candidate else { return }
+        legacyModeContexts[candidate]?.speculationInFlight = true
+    }
+
     private func legacyModeEvent(_ caption: String, reason: String, duration: Double? = nil) {
         guard let context = legacyModeContexts[caption], modeActiveSystem == "legacy" else { return }
         noteModeEvent(session: context.session, caption: caption, revision: 0, source: context.source,
@@ -732,7 +741,10 @@ final class Diagnostics: ObservableObject {
         // 2.3.0: the old name "pip_enqueue_legacy_recovery" suggested a second attempt. It is the same fresh
         // translation of the confirmed text; the only difference is that the caption's early text had changed.
         if context.fresh { reason = context.mismatch ? "pip_enqueue_fresh_text_changed" : "pip_enqueue_confirmed_fresh" }
-        else if context.speculativeHit { reason = "pip_enqueue_speculation_match_ready" }
+        else if context.speculativeHit {
+            // 2.3.1: same two names Hybrid and Low Latency use for the same two situations.
+            reason = context.speculationInFlight ? "pip_enqueue_speculation_match_in_flight" : "pip_enqueue_speculation_match_ready"
+        }
         else { reason = "pip_enqueue_memory_hit" }
         legacyModeEvent(caption, reason: reason, duration: duration)
     }

@@ -198,6 +198,20 @@ struct TranslationModeReport: Codable {
     let distributions: [String: DiagnosticDistribution]
     let counters: [String: Int]
 
+    /// 2.3.1: where a caption's translation came from, in words that mean the same in every mode.
+    /// memory: nothing was translated, the result was stored. early: the translation started before confirmation was used.
+    /// confirmed_time: the text was translated after confirmation (Legacy confirmed fresh or text changed; Hybrid and Low
+    /// Latency recovery_success). Returns nil for reasons that are not a translation source.
+    static func pathGroup(_ reason: String) -> String? {
+        switch reason {
+        case "pip_enqueue_memory_hit": return "memory"
+        case "pip_enqueue_speculation_match_ready", "pip_enqueue_speculation_match_in_flight": return "early"
+        case "pip_enqueue_confirmed_fresh", "pip_enqueue_fresh_text_changed", "pip_enqueue_legacy_recovery",
+             "pip_enqueue_recovery_success": return "confirmed_time"
+        default: return nil
+        }
+    }
+
     static let reasons: Set<String> = [
         "speculative_model_submitted", "confirmed_model_submitted", "model_batch_failed", "model_batch_completed", "speculative_model_completed", "confirmed_model_completed",
         "cancellation_requested", "cancelled_call_returned",
@@ -291,6 +305,14 @@ struct TranslationModeReport: Codable {
                 }
                 if let decision = recoveries[identity] {
                     samples[cohort + "_" + event.reason + "_recoveryDecisionToEnqueue", default: []].append(max(0, event.monotonicTime - decision) * 1000)
+                }
+                // 2.3.1: the same three groups in every mode, summed over languages (see pathGroup).
+                if let group = Self.pathGroup(event.reason) {
+                    let groupKey = (event.mode ?? active) + "_" + (event.testMode ?? "normal") + "_path_" + group
+                    if let duration = event.durationMs { samples[groupKey, default: []].append(duration) }
+                    if let confirmed = confirmations[identity] {
+                        samples[groupKey + "_confirmationToEnqueue", default: []].append(max(0, event.monotonicTime - confirmed) * 1000)
+                    }
                 }
             }
         }
@@ -831,11 +853,14 @@ actor DiagnosticExportWriter {
             Apple Default model, booked under that stage name, not a separate filtering cost. The
             hybrid_switch_guard_* values are the gap since the last Default call returned, not a delay.
 
-            Names (2.3.0): in Legacy the ordinary confirmed model call is confirmed_service_ms, and a fresh
-            translation whose early text had changed is pip_enqueue_fresh_text_changed (reports before 2.3.0 used
-            recovery_service_ms and pip_enqueue_legacy_recovery for these; neither is a second attempt). In Low
-            Latency, recovery_queue_ms and recovery_service_ms still name the ordinary confirmed call. Only in Hybrid
-            Recovery do the recovery_* names mean a recovery.
+            Names (2.3.1): the same three sources are summed in every mode as path_memory (stored result),
+            path_early (early translation reused, ready or still running) and path_confirmed_time (translated after
+            confirmation). In Hybrid Recovery and Low Latency a translation after confirmation is called a recovery
+            (recovery_decision_*, recovery_service_ms, pip_enqueue_recovery_success). Legacy has the same situation and
+            calls it confirmed fresh (confirmed_service_ms, pip_enqueue_confirmed_fresh), or pip_enqueue_fresh_text_changed
+            when the caption's early text had changed; reports before 2.3.0 called that pip_enqueue_legacy_recovery and
+            recovery_service_ms. None of these is a second attempt. All modes also name the model call through
+            confirmed_model_completed (confirmedModelMs) and the model-call table lane confirmed.
 
             Diagnostics are bounded. Structured events cover at most 6000 retained (2.2.3: raised from 2400)
             entries; old events can be evicted. Summary counters span the whole session.

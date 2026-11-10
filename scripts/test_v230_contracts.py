@@ -35,9 +35,9 @@ assert diagnostics.count("legacyModeContextOrder.removeAll()") == 1, "reset clea
 assert '"pip_enqueue_fresh_text_changed"' in archive and '"pip_enqueue_legacy_recovery"' in archive
 assert archive.count('"confirmed_service_ms"') == 2, "reason allowlist and model-call parser"
 assert 'case "speculative_service_ms", "recovery_service_ms", "confirmed_service_ms":' in archive
-# Low Latency and Hybrid keep their names (renaming them touches the Hybrid analysis); the README says what they mean.
+# Low Latency and Hybrid keep their names: there "recovery" is the code's own name for a translation after confirmation.
 assert service.count('"recovery_service_ms"') == 2 and service.count('"recovery_queue_ms"') == 2
-assert "Only in Hybrid" in archive and "Recovery do the recovery_* names mean a recovery" in archive
+# 2.3.1 replaced the 2.3.0 README sentence (it wrongly said recovery names mean a recovery only in Hybrid); see test_v231_contracts.py.
 
 # Supersession measurement: counters, one bounded sample list, exported through every allowlist.
 assert "func noteConfirmedSupersession(workStarted: Bool, ageMs: Double)" in diagnostics
@@ -61,8 +61,8 @@ work = read("Shared/SharedTranslationWork.swift")
 assert work.count("?? false, forKey:") == 4, "the four 2.2.3 switches keep defaulting to off"
 
 # Version 2.3.0 build 107 in the places CI checks; older changelog entries stay.
-assert 'static let version = "2.3.0"' in shared and "static let build = 107" in shared
-assert project.count('"2.3.0"') == 3 and project.count('"107"') == 3
+assert 'static let version = "2.3.1"' in shared and "static let build = 108" in shared
+assert project.count('"2.3.1"') == 3 and project.count('"108"') == 3
 assert '("2.3.0", "Build 107:' in shared and '("2.2.3", "Build 106:' in shared
 print("v2.3.0 source contracts passed: per-caption Legacy labels, confirmed_service_ms, oldest-first context drop, "
       "supersession measurement, switches column, defaults unchanged, version")
