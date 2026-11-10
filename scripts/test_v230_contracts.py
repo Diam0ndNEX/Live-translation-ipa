@@ -6,15 +6,15 @@ Structural checks only. Nothing here compiles or runs the app, and nothing claim
 2.3.0 changes diagnostics only; the engine hot path (process, drain, enqueue) must be unchanged.
 """
 from pathlib import Path
+from sources import read_source
 
 root = Path(__file__).resolve().parents[1]
-read = lambda relative: (root / relative).read_text(encoding="utf-8")
-diagnostics = read("App/Diagnostics.swift")
-archive = read("App/DiagnosticArchive.swift")
-engine = read("App/TranslatorEngine.swift")
-service = read("App/ModeTranslationService.swift")
-shared = read("Shared/Shared.swift")
-project = read("project.yml")
+diagnostics = read_source("Diagnostics")
+archive = read_source("DiagnosticArchive")
+engine = read_source("TranslatorEngine")
+service = read_source("ModeTranslationService")
+shared = read_source("Shared")
+project = (root / "project.yml").read_text(encoding="utf-8")
 
 # Legacy labels: decided per caption, no value shared between captions.
 assert "lastLegacySpeculation" not in diagnostics, "the shared last-speculation value must stay gone"
@@ -58,7 +58,7 @@ assert '| memory timeouts | switches on |' in archive
 assert 'armsOn' in archive and '("legacyOwnLaneAB", "Legacy own lane")' in archive
 
 # Defaults unchanged: every 2.2.3 switch still defaults to OFF.
-work = read("Shared/SharedTranslationWork.swift")
+work = read_source("SharedTranslationWork")
 assert work.count("?? false, forKey:") == 5, "the four 2.2.3 switches and the 2.3.2 heartbeat switch default to off"
 
 # Version 2.3.0 build 107 in the places CI checks; older changelog entries stay.
