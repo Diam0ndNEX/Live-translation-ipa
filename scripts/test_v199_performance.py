@@ -16,7 +16,7 @@ def read(relative):
     return (root / relative).read_text(encoding="utf-8")
 shared = read("Shared/Shared.swift")
 project = read("project.yml")
-capture = read("BroadcastExtension/SampleHandler.swift")
+capture = read_source("SampleHandler")
 acquisition = read("Shared/SubtitleAcquisitionPolicy.swift")
 governor = read("Shared/SubtitlePerformancePolicy.swift")
 engine = read("App/TranslatorEngine.swift")

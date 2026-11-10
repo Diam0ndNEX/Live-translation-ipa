@@ -12,7 +12,7 @@ def read(path):
     return (root / path).read_text(encoding="utf-8")
 
 engine = read("App/TranslatorEngine.swift")
-extension = read("BroadcastExtension/SampleHandler.swift")
+extension = read_source("SampleHandler")
 simulation = read("App/PipelineSimulation.swift")
 core = read_source("TranslationSystem")
 policy = read("Shared/SubtitlePerformancePolicy.swift")

@@ -35,7 +35,7 @@ settings_views = read("App/SettingsViews.swift")
 guard_file = read("App/CollectionChangeGuard.swift")
 policy_shared = read("Shared/SubtitlePerformancePolicy.swift")
 cjk = read("Shared/CJKText.swift")
-extension_source = read("BroadcastExtension/SampleHandler.swift")
+extension_source = read_source("SampleHandler")
 tune = read("App/UI/Translate/TuneSheet.swift")
 scenes = read("App/UI/Translate/ScenesStrip.swift")
 memory_view = read("App/MemoryManagementView.swift")
@@ -274,7 +274,7 @@ for key in ("hybridSchedulerVariant", "hotPathReuseLowLatencyPlan", "hotPathReus
 assert "applies from the next session, never during one" in experimental
 
 # D11: suppressed early wakes are counted (measurement only) and reach the export.
-capture = read("BroadcastExtension/SampleHandler.swift")
+capture = read_source("SampleHandler")
 shared_main = read("Shared/Shared.swift")
 assert "visualWakeSuppressedCount += 1" in capture and "earlyVisualWakesSuppressed: visualWakeSuppressedCount" in capture
 assert "var earlyVisualWakesSuppressed: Int?" in shared_main
