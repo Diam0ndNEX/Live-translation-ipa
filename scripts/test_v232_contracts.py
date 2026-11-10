@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """ScreenLingo 2.3.2 source contracts: the in-app Diagnostics tabs show the 2.3 data. UI and read-only accessors only."""
 from pathlib import Path
+from sources import read_source
 root = Path(__file__).resolve().parents[1]
-dash = (root / "App/DiagnosticsDashboard.swift").read_text()
-diag = (root / "App/Diagnostics.swift").read_text()
-shared = (root / "Shared/Shared.swift").read_text()
+dash = read_source("DiagnosticsDashboard")
+diag = read_source("Diagnostics")
+shared = read_source("Shared")
 project = (root / "project.yml").read_text()
 
 assert "func enqueuePathCount(_ reason: String) -> Int" in diag and '"pip_enqueue_" + reason' in diag
@@ -26,10 +27,10 @@ for old in ('("2.3.2", "Build 109:', '("2.3.1", "Build 108:', '("2.3.0", "Build 
 print("v2.3.2 source contracts passed: path card, supersession split, switches line, bypassed note, version")
 
 # ---- Stop and start again: the run continues, nothing is cleared (2.3.2) ----
-engine = (root / "App/TranslatorEngine.swift").read_text()
-runviews = (root / "App/TestRunViews.swift").read_text()
-store = (root / "App/TestRunStore.swift").read_text()
-archive = (root / "App/DiagnosticArchive.swift").read_text()
+engine = read_source("TranslatorEngine")
+runviews = read_source("TestRunViews")
+store = read_source("TestRunStore")
+archive = read_source("DiagnosticArchive")
 def body(src, start, end):
     i = src.index(start); return src[i:src.index(end, i)]
 # the three stop paths pause the run; none ends it
@@ -81,10 +82,10 @@ assert engine.count("diag.pauseRun(reason:") == 3 and engine.count("frames: fram
 print("v2.3.2 stop/start contracts passed: run continues across stop and restart")
 
 # ---- Independent capture heartbeat: optional, off by default, nothing extra sent while frames flow ----
-work = (root / "Shared/SharedTranslationWork.swift").read_text()
-shared_cfg = (root / "Shared/Shared.swift").read_text()
-ext = (root / "BroadcastExtension/SampleHandler.swift").read_text()
-experimental = (root / "App/ExperimentalFeaturesView.swift").read_text()
+work = read_source("SharedTranslationWork")
+shared_cfg = read_source("Shared")
+ext = read_source("SampleHandler")
+experimental = read_source("ExperimentalFeaturesView")
 assert "var independentHeartbeat: Bool? = nil" in shared_cfg, "optional field: older apps and extensions ignore it"
 assert "(UserDefaults.standard.object(forKey: independentHeartbeatPinnedKey) as? Bool) ?? false" in work
 assert "defaults.set((defaults.object(forKey: independentHeartbeatSettingKey) as? Bool) ?? false, forKey: independentHeartbeatPinnedKey)" in work, "pinned at session start, default off"
