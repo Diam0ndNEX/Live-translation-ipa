@@ -1,19 +1,22 @@
 # ScreenLingo structure guidelines
 
-Status: rewritten for 2.3.9 (build 116). The big files were split in 2.3.3 to 2.3.9 (see `docs/structure-migration-plan.md` for the log). Swift was never compiled in chat; the GitHub Actions run is the first test of any change. This file says where code, tests and docs go, and how to split safely.
+Status: rewritten for 2.3.9 (build 116). Reviewed for: 2.3 (see section 9). The big files were split in 2.3.3 to 2.3.9 (see `docs/structure-migration-plan.md` for the log). Swift was never compiled in chat; the GitHub Actions run is the first test of any change. This file says where code, tests and docs go, and how to split safely.
 
 ## 1. Current state (2.3.9)
-| File | Lines | Parts |
+<!-- sizes:start -->
+| Main file | Lines (rounded to 50) | Part files |
 |---|---|---|
-| App/TranslatorEngine.swift | 1334 | 20 files `App/Engine/TranslatorEngine+*.swift` |
-| App/Diagnostics.swift | 648 | `App/Diagnostics/Diagnostics+*.swift` (8 + models) |
-| App/TranslationMemoryStore.swift | 418 | `App/Memory/TranslationMemoryStore+*.swift` |
-| App/ModeTranslationService.swift | 404 | `App/Engine/ModeTranslationService+*.swift` |
-| BroadcastExtension/SampleHandler.swift | 486 | `BroadcastExtension/SampleHandler+*.swift` |
-| App/DiagnosticArchive.swift | 425 | `App/Diagnostics/DiagnosticArchive+*.swift` |
-| App/DiagnosticsDashboard.swift | 315 | `App/Diagnostics/DiagnosticsDashboard+*.swift` |
-| Shared/TranslationSystem.swift | 235 | `Shared/TranslationSystem+*.swift` (Shared stays flat) |
-| App/SettingsViews.swift, App/TestRunViews.swift | 315, 272 | `App/Settings/`, `App/TestRuns/` |
+| App/TranslatorEngine.swift | 1350 | 20 |
+| App/Diagnostics.swift | 650 | 8 |
+| BroadcastExtension/SampleHandler.swift | 500 | 3 |
+| App/DiagnosticArchive.swift | 400 | 7 |
+| App/TranslationMemoryStore.swift | 400 | 9 |
+| App/ModeTranslationService.swift | 400 | 2 |
+| App/SettingsViews.swift | 300 | 2 |
+| App/DiagnosticsDashboard.swift | 300 | 5 |
+| App/TestRunViews.swift | 250 | 2 |
+| Shared/TranslationSystem.swift | 250 | 2 |
+<!-- sizes:end -->
 Biggest remaining: TranslatorEngine (stored properties, `init`, test-pinned members) and `process` (391 lines, one function, left whole on purpose).
 
 ## 2. Layout
@@ -72,11 +75,18 @@ Main files stay where they are (`App/TranslatorEngine.swift` ...); only parts li
 - [ ] New code is in a new file in the right folder; no file over 800 lines grew.
 - [ ] A split follows section 4 (imports, access, signature check, multiset, tests).
 - [ ] Version, build and changelog (no inner quotes) in `Shared/Shared.swift`; 3 places each in `project.yml`; every script that asserts the version.
-- [ ] `docs/vX.Y.Z-specification.md` added and listed in `docs/README.md`.
+- [ ] `docs/vX.Y.Z-specification.md` added and listed in `docs/README.md`; `python3 scripts/test_structure_docs.py --write` run.
 - [ ] Commit messages say what changed. No speed claims without Diagnostics from all three modes.
 - [ ] Say that nothing was compiled in chat; the CI run is the first test.
 
-## 9. Not decided
+## 9. Keeping this file current
+`scripts/test_structure_docs.py` runs in CI and fails when:
+- the size table in section 1 no longer matches the files (run `python3 scripts/test_structure_docs.py --write`; it only changes when a file moves by about 50 lines or a new part appears);
+- "Reviewed for" is older than the app's major.minor version. At 2.4.0, 3.0.0 and so on, re-read the whole file against the code, fix what is outdated, update `Status:` and set `Reviewed for: X.Y`;
+- a Swift file over 800 lines is not named in this file;
+- the current version has no `docs/vX.Y.Z-specification.md` listed in `docs/README.md`.
+
+## 10. Not decided
 - Whether `process` (391 lines) and `handleContent` (229) should ever be broken into smaller functions. That is a code change, not a layout change, and needs Diagnostics data.
 - Whether per-version test scripts should be merged into topic tests.
 - Whether `docs/` should get subfolders (check first that no script links to the paths).
