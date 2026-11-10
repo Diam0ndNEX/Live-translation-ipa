@@ -2,6 +2,7 @@
 """Contract checks supplement the real asynchronous Swift coordinator tests."""
 from pathlib import Path
 import subprocess
+from sources import read_source
 root = Path(__file__).resolve().parents[1]
 base = 'e94542ce46cdb5b2426fdfd5dc258c932327762b'
 def old(path, ref=base):
@@ -12,7 +13,7 @@ def function(source, name):
     start = source.index('    private func ' + name + '(')
     end = source.find('\n    private func ', start + 1)
     return source[start:end if end != -1 else len(source)]
-engine = read('App/TranslatorEngine.swift')
+engine = read_source('TranslatorEngine')
 # 2.2.3 (L2, owner-approved): `drain` and `process` may differ from e94542ce ONLY by these listed edits. Undoing exactly
 # these edits must give back the original function, so nothing else in the Legacy drain/assembly algorithm changed.
 L2_UNDO = {
@@ -63,8 +64,8 @@ assert function(engine, 'extractTexts') == old_extract, 'Legacy extraction chang
 old_select = function(reference_engine, 'selectBlocks').replace('if mode == .movie {', 'if flag("activeTextFocus", true) {')
 assert function(engine, 'selectBlocks') == old_select, 'Legacy text selection changed beyond preset-independent focus routing'
 assert 'if mode == .movie' not in engine, 'Recognition cannot be locked to the Movie category'
-assert function(read('App/TranslationMemoryStore.swift'), 'createSchema') == function(old('App/TranslationMemoryStore.swift'), 'createSchema')
-assert function(read('App/TranslationMemoryStore.swift'), 'upgradeSchemaV2') == function(old('App/TranslationMemoryStore.swift'), 'upgradeSchemaV2')
+assert function(read_source('TranslationMemoryStore'), 'createSchema') == function(old('App/TranslationMemoryStore.swift'), 'createSchema')
+assert function(read_source('TranslationMemoryStore'), 'upgradeSchemaV2') == function(old('App/TranslationMemoryStore.swift'), 'upgradeSchemaV2')
 assert old('App/TranslationMemoryStore.swift', 'origin/codex/screenlingo-v1.8.0-performance') == old('App/TranslationMemoryStore.swift')
 for token in ['com.diam0ndnex.screenlingo', 'com.diam0ndnex.screenlingo.broadcast']:
     assert token in read('project.yml')
@@ -75,12 +76,12 @@ assert 'knownDefault: true' in engine
 assert 'activeTranslationSystem != .legacy && flag("subtitleTracking", true)' in engine
 assert 'activeTranslationSystem == .legacy else' in engine
 assert 'modeCoordinator.observe(caption' in engine
-core = read('Shared/TranslationSystem.swift')
+core = read_source('TranslationSystem')
 assert core.count('case legacy, hybridRecovery, lowLatency') == 1
 assert 'self.system == .hybridRecovery' in core
 assert 'if result == nil, self.system == .hybridRecovery' in core
 assert 'lowOrder.count > 256' in core
-assert 'preferredStrategy: .highFidelity' not in read('App/ModeTranslationService.swift')
+assert 'preferredStrategy: .highFidelity' not in read_source('ModeTranslationService')
 assert '"26.6"' in read('.github/workflows/build.yml')
 assert 'hybridPreview' not in engine
 activity = engine[engine.index('    var translationActivity:'):engine.index('    private func refreshModePreparation')]
@@ -91,8 +92,8 @@ assert 'modelReadiness.finishExecution(success: true' in engine
 assert 'modeService.activityChanged' in engine
 assert 'backendActivity.liveReadiness(modelReadiness)' in engine
 assert 'let activity = backendActivity.activity' in activity
-assert 'heldByActualCall = true' in read('App/ModeTranslationService.swift')
-service = read('App/ModeTranslationService.swift')
+assert 'heldByActualCall = true' in read_source('ModeTranslationService')
+service = read_source('ModeTranslationService')
 warm = service[service.index('    func warmInitially('):service.index('    func prepare(')]
 assert 'InitialWarmupPolicy.strategies(for: system)' in warm
 assert 'warmup: true' in warm
@@ -119,8 +120,8 @@ assert 'hybrid_losing_request_draining' in core
 assert 'if system != .hybridRecovery {' in core
 assert 'self.committed != caption' in core
 assert 'sortedDefault' in core and 'recoveryMedian * 0.75' in core
-assert 'hybrid_hedged_recovery' in read('App/DiagnosticArchive.swift')
-assert 'modeAvailabilityCheckMs' in read('App/Diagnostics.swift')
-assert 'exportModeEventWindow()' in read('App/Diagnostics.swift')
+assert 'hybrid_hedged_recovery' in read_source('DiagnosticArchive')
+assert 'modeAvailabilityCheckMs' in read_source('Diagnostics')
+assert 'exportModeEventWindow()' in read_source('Diagnostics')
 assert 'backend_installed_cache_hit' in service
 print('Legacy algorithm equivalence, installed schema/identity, no preview/refinement, bounded cache and model routing source contracts passed')
