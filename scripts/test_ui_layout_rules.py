@@ -68,7 +68,7 @@ for name in ("InfoCardModifier", "ScreenScaffold", "SectionHeader", "SettingsTil
 # Owner decision after build 91: the Diagnostics page chips come back (pinned, one page at a time),
 # so the chip bar is required, not forbidden. Other screens must not grow their own chip bars.
 for path, text in files.items():
-    if path.name != "DiagnosticsDashboard.swift" and re.search(r"\bfunc pageChip\b|\bvar pageBar\b", text):
+    if not path.name.startswith("DiagnosticsDashboard") and re.search(r"\bfunc pageChip\b|\bvar pageBar\b", text):
         fail("R6", path, "page chips outside Diagnostics")
 
 # §13.3 / U10: one language picker implementation.
@@ -98,7 +98,7 @@ for path, text in files.items():
 
 # R10: toolbar buttons have labels (Label or text), not bare round icons.
 for path, text in files.items():
-    if "/UI/" not in str(path) and path.name != "DiagnosticsDashboard.swift":
+    if "/UI/" not in str(path) and not path.name.startswith("DiagnosticsDashboard"):
         continue
     for m in re.finditer(r"ToolbarItem[^{]*\{\s*Button\s*\{[^}]*\}\s*label:\s*\{\s*Image\(", text):
         fail("R10", path, "toolbar button with an unlabeled image")

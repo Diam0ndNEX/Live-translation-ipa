@@ -142,7 +142,7 @@ if re.search(r"Section\s*\{[^{}]*\}\s*\.confirmationDialog", settings):
 if any("ToastView" in t for t in files.values()):
     fail("U23", "ToastView still used")
 for p, t in files.items():
-    if "toastText" in t and p.name not in ("ScreenTranslatorApp.swift", "TranslatorEngine.swift"):
+    if "toastText" in t and p.name not in ("ScreenTranslatorApp.swift", "TranslatorEngine.swift") and not p.name.startswith("TranslatorEngine+"):
         fail("U23", f"{rel(p)} reads engine.toastText instead of the feedback queue")
 
 # U3: Settings pages that only call engine methods must not subscribe to the whole engine

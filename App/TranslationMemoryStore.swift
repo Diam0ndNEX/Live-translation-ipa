@@ -2,9 +2,9 @@ import Foundation
 import SQLite3
 import CryptoKit
 
-private final class MemoryLookupCompletion: @unchecked Sendable {
+final class MemoryLookupCompletion: @unchecked Sendable {
     private let lock = NSLock()
-    private var continuation: CheckedContinuation<MemoryLookupResult, Never>?
+    var continuation: CheckedContinuation<MemoryLookupResult, Never>?
     func install(_ value: CheckedContinuation<MemoryLookupResult, Never>) { lock.lock(); continuation = value; lock.unlock() }
     func finish(_ value: MemoryLookupResult) {
         lock.lock(); let current = continuation; continuation = nil; lock.unlock()
@@ -33,7 +33,7 @@ actor TranslationMemoryStore {
     var db: OpaquePointer?
     private var lookupStatements: [String: OpaquePointer] = [:]
     var active = false
-    private var latestRevision = -1
+    var latestRevision = -1
     var status = MemoryStoreHealth()
     #if MEMORY_FAULT_TESTING
     private var injectedInsertCountdown: Int?
@@ -57,7 +57,7 @@ actor TranslationMemoryStore {
 
     /// Only the two read-only lookup shapes are retained, on this actor.
     /// Reset AND clear bindings after every use, including conflicts/timeouts.
-    private func lookupStatement(_ sql: String, _ values: [SQLValue]) throws -> OpaquePointer {
+    func lookupStatement(_ sql: String, _ values: [SQLValue]) throws -> OpaquePointer {
         guard let query = lookupStatements[sql] else {
             let query = try statement(sql, values)
             lookupStatements[sql] = query
@@ -71,7 +71,7 @@ actor TranslationMemoryStore {
         return query
     }
 
-    private func finishLookup(_ query: OpaquePointer) {
+    func finishLookup(_ query: OpaquePointer) {
         let reset = sqlite3_reset(query)
         let cleared = sqlite3_clear_bindings(query)
         if reset != SQLITE_OK || cleared != SQLITE_OK {
@@ -139,7 +139,7 @@ actor TranslationMemoryStore {
     func setMetadata(_ key: String, _ value: String) throws {
         try execute("INSERT INTO memory_metadata(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", [.text(key), .text(value)])
     }
-    private func metadata(_ key: String) throws -> String? {
+    func metadata(_ key: String) throws -> String? {
         let query = try statement("SELECT value FROM memory_metadata WHERE key=?", [.text(key)])
         defer { sqlite3_finalize(query) }
         let code = sqlite3_step(query)
@@ -270,10 +270,10 @@ actor TranslationMemoryStore {
 
     /// Parses historical byte-length prefixes, not delimiter splitting of source text.
     /// Delimiters and emoji may legitimately occur inside protected-token context.
-    private struct KeyParts {
+    struct KeyParts {
         var source: String; var target: String; var sourceText: String; var context: String; var rules: String?
     }
-    private func keyParts(_ key: String) -> KeyParts? {
+    func keyParts(_ key: String) -> KeyParts? {
         var bytes = Array(key.utf8)
         func field() -> String? {
             guard let end = bytes.firstIndex(of: 124), let value = String(bytes: bytes[..<end], encoding: .utf8) else { return nil }
@@ -295,8 +295,8 @@ actor TranslationMemoryStore {
               let sourceText = String(bytes: bytes.dropFirst(size + 1), encoding: .utf8), !sourceText.isEmpty else { return nil }
         return KeyParts(source: String(languages[0]), target: String(languages[1]), sourceText: sourceText, context: context, rules: rules)
     }
-    private func digest(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
-    private func normalized(_ text: String) -> String {
+    func digest(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
+    func normalized(_ text: String) -> String {
         // Conservative: case and punctuation carry meaning and are retained.
         text.precomposedStringWithCanonicalMapping.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
     }
@@ -378,25 +378,7 @@ actor TranslationMemoryStore {
         }
     }
 
-    /// The deadline includes time waiting behind actor work. Timeout wins exactly
-    /// once; a delayed lookup is discarded and never publishes an unsolicited result.
-    nonisolated func lookup(key: String, timeoutMilliseconds: Double = 8) async -> MemoryLookupResult {
-        let started = ProcessInfo.processInfo.systemUptime
-        let budget = min(50, max(1, timeoutMilliseconds.isFinite ? timeoutMilliseconds : 8)) / 1000
-        let completion = MemoryLookupCompletion()
-        return await withCheckedContinuation { continuation in
-            completion.install(continuation)
-            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + budget) {
-                completion.finish(MemoryLookupResult(value: nil, origin: "none", outcome: "timeout", durationMs: (ProcessInfo.processInfo.systemUptime - started) * 1000))
-            }
-            Task {
-                let result = await self.lookupNow(key: key, started: started, deadline: started + budget)
-                self.measurement.report(result.waitMs)
-                completion.finish(result)
-            }
-        }
-    }
-    private func lookupNow(key: String, started: Double, deadline: Double) -> MemoryLookupResult {
+    func lookupNow(key: String, started: Double, deadline: Double) -> MemoryLookupResult {
         // 2.2.1 (D10): measure how long this lookup queued behind saves, health queries and other lookups.
         let waitMs = (ProcessInfo.processInfo.systemUptime - started) * 1000
         var measured = lookupBody(key: key, started: started, deadline: deadline)
@@ -431,568 +413,6 @@ actor TranslationMemoryStore {
     }
 
 
-    /// Canonical Unicode equivalence is the only automatic normalized reuse.
-    /// Never remove punctuation, whitespace, names or context to manufacture a hit.
-    /// The language/normalized_source index bounds work before compatibility checks.
-    private func lookupNormalized(key: String, started: Double, deadline: Double) throws -> MemoryLookupResult {
-        func result(_ value: String? = nil, _ origin: String = "none", _ outcome: String) -> MemoryLookupResult {
-            MemoryLookupResult(value: value, origin: origin, outcome: outcome,
-                durationMs: (ProcessInfo.processInfo.systemUptime - started) * 1000)
-        }
-        guard let requested = keyParts(key), let rules = requested.rules
-        else { return result(nil, "none", "incompatible") }
-        let composed = requested.sourceText.precomposedStringWithCanonicalMapping
-        let query = try lookupStatement("""
-            SELECT canonical_key,translated_text,validation_state,confirmation_state
-            FROM memory_entries
-            WHERE source_language=? AND target_language=? AND normalized_source=?
-            LIMIT 16
-            """, [.text(requested.source), .text(requested.target),
-                   .text(normalized(requested.sourceText))])
-        defer { finishLookup(query) }
-        var matched: String?
-        var scanned = 0
-        while true {
-            guard ProcessInfo.processInfo.systemUptime < deadline
-            else { return result(nil, "none", "timeout") }
-            let state = sqlite3_step(query)
-            if state == SQLITE_DONE { break }
-            guard state == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
-            scanned += 1
-            // If more matches might be unseen, refuse to guess.
-            if scanned == 16 { return result(nil, "none", "ambiguous") }
-            guard let parts = keyParts(text(query, 0)),
-                  parts.rules == rules,
-                  parts.context == requested.context,
-                  parts.source == requested.source,
-                  parts.target == requested.target,
-                  parts.sourceText.precomposedStringWithCanonicalMapping == composed
-            else { continue }
-            // A quarantined canonical-equivalent variant must block automatic
-            // normalized reuse instead of being bypassed by a different byte form.
-            guard text(query, 2) == "ready", text(query, 3) == "persisted"
-            else { return result(nil, "none", "incompatible") }
-            if matched != nil { return result(nil, "none", "conflict") }
-            matched = text(query, 1)
-        }
-        guard ProcessInfo.processInfo.systemUptime < deadline
-        else { return result(nil, "none", "timeout") }
-        return matched.map { result($0, "normalized", "normalized_hit") }
-            ?? result(nil, "none", "miss")
-    }
-
-    /// Safely quarantine suspect entries for fresh translation. The original text
-    /// remains persisted and inspectable; user history and settings are untouched.
-    func quarantineEntries(ids: [Int64]) throws -> MemoryStoreHealth {
-        guard active else { throw MemoryStoreError.unavailable }
-        try transaction {
-            for id in Set(ids) {
-                try execute("""
-                    UPDATE memory_entries SET validation_state='needs_validation',
-                    confirmation_state='needs_validation',updated_at=?
-                    WHERE id=?
-                    """, [.real(Date().timeIntervalSince1970), .integer(id)])
-            }
-        }
-        return try health()
-    }
-
-    /// Reconcile *only* independently generated, confirmed current-rule model results.
-    /// An older key with no rules digest never becomes directly reusable: a new v4
-    /// translation is persisted first, then the old row is marked as historical evidence.
-    /// Exact language, NFC-equivalent source, and context must match. No fuzzy matching,
-    /// no app-start mass validation, and no additional translation requests are made.
-    private func reconcileLegacy(key: String, confirmedValue: String) throws {
-        // Common case after migration: no pending legacy rows, so avoid even an
-        // indexed SQLite lookup on the asynchronous confirmation-write path.
-        guard status.legacyUnverified > 0 else { return }
-        guard let fresh = keyParts(key), fresh.rules != nil,
-              !confirmedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        // Indexed exact/prefix selection, capped even on large legacy stores.
-        // Cross-language matches and unconstrained full-table fuzzy scans are forbidden.
-        let normalizedSource = normalized(fresh.sourceText)
-        let prefix = String(normalizedSource.prefix(2))
-        guard prefix.count == 2 && !prefix.contains(where: { "*?[]%_".contains($0) }) else { return }
-        let q = try statement("""
-            SELECT id,canonical_key,source_text,translated_text FROM memory_entries
-            WHERE source_language=? AND target_language=?
-              AND rules_version IS NULL AND validation_state='needs_validation'
-              AND (normalized_source=? OR normalized_source LIKE ?
-                   OR normalized_source LIKE ? OR INSTR(?, normalized_source)>0)
-            ORDER BY CASE WHEN normalized_source=? THEN 0 ELSE 1 END, id DESC
-            LIMIT 65
-            """, [.text(fresh.source), .text(fresh.target),
-                   .text(normalizedSource), .text(prefix + "%"),
-                   .text("%" + normalizedSource + "%"), .text(normalizedSource),
-                   .text(normalizedSource)])
-        defer { sqlite3_finalize(q) }
-        var updates: [(id: Int64, state: String)] = []
-        var suggestions: [(id: Int64, kind: LegacyAssociationKind)] = []
-        var seen = 0
-        while true {
-            let code = sqlite3_step(q)
-            if code == SQLITE_DONE { break }
-            guard code == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
-            // Refuse an ambiguous or excessive set; leave all historical rows untouched.
-            seen += 1
-            if seen > 64 { return }
-            let oldKey = text(q, 1)
-            guard let old = keyParts(oldKey), old.rules == nil,
-                  old.source == fresh.source, old.target == fresh.target,
-                  old.context == fresh.context else { continue }
-            let association = LegacyAssociation.classify(old: old.sourceText, new: fresh.sourceText)
-            let id = sqlite3_column_int64(q, 0)
-            if association == .exact {
-                let oldValue = text(q, 3)
-                // Differing natural translations are alternate wording, not proof
-                // of a wrong old answer. Both outputs remain inspectable.
-                let state = oldValue == confirmedValue ? "validated_legacy" : "superseded_legacy"
-                updates.append((id: id, state: state))
-            } else if association != .none {
-                // Only store a review suggestion. No fuzzy OCR/fragment match
-                // ever promotes a legacy translation to a usable memory hit.
-                suggestions.append((id: id, kind: association))
-            }
-        }
-        let now = Date().timeIntervalSince1970
-        if !suggestions.isEmpty {
-            let q = try statement("SELECT id FROM memory_entries WHERE canonical_key=? AND translated_text=? LIMIT 1",
-                [.text(key), .text(confirmedValue)])
-            let row = sqlite3_step(q)
-            let currentID: Int64? = row == SQLITE_ROW ? sqlite3_column_int64(q, 0) : nil
-            sqlite3_finalize(q)
-            guard let currentID else { throw MemoryStoreError.databaseOperation }
-            for suggestion in suggestions {
-                try execute("""
-                    INSERT OR IGNORE INTO memory_legacy_associations
-                    (legacy_id,current_id,kind,created_at) VALUES(?,?,?,?)
-                    """, [.integer(suggestion.id), .integer(currentID),
-                           .text(suggestion.kind.rawValue), .real(now)])
-            }
-        }
-        for update in updates {
-            try execute("""
-                UPDATE memory_entries SET validation_state=?, updated_at=?
-                WHERE id=? AND validation_state='needs_validation' AND rules_version IS NULL
-                """, [.text(update.state), .real(now), .integer(update.id)])
-        }
-    }
-
-    struct LegacyIdleCandidate: Sendable {
-        let id: Int64
-        let source: String
-        let target: String
-        let text: String
-        let previousOutput: String
-    }
-
-    /// Only called after user opt-in while foreground/idle. Cursor avoids repeatedly
-    /// scheduling the same unsupported language pair or failing old entry.
-    func nextLegacyIdleCandidate(target: String, selectedSource: String?,
-                                 after id: Int64) throws -> LegacyIdleCandidate? {
-        guard active else { throw MemoryStoreError.unavailable }
-        let query = try statement("""
-            SELECT id,canonical_key,source_text,translated_text,source_language,target_language
-            FROM memory_entries
-            WHERE validation_state='needs_validation' AND rules_version IS NULL
-              AND target_language=? AND id>? AND LENGTH(source_text) BETWEEN 4 AND 240
-              AND (? IS NULL OR source_language=?)
-            ORDER BY id LIMIT 1
-            """, [.text(target), .integer(id), selectedSource.map(SQLValue.text) ?? .null,
-                   selectedSource.map(SQLValue.text) ?? .null])
-        defer { sqlite3_finalize(query) }
-        let result = sqlite3_step(query)
-        if result == SQLITE_DONE { return nil }
-        guard result == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
-        let recordID = sqlite3_column_int64(query, 0)
-        let key = text(query, 1)
-        let parsed = keyParts(key)
-        let eligible = parsed?.rules == nil && parsed?.context.isEmpty == true &&
-            parsed?.source == text(query, 4) && parsed?.target == text(query, 5)
-        // Return an empty source for malformed rows so the caller can advance
-        // its cursor without accidentally sending unknown text to the model.
-        return LegacyIdleCandidate(id: recordID,
-            source: eligible ? (parsed?.source ?? "") : "",
-            target: eligible ? (parsed?.target ?? "") : "",
-            text: eligible ? (parsed?.sourceText ?? "") : "",
-            previousOutput: text(query, 3))
-    }
-
-    /// Read-only inventory. Categories partition pending legacy records; scan
-    /// candidates still require key, cleanup, segmentation and model checks.
-    func legacyValidationInventory(target: String, selectedSource: String?) throws -> [String: Int] {
-        guard active else { throw MemoryStoreError.unavailable }
-        let pending = "validation_state='needs_validation' AND rules_version IS NULL"
-        let all = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE \(pending)"))
-        let targetCount = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE \(pending) AND target_language=?", [.text(target)]))
-        let pair = pending + " AND target_language=? AND (? IS NULL OR source_language=?)"
-        let values: [SQLValue] = [.text(target), selectedSource.map(SQLValue.text) ?? .null, selectedSource.map(SQLValue.text) ?? .null]
-        let matching = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE \(pair)", values))
-        let candidates = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE \(pair) AND LENGTH(source_text) BETWEEN 4 AND 240", values))
-        return ["Pending legacy records": all, "Different target language": all - targetCount,
-                "Different source language": targetCount - matching,
-                "Outside 4–240 character range": matching - candidates,
-                "Scan candidates before safety checks": candidates]
-    }
-
-    /// One bounded read instead of a separate SQLite call for each old entry.
-    /// The caller can skip malformed rows, missing models and context-incompatible
-    /// sources without loading all historical data into RAM.
-    func nextLegacyIdleCandidates(target: String, selectedSource: String?,
-                                  after id: Int64, limit: Int = 96) throws -> [LegacyIdleCandidate] {
-        guard active else { throw MemoryStoreError.unavailable }
-        let q = try statement("""
-            SELECT id,canonical_key,translated_text,source_language,target_language
-            FROM memory_entries
-            WHERE validation_state='needs_validation' AND rules_version IS NULL
-              AND target_language=? AND id>? AND LENGTH(source_text) BETWEEN 4 AND 240
-              AND (? IS NULL OR source_language=?)
-            ORDER BY id LIMIT ?
-            """, [.text(target), .integer(id),
-                   selectedSource.map(SQLValue.text) ?? .null,
-                   selectedSource.map(SQLValue.text) ?? .null,
-                   .integer(Int64(max(1, min(128, limit))))])
-        defer { sqlite3_finalize(q) }
-        var candidates: [LegacyIdleCandidate] = []
-        while true {
-            let result = sqlite3_step(q)
-            if result == SQLITE_DONE { break }
-            guard result == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
-            let parsed = keyParts(text(q, 1))
-            let eligible = parsed?.rules == nil && parsed?.context.isEmpty == true &&
-                parsed?.source == text(q, 3) && parsed?.target == text(q, 4)
-            candidates.append(LegacyIdleCandidate(id: sqlite3_column_int64(q, 0),
-                source: eligible ? (parsed?.source ?? "") : "",
-                target: eligible ? (parsed?.target ?? "") : "",
-                text: eligible ? (parsed?.sourceText ?? "") : "",
-                previousOutput: text(q, 2)))
-        }
-        return candidates
-    }
-
-    struct LegacyIdleConfirmation: Sendable {
-        let id: Int64
-        let currentKey: String
-        let freshOutput: String
-    }
-
-    /// Batch commit is one WAL transaction and one health refresh. Every row is
-    /// checked again against its original key, language and pending state before
-    /// insertion. If one entry changed, rollback *all* new translations.
-    func confirmIdleLegacyBatch(_ entries: [LegacyIdleConfirmation],
-                                revision: Int) throws -> MemoryStoreHealth {
-        guard active else { throw MemoryStoreError.unavailable }
-        guard revision > latestRevision else { throw MemoryStoreError.staleRevision }
-        guard !entries.isEmpty, entries.count <= IdleLegacyBatchPolicy.maximumEntries,
-              Set(entries.map(\.id)).count == entries.count
-        else { throw MemoryStoreError.invalidImport }
-        do {
-            try transaction {
-                for item in entries {
-                    guard let parts = keyParts(item.currentKey),
-                          parts.rules != nil, parts.context.isEmpty,
-                          !item.freshOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                    else { throw MemoryStoreError.invalidImport }
-                    let q = try statement("""
-                        SELECT canonical_key,translated_text FROM memory_entries
-                        WHERE id=? AND rules_version IS NULL
-                          AND validation_state='needs_validation'
-                        """, [.integer(item.id)])
-                    let result = sqlite3_step(q)
-                    let originalKey = result == SQLITE_ROW ? text(q, 0) : ""
-                    let originalOutput = result == SQLITE_ROW ? text(q, 1) : ""
-                    sqlite3_finalize(q)
-                    guard result == SQLITE_ROW, let old = keyParts(originalKey),
-                          old.rules == nil, old.source == parts.source,
-                          old.target == parts.target, old.context.isEmpty,
-                          old.sourceText == parts.sourceText
-                    else { throw MemoryStoreError.staleRevision }
-                    _ = try insert(key: item.currentKey,
-                                   value: item.freshOutput, compatible: true)
-                    try execute("""
-                        UPDATE memory_entries SET validation_state=?, updated_at=?
-                        WHERE id=? AND validation_state='needs_validation'
-                        """, [.text(originalOutput == item.freshOutput ?
-                                    "validated_legacy" : "superseded_legacy"),
-                               .real(Date().timeIntervalSince1970), .integer(item.id)])
-                }
-            }
-        } catch {
-            status.failedWrites += 1
-            throw error
-        }
-        latestRevision = revision
-        return try health()
-    }
-
-    /// A successful fresh on-device model translation, independently requested
-    /// while idle. This never trusts the historical output as translation truth.
-    /// One transaction saves the v4 current translation and classifies the old
-    /// record without deleting it. Fails closed if state changed in the meantime.
-    func confirmIdleLegacy(id: Int64, currentKey: String,
-                           freshOutput: String, revision: Int) throws -> MemoryStoreHealth {
-        guard active else { throw MemoryStoreError.unavailable }
-        guard revision > latestRevision else { throw MemoryStoreError.staleRevision }
-        guard let parts = keyParts(currentKey), parts.rules != nil, parts.context.isEmpty,
-              !freshOutput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        else { throw MemoryStoreError.invalidImport }
-        try transaction {
-            let query = try statement("""
-                SELECT canonical_key,translated_text FROM memory_entries
-                WHERE id=? AND rules_version IS NULL AND validation_state='needs_validation'
-                """, [.integer(id)])
-            let result = sqlite3_step(query)
-            let oldKey = result == SQLITE_ROW ? text(query, 0) : ""
-            let oldOutput = result == SQLITE_ROW ? text(query, 1) : ""
-            sqlite3_finalize(query)
-            guard result == SQLITE_ROW, let old = keyParts(oldKey),
-                  old.source == parts.source, old.target == parts.target,
-                  old.context.isEmpty, old.sourceText == parts.sourceText
-            else { throw MemoryStoreError.staleRevision }
-            _ = try insert(key: currentKey, value: freshOutput, compatible: true)
-            try execute("""
-                UPDATE memory_entries SET validation_state=?, updated_at=?
-                WHERE id=? AND validation_state='needs_validation'
-                """, [.text(oldOutput == freshOutput ? "validated_legacy" : "superseded_legacy"),
-                       .real(Date().timeIntervalSince1970), .integer(id)])
-        }
-        latestRevision = revision
-        return try health()
-    }
-
-    /// The caller supplies only confirmed eligible results. Return means COMMIT has
-    /// succeeded. A failed transaction leaves every prior translation untouched.
-    /// independentlyConfirmedKeys come only from current-model results that
-    /// reached confirmed OCR (including an exact-match speculative result after
-    /// confirmation), never from ordinary RAM, disk or imported memory hits.
-    func save(_ entries: [String:String], revision: Int,
-              independentlyConfirmedKeys: Set<String> = [],
-              knownDefaultStrategyKeys: Set<String> = []) throws -> MemoryStoreHealth {
-        guard active else { throw MemoryStoreError.unavailable }
-        guard revision > latestRevision else { throw MemoryStoreError.staleRevision }
-        do {
-            try transaction {
-                for (key, value) in entries {
-                    guard keyParts(key)?.rules != nil, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
-                    let inserted = try insert(key: key, value: value, compatible: true)
-                    if knownDefaultStrategyKeys.contains(key) {
-                        // Add a new observation; do not relabel or erase historical provenance.
-                        // The existing schema can represent this metadata without a migration.
-                        let fingerprint = digest(Data((key + "\u{1F}" + value + "\u{1F}appleDefault").utf8))
-                        try execute("""
-                            INSERT OR IGNORE INTO memory_provenance(entry_id,source_format,source_fingerprint,legacy_key,import_batch,import_timestamp,original_metadata)
-                            VALUES(?,?,?,?,?,?,?)
-                            """, [.integer(inserted.id), .text("live_v190"), .text(fingerprint), .text(key),
-                                   .text("live_v190"), .real(Date().timeIntervalSince1970),
-                                   .text("{\"requestedStrategy\":\"appleDefault\",\"effectiveModel\":\"unknown\",\"qualityTier\":\"preferred\",\"sourceConfirmed\":true}")])
-                    }
-                    if independentlyConfirmedKeys.contains(key) {
-                        try reconcileLegacy(key: key, confirmedValue: value)
-                    }
-                }
-            }
-        } catch { status.failedWrites += 1; throw error }
-        latestRevision = revision // Only acknowledge the revision after SQLite COMMIT.
-        return try health()
-    }
-
-    func health() throws -> MemoryStoreHealth {
-        let healthBegan = ProcessInfo.processInfo.systemUptime
-        status.totalEntries = Int(try scalar("SELECT COUNT(*) FROM memory_entries"))
-        status.readyEntries = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE validation_state='ready'"))
-        status.needsValidation = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE validation_state='needs_validation'"))
-        status.legacyValidated = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE validation_state='validated_legacy'"))
-        status.legacySuperseded = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE validation_state='superseded_legacy'"))
-        status.legacyUnverified = Int(try scalar("SELECT COUNT(*) FROM memory_entries WHERE validation_state='needs_validation' AND rules_version IS NULL"))
-        status.suggestedOCRMatches = Int(try scalar("SELECT COUNT(DISTINCT legacy_id) FROM memory_legacy_associations WHERE kind IN ('orthographic','ocrCandidate')"))
-        status.suggestedFragmentMatches = Int(try scalar("SELECT COUNT(DISTINCT legacy_id) FROM memory_legacy_associations WHERE kind='fragment'"))
-        status.conflicts = Int(try scalar("SELECT COUNT(*) FROM memory_conflicts WHERE resolved=0"))
-        status.importedEntries = Int(try scalar("SELECT COALESCE(SUM(imported),0) FROM migration_runs WHERE state='ready'"))
-        status.duplicateEntries = Int(try scalar("SELECT COALESCE(SUM(duplicates),0) FROM migration_runs WHERE state='ready'"))
-        let categories = try statement("SELECT unit_type,COUNT(*) FROM memory_entries GROUP BY unit_type")
-        defer { sqlite3_finalize(categories) }
-        var counts: [String: Int] = [:]
-        while true {
-            let code = sqlite3_step(categories)
-            if code == SQLITE_DONE { break }
-            guard code == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
-            counts[text(categories, 0)] = Int(sqlite3_column_int64(categories, 1))
-        }
-        status.categoryCounts = counts
-        status.lastVerifiedBackup = try metadata("last_verified_backup").flatMap { $0.isEmpty ? nil : $0 }
-        status.databaseBytes = ["memory.sqlite","memory.sqlite-wal","memory.sqlite-shm"].reduce(0) {
-            $0 + ((try? FileManager.default.attributesOfItem(atPath: directory.appendingPathComponent($1).path)[.size] as? NSNumber)?.int64Value ?? 0)
-        }
-        // Set before the copy is returned, so the caller sees the time this query took.
-        status.lastHealthMs = (ProcessInfo.processInfo.systemUptime - healthBegan) * 1000
-        return status
-    }
-
-    func verifyIntegrity() throws -> String {
-        let query = try statement("PRAGMA quick_check"); defer { sqlite3_finalize(query) }
-        guard sqlite3_step(query) == SQLITE_ROW, text(query, 0) == "ok" else { throw MemoryStoreError.integrityFailure }
-        let foreign = try statement("PRAGMA foreign_key_check"); defer { sqlite3_finalize(foreign) }
-        guard sqlite3_step(foreign) == SQLITE_DONE else { throw MemoryStoreError.integrityFailure }
-        status.integrity = "ok"
-        return "ok"
-    }
-
-
-    func deletePreservedCopies(legacyURLs: [URL]) throws {
-        guard active else { throw MemoryStoreError.unavailable }
-        // Enforce the destructive operation's precondition at the storage boundary,
-        // not only in the UI. Do not erase the last recovery sources of active data.
-        guard try scalar("SELECT COUNT(*) FROM memory_entries") == 0 else {
-            throw MemoryStoreError.memoryNotEmpty
-        }
-        let permitted = Set(["translation-memory-v4.json", "translation-memory.json"])
-        for url in legacyURLs {
-            guard permitted.contains(url.lastPathComponent) else { throw MemoryStoreError.sourceUnreadable }
-            if FileManager.default.fileExists(atPath: url.path) {
-                try FileManager.default.removeItem(at: url)
-            }
-        }
-        for name in ["legacy", "recovery"] {
-            let folder = directory.appendingPathComponent(name, isDirectory: true)
-            if FileManager.default.fileExists(atPath: folder.path) {
-                try FileManager.default.removeItem(at: folder)
-            }
-        }
-        try setMetadata("last_verified_backup", "")
-        status.lastVerifiedBackup = nil
-    }
-
-    func clear(revision: Int) throws {
-        guard active else { throw MemoryStoreError.unavailable }
-        guard revision > latestRevision else { throw MemoryStoreError.staleRevision }
-        try transaction {
-            try execute("DELETE FROM memory_entries")
-            // Retain migration receipts so intentionally deleted entries are not
-            // silently reimported from protected legacy originals at next launch.
-            try setMetadata("last_explicit_clear", String(Date().timeIntervalSince1970))
-        }
-        latestRevision = revision // A rolled-back clear must remain retryable.
-    }
-    #if MEMORY_FAULT_TESTING
-    private var failLegacyDeletion = false
-    func injectLegacyDeletionFailure() { failLegacyDeletion = true }
-    #endif
-
-    /// Deletes only still-unvalidated legacy rows, across all language pairs
-    /// and lengths. Rechecks state inside the transaction; migration receipts
-    /// remain so retained import files cannot silently resurrect these rows.
-    func deleteUnvalidatedLegacy(revision: Int) throws -> Int {
-        guard active else { throw MemoryStoreError.unavailable }
-        guard revision > latestRevision else { throw MemoryStoreError.staleRevision }
-        let removed: Int = try transaction {
-            try execute("DELETE FROM memory_entries WHERE validation_state='needs_validation' AND rules_version IS NULL")
-            let count = Int(sqlite3_changes(db))
-            #if MEMORY_FAULT_TESTING
-            if failLegacyDeletion {
-                failLegacyDeletion = false
-                throw MemoryStoreError.databaseOperation
-            }
-            #endif
-            try setMetadata("last_unvalidated_legacy_delete", String(Date().timeIntervalSince1970))
-            return count
-        }
-        latestRevision = revision
-        return removed
-    }
-
-    func delete(ids: [Int64]) throws {
-        guard active else { throw MemoryStoreError.unavailable }
-        try transaction { for id in ids { try execute("DELETE FROM memory_entries WHERE id=?", [.integer(id)]) } }
-    }
-    private func readEntry(_ query: OpaquePointer) -> MemoryStoredEntry {
-        MemoryStoredEntry(id: sqlite3_column_int64(query, 0), key: text(query, 1), sourceText: text(query, 2), translatedText: text(query, 3), sourceLanguage: text(query, 4), targetLanguage: text(query, 5), unitType: text(query, 6), validationState: text(query, 7), confirmationState: text(query, 8), createdAt: sqlite3_column_double(query, 9), updatedAt: sqlite3_column_double(query, 10), reuseCount: Int(sqlite3_column_int(query, 11)))
-    }
-    private var entryColumns: String { "id,canonical_key,source_text,translated_text,source_language,target_language,unit_type,validation_state,confirmation_state,created_at,updated_at,reuse_count" }
-    /// Explicit management query, never called by the live translation path.
-    func search(query: String = "", limit: Int = 100) throws -> [MemoryStoredEntry] {
-        let escaped = query.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "%", with: "\\%").replacingOccurrences(of: "_", with: "\\_")
-        let sql = try statement("SELECT \(entryColumns) FROM memory_entries WHERE source_text LIKE ? ESCAPE '\\' OR translated_text LIKE ? ESCAPE '\\' ORDER BY id DESC LIMIT ?", [.text("%\(escaped)%"), .text("%\(escaped)%"), .integer(Int64(min(1000, max(1, limit))))])
-        defer { sqlite3_finalize(sql) }
-        var entries: [MemoryStoredEntry] = []
-        while true {
-            let code = sqlite3_step(sql)
-            if code == SQLITE_DONE { break }
-            guard code == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
-            entries.append(readEntry(sql))
-        }
-        return entries
-    }
-    /// Explicit management-only query. Never enumerate conflicts in live OCR lookup.
-    /// Both alternatives remain intact until an informed user takes action.
-    func conflictingEntries(limit: Int = 100) throws -> [MemoryStoredEntry] {
-        guard active else { throw MemoryStoreError.unavailable }
-        let sql = try statement("""
-            SELECT \(entryColumns) FROM memory_entries
-            WHERE id IN (
-                SELECT entry_id FROM memory_conflicts WHERE resolved=0
-                UNION SELECT alternative_id FROM memory_conflicts WHERE resolved=0
-            )
-            ORDER BY updated_at DESC LIMIT ?
-            """, [.integer(Int64(min(100, max(1, limit))))])
-        defer { sqlite3_finalize(sql) }
-        var entries: [MemoryStoredEntry] = []
-        while true {
-            let code = sqlite3_step(sql)
-            if code == SQLITE_DONE { break }
-            guard code == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
-            entries.append(readEntry(sql))
-        }
-        return entries
-    }
-
-    private struct ExportEnvelope: Codable {
-        let formatVersion: Int
-        let schemaVersion: Int
-        let exportedAt: Date
-        let entries: [MemoryStoredEntry]
-        let checksum: String
-    }
-    func exportData() throws -> Data {
-        let query = try statement("SELECT \(entryColumns) FROM memory_entries ORDER BY id")
-        defer { sqlite3_finalize(query) }
-        var entries: [MemoryStoredEntry] = []
-        while true {
-            let code = sqlite3_step(query)
-            if code == SQLITE_DONE { break }
-            guard code == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
-            entries.append(readEntry(query))
-        }
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        let checksum = digest(try encoder.encode(entries))
-        let data = try encoder.encode(ExportEnvelope(formatVersion: 1, schemaVersion: Self.schemaVersion, exportedAt: Date(), entries: entries, checksum: checksum))
-        // Keep exports within the same documented 256 MiB transfer ceiling as imports.
-        // A too-large export must fail explicitly instead of presenting an unusable file.
-        guard data.count <= 256 * 1024 * 1024 else { throw MemoryStoreError.tooLarge }
-        return data
-    }
-    func importData(_ data: Data) throws -> MemoryStoreHealth {
-        guard active else { throw MemoryStoreError.unavailable }
-        guard data.count <= 256 * 1024 * 1024 else { throw MemoryStoreError.tooLarge }
-        guard let envelope = try? JSONDecoder().decode(ExportEnvelope.self, from: data) else { throw MemoryStoreError.invalidImport }
-        guard envelope.formatVersion == 1, [1, Self.schemaVersion].contains(envelope.schemaVersion) else { throw MemoryStoreError.unsupportedImport }
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        guard digest(try encoder.encode(envelope.entries)) == envelope.checksum else { throw MemoryStoreError.integrityFailure }
-        try transaction {
-            for entry in envelope.entries {
-                let inserted = try insert(key: entry.key, value: entry.translatedText,
-                    compatible: entry.validationState == "ready" && entry.confirmationState == "persisted",
-                    revalidateExisting: false)
-                if inserted.inserted, keyParts(entry.key)?.rules == nil,
-                   ["validated_legacy", "superseded_legacy"].contains(entry.validationState) {
-                    try execute("""
-                        UPDATE memory_entries SET validation_state=?,confirmation_state=?
-                        WHERE id=? AND rules_version IS NULL
-                        """, [.text(entry.validationState),
-                               .text(entry.confirmationState), .integer(inserted.id)])
-                }
-            }
-        }
-        return try health()
-    }
+    var failLegacyDeletion = false
 }
 

@@ -1,79 +1,93 @@
 # ScreenLingo structure guidelines
 
-Status: written 2026-11-10 for the 2.3.2 (build 109) code, refreshed after all contract tests moved to `read_source` and the shell scripts to `scripts/swift_sources.sh`. Nothing Swift was compiled. Existing files are NOT moved by this document (the first moves are logged in the migration plan); it defines where NEW code, tests and docs go and how the big files shrink over time. The step-by-step path to moving and splitting existing files is in `docs/structure-migration-plan.md`.
+Status: rewritten for 2.3.9 (build 116). Reviewed for: 2.3 (see section 9). The big files were split in 2.3.3 to 2.3.9 (see `docs/structure-migration-plan.md` for the log). Swift was never compiled in chat; the GitHub Actions run is the first test of any change. This file says where code, tests and docs go, and how to split safely.
 
-Why: `TranslatorEngine.swift` (~258 KB), `Diagnostics.swift` (~121 KB), `DiagnosticArchive.swift` (~105 KB), `TranslationMemoryStore.swift` (~81 KB) and `DiagnosticsDashboard.swift` (~77 KB) are too big to review or edit safely, and `App/` has ~27 loose files. Optimization work keeps going, so structure improves a little with every update instead of in one big stop.
+## 1. Current state (2.3.9)
+<!-- sizes:start -->
+| Main file | Lines (rounded to 50) | Part files |
+|---|---|---|
+| App/TranslatorEngine.swift | 1350 | 20 |
+| App/Diagnostics.swift | 650 | 8 |
+| BroadcastExtension/SampleHandler.swift | 500 | 3 |
+| App/DiagnosticArchive.swift | 400 | 7 |
+| App/TranslationMemoryStore.swift | 400 | 9 |
+| App/ModeTranslationService.swift | 400 | 2 |
+| App/SettingsViews.swift | 300 | 2 |
+| App/DiagnosticsDashboard.swift | 300 | 5 |
+| App/TestRunViews.swift | 250 | 2 |
+| Shared/TranslationSystem.swift | 250 | 2 |
+<!-- sizes:end -->
+Biggest remaining: TranslatorEngine (stored properties, `init`, test-pinned members) and `process` (391 lines, one function, left whole on purpose).
 
-## 1. What is possible now (no moves, no risk to tests)
-- New code goes into new files in the target folders below. Xcode sources are `[App, Shared]` in `project.yml` and are picked up recursively, so a new folder under `App/` needs no project change.
-- `Shared/` stays FLAT. `build.yml` compiles `Shared/*.swift` with a glob, so a subfolder there would silently drop files from those test builds.
-- Tests now find sources by name (`read_source`, `scripts/swift_sources.sh`), so moving a file no longer breaks them. Still open before any move: 3 `swiftc` lines in `build.yml`, the path read in `Tests/TestRuns/main.swift`, and the two UI lints (see the migration plan).
-- `docs/` stays flat for now (see section 7). The index is `docs/README.md`.
-
-## 2. Target layout for `App/`
+## 2. Layout
 ```
 App/
-  Engine/        capture intake, OCR handling, Legacy drain and speculation,
-                 confirmation, PiP enqueue, mode preparation, caption assembly
-  Diagnostics/   recorder core, mode and pipeline events, run snapshots, archive/report sections, dashboard
-  Memory/        translation memory store, writer, management view
-  PiP/           PiP renderer, loopback transport
-  TestRuns/      test run store and views
-  Settings/      settings views, categories, customization
-  UI/            already organized by screen (Kit, Model, Translate, Library, Languages, Fixtures)
+  Engine/        TranslatorEngine+*, ModeTranslationService+*
+  Diagnostics/   recorder, archive, dashboard parts
+  Memory/        translation memory store parts
+  TestRuns/      test run view parts
+  Settings/      settings view parts
+  UI/            organized by screen (Kit, Model, Translate, Library, Languages, Fixtures)
+Shared/          FLAT (build.yml compiles Shared/*.swift by glob)
+BroadcastExtension/  SampleHandler + parts
 ```
-This is the END state. Do not move old files just to match it.
+Main files stay where they are (`App/TranslatorEngine.swift` ...); only parts live in the folders. `project.yml` sources are recursive, so new folders need no project change.
 
 ## 3. Rules for new code
-1. One concern per file, named for the concern (`LegacySpeculationAdmission.swift`, not `Helpers.swift`).
-2. Target size: under about 400 lines; over about 800 lines needs a reason in the PR.
-3. A new feature gets a new file in the right folder. It must not be appended to a file listed as "giant" above.
-4. Pure logic with no UI or engine state goes in `Shared/` as a small policy file with a Swift test in `Tests/` (the existing pattern: `PixelConfirmation`, `HistoryPolicy`, `LanguageRouting`).
-5. SwiftUI views go in `App/UI/<Screen>/` or `App/Settings/`, never next to engine code. UI files keep a unique file name and stay under a folder named `UI` (the UI lints match on both).
-6. Engine code that must touch engine state goes into an `extension TranslatorEngine` in its own file under `App/Engine/`.
-7. Split parts of a type are named `Type+Topic.swift` (for example `TranslatorEngine+LegacyDrain.swift`). `scripts/sources.py` relies on this name pattern.
+1. One concern per file, named for the concern. Target under about 400 lines; over about 800 needs a reason in the PR.
+2. New features go in new files in the folders above, never appended to a main file that is already over 800 lines.
+3. Split parts are named `Type+Topic.swift`, even when the part declares a different type. `scripts/sources.py` and `scripts/swift_sources.sh` find parts only by this name.
+4. Pure logic with no UI or engine state goes in `Shared/` as a small policy file with a Swift test in `Tests/`.
+5. SwiftUI views go in `App/UI/<Screen>/`, `App/Settings/` or the screen folder. UI files keep a unique name; the UI lints match on names and on `/UI/`.
+6. Engine code that touches engine state goes in `extension TranslatorEngine` in its own file under `App/Engine/`.
 
-## 4. Extract-on-touch (how the giant files shrink)
-When an update has to change code inside a giant file:
-1. First commit, no behavior change: move the affected functions into a new `Type+Topic.swift` file as an `extension`, text unchanged.
-2. Update tests and CI paths for that move in the same commit (unless the tests already use `read_source`).
-3. Second commit: the actual change, in the new small file.
-Both commits say what they are. A failed CI run is then traceable to one of them.
+## 4. How to split a file safely (learned in 2.3.3 to 2.3.9)
+1. Move whole units: top-level types, or whole members of a class, actor or struct. Never cut inside a function. One concern per commit; text unchanged.
+2. Stay in the main file: stored properties, `init`, `deinit`, `body`, members with `override`, and members that tests match by text or by position (section markers).
+3. Imports: every new file gets the imports its code uses. A missing `import CryptoKit` broke the 2.3.5 build. Grep the block for the symbols of each import of the source file.
+4. Access: `private` is file-scoped. Remove `private` only from members that another file of the same type uses. Then check that no internal method exposes a private type (2.3.5 and 2.3.7 each found one). Never make a member public.
+5. Check with a line multiset (moved text plus parts equals the old file; only `private` removals, wrappers and imports differ).
+6. Run all `scripts/test_*.py` and `make_settings_index.py --check`. Fix tests only so that their meaning stays (see section 5).
+7. Bump the version (every update), write `docs/vX.Y.Z-specification.md`, list it in `docs/README.md`. One push per stage; a new push cancels the running CI.
+8. Hot paths (`SampleHandler`, `TranslatorEngine`, `TranslationSystem`) are guarded by tests that compare function text with old commits. Moving them is allowed when the body stays identical; changing them needs a measured reason.
+9. Helper scripts for these checks are in `scripts/split_tools/` (see its README).
 
-Swift note: `private` members are file-scoped, so an extension in another file cannot use them. Moving code can force `private` to become `fileprivate` or internal. That is a small code change; list it in the commit message.
-
-## 5. Which files to split first (UNVERIFIED split points)
-Split points are guesses from file names and sizes, not from reading the code. Confirm by reading before moving.
-- `TranslatorEngine`: capture and OCR intake, Legacy drain and speculation, confirmation and PiP enqueue, mode preparation, core state.
-- `Diagnostics`: recorder core, mode and pipeline events, run snapshots and export.
-- `DiagnosticArchive`: one file per report/ZIP section.
-
-## 6. Tests and CI
-- Source-contract tests in `scripts/` compare function text with older commits (`old('App/TranslatorEngine.swift')`, which runs `git show <commit>:<path>`).
-- Every Python test that reads Swift sources loads them with `from sources import read_source` and `read_source("TranslatorEngine")` (see `scripts/sources.py`). That returns the main file plus all `TranslatorEngine+*.swift` parts wherever they are, so a move or split needs no test edit. New tests must do the same.
-- Shell scripts build their `swiftc` lists with `$(bash scripts/swift_sources.sh Name1 Name2)`, which does the same lookup. `Shared/*.swift` stays a glob.
-- `old()` comparisons keep the OLD commit's path; only the current-file side uses `read_source`.
-- `build.yml` still names 3 groups of `App/` files explicitly in `swiftc` commands (pipeline regressions, navigation, UI model); use `scripts/swift_sources.sh` there too. Any update that moves a file lists every script and workflow line it changed.
-- Do not add a new `test_vXYZ_contracts.py` per version if the check fits an existing topic test. A per-version file is only for checks that are specific to that release.
+## 5. Tests and CI
+- Python tests load Swift with `from sources import read_source` and `read_source("Name")` (main file plus all `Name+*.swift`). New tests must do the same. Never read `App/Name.swift` by path.
+- `function()` in `test_three_modes.py` cuts a function at its own closing brace and ignores `private`; `old()` comparisons keep the OLD commit path.
+- Test strings should name a member without the access keyword (`func show(`, not `private func show(`).
+- Tests that slice source between two markers depend on member order in one file. Keep those members together in the main file.
+- Shell scripts and `build.yml` build `swiftc` lists with `$(bash scripts/swift_sources.sh Name1 Name2)`, never with a file name. `Shared/*.swift` stays a glob. Workflow files cannot be pushed from chat; hand the file to the owner to paste.
+- Do not add a `test_vXYZ_contracts.py` per version if the check fits an existing topic test.
+- CI is two parallel jobs: `checks` (all tests) and `build` (xcodegen, xcodebuild, IPA). The IPA can exist while `checks` is red; read both.
 - CI green means it compiles and the tests pass. It is not proof of speed or correct subtitles.
 
-## 7. Docs
-- One specification per update: `docs/vX.Y.Z-specification.md`. State what was read, what was not, and what is unverified.
-- Add every new doc to `docs/README.md` in the same commit.
-- Diagnostics analyses (per build or mode) stay in the Claude Project, not in `docs/`, unless a spec needs the numbers; then quote them with their conditions.
-- Do not move existing docs into subfolders until it is checked whether any script or doc links to their paths.
+## 6. Docs
+- One specification per update: `docs/vX.Y.Z-specification.md`. State what was read, what was not, what is unverified.
+- Docs of older versions are records; do not edit them. Add every new doc to `docs/README.md` in the same commit.
+- Diagnostics analyses stay in the Claude Project, not in `docs/`.
+
+## 7. Branches and PRs
+- Work on `claude/screenlingo-v<version>` from the newest `claude/screenlingo-v*` branch. Open a draft PR into the branch you started from, never `main`. Old `codex/*` branches are history.
+- The chat session cannot delete branches or push workflow files.
 
 ## 8. Checklist for every update
 - [ ] Read the contract tests that mention the files you edit.
-- [ ] New code is in a new file in the target folder; no giant file grew.
-- [ ] If a giant file was touched: extraction commit first, then the change.
-- [ ] New or changed tests load sources with `read_source`; new `swiftc` lists use `scripts/swift_sources.sh`.
-- [ ] Version, build and changelog bumped in `Shared/Shared.swift` and `project.yml` (3 places each) and every script that asserts the version.
-- [ ] `docs/vX.Y.Z-specification.md` added and listed in `docs/README.md`.
+- [ ] New code is in a new file in the right folder; no file over 800 lines grew.
+- [ ] A split follows section 4 (imports, access, signature check, multiset, tests).
+- [ ] Version, build and changelog (no inner quotes) in `Shared/Shared.swift`; 3 places each in `project.yml`; every script that asserts the version.
+- [ ] `docs/vX.Y.Z-specification.md` added and listed in `docs/README.md`; `python3 scripts/test_structure_docs.py --write` run.
 - [ ] Commit messages say what changed. No speed claims without Diagnostics from all three modes.
-- [ ] Say that nothing was compiled; the CI run is the first test.
+- [ ] Say that nothing was compiled in chat; the CI run is the first test.
 
-## 9. Not decided
-- Whether `App/` files get regrouped at all, or only the new code follows the layout.
+## 9. Keeping this file current
+`scripts/test_structure_docs.py` runs in CI and fails when:
+- the size table in section 1 no longer matches the files (run `python3 scripts/test_structure_docs.py --write`; it only changes when a file moves by about 50 lines or a new part appears);
+- "Reviewed for" is older than the app's major.minor version. At 2.4.0, 3.0.0 and so on, re-read the whole file against the code, fix what is outdated, update `Status:` and set `Reviewed for: X.Y`;
+- a Swift file over 800 lines is not named in this file;
+- the current version has no `docs/vX.Y.Z-specification.md` listed in `docs/README.md`.
+
+## 10. Not decided
+- Whether `process` (391 lines) and `handleContent` (229) should ever be broken into smaller functions. That is a code change, not a layout change, and needs Diagnostics data.
 - Whether per-version test scripts should be merged into topic tests.
-- Whether `docs/` should get subfolders.
+- Whether `docs/` should get subfolders (check first that no script links to the paths).
