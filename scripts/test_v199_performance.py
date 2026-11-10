@@ -7,8 +7,13 @@ It does not claim a device performance improvement.
 """
 from pathlib import Path
 
+from sources import read_source
+
 root = Path(__file__).resolve().parents[1]
-read = lambda relative: (root / relative).read_text(encoding="utf-8")
+def read(relative):
+    if relative.split("/")[0] in ("App", "Shared", "BroadcastExtension"):
+        return read_source(Path(relative).stem)
+    return (root / relative).read_text(encoding="utf-8")
 shared = read("Shared/Shared.swift")
 project = read("project.yml")
 capture = read("BroadcastExtension/SampleHandler.swift")
