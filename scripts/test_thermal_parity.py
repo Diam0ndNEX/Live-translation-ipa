@@ -18,7 +18,7 @@ core = read("Shared/TranslationSystem.swift")
 policy = read("Shared/SubtitlePerformancePolicy.swift")
 tests = read("Tests/main.swift")
 modes = read("Tests/ThreeModes/main.swift")
-diagnostics = read("App/Diagnostics.swift")
+diagnostics = read_source("Diagnostics")
 
 required = {
     "thermal classification": 'case .nominal, .fair: return .fullPerformance' in policy,

@@ -26,11 +26,11 @@ slice = read("App/DesignSystem/EngineSlice.swift")
 categories = read("App/SettingsCategories.swift")
 policy = read("Shared/HistoryPolicy.swift")
 workflow = read(".github/workflows/build.yml")
-diagnostics = read("App/Diagnostics.swift")
+diagnostics = read_source("Diagnostics")
 archive = read("App/DiagnosticArchive.swift")
 runstore = read("App/TestRunStore.swift")
 runviews = read("App/TestRunViews.swift")
-dashboard = read("App/DiagnosticsDashboard.swift")
+dashboard = read_source("DiagnosticsDashboard")
 settings_views = read("App/SettingsViews.swift")
 guard_file = read("App/CollectionChangeGuard.swift")
 policy_shared = read("Shared/SubtitlePerformancePolicy.swift")
@@ -71,7 +71,7 @@ for fn, marker in (("deleteHistory", "func deleteHistory"), ("toggleStar", "func
     assert "flushHistorySave()" in body_of(engine, marker, "\n    }\n"), "E15: " + fn + " must flush the write"
 assert "historyWriter.cancel()" in body_of(engine, "func eraseHistory", "\n    }\n")
 assert "engine.flushHistorySave()" in app, "E15: the app must flush the Library when it goes to the background"
-assert "noteHistorySave" in engine and "historySaveMs" in read("App/Diagnostics.swift") and "historySaveMs" in read("App/DiagnosticArchive.swift")
+assert "noteHistorySave" in engine and "historySaveMs" in read_source("Diagnostics") and "historySaveMs" in read("App/DiagnosticArchive.swift")
 retention = body_of(engine, "    func applyHistoryRetention()", "\n    }\n")
 assert "if kept.count != history.count" in retention, "E15: retention must not write when nothing expired"
 
