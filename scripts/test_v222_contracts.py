@@ -47,7 +47,7 @@ assert "typeSize.isAccessibilitySize" in read_source("AreaEditor") and "typeSize
 # V: the current version (2.2.3 build 106, since the 2.2.3 update) in the three places the CI checks; the 2.2.2 changelog
 # entry must stay.
 shared = read_source("Shared"); project = read("project.yml")
-assert 'static let version = "2.3.8"' in shared and "static let build = 115" in shared
-assert project.count('"2.3.8"') == 3 and project.count('"115"') == 3
+assert 'static let version = "2.3.9"' in shared and "static let build = 116" in shared
+assert project.count('"2.3.9"') == 3 and project.count('"116"') == 3
 assert '("2.2.2", "Build 105:' in shared
 print("v2.2.2 source contracts passed: PiP host, start reasons, diagnostics codes, automatic start, large-text layouts, version")
