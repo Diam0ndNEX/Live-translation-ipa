@@ -2,9 +2,13 @@
 """Fail CI if nominal/fair policy parity is weakened in any translation backend."""
 from pathlib import Path
 
+from sources import read_source
+
 root = Path(__file__).resolve().parents[1]
 
-def read(path: str) -> str:
+def read(path):
+    if path.split("/")[0] in ("App", "Shared", "BroadcastExtension"):
+        return read_source(Path(path).stem)
     return (root / path).read_text(encoding="utf-8")
 
 engine = read("App/TranslatorEngine.swift")
