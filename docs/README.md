@@ -9,7 +9,13 @@ Older documents are records of what was true when they were written. They name b
 - structure-migration-plan.md: which scripts depend on which files, and the order for moving and splitting existing files
 
 ## Current line (start here)
-- v2.3.3-specification.md: newest specification in this folder (2.3.2 has no specification file; see the changelog in `Shared/Shared.swift`)
+- v2.3.9-specification.md: newest specification (TranslatorEngine, second pass)
+- v2.3.8-specification.md: remaining big files split, not TranslatorEngine
+- v2.3.7-specification.md: the five big files split
+- v2.3.6-specification.md: memory store, dashboard and recorder models split
+- v2.3.5-specification.md: memory store split, stage 2
+- v2.3.4-specification.md: memory store split, stage 1
+- v2.3.3-specification.md: layout, tests find Swift by name, first splits, faster CI. Older line: (2.3.2 has no specification file; see the changelog in `Shared/Shared.swift`)
 - v2.3.1-specification.md
 - v2.3.0-specification.md
 - v2.2.3-specification.md: includes the 2.2.2 b105 latency test figures
