@@ -7,8 +7,13 @@ and nothing here claims a device result.
 from pathlib import Path
 import re
 
+from sources import read_source
+
 root = Path(__file__).resolve().parents[1]
-read = lambda relative: (root / relative).read_text(encoding="utf-8")
+def read(relative):
+    if relative.split("/")[0] in ("App", "Shared", "BroadcastExtension"):
+        return read_source(Path(relative).stem)
+    return (root / relative).read_text(encoding="utf-8")
 engine = read("App/TranslatorEngine.swift")
 app = read("App/ScreenTranslatorApp.swift")
 phase = read("App/UI/Model/SessionPhase.swift")
