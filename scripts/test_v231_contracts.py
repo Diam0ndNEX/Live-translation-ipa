@@ -5,15 +5,15 @@ Structural checks only. Nothing here compiles or runs the app, and nothing claim
 2.3.1 changes diagnostics names and one diagnostic call; translation, OCR, confirmation and defaults are unchanged.
 """
 from pathlib import Path
+from sources import read_source
 
 root = Path(__file__).resolve().parents[1]
-read = lambda relative: (root / relative).read_text(encoding="utf-8")
-diagnostics = read("App/Diagnostics.swift")
-archive = read("App/DiagnosticArchive.swift")
-engine = read("App/TranslatorEngine.swift")
-system = read("Shared/TranslationSystem.swift")
-shared = read("Shared/Shared.swift")
-project = read("project.yml")
+diagnostics = read_source("Diagnostics")
+archive = read_source("DiagnosticArchive")
+engine = read_source("TranslatorEngine")
+system = read_source("TranslationSystem")
+shared = read_source("Shared")
+project = (root / "project.yml").read_text(encoding="utf-8")
 
 # "recovery" is the code's own word in the new modes for a translation after confirmation.
 assert system.count('"recovery_success"') == 1 and system.count('event(caption, "recovery_decision_" + reason, nil)') == 1
