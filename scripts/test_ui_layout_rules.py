@@ -7,6 +7,7 @@ text heuristic says so in its message, so a pass is not read as proof of the vis
 import re
 import sys
 from pathlib import Path
+from sources import read_source
 
 root = Path(__file__).resolve().parents[1]
 app = root / "App"
@@ -76,7 +77,7 @@ if pickers != 1:
     failures.append(f"U10: expected exactly one language picker implementation (LanguageSheet), found {pickers}")
 
 # R6: Diagnostics has no big summary pinned above every page; only the compact chip bar is pinned.
-dash = (app / "DiagnosticsDashboard.swift").read_text()
+dash = read_source("DiagnosticsDashboard")
 # 2.1.8: the chip row scrolls with the page; a pinned slab is what the owner called "stuck at the top".
 if "pinnedViews" in dash:
     failures.append("R6: DiagnosticsDashboard.swift: the page chip bar is pinned again")
@@ -107,19 +108,19 @@ for old in ("Live/LiveView.swift", "Live/LiveSheets.swift", "Languages/Languages
             "Library/LibraryView.swift", "Reader/ReaderView.swift", "WorkspaceViews.swift"):
     if (app / old).exists():
         failures.append(f"R1/R2/R3: {old} (replaced screen) still exists")
-translate = (app / "UI/Translate/TranslateScreen.swift").read_text()
+translate = read_source("TranslateScreen")
 if "PiPPreview" in translate or "StatusPill" in translate:
     failures.append("R1/R2: Translate draws the old preview box or a status pill")
 
 # R5: Languages groups and collapses its list instead of one flat list.
-lang = (app / "UI/Languages/LanguageSheet.swift").read_text()
+lang = read_source("LanguageSheet")
 for needle in ("Frequently used", "Available to download", "Downloaded", "Not supported on this device"):
     if needle not in lang:
         failures.append(f"R5: LanguageSheet has no '{needle}' group")
 
 # R9: every settings page is a native list (no header card) and the floating caption pages show the preview.
-custom = (app / "CustomizationViews.swift").read_text()
-settings = (app / "SettingsViews.swift").read_text()
+custom = read_source("CustomizationViews")
+settings = read_source("SettingsViews")
 if "CaptionPreview()" not in custom or "CaptionPreview()" not in settings:
     failures.append("R9: Window and Style pages must start with CaptionPreview")
 
