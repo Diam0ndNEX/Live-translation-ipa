@@ -1,6 +1,6 @@
 # ScreenLingo structure migration plan
 
-Status: written 2026-11-10 for 2.3.2 (build 109). Nothing Swift was compiled. No Swift file has been moved or split.
+Status: written 2026-11-10 for 2.3.2 (build 109), updated for 2.3.3. Nothing Swift was compiled. Step 3 has started: five whole types were moved out of `App/DiagnosticArchive.swift` into `App/Diagnostics/DiagnosticArchive+*.swift` (see the Step 3 log below). No other file has been moved or split.
 
 Progress: step 1 is done. Every Python test that reads Swift sources now loads them with `read_source`. The Python tests were run on a read-only clone of the branch and all CI-run ones pass. Step 2 is partly done (see below). Steps 3 and 4 are open.
 
@@ -53,4 +53,21 @@ Risks that stay (UNVERIFIED until CI):
 ## Decision for the owner
 Step 1 is done: 15 scripts changed, no assertion changed, one script per commit. The Python tests were run locally on a clone, so those results are real. Swift was not compiled, and the GitHub Actions run is still the first real test of the whole branch.
 
-Step 2: the 3 `build.yml` lines are yours to apply (or give this session workflow permission). No Swift file should be moved before that.
+Step 2 is complete: the 3 `build.yml` lines were applied by the owner and match the prepared version.
+
+## Step 3 log (2.3.3)
+Each row is its own commit; every moved line is identical (line multiset compared before and after), no access level changed, and all Python tests passed locally before the push. Swift was NOT compiled, so the GitHub Actions run is the first test that the pieces still compile together.
+
+| Commit | Moved out of DiagnosticArchive.swift | New file | Lines |
+|---|---|---|---|
+| 1 | DiagnosticStoredZIP | App/Diagnostics/DiagnosticArchive+StoredZIP.swift | 84 |
+| 2 | DiagnosticPerformanceComparison | DiagnosticArchive+Comparison.swift | 82 |
+| 3 | DiagnosticIssueFinding, DiagnosticIssueDetector | DiagnosticArchive+IssueDetector.swift | 133 |
+| 4 | DiagnosticReviewedStage, DiagnosticReviewedCandidate, DiagnosticTraceReview | DiagnosticArchive+TraceReview.swift | 100 |
+| 5 | CombinedDiagnosticReport | DiagnosticArchive+CombinedReport.swift | 408 |
+
+DiagnosticArchive.swift went from 1731 to about 920 lines. What stays in it: the export data types, the `DiagnosticExportWriter` actor (it has a private `redact` that its extension at the end of the file uses, so the actor and that extension stay together).
+
+The new files are named `DiagnosticArchive+Topic.swift` on purpose even though each declares its own type: that name is what makes `read_source("DiagnosticArchive")` and `scripts/swift_sources.sh DiagnosticArchive` find them. A file named after the type would be invisible to those tests and scripts.
+
+Next candidates, not started and unverified: `Diagnostics.swift`, `TranslatorEngine.swift`, `TranslationMemoryStore.swift`, `DiagnosticsDashboard.swift`. Moving whole top-level types is the safe kind of split. Moving functions out of a class or actor into an `extension` can hit `private` members and needs a read of each function first.

@@ -1,6 +1,6 @@
 # ScreenLingo structure guidelines
 
-Status: written 2026-11-10 for the 2.3.2 (build 109) code, refreshed after all contract tests moved to `read_source` and the shell scripts to `scripts/swift_sources.sh`. Nothing Swift was compiled. Existing files are NOT moved by this document; it defines where NEW code, tests and docs go and how the big files shrink over time. The step-by-step path to moving and splitting existing files is in `docs/structure-migration-plan.md`.
+Status: written 2026-11-10 for the 2.3.2 (build 109) code, refreshed after all contract tests moved to `read_source` and the shell scripts to `scripts/swift_sources.sh`. Nothing Swift was compiled. Existing files are NOT moved by this document (the first moves are logged in the migration plan); it defines where NEW code, tests and docs go and how the big files shrink over time. The step-by-step path to moving and splitting existing files is in `docs/structure-migration-plan.md`.
 
 Why: `TranslatorEngine.swift` (~258 KB), `Diagnostics.swift` (~121 KB), `DiagnosticArchive.swift` (~105 KB), `TranslationMemoryStore.swift` (~81 KB) and `DiagnosticsDashboard.swift` (~77 KB) are too big to review or edit safely, and `App/` has ~27 loose files. Optimization work keeps going, so structure improves a little with every update instead of in one big stop.
 
