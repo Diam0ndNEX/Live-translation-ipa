@@ -9,6 +9,7 @@ Older documents are records of what was true when they were written. They name b
 - structure-migration-plan.md: which scripts depend on which files, and the order for moving and splitting existing files
 
 ## Current line (start here)
+- v2.4.0-audit.md: full audit before the 2.4.0 latency rebuild (where the time goes, defects, ranked opportunities, what was not read)
 - v2.3.9-specification.md: newest specification (TranslatorEngine, second pass)
 - v2.3.8-specification.md: remaining big files split, not TranslatorEngine
 - v2.3.7-specification.md: the five big files split
