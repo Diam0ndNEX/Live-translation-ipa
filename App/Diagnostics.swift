@@ -514,6 +514,13 @@ final class Diagnostics: ObservableObject {
             modelTimingSamples["confirmed_superseded_age_ms"]?.removeFirst()
         }
     }
+    /// 2.3.2: live read of this session's enqueue-path counts and superseded-confirmation ages for the in-app tabs.
+    /// Same names as the exported report. Counts since the last reset.
+    func enqueuePathCount(_ reason: String) -> Int { modeEventCounts["pip_enqueue_" + reason, default: 0] }
+    var confirmedSupersededAges: Summary {
+        let values = modelTimingSamples["confirmed_superseded_age_ms", default: []]
+        return Diagnostics.summarize(values.map { Sample(t: Date(), v: $0) })
+    }
     func recordQueueWait(owner: ModelQueueOwner, durationMs: Double, candidate: String?) {
         guard enabled, durationMs.isFinite, durationMs >= 0 else { return }
         queueWaitSamples[owner, default: []].append(durationMs)

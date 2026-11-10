@@ -656,9 +656,19 @@ private struct DiagnosticsBody: View {
                 LabeledContent("Next capture", value: facts.pending.shortName)
             }
             Hint(facts.availability)
+            Hint(abSwitchLine)
             Hint("Legacy keeps the reading and translation steps of version 1.7.2 (build 58, commit e94542ce). Apple Default does not report which model it used.")
         }
         .kitSurface()
+    }
+
+    /// 2.3.2: the 2.2.3 test switches that are on for this session (pinned at session start). All default off.
+    private var abSwitchLine: String {
+        let on = [(TranslationHotPathAB.legacyConfirmedOwnLane, "Legacy own lane"),
+                  (TranslationHotPathAB.refreshAvailabilityInBackground, "background language check"),
+                  (TranslationHotPathAB.hybridRelaxedBackoff, "Hybrid relaxed backoff"),
+                  (TranslationHotPathAB.hybridShorterGuard, "Hybrid shorter guard")].filter { $0.0 }.map { $0.1 }
+        return on.isEmpty ? "Test switches on: none." : "Test switches on: " + on.joined(separator: ", ") + "."
     }
 
     private var statusLine: String {
@@ -709,6 +719,14 @@ private struct DiagnosticsBody: View {
             LabeledContent("Confirmed candidate packets", value: "\(stats.confirmedCandidatePackets)")
             LabeledContent("Successful PiP candidate enqueues", value: "\(stats.enqueuedCandidateFrames)")
             LabeledContent("Confirmed but superseded before enqueue", value: "\(stats.supersededUnpresentedConfirmed)")
+            if stats.supersededUnpresentedConfirmed > 0 {
+                LabeledContent("  translation had started", value: "\(stats.supersededConfirmedInFlight)")
+                LabeledContent("  translation not started", value: "\(stats.supersededConfirmedNotStarted)")
+                let age = diag.confirmedSupersededAges
+                if age.n > 0 {
+                    Hint("Replaced captions had been confirmed for a median \(Int(age.p50)) ms (P95 \(Int(age.p95)) ms, \(age.n) samples). Cause of the replacement is not measured.")
+                }
+            }
             LabeledContent("Speculative pipelines discarded", value: "\(stats.specDiscarded)")
             if facts.system == .legacy {
                 LabeledContent("Superseded units retained in RAM", value: "\(stats.specRetainedUnits)")
@@ -768,6 +786,7 @@ private struct DiagnosticsBody: View {
         case .timeline: timelinePage
         case .pipeline:
             evidenceDetails
+            enqueuePathCard
             pipelinePage
             adaptivePipelineCard
             subtitleLifecycleCard
@@ -795,6 +814,7 @@ private struct DiagnosticsBody: View {
                 LabeledContent(category.replacingOccurrences(of: "_", with: " ").capitalized,
                                value: String(diag.memoryHealth.categoryCounts[category, default: 0]))
             }
+            Text("Bypassed means the test mode did not allow memory reuse for that unit; it is not a miss.").font(.caption).foregroundStyle(.secondary)
             Text("Pending writes are not yet durable. RAM eviction never means permanent deletion. Lookup outcomes count translation units; persistence counters count write operations.").font(.caption).foregroundStyle(.secondary)
             ForEach(MemoryDiagnosticOutcome.allCases, id: \.self) { outcome in
                 LabeledContent(humanizedKey(outcome.rawValue), value: String(diag.memoryOutcomesForUI(outcome)))
@@ -1147,6 +1167,35 @@ private struct DiagnosticsBody: View {
             }
             Text("Times measure app processing and frame enqueue, not physical screen presentation. Full bounded timeline is in CSV.").font(.caption).foregroundStyle(.secondary)
         }.kitSurface()
+    }
+
+    /// 2.3.2: how this session's captions reached PiP, with the same names the exported report uses.
+    /// Hybrid and Low Latency report `recovery_success`; Legacy reports the same situation as confirmed fresh.
+    private var enqueuePathCard: some View {
+        let rows: [(String, String, Int)] = facts.system == .legacy
+            ? [("Memory hit", "memory_hit", diag.enqueuePathCount("memory_hit")),
+               ("Speculation ready", "speculation_match_ready", diag.enqueuePathCount("speculation_match_ready")),
+               ("Speculation still running", "speculation_match_in_flight", diag.enqueuePathCount("speculation_match_in_flight")),
+               ("Confirmed fresh", "confirmed_fresh", diag.enqueuePathCount("confirmed_fresh")),
+               ("Fresh, text changed", "fresh_text_changed", diag.enqueuePathCount("fresh_text_changed"))]
+            : [("Memory hit", "memory_hit", diag.enqueuePathCount("memory_hit")),
+               ("Speculation ready", "speculation_match_ready", diag.enqueuePathCount("speculation_match_ready")),
+               ("Speculation still running", "speculation_match_in_flight", diag.enqueuePathCount("speculation_match_in_flight")),
+               ("Recovery after confirmation", "recovery_success", diag.enqueuePathCount("recovery_success"))]
+        let total = rows.reduce(0) { $0 + $1.2 }
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("How captions reached the screen").font(.headline)
+            if total == 0 {
+                Hint("No PiP enqueues recorded yet. This needs Detailed collection and a running capture.")
+            } else {
+                ForEach(rows, id: \.1) { row in
+                    LabeledContent(row.0, value: "\(row.2) · \(Int(Double(row.2) / Double(total) * 100))%")
+                }
+                Hint("\(total) enqueues since the last reset. Memory and speculation answer before the caption is confirmed or from stored text; the last row(s) translate after confirmation and are the slow path.")
+            }
+        }
+        .font(.footnote)
+        .kitSurface()
     }
 
     private var adaptivePipelineCard: some View {

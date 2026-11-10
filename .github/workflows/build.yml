@@ -41,6 +41,8 @@ jobs:
         run: python3 scripts/test_v230_contracts.py
       - name: Verify v2.3.1 source contracts (cross-mode diagnostics names)
         run: python3 scripts/test_v231_contracts.py
+      - name: Verify v2.3.2 source contracts (Diagnostics tabs show the 2.3 data)
+        run: python3 scripts/test_v232_contracts.py
       - name: Diagnostic allowlist guards (2.2.1 C2, C3)
         run: python3 scripts/test_diag_allowlists.py
       - name: Library history rules and debounced save (2.2.1 E1, E15)
