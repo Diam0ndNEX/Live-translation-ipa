@@ -48,8 +48,8 @@ assert "path_memory" in archive and "path_early" in archive and "path_confirmed_
 assert "Only in Hybrid" not in archive, "the wrong 2.3.0 README sentence is gone"
 
 # Version 2.3.1 build 108; older changelog entries stay.
-assert 'static let version = "2.3.6"' in shared and "static let build = 113" in shared
-assert project.count('"2.3.6"') == 3 and project.count('"113"') == 3
+assert 'static let version = "2.3.7"' in shared and "static let build = 114" in shared
+assert project.count('"2.3.7"') == 3 and project.count('"114"') == 3
 for old in ('("2.3.1", "Build 108:', '("2.3.0", "Build 107:', '("2.2.3", "Build 106:'):
     assert old in shared, old
 print("v2.3.1 source contracts passed: recovery naming, Legacy in-flight label, bypassed outcome, path groups, version")
