@@ -1,6 +1,8 @@
 # ScreenLingo structure migration plan
 
-Status: written 2026-11-10 for 2.3.2 (build 109). Nothing was compiled or run. Existing files have NOT been moved or split. This plan says what has to happen first and in what order.
+Status: written 2026-11-10 for 2.3.2 (build 109). Nothing Swift was compiled. No Swift file has been moved or split.
+
+Progress: step 1 is done. Every Python test that reads Swift sources now loads them with `read_source`. The Python tests were run on a read-only clone of the branch and all CI-run ones pass. Steps 2 to 4 are open.
 
 ## Why files cannot just be moved
 I read 13 of the test scripts, the main workflow and 5 shell scripts. They hardcode full paths, and most assert on the WHOLE TEXT of a file, so a move or a split breaks them.
@@ -23,15 +25,17 @@ Explicit file lists in CI: `build.yml` swiftc steps name App/TextIntelligence, C
 
 Two scripts walk the whole of `App/` (`rglob`): ui_layout_rules and ui_no_carryover. They also check by file NAME and by the substring `/UI/`, so a moved UI file must keep its name and stay under a `UI` folder.
 
-Not yet read: test_thermal_parity, test_v197/v198/v199, compare_* and their tests, preview_interface.sh, ui_screenshots.sh, make_contact_sheet, make_icon, the workflows memory-benchmark.yml and ui-screenshots.yml, and the Swift tests in `Tests/*/main.swift` (the comment in test_test_runs.sh says Tests/TestRuns reads App/Diagnostics.swift). Read these before any move.
+Still not read (needed for step 2 and before any move): preview_interface.sh, ui_screenshots.sh, make_contact_sheet, make_icon, the workflows memory-benchmark.yml and ui-screenshots.yml, and the Swift tests in `Tests/*/main.swift` (the comment in test_test_runs.sh says Tests/TestRuns reads App/Diagnostics.swift). compare_performance and compare_three_modes and their tests read no Swift files.
+
+Not migrated on purpose: test_v197_experiments.py and test_v198_performance.py. CI does not run them and they already fail on this branch (they assert versions 1.9.7 and 1.9.8). Remove them or leave them; do not rely on them.
 
 ## The fix: tests find sources by name, not by path
-`scripts/sources.py` (added with this plan, not yet used by any test) gives `read_source("TranslatorEngine")`: the main file plus every split part named `TranslatorEngine+<Topic>.swift`, anywhere under App/, Shared/ or BroadcastExtension/. A test using it does not care which folder a file is in or whether it was split, because it asserts against the combined text.
+`scripts/sources.py` (now used by every script that reads Swift sources, and unit-tested in a scratch folder: merge of `A.swift` + `A+Part.swift`, missing name, duplicate name) gives `read_source("TranslatorEngine")`: the main file plus every split part named `TranslatorEngine+<Topic>.swift`, anywhere under App/, Shared/ or BroadcastExtension/. A test using it does not care which folder a file is in or whether it was split, because it asserts against the combined text.
 
 It does not fix comparisons with OLD commits. `old('App/TranslatorEngine.swift')` runs `git show <old commit>:<path>` and must keep the old path.
 
 ## Order of work (each step is its own push and its own CI check)
-1. Migrate one test script at a time to `read_source`, newest first (v232, v231, v230, v223, v222, mode_diagnostics_ui, diag_allowlists, experimental_settings, test_three_modes, then the two UI lints and make_settings_index). Assertions stay exactly the same; only how the text is loaded changes. Say "no assertion changed" in each commit.
+1. DONE. Migrate one test script at a time to `read_source`, newest first (v232, v231, v230, v223, v222, mode_diagnostics_ui, diag_allowlists, experimental_settings, test_three_modes, then the two UI lints and make_settings_index). Assertions stay exactly the same; only how the text is loaded changes. Say "no assertion changed" in each commit.
 2. Make the CI file lists layout-free: replace the explicit paths in `build.yml` and the shell scripts with a lookup (for example `$(find App -name TextIntelligence.swift)`), one step at a time.
 3. Only then move or split files, using extract-on-touch from `docs/structure-guidelines.md`. At that point tests need no path edits; only the two UI lints (name and `/UI/` rules) and any `function(source, name)` slicing need care.
 4. Last: regroup the rest of `App/` into the target folders.
@@ -42,4 +46,6 @@ Risks that stay (UNVERIFIED until CI):
 - Assertions that count occurrences (for example `diagnostics.count("legacyModeContextOrder.removeAll()") == 2`) count over the combined text, so they stay correct after a split but must not be disturbed by moving code between files and a different file.
 
 ## Decision for the owner
-Step 1 edits 13+ test scripts without changing a single assertion. It is safe in intent, but it cannot be compiled or run here, and one typo would fail CI. Do it one script per push.
+Step 1 is done: 15 scripts changed, no assertion changed, one script per commit. The Python tests were run locally on a clone, so those results are real. Swift was not compiled, and the GitHub Actions run is still the first real test of the whole branch.
+
+Next decision: step 2 edits `build.yml` and the shell scripts, which CI runs. It is the first step I cannot test locally, so I would do it one file per push.
