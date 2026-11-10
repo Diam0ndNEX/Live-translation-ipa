@@ -475,7 +475,7 @@ actor DiagnosticExportWriter {
             "rapidTextTracking", "joinAdjacentText", "activeTextFocus",
             "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
             "thermalState", "performanceTier", "reductionReasons",
-            "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "hybridBackoffAB", "hybridGuardAB", "legacyOwnLaneAB", "detailSuspended",
+            "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "hybridBackoffAB", "hybridGuardAB", "legacyOwnLaneAB", "heartbeatAB", "detailSuspended",
             // 2.2.1 (D4, E12)
             "idleMinutes", "sessionLimit", "autoOpenPiP", "winSize", "textSize", "pipFont", "theme", "showOriginal",
             "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding",
@@ -921,7 +921,7 @@ struct DiagnosticPerformanceComparison {
         "mode", "speed", "stability", "area", "customY0", "customY1", "translationTestMode",
         "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
         "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
-        "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "hybridBackoffAB", "hybridGuardAB", "legacyOwnLaneAB", "detailedCollection", "performanceTier",
+        "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "hybridBackoffAB", "hybridGuardAB", "legacyOwnLaneAB", "heartbeatAB", "detailedCollection", "performanceTier",
         "focusedCaptionOCR", "strictCaptionIdentity", "cjkSingleCharacters", "liveWarmupLegacy"
     ]
     static let noteKeys = [
@@ -1589,7 +1589,8 @@ enum CombinedDiagnosticReport {
             let s = session.settings
             // 2.3.0: these keys are written only when ON, so a missing key means OFF. Names the 2.2.3 switches that were on.
             let armsOn = [("legacyOwnLaneAB", "Legacy own lane"), ("availabilityRefreshAB", "background language check"),
-                          ("hybridBackoffAB", "Hybrid relaxed backoff"), ("hybridGuardAB", "Hybrid shorter guard")]
+                          ("hybridBackoffAB", "Hybrid relaxed backoff"), ("hybridGuardAB", "Hybrid shorter guard"),
+                          ("heartbeatAB", "independent capture heartbeat")]
                 .filter { s[$0.0] == "on" }.map { $0.1 }
             let armsText = armsOn.isEmpty ? "none" : armsOn.joined(separator: ", ")
             out.append("| \(labels[i]) | \(s["hotPathAB"] ?? "?") | \(s["hybridSchedulerAB"] ?? "?") | \(s["detailedCollection"] ?? "?")\(s["detailSuspended"] == "true" ? " (suspended: thermal)" : "") | \(s["thermalStart"] ?? "?")/\(s["thermalEnd"] ?? "?")/\(s["thermalMax"] ?? "?") | \(s["focusedCaptionOCR"] ?? "?")/\(s["strictCaptionIdentity"] ?? "?") | \(session.counters["identicalFrameHolds", default: 0]) | \(session.counters["manualTranslations", default: 0]) | \(ms(session.distributions["memoryLookupWaitMs"]?.p50))/\(ms(session.distributions["memoryLookupWaitMs"]?.p95)) | \(ms(session.distributions["memoryHealthMs"]?.p50))/\(ms(session.distributions["memoryHealthMs"]?.p95)) | \(memoryTimeoutShare(session)) | \(armsText) |")

@@ -79,3 +79,27 @@ for key in ("resumedSameBroadcast", "resumedNewBroadcast", "extensionFramesDurin
 assert "sameBroadcast: captureAdmission == .current, frames: p.frames" in engine
 assert engine.count("diag.pauseRun(reason:") == 3 and engine.count("frames: frames)") >= 3
 print("v2.3.2 stop/start contracts passed: run continues across stop and restart")
+
+# ---- Independent capture heartbeat: optional, off by default, nothing extra sent while frames flow ----
+work = (root / "Shared/SharedTranslationWork.swift").read_text()
+shared_cfg = (root / "Shared/Shared.swift").read_text()
+ext = (root / "BroadcastExtension/SampleHandler.swift").read_text()
+experimental = (root / "App/ExperimentalFeaturesView.swift").read_text()
+assert "var independentHeartbeat: Bool? = nil" in shared_cfg, "optional field: older apps and extensions ignore it"
+assert "(UserDefaults.standard.object(forKey: independentHeartbeatPinnedKey) as? Bool) ?? false" in work
+assert "defaults.set((defaults.object(forKey: independentHeartbeatSettingKey) as? Bool) ?? false, forKey: independentHeartbeatPinnedKey)" in work, "pinned at session start, default off"
+assert "independentHeartbeat: TranslationHotPathAB.independentHeartbeat ? true : nil" in engine
+assert '@AppStorage("independentCaptureHeartbeat") private var independentCaptureHeartbeat = false' in experimental
+assert '"legacyConfirmedOwnLane", "independentCaptureHeartbeat"' in experimental, "reset section lists it"
+assert 'settings["heartbeatAB"] = "on"' in diag and archive.count('"heartbeatAB"') >= 3
+hb = body(ext, "private func sendHeartbeatIfQuiet()", "// MARK: Frames")
+assert "recognitionLock" not in hb, "the heartbeat must never wait on the OCR lock"
+assert "now - last >= 1.5" in hb, "sends only when nothing else went out for 1.5 s"
+assert "config" not in hb.replace("independentHeartbeat", "") and "info" not in hb.split("Packet(")[1].split(")")[0], "reads only lock-protected values"
+assert "stopHeartbeat()" in body(ext, "override func broadcastFinished()", "/// The app sends settings")
+assert "updateHeartbeat(enabled: cfg.independentHeartbeat == true)" in ext
+assert "heartbeatFrames = frames; lastSendUptime" in body(ext, "private func send(", "func encode(")
+# the frame callback itself is untouched
+frame = body(ext, "override func processSampleBuffer(", "let cfg = config")
+assert "heartbeat" not in frame.lower()
+print("v2.3.2 heartbeat contracts passed: optional, off by default, quiet-only, no OCR lock")

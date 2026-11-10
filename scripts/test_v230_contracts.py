@@ -59,7 +59,7 @@ assert 'armsOn' in archive and '("legacyOwnLaneAB", "Legacy own lane")' in archi
 
 # Defaults unchanged: every 2.2.3 switch still defaults to OFF.
 work = read("Shared/SharedTranslationWork.swift")
-assert work.count("?? false, forKey:") == 4, "the four 2.2.3 switches keep defaulting to off"
+assert work.count("?? false, forKey:") == 5, "the four 2.2.3 switches and the 2.3.2 heartbeat switch default to off"
 
 # Version 2.3.0 build 107 in the places CI checks; older changelog entries stay.
 assert 'static let version = "2.3.2"' in shared and "static let build = 109" in shared

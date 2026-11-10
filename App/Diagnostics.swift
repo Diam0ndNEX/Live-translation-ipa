@@ -911,6 +911,7 @@ final class Diagnostics: ObservableObject {
         if TranslationHotPathAB.hybridRelaxedBackoff { settings["hybridBackoffAB"] = "on" }
         if TranslationHotPathAB.hybridShorterGuard { settings["hybridGuardAB"] = "on" }
         if TranslationHotPathAB.legacyConfirmedOwnLane { settings["legacyOwnLaneAB"] = "on" }
+        if TranslationHotPathAB.independentHeartbeat { settings["heartbeatAB"] = "on" }
         settings["reductionReasons"] = captureReductionReasons.joined(separator: "_")
         settings["appRequestedCaptureIntervalMs"] = String(requestedCaptureIntervalMs)
         settings["appRequestedCaptureEdgePx"] = String(requestedCaptureEdgePx)

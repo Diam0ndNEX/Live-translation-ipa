@@ -1461,7 +1461,8 @@ final class TranslatorEngine: ObservableObject {
                            pixelConfirmation: flag("pixelConfirmation", true),
                            eventDrivenOCR: flag("eventDrivenOCR", true),
                            fastOCR: flag("fastOCR", false),
-                           cjkSingleCharacters: flag("cjkSingleCharacters", true)))
+                           cjkSingleCharacters: flag("cjkSingleCharacters", true),
+                           independentHeartbeat: TranslationHotPathAB.independentHeartbeat ? true : nil))
     }
 
     // MARK: PiP

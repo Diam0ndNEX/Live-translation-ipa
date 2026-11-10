@@ -667,7 +667,8 @@ private struct DiagnosticsBody: View {
         let on = [(TranslationHotPathAB.legacyConfirmedOwnLane, "Legacy own lane"),
                   (TranslationHotPathAB.refreshAvailabilityInBackground, "background language check"),
                   (TranslationHotPathAB.hybridRelaxedBackoff, "Hybrid relaxed backoff"),
-                  (TranslationHotPathAB.hybridShorterGuard, "Hybrid shorter guard")].filter { $0.0 }.map { $0.1 }
+                  (TranslationHotPathAB.hybridShorterGuard, "Hybrid shorter guard"),
+                  (TranslationHotPathAB.independentHeartbeat, "independent capture heartbeat")].filter { $0.0 }.map { $0.1 }
         return on.isEmpty ? "Test switches on: none." : "Test switches on: " + on.joined(separator: ", ") + "."
     }
 

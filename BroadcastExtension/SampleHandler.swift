@@ -23,6 +23,13 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var candidateStartedMonotonic: Double?
     private var candidateStartedAt = 0.0
     private var lastPing = Date.distantPast
+    // 2.3.2: optional timer heartbeat (Config.independentHeartbeat). Everything it reads is behind `heartbeatLock`.
+    // It never takes `recognitionLock`, and sends only when nothing else was sent for a while.
+    private let heartbeatLock = NSLock()
+    private var heartbeatTimer: DispatchSourceTimer?
+    private var heartbeatConn: NWConnection?
+    private var heartbeatFrames = 0
+    private var lastSendUptime = ProcessInfo.processInfo.systemUptime
     private var candidateKey = ""
     private var sentKey = ""
     private var candidateCount = 0
@@ -98,11 +105,13 @@ class SampleHandler: RPBroadcastSampleHandler {
                              port: NWEndpoint.Port(rawValue: Loopback.port)!, using: .udp)
         c.start(queue: .global(qos: .userInitiated))
         conn = c
+        heartbeatLock.lock(); heartbeatConn = c; heartbeatLock.unlock()
         listen()
         send(kind: "ping", lines: [])
     }
 
     override func broadcastFinished() {
+        stopHeartbeat()
         recognitionLock.lock()
         defer { recognitionLock.unlock() }
         send(kind: "stopped", lines: [], closeConnection: true)
@@ -112,7 +121,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     /// The app sends settings back over the same link.
     private func listen() {
         conn?.receiveMessage { [weak self] data, _, _, error in
-            if let data, let cfg = try? JSONDecoder().decode(Config.self, from: data) { self?.config = cfg }
+            if let data, let cfg = try? JSONDecoder().decode(Config.self, from: data) { self?.config = cfg; self?.updateHeartbeat(enabled: cfg.independentHeartbeat == true) }
             guard let error else { self?.listen(); return }
             // 2.2.0: one receive error (for example the app was not listening for a moment) used to end this loop for
             // the rest of the broadcast, so pause and area changes never arrived again. A deliberate cancel still
@@ -120,6 +129,42 @@ class SampleHandler: RPBroadcastSampleHandler {
             if case .posix(let code) = error, code == .ECANCELED { return }
             DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1) { [weak self] in self?.listen() }
         }
+    }
+
+    // MARK: Heartbeat (2.3.2, off unless the app asks for it)
+    private func updateHeartbeat(enabled: Bool) {
+        heartbeatLock.lock(); defer { heartbeatLock.unlock() }
+        if enabled, heartbeatTimer == nil, heartbeatConn != nil {
+            let timer = DispatchSource.makeTimerSource(queue: .global(qos: .utility))
+            timer.schedule(deadline: .now() + 2, repeating: 2, leeway: .milliseconds(500))
+            timer.setEventHandler { [weak self] in self?.sendHeartbeatIfQuiet() }
+            heartbeatTimer = timer
+            timer.resume()
+        } else if !enabled, let timer = heartbeatTimer {
+            timer.cancel(); heartbeatTimer = nil
+        }
+    }
+
+    private func stopHeartbeat() {
+        heartbeatLock.lock()
+        heartbeatTimer?.cancel(); heartbeatTimer = nil
+        heartbeatConn = nil
+        heartbeatLock.unlock()
+    }
+
+    /// A small ping that reads only values kept behind `heartbeatLock`. If a ping or OCR packet went out in the last
+    /// 1.5 s (the normal case) nothing is sent, so with working frames this adds no traffic.
+    private func sendHeartbeatIfQuiet() {
+        heartbeatLock.lock()
+        let connection = heartbeatConn, framesSeen = heartbeatFrames, last = lastSendUptime
+        heartbeatLock.unlock()
+        let now = ProcessInfo.processInfo.systemUptime
+        guard let connection, now - last >= 1.5 else { return }
+        let packet = Packet(kind: "ping", version: AppVersion.version, frames: framesSeen, lines: [],
+                            memFreeMB: freeMB(), ts: Date().timeIntervalSince1970,
+                            captureSessionID: captureID, sentMonotonic: now)
+        guard let data = try? JSONEncoder().encode(packet) else { return }
+        connection.send(content: data, completion: .contentProcessed { _ in })
     }
 
     // MARK: Frames
@@ -663,6 +708,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         sendStatsLock.lock()
         let largeSoFar = largePacketCount, errorsSoFar = sendErrorCount
         sendStatsLock.unlock()
+        heartbeatLock.lock(); heartbeatFrames = frames; lastSendUptime = ProcessInfo.processInfo.systemUptime; heartbeatLock.unlock()
         func encode(_ l: [OCRLine]) -> Data? {
             try? JSONEncoder().encode(Packet(kind: kind, version: AppVersion.version, frames: frames, lines: l,
                                              ocrMs: lastOcrMs, memFreeMB: freeMB(),

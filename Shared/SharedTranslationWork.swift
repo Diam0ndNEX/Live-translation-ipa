@@ -123,6 +123,9 @@ enum TranslationHotPathAB {
     static let hybridBackoffPinnedKey = "hybridRelaxedBackoffPinned"
     static let hybridGuardSettingKey = "hybridShorterGuard"
     static let hybridGuardPinnedKey = "hybridShorterGuardPinned"
+    // 2.3.2: capture keep-alive from a timer in the extension, default OFF = current behaviour.
+    static let independentHeartbeatSettingKey = "independentCaptureHeartbeat"
+    static let independentHeartbeatPinnedKey = "independentCaptureHeartbeatPinned"
     // 2.2.3 (L2): Legacy only, default OFF = current behaviour.
     static let legacyOwnLaneSettingKey = "legacyConfirmedOwnLane"
     static let legacyOwnLanePinnedKey = "legacyConfirmedOwnLanePinned"
@@ -139,6 +142,7 @@ enum TranslationHotPathAB {
         defaults.set((defaults.object(forKey: hybridBackoffSettingKey) as? Bool) ?? false, forKey: hybridBackoffPinnedKey)
         defaults.set((defaults.object(forKey: hybridGuardSettingKey) as? Bool) ?? false, forKey: hybridGuardPinnedKey)
         defaults.set((defaults.object(forKey: legacyOwnLaneSettingKey) as? Bool) ?? false, forKey: legacyOwnLanePinnedKey)
+        defaults.set((defaults.object(forKey: independentHeartbeatSettingKey) as? Bool) ?? false, forKey: independentHeartbeatPinnedKey)
     }
 
     static var reuseStandaloneLowLatencyPlan: Bool {
@@ -165,6 +169,10 @@ enum TranslationHotPathAB {
     /// call to finish unwinding. iOS 26 direct sessions only. Default OFF.
     static var legacyConfirmedOwnLane: Bool {
         (UserDefaults.standard.object(forKey: legacyOwnLanePinnedKey) as? Bool) ?? false
+    }
+    /// 2.3.2: the extension sends a keep-alive from a timer when its frame callback is quiet. Default OFF.
+    static var independentHeartbeat: Bool {
+        (UserDefaults.standard.object(forKey: independentHeartbeatPinnedKey) as? Bool) ?? false
     }
     /// 2.2.3 (L4): shorter Hybrid switch-guard window and post-Default settling wait. Default OFF.
     static var hybridShorterGuard: Bool {

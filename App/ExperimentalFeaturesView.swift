@@ -39,6 +39,7 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("hybridRelaxedBackoff") private var hybridRelaxedBackoff = false
     @AppStorage("hybridShorterGuard") private var hybridShorterGuard = false
     @AppStorage("legacyConfirmedOwnLane") private var legacyConfirmedOwnLane = false
+    @AppStorage("independentCaptureHeartbeat") private var independentCaptureHeartbeat = false
 
     // Previous opt-in Smart pipeline controls are experimental, not core defaults.
     @AppStorage("adaptiveConfirmation") private var adaptiveConfirmation = false
@@ -166,6 +167,10 @@ struct ExperimentalFeaturesView: View {
                     title: "Legacy confirmed own lane",
                     explanation: "Legacy mode, iOS 26 and later. Off (default): when a caption is confirmed while a different early translation is still running, the confirmed one waits for the early one to stop. On: it starts right away on its own session, so two Apple Default calls can run at once and may slow each other. Same text. Unverified effect.",
                     enabled: $legacyConfirmedOwnLane)
+                ExperimentalOption(
+                    title: "Independent capture heartbeat",
+                    explanation: "All modes. Off (default): ScreenLingo decides capture has stopped after 5 seconds without a message, and the capture extension only sends its keep-alive while screen frames arrive. On: the extension also sends a small keep-alive from a timer, but only when 1.5 seconds have passed without any other message, so with normal frames nothing extra is sent. Meant for a false \"stopped\" while the screen-recording icon is still on. Does not change reading, confirmation or translation. Unverified effect.",
+                    enabled: $independentCaptureHeartbeat)
             } header: { Text("A/B test variants") } footer: {
                 Text("For comparing builds on the same video. A change applies from the next session, never during one. Each run's report names the variant it used.")
             }
@@ -189,7 +194,7 @@ struct ExperimentalFeaturesView: View {
                 "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
                 "adaptiveConfirmation", "confirmationDeadline", "continuousRotation",
                 "hybridSchedulerVariant", "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy",
-                "backgroundAvailabilityRefresh", "hybridRelaxedBackoff", "hybridShorterGuard", "legacyConfirmedOwnLane"
+                "backgroundAvailabilityRefresh", "hybridRelaxedBackoff", "hybridShorterGuard", "legacyConfirmedOwnLane", "independentCaptureHeartbeat"
             ])
         }
         .settingsPage("Experimental features")
