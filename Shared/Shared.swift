@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "2.3.5"
-    static let build = 112
+    static let version = "2.3.6"
+    static let build = 113
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("2.3.6", "Build 113: no change to translation, OCR, confirmation, the model choice or any default. Code layout only: more of the translation memory store, the diagnostics dashboard and the diagnostics recorder models moved into their own files, and the helpers they share lost their private marker. Swift app behavior is unchanged."),
         ("2.3.5", "Build 112: no change to translation, OCR, confirmation, the model choice or any default. Code layout only: the snapshot, merge and recovery functions of the translation memory store moved into their own file, and a few more internal helpers of that store lost their private marker so the new file can use them. Swift app behavior is unchanged."),
         ("2.3.4", "Build 111: no change to translation, OCR, confirmation, the model choice or any default. Code layout only: the diagnostic session storage functions of the translation memory store moved into their own file, and a few internal helpers of that store lost their private marker so the new file can use them. Swift app behavior is unchanged."),
         ("2.3.3", "Build 110: no change to translation, OCR, confirmation, the model choice or any default. Code and test layout only: the tests and CI scripts now find Swift files by name, so source files can be split into smaller files without breaking the checks. Some diagnostics and memory types moved into their own files with the text unchanged. The build workflow now runs the checks and the app build in parallel, and the screenshot workflow starts only for interface changes, so CI should finish sooner. Swift app code is unchanged apart from the version number, this entry and those file moves."),
