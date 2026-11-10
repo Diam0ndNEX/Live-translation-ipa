@@ -84,7 +84,7 @@ assert "static let relaxedBackoffMaxAge = 10.0" in system
 assert '(UserDefaults.standard.object(forKey: legacyOwnLanePinnedKey) as? Bool) ?? false' in work
 assert '@AppStorage("legacyConfirmedOwnLane") private var legacyConfirmedOwnLane = false' in experimental
 assert 'label: "Legacy confirmed own lane"' in index
-detach = engine[engine.index("private func detachCancelledSpeculationIfEnabled"):engine.index("private func presentQueuedFromRAMIfComplete")]
+detach = engine[engine.index("func detachCancelledSpeculationIfEnabled"):engine.index("func presentQueuedFromRAMIfComplete")]
 for token in ("TranslationHotPathAB.legacyConfirmedOwnLane", "activeTranslationSystem == .legacy", "activeQueueOwner == .speculative", "#available(iOS 26.0, *)", "drainEpoch += 1"):
     assert token in detach, token
 assert engine.count("detachCancelledSpeculationIfEnabled()") == 2, "defined once, called once"
@@ -101,8 +101,8 @@ assert "maximumTotalBytes: Int = Int.max" in store and "maximumUnpinnedRuns: Int
 assert "100 MB" not in read_source("TestRunViews")
 
 # Version 2.2.3 build 106 in the places CI checks.
-assert 'static let version = "2.3.4"' in shared and "static let build = 111" in shared
-assert project.count('"2.3.4"') == 3 and project.count('"111"') == 3
+assert 'static let version = "2.3.9"' in shared and "static let build = 116" in shared
+assert project.count('"2.3.9"') == 3 and project.count('"116"') == 3
 assert '("2.2.3", "Build 106:' in shared
 assert '("2.2.2", "Build 105:' in shared, "older changelog entries stay"
 print("v2.2.3 source contracts passed: L5 switch (default off, pinned), unchanged request path and TTL, toggle, Fast OCR switch, version")
