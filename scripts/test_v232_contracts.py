@@ -103,3 +103,11 @@ assert "heartbeatFrames = frames; lastSendUptime" in body(ext, "private func sen
 frame = body(ext, "override func processSampleBuffer(", "let cfg = config")
 assert "heartbeat" not in frame.lower()
 print("v2.3.2 heartbeat contracts passed: optional, off by default, quiet-only, no OCR lock")
+
+# ---- Changelog lint: CI failed to compile because the 2.3.1 entry ended in an escaped quote (unterminated string) ----
+import re
+for number, line in enumerate(shared.split("\n"), 1):
+    if line.startswith('        ("'):
+        quotes = len(re.findall(r'(?<!\\)"', line))
+        assert quotes == 4 and line.rstrip().endswith('"),'), f"Shared.swift line {number}: changelog entry is not a closed string pair"
+print("v2.3.2 changelog lint passed")
