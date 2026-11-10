@@ -8,15 +8,16 @@ C3: every settings key that sessionSnapshot() collects must be in the export all
 Structural source checks only; nothing here is a device result.
 """
 from pathlib import Path
+from sources import read_source
 import re
 import sys
 
 root = Path(__file__).resolve().parents[1]
 read = lambda relative: (root / relative).read_text(encoding="utf-8")
-diagnostics = read("App/Diagnostics.swift")
-archive = read("App/DiagnosticArchive.swift")
-engine = read("App/TranslatorEngine.swift")
-service = read("App/ModeTranslationService.swift")
+diagnostics = read_source("Diagnostics")
+archive = read_source("DiagnosticArchive")
+engine = read_source("TranslatorEngine")
+service = read_source("ModeTranslationService")
 app_sources = {p.relative_to(root).as_posix(): p.read_text(encoding="utf-8") for p in (root / "App").rglob("*.swift")}
 errors = []
 
