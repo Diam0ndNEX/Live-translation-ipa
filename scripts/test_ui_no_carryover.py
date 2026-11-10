@@ -4,6 +4,7 @@ Every pattern carries its U-number from docs/v2.0.0-ui-audit.md. Source checks o
 import re
 import sys
 from pathlib import Path
+from sources import read_source
 
 root = Path(__file__).resolve().parents[1]
 app = root / "App"
@@ -27,7 +28,7 @@ for p, t in files.items():
         fail("U1/U2", f"selectTab still used in {rel(p)}")
 
 # U2 / 2.1.0 §13.3: four typed tabs (Translate, Library, Diagnostics, Settings); Languages is a sheet; Activity stays gone
-root_src = (app / "ScreenTranslatorApp.swift").read_text()
+root_src = read_source("ScreenTranslatorApp")
 tags = re.findall(r"\.tag\(AppTab\.\w+\)", root_src)
 if len(tags) != 4:
     fail("U2", f"root TabView must have exactly 4 typed tabs, found {len(tags)}")
@@ -43,7 +44,7 @@ if re.search(r'Label\("Activity"', root_src) or ".tag(3)" in root_src:
 # U3: leaf tabs observe snapshots, not the whole engine
 for name in ("UI/Translate/TranslateScreen.swift", "UI/Translate/FocusMode.swift", "UI/Translate/SessionSheet.swift",
              "UI/Languages/LanguageSheet.swift", "UI/Library/LibraryScreen.swift", "Onboarding/OnboardingView.swift"):
-    t = (app / name).read_text()
+    t = read_source(Path(name).stem)
     if re.search(r"@EnvironmentObject[^\n]*TranslatorEngine", t) or "@ObservedObject var engine" in t:
         fail("U3", f"{name} observes the whole engine")
     if "EngineSlice" not in t:
@@ -68,7 +69,7 @@ if (app / "UIParts.swift").exists():
     fail("U5", "UIParts.swift (old theme) still exists")
 
 # U6 / 2.1.0 §13.5.2: the side being edited is always visible (From | Into) and every change offers Undo
-lang = (app / "UI/Languages/LanguageSheet.swift").read_text()
+lang = read_source("LanguageSheet")
 if "onTapGesture" in lang:
     fail("U6", "Languages rows use a silent tap gesture")
 if "LanguageSide.source" not in lang or "LanguageSide.target" not in lang or '"Undo"' not in lang:
@@ -77,7 +78,7 @@ if (app / "Languages/LanguagesView.swift").exists():
     fail("§13.3", "the old Languages tab view still exists")
 
 # U7: Library destructive actions
-lib = (app / "UI/Library/LibraryScreen.swift").read_text()
+lib = read_source("LibraryScreen")
 if "Delete visible unstarred" in lib:
     fail("U7", "bulk delete is back in a filter menu")
 if "Undo" not in lib:
@@ -90,7 +91,7 @@ for old in ("LibraryViews.swift", "Library/LibraryView.swift"):
 for old in ("WorkspaceViews.swift", "Live/LiveView.swift", "Live/LiveSheets.swift", "Reader/ReaderView.swift"):
     if (app / old).exists():
         fail("U9/§13.0.1", f"replaced screen {old} still exists")
-area = (app / "UI/Kit/AreaEditor.swift").read_text()
+area = read_source("AreaEditor")
 if "not your live screen" not in area:
     fail("U9", "Capture area preview is not labelled as a preview")
 
@@ -111,12 +112,12 @@ for p, t in files.items():
             fail("U13", f'old wording "{bad}" in {rel(p)}')
 
 # U15: diagnostics content must not be gated on onAppear
-diag = (app / "Diagnostics.swift").read_text() + (app / "DiagnosticsDashboard.swift").read_text()
+diag = read_source("Diagnostics") + read_source("DiagnosticsDashboard")
 if "onAppear { visible = true }" in diag or "if visible {" in diag:
     fail("U15", "Diagnostics content is gated behind onAppear")
 
 # U16: onboarding
-onb = (app / "Onboarding/OnboardingView.swift").read_text()
+onb = read_source("OnboardingView")
 if "Home tab" in onb or "setupState" not in onb:
     fail("U16", "onboarding wording or resumable skip is wrong")
 
@@ -130,7 +131,7 @@ for p in (root / "Shared" / "Shared.swift",):
         fail("U21", "stale header in Shared.swift")
 
 # U22: dialogs are attached to the owning button, never to a Section
-settings = (app / "SettingsViews.swift").read_text()
+settings = read_source("SettingsViews")
 reset = settings[settings.index("struct ResetSection"):settings.index("private struct PresetsLinkRow")]
 if "confirmationDialog" in reset or "confirmDestructive" not in reset:
     fail("U22", "ResetSection dialog is not attached to the button")
@@ -151,7 +152,7 @@ for name, structs in {"SettingsViews.swift": ["ReadingSettings", "IntelligenceSe
                       "ExperimentalFeaturesView.swift": ["ExperimentalFeaturesView"],
                       "SettingsCategories.swift": ["TranslationSettings", "HistoryStorageSettings"],
                       "UI/Translate/TuneSheet.swift": ["TuneSheet", "AreaSheet"]}.items():
-    text = (app / name).read_text()
+    text = read_source(Path(name).stem)
     for st in structs:
         i = text.index(f"struct {st}")
         j = text.find("\nstruct ", i + 1)
@@ -161,21 +162,21 @@ for name, structs in {"SettingsViews.swift": ["ReadingSettings", "IntelligenceSe
 
 # U3/U11/U19: developer screens read snapshots, never the whole engine or the whole recorder
 for name in ("DiagnosticsDashboard.swift", "MemoryManagementView.swift", "PipelineSimulatorView.swift", "TestRunViews.swift"):
-    text = (app / name).read_text()
+    text = read_source(Path(name).stem)
     if re.search(r"@EnvironmentObject[^\n]*TranslatorEngine", text):
         fail("U3", f"{name} observes the whole engine")
     if re.search(r"@ObservedObject[^\n]*(engine|diag|Diagnostics|TranslatorEngine)", text):
         fail("U3", f"{name} observes the whole engine or recorder")
-presets = (app / "Presets.swift").read_text()
+presets = read_source("Presets")
 editor = presets[presets.index("struct PresetEditor"):presets.index("// MARK: - Manager page")]
 if re.search(r"@EnvironmentObject[^\n]*TranslatorEngine", editor):
     fail("U3", "PresetEditor observes the whole engine")
-dset = (app / "SettingsCategories.swift").read_text()
+dset = read_source("SettingsCategories")
 dset = dset[dset.index("struct DiagnosticsSettings"):]
 dset = dset[:dset.find("\nstruct ", 10)] if "\nstruct " in dset[10:] else dset
 if re.search(r"@EnvironmentObject[^\n]*TranslatorEngine", dset):
     fail("U3", "DiagnosticsSettings observes the whole engine")
-if "AdvancedBlock" in (app / "DiagnosticsDashboard.swift").read_text():
+if "AdvancedBlock" in read_source("DiagnosticsDashboard"):
     fail("U11", "the Diagnostics tab hides its numbers behind the Advanced switch again")
 
 # U2: deep links
