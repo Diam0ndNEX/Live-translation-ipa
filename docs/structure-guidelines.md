@@ -50,6 +50,7 @@ Main files stay where they are (`App/TranslatorEngine.swift` ...); only parts li
 6. Run all `scripts/test_*.py` and `make_settings_index.py --check`. Fix tests only so that their meaning stays (see section 5).
 7. Bump the version (every update), write `docs/vX.Y.Z-specification.md`, list it in `docs/README.md`. One push per stage; a new push cancels the running CI.
 8. Hot paths (`SampleHandler`, `TranslatorEngine`, `TranslationSystem`) are guarded by tests that compare function text with old commits. Moving them is allowed when the body stays identical; changing them needs a measured reason.
+9. Helper scripts for these checks are in `scripts/split_tools/` (see its README).
 
 ## 5. Tests and CI
 - Python tests load Swift with `from sources import read_source` and `read_source("Name")` (main file plus all `Name+*.swift`). New tests must do the same. Never read `App/Name.swift` by path.
