@@ -4,6 +4,7 @@ Files are named by the version they were written for. Grouped here by purpose; t
 
 ## Rules for code, tests and docs (read before an update)
 - structure-guidelines.md: where new code goes, extract-on-touch for the giant files, test and CI path rules, update checklist
+- structure-migration-plan.md: which scripts depend on which files, and the order for moving and splitting existing files
 
 ## Current line (start here)
 - v2.3.1-specification.md: newest specification in this folder

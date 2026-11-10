@@ -1,0 +1,45 @@
+# ScreenLingo structure migration plan
+
+Status: written 2026-11-10 for 2.3.2 (build 109). Nothing was compiled or run. Existing files have NOT been moved or split. This plan says what has to happen first and in what order.
+
+## Why files cannot just be moved
+I read 13 of the test scripts, the main workflow and 5 shell scripts. They hardcode full paths, and most assert on the WHOLE TEXT of a file, so a move or a split breaks them.
+
+Most coupled files (number of scripts reading them, from the scripts read so far):
+| File | Read by |
+|---|---|
+| App/TranslatorEngine.swift | test_three_modes, v230, v231, v232, v223, v222, mode_diagnostics_ui, experimental_settings, diag_allowlists |
+| App/Diagnostics.swift | test_three_modes, v230, v231, v232, v223, v222, mode_diagnostics_ui, diag_allowlists, ui_no_carryover, test_test_runs (via the Swift test) |
+| App/DiagnosticArchive.swift | test_three_modes, v230, v231, v232, v223, v222, mode_diagnostics_ui, diag_allowlists, test_diagnostics.sh, test_test_runs.sh |
+| App/ModeTranslationService.swift | test_three_modes, v230, v223, mode_diagnostics_ui, diag_allowlists |
+| App/ExperimentalFeaturesView.swift | v232, v223, experimental_settings, make_settings_index |
+| App/SettingsViews / CustomizationViews / SettingsCategories | experimental_settings, make_settings_index, ui_layout_rules, ui_no_carryover |
+| App/DiagnosticsDashboard.swift | v232, v222, mode_diagnostics_ui, ui_layout_rules, ui_no_carryover |
+| App/TestRunStore / TestRunViews | v232, v223, ui_no_carryover, test_test_runs.sh |
+| App/UI/... views | v222, ui_layout_rules, ui_no_carryover, experimental_settings |
+| Shared/*.swift | many scripts, and `build.yml` / shell scripts use the glob `Shared/*.swift` (so Shared stays flat) |
+
+Explicit file lists in CI: `build.yml` swiftc steps name App/TextIntelligence, CaptionAssembly, MemoryWriter, PipelineSimulation, DesignSystem/AppRouter, DesignSystem/ObjectSlice, UI/Model/SessionPhase. Shell scripts name LoopbackServer, TextIntelligence, TranslationMemoryStore, DiagnosticArchive, TestRunStore.
+
+Two scripts walk the whole of `App/` (`rglob`): ui_layout_rules and ui_no_carryover. They also check by file NAME and by the substring `/UI/`, so a moved UI file must keep its name and stay under a `UI` folder.
+
+Not yet read: test_thermal_parity, test_v197/v198/v199, compare_* and their tests, preview_interface.sh, ui_screenshots.sh, make_contact_sheet, make_icon, the workflows memory-benchmark.yml and ui-screenshots.yml, and the Swift tests in `Tests/*/main.swift` (the comment in test_test_runs.sh says Tests/TestRuns reads App/Diagnostics.swift). Read these before any move.
+
+## The fix: tests find sources by name, not by path
+`scripts/sources.py` (added with this plan, not yet used by any test) gives `read_source("TranslatorEngine")`: the main file plus every split part named `TranslatorEngine+<Topic>.swift`, anywhere under App/, Shared/ or BroadcastExtension/. A test using it does not care which folder a file is in or whether it was split, because it asserts against the combined text.
+
+It does not fix comparisons with OLD commits. `old('App/TranslatorEngine.swift')` runs `git show <old commit>:<path>` and must keep the old path.
+
+## Order of work (each step is its own push and its own CI check)
+1. Migrate one test script at a time to `read_source`, newest first (v232, v231, v230, v223, v222, mode_diagnostics_ui, diag_allowlists, experimental_settings, test_three_modes, then the two UI lints and make_settings_index). Assertions stay exactly the same; only how the text is loaded changes. Say "no assertion changed" in each commit.
+2. Make the CI file lists layout-free: replace the explicit paths in `build.yml` and the shell scripts with a lookup (for example `$(find App -name TextIntelligence.swift)`), one step at a time.
+3. Only then move or split files, using extract-on-touch from `docs/structure-guidelines.md`. At that point tests need no path edits; only the two UI lints (name and `/UI/` rules) and any `function(source, name)` slicing need care.
+4. Last: regroup the rest of `App/` into the target folders.
+
+Risks that stay (UNVERIFIED until CI):
+- `function(source, name)` in test_three_modes slices from one function to the next `private func`. With combined text of a split file it still works only if the function stays intact and the combined order is main file first (as `read_source` does).
+- `private` members cannot be used from another file; a split may need `fileprivate` or internal, which is a code change.
+- Assertions that count occurrences (for example `diagnostics.count("legacyModeContextOrder.removeAll()") == 2`) count over the combined text, so they stay correct after a split but must not be disturbed by moving code between files and a different file.
+
+## Decision for the owner
+Step 1 edits 13+ test scripts without changing a single assertion. It is safe in intent, but it cannot be compiled or run here, and one typo would fail CI. Do it one script per push.
