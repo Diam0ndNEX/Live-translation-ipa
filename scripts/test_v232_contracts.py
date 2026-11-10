@@ -33,21 +33,21 @@ archive = (root / "App/DiagnosticArchive.swift").read_text()
 def body(src, start, end):
     i = src.index(start); return src[i:src.index(end, i)]
 # the three stop paths pause the run; none ends it
-assert 'diag.pauseRun(reason: "captureStopped")' in engine
-assert 'diag.pauseRun(reason: "heartbeatTimeout")' in engine
-assert 'diag.pauseRun(reason: "newCaptureSession")' in engine
+assert 'diag.pauseRun(reason: "captureStopped", frames: frames)' in engine
+assert 'diag.pauseRun(reason: "heartbeatTimeout", frames: frames)' in engine
+assert 'diag.pauseRun(reason: "newCaptureSession", frames: frames)' in engine
 for gone in ('endRun(reason: "captureStopped")', 'endRun(reason: "heartbeatTimeout")', 'endRun(reason: "newCaptureSession")'):
     assert gone not in engine, gone
 # only a mode change, a reset or a different mode ends a run
 assert 'diag.endRun(reason: "modeChanged")' in engine
 assert 'endRun(reason: "diagnosticsReset")' in diag and 'endRun(reason: "newRunStarted")' in diag
-begin = body(diag, "func beginRun()", "private func startRunState()")
-assert "if run.mode == modeActiveSystem { resumeRun(); return }" in begin, "same mode continues the run"
-assert begin.index("resumeRun(); return") < begin.index("s = Stats()"), "resume returns before any zeroing"
-resume = body(diag, "private func resumeRun()", "private func startRunState()")
+entry = body(diag, "func beginRun(sameBroadcast: Bool, frames: Int)", "func beginRun() {")
+assert "run.mode == modeActiveSystem { resumeRun(sameBroadcast: sameBroadcast, frames: frames); return }" in entry, "same mode continues the run"
+assert 'endRun(reason: "newRunStarted")' in body(diag, "func beginRun() {", "private func startRunState()")
+resume = body(diag, "private func resumeRun(", "private func startRunState()")
 for forbidden in ("clearCollection", "s = Stats()", "endRun", "modelTimingSamples", "modeEventCounts"):
     assert forbidden not in resume, forbidden
-pause = body(diag, "func pauseRun(reason: String)", "private func resumeRun()")
+pause = body(diag, "func pauseRun(reason: String", "private func resumeRun(")
 for forbidden in ("clearCollection", "s = Stats()", "endRun", "activeRun = nil"):
     assert forbidden not in pause, forbidden
 assert "store.save(meta: meta, snapshot: snapshot)" in pause and "previous?.label" in pause and "previous?.pinned" in pause
@@ -66,7 +66,7 @@ for name in ("legacyModeContexts.removeAll()", "legacyModeContextOrder.removeAll
              "lastCheckpointCaptureMs = nil", "checkpointCaptureMicros = 0", "clearSpeakers()", "diagnosticSessionID = UUID()",
              "pausedAt = nil; pausedTotal = 0"):
     assert name in clear, name
-assert "if !wasAlive {" in engine and "diag.beginRun(); refreshModeDiagnosticEpoch()" in engine
+assert "if !wasAlive {" in engine
 for key in ("captureStopsByPacket", "captureStopsByTimeout", "captureStopsByNewSession", "extensionFreeMBAtLastStop", "secondsIntoRunAtLastStop"):
     assert f'"{key}"' in diag and f'"{key}"' in archive, key
 assert "captureStopCounts = [:]" in clear
@@ -74,4 +74,8 @@ assert "captureStopCounts = [:]" in clear
 import re
 assert not re.search(r"=\s*[;\n]", diag.replace("==", "")), "assignment without a value"
 assert 'pauseReason = ""' in diag
+for key in ("resumedSameBroadcast", "resumedNewBroadcast", "extensionFramesDuringLastGap", "longestStopGapSeconds"):
+    assert f'"{key}"' in diag and f'"{key}"' in archive, key
+assert "sameBroadcast: captureAdmission == .current, frames: p.frames" in engine
+assert engine.count("diag.pauseRun(reason:") == 3 and engine.count("frames: frames)") >= 3
 print("v2.3.2 stop/start contracts passed: run continues across stop and restart")

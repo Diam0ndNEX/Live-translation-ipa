@@ -232,6 +232,13 @@ final class Diagnostics: ObservableObject {
     /// stopped sending), or a new capture session replacing the old one. Plus what was known at the last stop.
     private var captureStopCounts: [String: Int] = [:]
     private var extFreeMBAtLastStop = 0
+    /// What the extension looked like across a stop: frames it had seen, and whether the same broadcast came back.
+    /// Same broadcast back after a silent timeout means the extension never stopped (the app only stopped hearing it).
+    private var framesAtLastStop = 0
+    private var resumedSameBroadcast = 0
+    private var resumedNewBroadcast = 0
+    private var framesDuringLastGap = 0
+    private var longestStopGapSeconds = 0
     private var secondsIntoRunAtLastStop = 0
     var isRunPaused: Bool { activeRun != nil && pausedAt != nil }
     /// Seconds with capture off inside the current run. Left out of the run duration and of Time live.
@@ -960,6 +967,10 @@ final class Diagnostics: ObservableObject {
         counters["captureStopsByNewSession"] = captureStopCounts["newCaptureSession", default: 0]
         counters["extensionFreeMBAtLastStop"] = extFreeMBAtLastStop
         counters["secondsIntoRunAtLastStop"] = secondsIntoRunAtLastStop
+        counters["resumedSameBroadcast"] = resumedSameBroadcast
+        counters["resumedNewBroadcast"] = resumedNewBroadcast
+        counters["extensionFramesDuringLastGap"] = framesDuringLastGap
+        counters["longestStopGapSeconds"] = longestStopGapSeconds
         counters["runPausedSeconds"] = Int(pausedSeconds.rounded())
         var currentHealth = memoryHealth
         currentHealth.ramEntries = ramEntryCount?() ?? memoryHealth.ramEntries
@@ -1126,11 +1137,14 @@ final class Diagnostics: ObservableObject {
     }
 
     /// Capture connected: a run starts. Keeps the opening warm-up trace already collected for this broadcast.
+    /// Capture connected. Same mode as the paused run: the run continues and nothing is cleared (2.3.2).
+    /// Otherwise a new run begins, as before.
+    func beginRun(sameBroadcast: Bool, frames: Int) {
+        if let run = activeRun, run.mode == modeActiveSystem { resumeRun(sameBroadcast: sameBroadcast, frames: frames); return }
+        beginRun()
+    }
     func beginRun() {
-        if let run = activeRun {
-            if run.mode == modeActiveSystem { resumeRun(); return }
-            endRun(reason: "newRunStarted")
-        }
+        if activeRun != nil { endRun(reason: "newRunStarted") }
         // 2.2.1 (E8): numbers gathered before capture connected (compose, tests) must not count in the run.
         // The warm-up trace is kept; only the totals and the latency series start from zero.
         s = Stats()
@@ -1145,9 +1159,10 @@ final class Diagnostics: ObservableObject {
     }
     /// Capture stopped, timed out or began a new capture session. The run and all live data stay; the run is saved
     /// (same id, so a later save replaces it) so nothing is lost if the app is closed before capture restarts.
-    func pauseRun(reason: String) {
+    func pauseRun(reason: String, frames: Int = 0) {
         guard activeRun != nil, pausedAt == nil else { return }
         pausedAt = Date()
+        framesAtLastStop = frames
         pauseReason = reason
         captureStopCounts[reason, default: 0] += 1
         extFreeMBAtLastStop = Int((extMem.last?.v ?? 0).rounded())
@@ -1174,14 +1189,18 @@ final class Diagnostics: ObservableObject {
     }
 
     /// Capture connected again in the same mode: nothing is cleared. Only the gap is remembered.
-    private func resumeRun() {
+    private func resumeRun(sameBroadcast: Bool, frames: Int) {
         if let paused = pausedAt {
-            pausedTotal += Date().timeIntervalSince(paused)
+            let gap = Date().timeIntervalSince(paused)
+            pausedTotal += gap
+            longestStopGapSeconds = max(longestStopGapSeconds, Int(gap.rounded()))
+            if sameBroadcast { resumedSameBroadcast += 1 } else { resumedNewBroadcast += 1 }
+            framesDuringLastGap = max(0, frames - framesAtLastStop)
             pausedAt = nil
             captureRestartCount += 1
             // Per-caption tags belong to the capture that stopped; a caption seen again after restart starts clean.
             legacyModeContexts.removeAll(); legacyModeContextOrder.removeAll()
-            event(.state, "Capture started again; the same run continues (restart \(captureRestartCount))")
+            event(.state, "Capture heard again after \(Int(gap.rounded())) s (\(sameBroadcast ? "same broadcast, so the extension had not stopped" : "new broadcast")); extension frames during the gap: \(framesDuringLastGap); the same run continues (restart \(captureRestartCount))")
         }
     }
 
@@ -1510,6 +1529,7 @@ final class Diagnostics: ObservableObject {
         speculativeUnitCounts = [:]; queueWaitSamples = [:]
         pausedAt = nil; pausedTotal = 0; pauseReason = ""; captureRestartCount = 0
         captureStopCounts = [:]; extFreeMBAtLastStop = 0; secondsIntoRunAtLastStop = 0
+        framesAtLastStop = 0; resumedSameBroadcast = 0; resumedNewBroadcast = 0; framesDuringLastGap = 0; longestStopGapSeconds = 0
         temporaryMemoryHits = 0; startingRAMEntries = ramEntryCount?() ?? 0
         // 2.3.2: the previous run's checkpoint cost must not appear in the next run's report.
         lastCheckpointCaptureMs = nil; checkpointCaptureMicros = 0

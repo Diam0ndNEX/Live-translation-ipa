@@ -1239,7 +1239,7 @@ final class TranslatorEngine: ObservableObject {
             status = "Capture stopped – iOS may have closed the capture extension. Tap the broadcast icon again (try Speed: Fast)."
             diag.log("Capture stopped")
             diag.noteRuntimeState("heartbeat_timeout")
-            diag.pauseRun(reason: "heartbeatTimeout")
+            diag.pauseRun(reason: "heartbeatTimeout", frames: frames)
             if activeTranslationSystem != .legacy { invalidatePending() }
         }
         if captureAlive != alive { captureAlive = alive }
@@ -1791,14 +1791,14 @@ final class TranslatorEngine: ObservableObject {
             captureAlive = false; lastPacketDate = .distantPast
             invalidatePending()
             diag.noteRuntimeState("heartbeat_timeout")
-            diag.pauseRun(reason: "captureStopped")
+            diag.pauseRun(reason: "captureStopped", frames: frames)
             return
         }
         let captureAdmission = captureIdentity.admit(p.captureSessionID)
         guard captureAdmission != .rejected else { return }
         captureReadiness.receive(frames: p.frames, session: p.captureSessionID, stopped: false, at: ProcessInfo.processInfo.systemUptime)
         publishCaptureStatus()
-        if captureAdmission == .newSession, captureAlive { invalidatePending(); captureAlive = false; diag.pauseRun(reason: "newCaptureSession") }
+        if captureAdmission == .newSession, captureAlive { invalidatePending(); captureAlive = false; diag.pauseRun(reason: "newCaptureSession", frames: frames) }
         let wasAlive = captureAlive
         lastPacketDate = now
         if !captureAlive { captureAlive = true }
@@ -1814,7 +1814,7 @@ final class TranslatorEngine: ObservableObject {
 
         if !wasAlive {
             activateTranslationSystem()
-            diag.beginRun(); refreshModeDiagnosticEpoch() // v2.0.0 build 84: one Test Run per broadcast, after the active mode is known
+            diag.beginRun(sameBroadcast: captureAdmission == .current, frames: p.frames); refreshModeDiagnosticEpoch() // v2.0.0 build 84: one Test Run per broadcast, after the active mode is known
             interruptWarmupForLiveWork()
             startupWarmupTask?.cancel() // Live capture takes priority over idle prewarming.
             startupWarmupTask = nil
