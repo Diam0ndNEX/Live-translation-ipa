@@ -29,7 +29,7 @@ Still not read (needed before any move): preview_interface.sh, ui_screenshots.sh
 
 Blocker found for splitting Diagnostics: `Tests/TestRuns/main.swift` (line 241) reads `App/Diagnostics.swift` at run time by that exact path. If Diagnostics is moved or split, that Swift test has to be changed to read the moved or split files. That is a Swift edit and cannot be compiled here.
 
-Not migrated on purpose: test_v197_experiments.py and test_v198_performance.py. CI does not run them and they already fail on this branch (they assert versions 1.9.7 and 1.9.8). Remove them or leave them; do not rely on them.
+Removed: test_v197_experiments.py and test_v198_performance.py. CI did not run them and they already failed on this branch (they asserted versions 1.9.7 and 1.9.8). They remain in git history.
 
 ## The fix: tests find sources by name, not by path
 `scripts/sources.py` (now used by every script that reads Swift sources, and unit-tested in a scratch folder: merge of `A.swift` + `A+Part.swift`, missing name, duplicate name) gives `read_source("TranslatorEngine")`: the main file plus every split part named `TranslatorEngine+<Topic>.swift`, anywhere under App/, Shared/ or BroadcastExtension/. A test using it does not care which folder a file is in or whether it was split, because it asserts against the combined text.

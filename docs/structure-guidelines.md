@@ -1,13 +1,13 @@
 # ScreenLingo structure guidelines
 
-Status: written 2026-11-10 for the 2.3.2 (build 109) code. Nothing here was compiled or run. Existing files are NOT moved by this document; it defines where NEW code, tests and docs go and how the big files shrink over time. The step-by-step path to moving and splitting existing files is in `docs/structure-migration-plan.md`.
+Status: written 2026-11-10 for the 2.3.2 (build 109) code, refreshed after all contract tests moved to `read_source` and the shell scripts to `scripts/swift_sources.sh`. Nothing Swift was compiled. Existing files are NOT moved by this document; it defines where NEW code, tests and docs go and how the big files shrink over time. The step-by-step path to moving and splitting existing files is in `docs/structure-migration-plan.md`.
 
 Why: `TranslatorEngine.swift` (~258 KB), `Diagnostics.swift` (~121 KB), `DiagnosticArchive.swift` (~105 KB), `TranslationMemoryStore.swift` (~81 KB) and `DiagnosticsDashboard.swift` (~77 KB) are too big to review or edit safely, and `App/` has ~27 loose files. Optimization work keeps going, so structure improves a little with every update instead of in one big stop.
 
 ## 1. What is possible now (no moves, no risk to tests)
 - New code goes into new files in the target folders below. Xcode sources are `[App, Shared]` in `project.yml` and are picked up recursively, so a new folder under `App/` needs no project change.
 - `Shared/` stays FLAT. `build.yml` compiles `Shared/*.swift` with a glob, so a subfolder there would silently drop files from those test builds.
-- Existing files are not moved until the tests find sources by name (see the migration plan). Moving first would break about 13 test scripts.
+- Tests now find sources by name (`read_source`, `scripts/swift_sources.sh`), so moving a file no longer breaks them. Still open before any move: 3 `swiftc` lines in `build.yml`, the path read in `Tests/TestRuns/main.swift`, and the two UI lints (see the migration plan).
 - `docs/` stays flat for now (see section 7). The index is `docs/README.md`.
 
 ## 2. Target layout for `App/`
@@ -49,10 +49,11 @@ Split points are guesses from file names and sizes, not from reading the code. C
 - `DiagnosticArchive`: one file per report/ZIP section.
 
 ## 6. Tests and CI
-- Source-contract tests in `scripts/` historically read files by path (`read('App/TranslatorEngine.swift')`) and compare function text with older commits (`old('App/TranslatorEngine.swift')`, which runs `git show <commit>:<path>`).
-- NEW tests load sources with `from sources import read_source` and `read_source("TranslatorEngine")` (see `scripts/sources.py`). That returns the main file plus all `TranslatorEngine+*.swift` parts wherever they are, so a later move or split needs no test edit.
+- Source-contract tests in `scripts/` compare function text with older commits (`old('App/TranslatorEngine.swift')`, which runs `git show <commit>:<path>`).
+- Every Python test that reads Swift sources loads them with `from sources import read_source` and `read_source("TranslatorEngine")` (see `scripts/sources.py`). That returns the main file plus all `TranslatorEngine+*.swift` parts wherever they are, so a move or split needs no test edit. New tests must do the same.
+- Shell scripts build their `swiftc` lists with `$(bash scripts/swift_sources.sh Name1 Name2)`, which does the same lookup. `Shared/*.swift` stays a glob.
 - `old()` comparisons keep the OLD commit's path; only the current-file side uses `read_source`.
-- `build.yml` names files explicitly in `swiftc` commands and uses `Shared/*.swift`. Any update that moves a file lists every script and workflow line it changed.
+- `build.yml` still names 3 groups of `App/` files explicitly in `swiftc` commands (pipeline regressions, navigation, UI model); use `scripts/swift_sources.sh` there too. Any update that moves a file lists every script and workflow line it changed.
 - Do not add a new `test_vXYZ_contracts.py` per version if the check fits an existing topic test. A per-version file is only for checks that are specific to that release.
 - CI green means it compiles and the tests pass. It is not proof of speed or correct subtitles.
 
@@ -66,7 +67,7 @@ Split points are guesses from file names and sizes, not from reading the code. C
 - [ ] Read the contract tests that mention the files you edit.
 - [ ] New code is in a new file in the target folder; no giant file grew.
 - [ ] If a giant file was touched: extraction commit first, then the change.
-- [ ] New or changed tests load sources with `read_source`.
+- [ ] New or changed tests load sources with `read_source`; new `swiftc` lists use `scripts/swift_sources.sh`.
 - [ ] Version, build and changelog bumped in `Shared/Shared.swift` and `project.yml` (3 places each) and every script that asserts the version.
 - [ ] `docs/vX.Y.Z-specification.md` added and listed in `docs/README.md`.
 - [ ] Commit messages say what changed. No speed claims without Diagnostics from all three modes.
