@@ -109,5 +109,5 @@ import re
 for number, line in enumerate(shared.split("\n"), 1):
     if line.startswith('        ("'):
         quotes = len(re.findall(r'(?<!\\)"', line))
-        assert quotes == 4 and line.rstrip().endswith('"),'), f"Shared.swift line {number}: changelog entry is not a closed string pair"
+        assert quotes == 4 and line.rstrip().rstrip(",").endswith('")'), f"Shared.swift line {number}: changelog entry is not a closed string pair"
 print("v2.3.2 changelog lint passed")
