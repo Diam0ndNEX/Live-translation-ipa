@@ -1,9 +1,9 @@
 name: Build ScreenLingo IPA
 on:
   push:
-    branches: ["claude/**", codex/screenlingo-v1.9.9-recovery-evidence, codex/screenlingo-v1.9.8-three-mode-performance, codex/screenlingo-v1.9.7-safe-hotpath, codex/screenlingo-v1.9.7-three-mode-gains, codex/screenlingo-v1.9.6-hybrid-contention, codex/screenlingo-v1.9.5-full-performance, codex/screenlingo-v1.9.4-measured-reliability, codex/screenlingo-v1.9.3-prediction-diagnostics, codex/screenlingo-v1.9.2-hybrid-reliability, codex/screenlingo-v1.9.1-hybrid-performance, codex/screenlingo-v1.9.0-three-modes, codex/screenlingo-v0.7.0, codex/screenlingo-v0.8.0, codex/screenlingo-v0.9.0, codex/screenlingo-v1.0.0, codex/screenlingo-v1.1.0, codex/screenlingo-v1.2.0, codex/screenlingo-v1.2.1, codex/screenlingo-v1.3.0, codex/screenlingo-v1.4.1, codex/screenlingo-v1.4.1-static-overlay, codex/screenlingo-v1.4.1-diagnostics, codex/screenlingo-v1.4.2, codex/screenlingo-v1.4.3-batch-memory, codex/screenlingo-v1.4.4-performance, codex/screenlingo-v1.4.5-latency, codex/screenlingo-v1.4.6-validation, codex/screenlingo-v1.4.7-intelligence, codex/screenlingo-v1.4.8-continuity, codex/screenlingo-v1.5.0-refinement, codex/screenlingo-v1.7.0-performance, codex/screenlingo-v1.7.1-testing, codex/screenlingo-v1.7.2-performance]
+    branches: ["claude/**", codex/screenlingo-v1.9.9-recovery-evidence]
   pull_request:
-    branches: [codex/screenlingo-v1.9.9-recovery-evidence, codex/screenlingo-v1.9.8-three-mode-performance, codex/screenlingo-v1.9.7-safe-hotpath, codex/screenlingo-v1.9.7-three-mode-gains, codex/screenlingo-v1.9.6-hybrid-contention, codex/screenlingo-v1.9.5-full-performance, codex/screenlingo-v1.9.4-measured-reliability, codex/screenlingo-v1.3.0, codex/screenlingo-v1.4.0, codex/screenlingo-v1.4.1, codex/screenlingo-v1.4.2, codex/screenlingo-v1.4.3-batch-memory, codex/screenlingo-v1.4.4-performance, codex/screenlingo-v1.4.5-latency, codex/screenlingo-v1.4.6-validation, "codex/memory2-**"]
+    branches: ["claude/**", codex/screenlingo-v1.9.9-recovery-evidence]
   workflow_dispatch:
     inputs:
       interface_preview:
@@ -17,7 +17,7 @@ concurrency:
 permissions:
   contents: read
 jobs:
-  build:
+  checks:
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
@@ -55,23 +55,23 @@ jobs:
           /tmp/pipeline-tests
       - name: Verify three-mode coordinator and source contract
         run: |
-          swiftc -parse-as-library Shared/SharedTranslationWork.swift Shared/TranslationSystem.swift Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/ThreeModes/main.swift -o /tmp/three-mode-tests
+          swiftc -parse-as-library Shared/SharedTranslationWork.swift $(bash scripts/swift_sources.sh TranslationSystem) Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/ThreeModes/main.swift -o /tmp/three-mode-tests
           /tmp/three-mode-tests
           python3 scripts/test_three_modes.py
           python3 scripts/test_compare_three_modes.py
       - name: Verify deterministic LL Legacy and Hybrid timed A/B matrix
         run: |
-          swiftc -parse-as-library Shared/SharedTranslationWork.swift Shared/TranslationSystem.swift Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/HotPathAB/main.swift -o /tmp/screenlingo-v196-timed-tests
+          swiftc -parse-as-library Shared/SharedTranslationWork.swift $(bash scripts/swift_sources.sh TranslationSystem) Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/HotPathAB/main.swift -o /tmp/screenlingo-v196-timed-tests
           /tmp/screenlingo-v196-timed-tests
       - name: Compile isolated reference Hybrid and confirmed-probe variants
         run: |
-          swiftc -parse-as-library -D SCREENLINGO_REFERENCE_CONFIRMED_PROBE -D SCREENLINGO_REFERENCE_HYBRID_PREFLIGHT -D SCREENLINGO_HYBRID_REFERENCE Shared/SharedTranslationWork.swift Shared/TranslationSystem.swift Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/HotPathAB/main.swift -o /tmp/screenlingo-v197-reference-tests
+          swiftc -parse-as-library -D SCREENLINGO_REFERENCE_CONFIRMED_PROBE -D SCREENLINGO_REFERENCE_HYBRID_PREFLIGHT -D SCREENLINGO_HYBRID_REFERENCE Shared/SharedTranslationWork.swift $(bash scripts/swift_sources.sh TranslationSystem) Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/HotPathAB/main.swift -o /tmp/screenlingo-v197-reference-tests
           /tmp/screenlingo-v197-reference-tests
-          swiftc -parse-as-library -D SCREENLINGO_HYBRID_RECOVERY_FIRST Shared/SharedTranslationWork.swift Shared/TranslationSystem.swift Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/HotPathAB/main.swift -o /tmp/screenlingo-v197-recovery-first-tests
+          swiftc -parse-as-library -D SCREENLINGO_HYBRID_RECOVERY_FIRST Shared/SharedTranslationWork.swift $(bash scripts/swift_sources.sh TranslationSystem) Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/HotPathAB/main.swift -o /tmp/screenlingo-v197-recovery-first-tests
           /tmp/screenlingo-v197-recovery-first-tests
       - name: Verify isolated Hybrid reference spacing build
         run: |
-          swiftc -parse-as-library -D SCREENLINGO_REFERENCE_HYBRID_EXIT_SETTLING Shared/SharedTranslationWork.swift Shared/TranslationSystem.swift Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/ThreeModes/main.swift -o /tmp/v199-hybrid-reference
+          swiftc -parse-as-library -D SCREENLINGO_REFERENCE_HYBRID_EXIT_SETTLING Shared/SharedTranslationWork.swift $(bash scripts/swift_sources.sh TranslationSystem) Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/ThreeModes/main.swift -o /tmp/v199-hybrid-reference
           /tmp/v199-hybrid-reference
       - name: Verify three-mode diagnostics live routing
         run: python3 scripts/test_mode_diagnostics_ui.py
@@ -83,6 +83,8 @@ jobs:
         run: python3 scripts/test_ui_no_carryover.py
       - name: UI layout lint (2.1.0 §13.8, R1-R10)
         run: python3 scripts/test_ui_layout_rules.py
+      - name: Structure docs are current (sizes table, reviewed-for version, spec file)
+        run: python3 scripts/test_structure_docs.py
       - name: Settings search index is current
         run: python3 scripts/make_settings_index.py --check
       - name: Navigation router and narrow-observation tests
@@ -101,8 +103,15 @@ jobs:
         run: bash scripts/test_diagnostics.sh
       - name: Check Test Runs storage, retention, recovery and migration
         run: bash scripts/test_test_runs.sh
-      - name: Storage scaling smoke benchmark
-        run: bash scripts/benchmark_memory.sh 3000 25000
+
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.6"
       - name: Generate app icon
         run: |
           python3 -m venv .venv

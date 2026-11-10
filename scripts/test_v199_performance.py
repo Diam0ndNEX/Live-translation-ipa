@@ -16,21 +16,21 @@ def read(relative):
     return (root / relative).read_text(encoding="utf-8")
 shared = read("Shared/Shared.swift")
 project = read("project.yml")
-capture = read("BroadcastExtension/SampleHandler.swift")
+capture = read_source("SampleHandler")
 acquisition = read("Shared/SubtitleAcquisitionPolicy.swift")
 governor = read("Shared/SubtitlePerformancePolicy.swift")
-engine = read("App/TranslatorEngine.swift")
-coordinator = read("Shared/TranslationSystem.swift")
+engine = read_source("TranslatorEngine")
+coordinator = read_source("TranslationSystem")
 service = read("App/ModeTranslationService.swift")
-diagnostics = read("App/Diagnostics.swift")
+diagnostics = read_source("Diagnostics")
 archive = read("App/DiagnosticArchive.swift")
-memory = read("App/TranslationMemoryStore.swift")
+memory = read_source("TranslationMemoryStore")
 workflow = read(".github/workflows/build.yml")
 
-assert 'static let version = "2.3.2"' in shared
-assert "static let build = 109" in shared
-assert project.count('"2.3.2"') == 3
-assert project.count('"109"') == 3
+assert 'static let version = "2.3.9"' in shared
+assert "static let build = 116" in shared
+assert project.count('"2.3.9"') == 3
+assert project.count('"116"') == 3
 
 assert "SCREENLINGO_REFERENCE_CAPTURE_CADENCE" in capture
 assert "SubtitleAcquisitionPolicy.allowsEarlyVisualWake" in capture
@@ -108,7 +108,7 @@ assert "hybrid_unsubmitted_hedge_ms" in archive
 assert "legacyAdaptiveLowYieldSkips" in archive
 assert "CREATE TABLE" in memory
 assert "codex/screenlingo-v1.9.9-recovery-evidence" in workflow
-assert "codex/screenlingo-v1.9.6-hybrid-contention" in workflow
+assert "claude/**" in workflow
 assert "Verify v1.9.9 recovery and OCR regression contract" in workflow
 
 print("v1.9.9 nominal/fair, custom preset, exact-lane and A/B wiring contract passed")

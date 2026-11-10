@@ -11,14 +11,14 @@ def read(path):
         return read_source(Path(path).stem)
     return (root / path).read_text(encoding="utf-8")
 
-engine = read("App/TranslatorEngine.swift")
-extension = read("BroadcastExtension/SampleHandler.swift")
+engine = read_source("TranslatorEngine")
+extension = read_source("SampleHandler")
 simulation = read("App/PipelineSimulation.swift")
-core = read("Shared/TranslationSystem.swift")
+core = read_source("TranslationSystem")
 policy = read("Shared/SubtitlePerformancePolicy.swift")
 tests = read("Tests/main.swift")
 modes = read("Tests/ThreeModes/main.swift")
-diagnostics = read("App/Diagnostics.swift")
+diagnostics = read_source("Diagnostics")
 
 required = {
     "thermal classification": 'case .nominal, .fair: return .fullPerformance' in policy,

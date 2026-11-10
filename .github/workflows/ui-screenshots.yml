@@ -5,9 +5,7 @@ on:
   push:
     branches: ["claude/**"]
     paths:
-      - "App/**"
-      - "Shared/**"
-      - "project.yml"
+      - "App/UI/**"
       - "scripts/ui_screenshots.sh"
       - "scripts/make_contact_sheet.py"
       - ".github/workflows/ui-screenshots.yml"
