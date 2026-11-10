@@ -1,6 +1,6 @@
 # ScreenLingo structure migration plan
 
-Status: written 2026-11-10 for 2.3.2 (build 109), updated for 2.3.3. Nothing Swift was compiled. Step 3 has started: five whole types were moved out of `App/DiagnosticArchive.swift` into `App/Diagnostics/DiagnosticArchive+*.swift` (see the Step 3 log below). No other file has been moved or split.
+Status: this file is the LOG of the migration (2.3.2 to 2.3.9). Steps 1 to 3 are done: tests and scripts find Swift by name, the big files are split. The current rules are in `docs/structure-guidelines.md`. Details below describe how things were at 2.3.3 and are kept as a record. Swift was never compiled in chat.
 
 Progress: step 1 is done. Every Python test that reads Swift sources now loads them with `read_source`. The Python tests were run on a read-only clone of the branch and all CI-run ones pass. Step 2 is partly done (see below). Steps 3 and 4 are open.
 
