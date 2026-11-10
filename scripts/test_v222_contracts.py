@@ -46,7 +46,7 @@ assert "typeSize.isAccessibilitySize" in read("App/UI/Kit/AreaEditor.swift") and
 # V: the current version (2.2.3 build 106, since the 2.2.3 update) in the three places the CI checks; the 2.2.2 changelog
 # entry must stay.
 shared = read("Shared/Shared.swift"); project = read("project.yml")
-assert 'static let version = "2.2.3"' in shared and "static let build = 106" in shared
-assert project.count('"2.2.3"') == 3 and project.count('"106"') == 3
+assert 'static let version = "2.3.0"' in shared and "static let build = 107" in shared
+assert project.count('"2.3.0"') == 3 and project.count('"107"') == 3
 assert '("2.2.2", "Build 105:' in shared
 print("v2.2.2 source contracts passed: PiP host, start reasons, diagnostics codes, automatic start, large-text layouts, version")

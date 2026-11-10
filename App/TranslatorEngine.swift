@@ -1954,6 +1954,9 @@ final class TranslatorEngine: ObservableObject {
                 diag.trace(previous, stage: "superseded", detail: "Confirmed replacement or early candidate")
                 if activeCandidateConfirmed && !activeCandidatePresented && diag.enabled {
                     diag.s.supersededUnpresentedConfirmed += 1
+                    // 2.3.0: measurement only. Whether the replaced caption's translation had started, and its age.
+                    diag.noteConfirmedSupersession(workStarted: busy && activeQueueOwner == .confirmed,
+                        ageMs: max(0, now.timeIntervalSince(activeCandidateConfirmedAt) * 1000))
                 }
             }
             activeCandidateID = candidate; activeCandidateText = candidateText

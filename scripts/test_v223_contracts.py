@@ -55,7 +55,8 @@ assert 'fastOCR: flag("fastOCR", false)' in engine
 diagnostics = (root / "App/Diagnostics.swift").read_text()
 archive = (root / "App/DiagnosticArchive.swift").read_text()
 assert 'if TranslationHotPathAB.refreshAvailabilityInBackground { settings["availabilityRefreshAB"] = "on" }' in diagnostics
-assert archive.count('"availabilityRefreshAB"') == 2, "settingsKeys and cohortKeys"
+# 2.3.0: 3 uses now (settingsKeys, cohortKeys and the new "switches on" report column).
+assert archive.count('"availabilityRefreshAB"') == 3, "settingsKeys, cohortKeys and the 2.3.0 report column"
 assert "deliveryFilteringMs matches confirmation-to-PiP time" in archive
 assert "hybrid_switch_guard_* values are the gap" in archive
 
@@ -100,8 +101,8 @@ assert "maximumTotalBytes: Int = Int.max" in store and "maximumUnpinnedRuns: Int
 assert "100 MB" not in (root / "App/TestRunViews.swift").read_text()
 
 # Version 2.2.3 build 106 in the places CI checks.
-assert 'static let version = "2.2.3"' in shared and "static let build = 106" in shared
-assert project.count('"2.2.3"') == 3 and project.count('"106"') == 3
+assert 'static let version = "2.3.0"' in shared and "static let build = 107" in shared
+assert project.count('"2.3.0"') == 3 and project.count('"107"') == 3
 assert '("2.2.3", "Build 106:' in shared
 assert '("2.2.2", "Build 105:' in shared, "older changelog entries stay"
 print("v2.2.3 source contracts passed: L5 switch (default off, pinned), unchanged request path and TTL, toggle, Fast OCR switch, version")

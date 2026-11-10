@@ -228,7 +228,7 @@ struct TranslationModeReport: Codable {
         "backend_session_age_ms", "backend_session_reuse_count",
         "pip_held_unchanged",
         "memory_saved_ram_hit", "memory_session_hit", "memory_legacy_hit", "memory_normalized_hit", "memory_persistent_hit",
-        "pip_enqueue_legacy_recovery", "pip_enqueue_confirmed_fresh",
+        "pip_enqueue_legacy_recovery", "pip_enqueue_fresh_text_changed", "pip_enqueue_confirmed_fresh",
         "selected_origin_compatible_memory", "selected_origin_speculation", "selected_origin_recovery",
         "selected_origin_session_low_latency", "selected_origin_session_apple_default",
         "selected_strategy_appleDefault", "selected_strategy_lowLatency", "memory_pressure", "thermal_reduced_speculation",
@@ -239,7 +239,7 @@ struct TranslationModeReport: Codable {
         "stale_rejected", "recovery_failed_missing", "confirmed", "display_failed",
         "unsupported_os", "unsupported_or_uninstalled_pair", "requested_appleDefault", "requested_lowLatency",
         "retained_session_start", "new_session_start", "speculative_queue_ms", "recovery_queue_ms",
-        "model_timeout", "model_error", "speculative_service_ms", "recovery_service_ms",
+        "model_timeout", "model_error", "speculative_service_ms", "recovery_service_ms", "confirmed_service_ms",
         "recovery_decision_speculation_failed", "recovery_decision_matching_deadline",
         "recovery_decision_speculation_absent", "recovery_decision_source_mismatch",
         "selected_memory_hit", "selected_speculation_match_ready", "selected_speculation_match_in_flight", "selected_recovery_success",
@@ -488,7 +488,7 @@ actor DiagnosticExportWriter {
             "legacySkipCleanup", "legacySkipSegmentation", "legacySkipModel",
             "sessionCacheHits", "savedMemoryHits", "speculativeModelRequests",
             "supersededSpeculativePipelines", "confirmedCandidatePackets",
-            "deferredEarlyCandidates", "supersededUnpresentedConfirmed",
+            "deferredEarlyCandidates", "supersededUnpresentedConfirmed", "supersededConfirmedInFlight", "supersededConfirmedNotStarted",
             "enqueuedCandidateFrames", "unchangedSkippedFrames",
             "cadenceSkippedFrames", "earlyVisualWakes", "earlyVisualWakesSuppressed", "largePackets", "packetSendErrors",
             "pixelConfirmations", "pixelRejections", "watchSkippedOCR", "watchTriggeredOCR", "pausedSkippedFrames", "emptyReads",
@@ -515,6 +515,7 @@ actor DiagnosticExportWriter {
             "modePlanBuiltMs", "modePlanReusedMs", "modeCommitToPiPMs",
             "modeConfirmationToPiPMs", "modeReadyToPiPMs", "hybridMatchingWaitMs",
             "speculativeStopReleaseMs", "legacyDetachedSpeculationReleaseMs", "queueBehindSpeculationMs", "queueBehindConfirmedMs", "queueSchedulingMs",
+            "confirmedSupersededAgeMs",
             "legacyConfirmedAfterSessionSwitchMs", "legacyConfirmedNoSwitchMs",
             "hybridUnsubmittedHedgeMs", "hybridPreviousDefaultExitGapMs", "hybridPostDefaultRecoveryServiceMs",
             "hybridNoOverlapRecoveryServiceMs", "hybridUnexplainedSlowRecoveryMs"
@@ -724,7 +725,7 @@ actor DiagnosticExportWriter {
             ## Subtitle lifecycle (candidates, not sentences)
             - Confirmed packets: \(count("confirmedCandidatePackets"))
             - Successfully enqueued candidate frames: \(count("enqueuedCandidateFrames"))
-            - Confirmed but superseded before enqueue: \(count("supersededUnpresentedConfirmed"))
+            - Confirmed but superseded before enqueue: \(count("supersededUnpresentedConfirmed")) (translation already running: \(count("supersededConfirmedInFlight")), not started: \(count("supersededConfirmedNotStarted")))
             - Failed enqueue attempts: \(count("enqueueFailed"))
             - Confirmed handoffs deferred: \(count("handoffDeferred"))
             - Handoffs replayed / expired: \(count("handoffReplayed")) / \(count("handoffExpired"))
@@ -829,6 +830,12 @@ actor DiagnosticExportWriter {
             In Hybrid Recovery, deliveryFilteringMs matches confirmation-to-PiP time: it is the wait for the
             Apple Default model, booked under that stage name, not a separate filtering cost. The
             hybrid_switch_guard_* values are the gap since the last Default call returned, not a delay.
+
+            Names (2.3.0): in Legacy the ordinary confirmed model call is confirmed_service_ms, and a fresh
+            translation whose early text had changed is pip_enqueue_fresh_text_changed (reports before 2.3.0 used
+            recovery_service_ms and pip_enqueue_legacy_recovery for these; neither is a second attempt). In Low
+            Latency, recovery_queue_ms and recovery_service_ms still name the ordinary confirmed call. Only in Hybrid
+            Recovery do the recovery_* names mean a recovery.
 
             Diagnostics are bounded. Structured events cover at most 6000 retained (2.2.3: raised from 2400)
             entries; old events can be evicted. Summary counters span the whole session.
@@ -1438,7 +1445,7 @@ enum CombinedDiagnosticReport {
                     list[index].queueMs = event.durationMs
                     open[event.caption] = list
                 }
-            case "speculative_service_ms", "recovery_service_ms":
+            case "speculative_service_ms", "recovery_service_ms", "confirmed_service_ms":
                 let lane = reason.hasPrefix("speculative") ? "speculative" : "confirmed"
                 let service = event.durationMs ?? 0
                 var call = Open(lane: lane, strategy: requested[event.caption] ?? "unknown",
@@ -1551,11 +1558,16 @@ enum CombinedDiagnosticReport {
 
         // 2.2.1 (D8): the variables the next A/B tests change, and a warning for sessions with no timing.
         out.append("")
-        out.append("| | hot path | Hybrid scheduler | detailed | thermal start/end/max | focused/strict | identical-frame holds | manual | memory wait P50/P95 | health P50/P95 | memory timeouts |")
-        out.append("|---|---|---|---|---|---|---|---|---|---|---|")
+        out.append("| | hot path | Hybrid scheduler | detailed | thermal start/end/max | focused/strict | identical-frame holds | manual | memory wait P50/P95 | health P50/P95 | memory timeouts | switches on |")
+        out.append("|---|---|---|---|---|---|---|---|---|---|---|---|")
         for (i, session) in selected.enumerated() {
             let s = session.settings
-            out.append("| \(labels[i]) | \(s["hotPathAB"] ?? "?") | \(s["hybridSchedulerAB"] ?? "?") | \(s["detailedCollection"] ?? "?")\(s["detailSuspended"] == "true" ? " (suspended: thermal)" : "") | \(s["thermalStart"] ?? "?")/\(s["thermalEnd"] ?? "?")/\(s["thermalMax"] ?? "?") | \(s["focusedCaptionOCR"] ?? "?")/\(s["strictCaptionIdentity"] ?? "?") | \(session.counters["identicalFrameHolds", default: 0]) | \(session.counters["manualTranslations", default: 0]) | \(ms(session.distributions["memoryLookupWaitMs"]?.p50))/\(ms(session.distributions["memoryLookupWaitMs"]?.p95)) | \(ms(session.distributions["memoryHealthMs"]?.p50))/\(ms(session.distributions["memoryHealthMs"]?.p95)) | \(memoryTimeoutShare(session)) |")
+            // 2.3.0: these keys are written only when ON, so a missing key means OFF. Names the 2.2.3 switches that were on.
+            let armsOn = [("legacyOwnLaneAB", "Legacy own lane"), ("availabilityRefreshAB", "background language check"),
+                          ("hybridBackoffAB", "Hybrid relaxed backoff"), ("hybridGuardAB", "Hybrid shorter guard")]
+                .filter { s[$0.0] == "on" }.map { $0.1 }
+            let armsText = armsOn.isEmpty ? "none" : armsOn.joined(separator: ", ")
+            out.append("| \(labels[i]) | \(s["hotPathAB"] ?? "?") | \(s["hybridSchedulerAB"] ?? "?") | \(s["detailedCollection"] ?? "?")\(s["detailSuspended"] == "true" ? " (suspended: thermal)" : "") | \(s["thermalStart"] ?? "?")/\(s["thermalEnd"] ?? "?")/\(s["thermalMax"] ?? "?") | \(s["focusedCaptionOCR"] ?? "?")/\(s["strictCaptionIdentity"] ?? "?") | \(session.counters["identicalFrameHolds", default: 0]) | \(session.counters["manualTranslations", default: 0]) | \(ms(session.distributions["memoryLookupWaitMs"]?.p50))/\(ms(session.distributions["memoryLookupWaitMs"]?.p95)) | \(ms(session.distributions["memoryHealthMs"]?.p50))/\(ms(session.distributions["memoryHealthMs"]?.p95)) | \(memoryTimeoutShare(session)) | \(armsText) |")
         }
         for (i, session) in selected.enumerated() where (session.distributions["enqueueLatencyMs"]?.count ?? 0) == 0 {
             out.append("")

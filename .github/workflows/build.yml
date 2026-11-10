@@ -37,6 +37,8 @@ jobs:
         run: python3 scripts/test_v222_contracts.py
       - name: Verify v2.2.3 source contracts (L5 background availability refresh)
         run: python3 scripts/test_v223_contracts.py
+      - name: Verify v2.3.0 source contracts (Legacy diagnostics labels, supersession measurement)
+        run: python3 scripts/test_v230_contracts.py
       - name: Diagnostic allowlist guards (2.2.1 C2, C3)
         run: python3 scripts/test_diag_allowlists.py
       - name: Library history rules and debounced save (2.2.1 E1, E15)

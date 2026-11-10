@@ -179,6 +179,9 @@ struct Stats: Equatable {
     var rotationTries = 0
     var confirmedCandidatePackets = 0, deferredEarlyCandidates = 0
     var supersededUnpresentedConfirmed = 0, enqueuedCandidateFrames = 0
+    /// 2.3.0: of the confirmed captions replaced by a different confirmed caption before enqueue, how many already had
+    /// translation work running and how many had not started it.
+    var supersededConfirmedInFlight = 0, supersededConfirmedNotStarted = 0
     var movieSelections = 0, movieTemporalOverrides = 0, movieRejectedSmall = 0
     var queueReplacements = 0, visualChanges = 0, earlyVisualWakes = 0, earlyVisualWakesSuppressed = 0, emptyOCRPasses = 0
     var largePackets = 0, packetSendErrors = 0
@@ -501,6 +504,16 @@ final class Diagnostics: ObservableObject {
         guard enabled, ["retained", "reused", "evictedUnused"].contains(outcome) else { return }
         speculativeUnitCounts[outcome, default: 0] += 1
     }
+    /// 2.3.0: a confirmed, not yet enqueued caption was replaced by a different confirmed caption. Records whether its
+    /// translation had started and how long it had been confirmed. Counts and one bounded sample list only.
+    func noteConfirmedSupersession(workStarted: Bool, ageMs: Double) {
+        guard enabled, ageMs.isFinite, ageMs >= 0 else { return }
+        if workStarted { s.supersededConfirmedInFlight += 1 } else { s.supersededConfirmedNotStarted += 1 }
+        modelTimingSamples["confirmed_superseded_age_ms", default: []].append(ageMs)
+        if modelTimingSamples["confirmed_superseded_age_ms", default: []].count > 1200 {
+            modelTimingSamples["confirmed_superseded_age_ms"]?.removeFirst()
+        }
+    }
     func recordQueueWait(owner: ModelQueueOwner, durationMs: Double, candidate: String?) {
         guard enabled, durationMs.isFinite, durationMs >= 0 else { return }
         queueWaitSamples[owner, default: []].append(durationMs)
@@ -536,7 +549,8 @@ final class Diagnostics: ObservableObject {
                 legacyModeEvent(candidate, reason: "requested_appleDefault")
             }
             if reason == "speculative_model_submitted" { legacyModeEvent(candidate, reason: "requested_appleDefault") }
-            if reason == "confirmed_model_completed" { legacyModeEvent(candidate, reason: "recovery_service_ms", duration: durationMs) }
+            // 2.3.0: was "recovery_service_ms". In Legacy this is the ordinary confirmed model call, not a recovery.
+            if reason == "confirmed_model_completed" { legacyModeEvent(candidate, reason: "confirmed_service_ms", duration: durationMs) }
             if reason == "speculative_model_completed" { legacyModeEvent(candidate, reason: "speculative_service_ms", duration: durationMs) }
         }
         if ["model_batch_completed", "confirmed_model_completed", "speculative_model_completed", "speculative_stop_released", "legacy_detached_speculation_released",
@@ -668,22 +682,38 @@ final class Diagnostics: ObservableObject {
         let firstOCR: Double
         var fresh = false
         var speculativeHit = false
+        /// 2.3.0: true only when THIS caption was seen unconfirmed with different text than it was confirmed with.
+        /// Before 2.3.0 this compared against one value shared by all captions (the last early sighting of any caption).
         var mismatch = false
+        /// 2.3.0: text fingerprint of this caption's latest unconfirmed sighting; nil when it had none.
+        var earlyFingerprint: String?
     }
     private var legacyModeContexts: [String: LegacyModeContext] = [:]
-    private var lastLegacySpeculation: String?
+    /// 2.3.0: insertion order of `legacyModeContexts`, so the oldest entries can be dropped first.
+    private var legacyModeContextOrder: [String] = []
+    private let legacyModeContextLimit = 128
+    private let legacyModeContextDropCount = 32
 
     func registerLegacyModeCaption(session: UUID, caption: String, source: String, target: String,
                                    fingerprint: String, firstOCR: Double, confirmed: Bool) {
         guard enabled, modeActiveSystem == "legacy" else { return }
-        if !confirmed { lastLegacySpeculation = fingerprint }
         if legacyModeContexts[caption] == nil {
-            if legacyModeContexts.count >= 128 { legacyModeContexts.removeAll(); legacyContextResets += 1 }
+            // 2.3.0: drop only the oldest entries. Clearing everything at once also erased the context of a caption
+            // whose translation was still running, so its enqueue was then labelled a memory hit or not recorded.
+            if legacyModeContexts.count >= legacyModeContextLimit {
+                let dropped = legacyModeContextOrder.prefix(legacyModeContextDropCount)
+                for key in dropped { legacyModeContexts.removeValue(forKey: key) }
+                legacyModeContextOrder.removeFirst(dropped.count)
+                legacyContextResets += 1
+            }
             legacyModeContexts[caption] = LegacyModeContext(session: session, source: source, target: target,
-                fingerprint: fingerprint, firstOCR: firstOCR, mismatch: confirmed && lastLegacySpeculation != nil && lastLegacySpeculation != fingerprint)
+                fingerprint: fingerprint, firstOCR: firstOCR)
+            legacyModeContextOrder.append(caption)
         }
-        if confirmed, let previous = lastLegacySpeculation {
-            legacyModeContexts[caption]?.mismatch = previous != fingerprint
+        if !confirmed {
+            legacyModeContexts[caption]?.earlyFingerprint = fingerprint
+        } else if let early = legacyModeContexts[caption]?.earlyFingerprint {
+            legacyModeContexts[caption]?.mismatch = early != fingerprint
         }
         legacyModeEvent(caption, reason: confirmed ? "confirmed" : "speculation_admitted")
     }
@@ -699,7 +729,9 @@ final class Diagnostics: ObservableObject {
         legacyModeContexts[caption]?.source = source
         guard let context = legacyModeContexts[caption], modeActiveSystem == "legacy" else { return }
         let reason: String
-        if context.fresh { reason = context.mismatch ? "pip_enqueue_legacy_recovery" : "pip_enqueue_confirmed_fresh" }
+        // 2.3.0: the old name "pip_enqueue_legacy_recovery" suggested a second attempt. It is the same fresh
+        // translation of the confirmed text; the only difference is that the caption's early text had changed.
+        if context.fresh { reason = context.mismatch ? "pip_enqueue_fresh_text_changed" : "pip_enqueue_confirmed_fresh" }
         else if context.speculativeHit { reason = "pip_enqueue_speculation_match_ready" }
         else { reason = "pip_enqueue_memory_hit" }
         legacyModeEvent(caption, reason: reason, duration: duration)
@@ -859,6 +891,8 @@ final class Diagnostics: ObservableObject {
         counters["confirmedCandidatePackets"] = s.confirmedCandidatePackets
         counters["deferredEarlyCandidates"] = s.deferredEarlyCandidates
         counters["supersededUnpresentedConfirmed"] = s.supersededUnpresentedConfirmed
+        counters["supersededConfirmedInFlight"] = s.supersededConfirmedInFlight
+        counters["supersededConfirmedNotStarted"] = s.supersededConfirmedNotStarted
         counters["enqueuedCandidateFrames"] = s.enqueuedCandidateFrames
         counters["unchangedSkippedFrames"] = s.unchangedSkipped
         counters["cadenceSkippedFrames"] = s.cadenceSkipped
@@ -910,6 +944,7 @@ final class Diagnostics: ObservableObject {
                 "speculativeStopReleaseMs": DiagnosticDistribution(modelTimingSamples["speculative_stop_released", default: []]),
                 "legacyDetachedSpeculationReleaseMs": DiagnosticDistribution(modelTimingSamples["legacy_detached_speculation_released", default: []]),
                 "queueBehindSpeculationMs": DiagnosticDistribution(queueWaitSamples[.speculative, default: []]),
+                "confirmedSupersededAgeMs": DiagnosticDistribution(modelTimingSamples["confirmed_superseded_age_ms", default: []]),
                 "queueBehindConfirmedMs": DiagnosticDistribution(queueWaitSamples[.confirmed, default: []]),
                 "queueSchedulingMs": DiagnosticDistribution(queueWaitSamples[.scheduling, default: []]),
                 "processingMs": DiagnosticDistribution(pipeline.map { $0.stages.translation }),
@@ -1368,7 +1403,7 @@ final class Diagnostics: ObservableObject {
     private func clearCollection() {
         modeTrace.removeAll(); openingModeTrace.removeAll()
         modeTimingSamples.removeAll(); modeEventCounts.removeAll()
-        initialWarmupTrace.removeAll(); legacyModeContexts.removeAll(); lastLegacySpeculation = nil
+        initialWarmupTrace.removeAll(); legacyModeContexts.removeAll(); legacyModeContextOrder.removeAll()
         diagnosticSessionID = UUID(); candidateIDs = [:]; frameIDs = [:]; unitIDs = [:]; structuredEvents = []
         legacyValidationSnapshot = [:]; legacyValidationPair = [:]
         eventTotals = [:]; intervalHistory = []; intervalStart = Date()
