@@ -9,7 +9,8 @@ Older documents are records of what was true when they were written. They name b
 - structure-migration-plan.md: which scripts depend on which files, and the order for moving and splitting existing files
 
 ## Current line (start here)
-- v2.3.1-specification.md: newest specification in this folder (2.3.2 has no specification file; see the changelog in `Shared/Shared.swift`)
+- v2.3.3-specification.md: newest specification in this folder (2.3.2 has no specification file; see the changelog in `Shared/Shared.swift`)
+- v2.3.1-specification.md
 - v2.3.0-specification.md
 - v2.2.3-specification.md: includes the 2.2.2 b105 latency test figures
 - v2.2.1-specification.md, v2.2.1-decisions.md, v2.2.1-addendum.md, v2.2.1-prompt.md
