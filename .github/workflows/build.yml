@@ -51,7 +51,7 @@ jobs:
           /tmp/history-policy-tests
       - name: Check pipeline regressions
         run: |
-          swiftc Shared/*.swift App/TextIntelligence.swift App/CaptionAssembly.swift App/MemoryWriter.swift App/PipelineSimulation.swift Tests/main.swift -o /tmp/pipeline-tests
+          swiftc Shared/*.swift $(bash scripts/swift_sources.sh TextIntelligence CaptionAssembly MemoryWriter PipelineSimulation) Tests/main.swift -o /tmp/pipeline-tests
           /tmp/pipeline-tests
       - name: Verify three-mode coordinator and source contract
         run: |
@@ -87,11 +87,11 @@ jobs:
         run: python3 scripts/make_settings_index.py --check
       - name: Navigation router and narrow-observation tests
         run: |
-          swiftc -parse-as-library App/DesignSystem/AppRouter.swift App/DesignSystem/ObjectSlice.swift Tests/Navigation/main.swift -o /tmp/navigation-tests
+          swiftc -parse-as-library $(bash scripts/swift_sources.sh AppRouter ObjectSlice) Tests/Navigation/main.swift -o /tmp/navigation-tests
           /tmp/navigation-tests
       - name: UI model tests (2.1.0 SessionPhase)
         run: |
-          swiftc -parse-as-library Shared/CaptureReadiness.swift App/UI/Model/SessionPhase.swift Tests/UIModel/main.swift -o /tmp/ui-model-tests
+          swiftc -parse-as-library Shared/CaptureReadiness.swift $(bash scripts/swift_sources.sh SessionPhase) Tests/UIModel/main.swift -o /tmp/ui-model-tests
           /tmp/ui-model-tests
       - name: Check SQLite memory migration
         run: bash scripts/test_memory.sh
