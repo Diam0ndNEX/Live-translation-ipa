@@ -4,10 +4,11 @@ finds the setting itself (spec §13.5.5). Run after changing a settings page; `-
 import re
 import sys
 from pathlib import Path
+from sources import read_source
 
 root = Path(__file__).resolve().parents[1]
-FILES = ["App/SettingsViews.swift", "App/SettingsCategories.swift", "App/CustomizationViews.swift",
-         "App/ExperimentalFeaturesView.swift"]
+# Source names, not paths: sources.py finds each file (and any Name+Topic.swift parts) wherever it lives.
+NAMES = ["SettingsViews", "SettingsCategories", "CustomizationViews", "ExperimentalFeaturesView"]
 # Page struct -> (enum case, title shown under the result)
 PAGES = {
     "ReadingSettings": ("reading", "Area and recognition"),
@@ -33,8 +34,8 @@ LABEL = re.compile(r'(?:Toggle|Picker|Stepper)\(\s*"([^"\\]{3,70})"|LabeledToggl
 
 def entries():
     out = []
-    for f in FILES:
-        s = (root / f).read_text()
+    for f in NAMES:
+        s = read_source(f)
         for m in re.finditer(r"\n(?:private )?struct (\w+): View \{", s):
             name = m.group(1)
             if name not in PAGES:
