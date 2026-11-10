@@ -1,6 +1,6 @@
 # ScreenLingo structure migration plan
 
-Status: written 2026-11-10 for 2.3.2 (build 109), updated for 2.3.3. Nothing Swift was compiled. Step 3 has started: five whole types were moved out of `App/DiagnosticArchive.swift` into `App/Diagnostics/DiagnosticArchive+*.swift` (see the Step 3 log below). No other file has been moved or split.
+Status: this file is the LOG of the migration (2.3.2 to 2.3.9). Steps 1 to 3 are done: tests and scripts find Swift by name, the big files are split. The current rules are in `docs/structure-guidelines.md`. Details below describe how things were at 2.3.3 and are kept as a record. Swift was never compiled in chat.
 
 Progress: step 1 is done. Every Python test that reads Swift sources now loads them with `read_source`. The Python tests were run on a read-only clone of the branch and all CI-run ones pass. Step 2 is partly done (see below). Steps 3 and 4 are open.
 
@@ -84,3 +84,10 @@ Next candidates, not started and unverified: `Diagnostics.swift`, `TranslatorEng
 
 ## Lesson from the 2.3.5 CI failure
 A moved block must get every `import` the original file had and the block uses. The 2.3.5 recovery file first had only `Foundation` and `SQLite3` and failed with `cannot find 'SHA256' in scope`; it needed `CryptoKit`. Python tests cannot catch this. Before each split, grep the block for symbols of every `import` at the top of the source file (CryptoKit: `SHA256`; SQLite3: `sqlite3_`, `SQLITE_`) and copy the imports that match.
+
+## 2.3.7: splitting classes into extension files
+Done for TranslatorEngine, Diagnostics, DiagnosticExportWriter, DiagnosticsBody and SettingsViews (see `docs/v2.3.7-specification.md`). Rules that came out of it:
+- Only whole members move; stored properties, `init`, `body` and `override` members stay in the main file.
+- Before moving, list the names tests match by text (`private func NAME`, `section(...)`, `body_of(...)`, `function(..., 'NAME')`). Members that define those names stay, and so do members that mention a private one.
+- Tests that slice the source between two markers depend on member order across files; keep the members involved in the main file.
+- After moving, remove `private` only from members whose name appears in another file of the type; then check that no internal signature exposes a private type, and that each new file has the imports of its source.

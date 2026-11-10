@@ -2,11 +2,14 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "2.3.6"
-    static let build = 113
+    static let version = "2.3.9"
+    static let build = 116
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("2.3.9", "Build 116: no change to translation, OCR, confirmation, the model choice or any default. Code layout only: another large part of the translator engine, including the OCR packet intake, the translation drain and the idle legacy validation, moved into its own files. Swift app behavior is unchanged."),
+        ("2.3.8", "Build 115: no change to translation, OCR, confirmation, the model choice or any default. Code layout only: the translation system and its three-mode coordinator, the test run screens, the translation memory store, the capture extension and the mode translation service were split into smaller files. Swift app behavior is unchanged."),
+        ("2.3.7", "Build 114: no change to translation, OCR, confirmation, the model choice or any default. Code layout only: the translator engine, the diagnostics recorder, the diagnostics archive writer, the diagnostics dashboard view and the settings pages were split into several smaller files, and the members they share lost their private marker. Swift app behavior is unchanged."),
         ("2.3.6", "Build 113: no change to translation, OCR, confirmation, the model choice or any default. Code layout only: more of the translation memory store, the diagnostics dashboard and the diagnostics recorder models moved into their own files, and the helpers they share lost their private marker. Swift app behavior is unchanged."),
         ("2.3.5", "Build 112: no change to translation, OCR, confirmation, the model choice or any default. Code layout only: the snapshot, merge and recovery functions of the translation memory store moved into their own file, and a few more internal helpers of that store lost their private marker so the new file can use them. Swift app behavior is unchanged."),
         ("2.3.4", "Build 111: no change to translation, OCR, confirmation, the model choice or any default. Code layout only: the diagnostic session storage functions of the translation memory store moved into their own file, and a few internal helpers of that store lost their private marker so the new file can use them. Swift app behavior is unchanged."),

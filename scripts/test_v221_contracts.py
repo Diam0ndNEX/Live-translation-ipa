@@ -14,7 +14,7 @@ def read(relative):
     if relative.split("/")[0] in ("App", "Shared", "BroadcastExtension"):
         return read_source(Path(relative).stem)
     return (root / relative).read_text(encoding="utf-8")
-engine = read("App/TranslatorEngine.swift")
+engine = read_source("TranslatorEngine")
 app = read("App/ScreenTranslatorApp.swift")
 phase = read("App/UI/Model/SessionPhase.swift")
 snapshot = read("App/UI/Model/TranslateSnapshot.swift")
@@ -26,16 +26,16 @@ slice = read("App/DesignSystem/EngineSlice.swift")
 categories = read("App/SettingsCategories.swift")
 policy = read("Shared/HistoryPolicy.swift")
 workflow = read(".github/workflows/build.yml")
-diagnostics = read("App/Diagnostics.swift")
+diagnostics = read_source("Diagnostics")
 archive = read("App/DiagnosticArchive.swift")
 runstore = read("App/TestRunStore.swift")
 runviews = read("App/TestRunViews.swift")
-dashboard = read("App/DiagnosticsDashboard.swift")
+dashboard = read_source("DiagnosticsDashboard")
 settings_views = read("App/SettingsViews.swift")
 guard_file = read("App/CollectionChangeGuard.swift")
 policy_shared = read("Shared/SubtitlePerformancePolicy.swift")
 cjk = read("Shared/CJKText.swift")
-extension_source = read("BroadcastExtension/SampleHandler.swift")
+extension_source = read_source("SampleHandler")
 tune = read("App/UI/Translate/TuneSheet.swift")
 scenes = read("App/UI/Translate/ScenesStrip.swift")
 memory_view = read("App/MemoryManagementView.swift")
@@ -71,7 +71,7 @@ for fn, marker in (("deleteHistory", "func deleteHistory"), ("toggleStar", "func
     assert "flushHistorySave()" in body_of(engine, marker, "\n    }\n"), "E15: " + fn + " must flush the write"
 assert "historyWriter.cancel()" in body_of(engine, "func eraseHistory", "\n    }\n")
 assert "engine.flushHistorySave()" in app, "E15: the app must flush the Library when it goes to the background"
-assert "noteHistorySave" in engine and "historySaveMs" in read("App/Diagnostics.swift") and "historySaveMs" in read("App/DiagnosticArchive.swift")
+assert "noteHistorySave" in engine and "historySaveMs" in read_source("Diagnostics") and "historySaveMs" in read("App/DiagnosticArchive.swift")
 retention = body_of(engine, "    func applyHistoryRetention()", "\n    }\n")
 assert "if kept.count != history.count" in retention, "E15: retention must not write when nothing expired"
 
@@ -116,7 +116,7 @@ assert "scripts/test_v221_contracts.py" in workflow
 # ---- WP2: test-run integrity ----
 
 # E8: manual work is counted on its own and stays out of run totals; runs start from zero.
-shown = body_of(engine, "private func show(", "func runTest()")
+shown = body_of(engine, "func show(", "func runTest()")
 assert "let isManualEntry = packet == nil" in shown and 'hasPrefix("manual-")' in shown
 assert "diag.s.manualTranslations += 1" in shown
 assert "if !isManualEntry {\n            diag.recordPipeline(latency.last)" in shown
@@ -244,7 +244,7 @@ assert "New ones start switched off" not in read("App/ExperimentalFeaturesView.s
 assert "Legacy reference: 1.7.2" not in dashboard
 
 # ---- WP5: memory-store measurement only (D10) ----
-store = read("App/TranslationMemoryStore.swift")
+store = read_source("TranslationMemoryStore")
 assert "var waitMs: Double? = nil" in store and "var lastHealthMs: Double? = nil" in store
 assert "private func lookupBody(" in store and "measured.waitMs = waitMs" in store
 assert "status.lastHealthMs = " in store
@@ -259,7 +259,7 @@ assert store.count("sqlite3_open_v2") <= 2 or True
 
 # ---- WP6: engine and extension additions ----
 shared_work = read("Shared/SharedTranslationWork.swift")
-shared_system = read("Shared/TranslationSystem.swift")
+shared_system = read_source("TranslationSystem")
 experimental = read("App/ExperimentalFeaturesView.swift")
 # D13: runtime A/B switches pinned at session start, defaults unchanged, compile flags still override.
 assert "static func pinSettings(" in shared_work and "static func pinSetting(" in shared_system
@@ -274,7 +274,7 @@ for key in ("hybridSchedulerVariant", "hotPathReuseLowLatencyPlan", "hotPathReus
 assert "applies from the next session, never during one" in experimental
 
 # D11: suppressed early wakes are counted (measurement only) and reach the export.
-capture = read("BroadcastExtension/SampleHandler.swift")
+capture = read_source("SampleHandler")
 shared_main = read("Shared/Shared.swift")
 assert "visualWakeSuppressedCount += 1" in capture and "earlyVisualWakesSuppressed: visualWakeSuppressedCount" in capture
 assert "var earlyVisualWakesSuppressed: Int?" in shared_main

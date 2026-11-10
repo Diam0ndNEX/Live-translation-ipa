@@ -10,11 +10,12 @@ def old(path, ref=base):
 def read(path):
     return (root / path).read_text()
 def function(source, name):
-    start = source.index('    private func ' + name + '(')
-    # A member may later lose its private marker (file splits), so any member start ends the function.
-    ends = [i for i in (source.find(m, start + 1) for m in ('\n    private func ', '\n    func ', '\n    private struct ', '\n    struct ')) if i != -1]
-    end = min(ends) if ends else -1
-    return source[start:end if end != -1 else len(source)]
+    start = max(source.find('    private func ' + name + '('), source.find('\n    func ' + name + '(') + 1)
+    assert start > 0 or source.startswith('    private func ' + name + '('), name
+    # The function ends at its own closing brace, so moving neighbouring members to other files does not change the text.
+    end = source.find('\n    }\n', start)
+    text = source[start:end + 6 if end != -1 else len(source)]
+    return text.replace('    private func ', '    func ', 1)  # access level may change when a member moves to another file
 engine = read_source('TranslatorEngine')
 # 2.2.3 (L2, owner-approved): `drain` and `process` may differ from e94542ce ONLY by these listed edits. Undoing exactly
 # these edits must give back the original function, so nothing else in the Legacy drain/assembly algorithm changed.
@@ -86,7 +87,7 @@ assert 'lowOrder.count > 256' in core
 assert 'preferredStrategy: .highFidelity' not in read_source('ModeTranslationService')
 assert '"26.6"' in read('.github/workflows/build.yml')
 assert 'hybridPreview' not in engine
-activity = engine[engine.index('    var translationActivity:'):engine.index('    private func refreshModePreparation')]
+activity = engine[engine.index('    var translationActivity:'):engine.index('func refreshModePreparation')]
 assert 'warmupStatus' not in activity, 'Readiness must not depend on an old mode\'s string label'
 assert 'TranslationActivity.preparation' not in engine, 'Use observed preparation stages, not parsing status text'
 assert 'modelReadiness.prepare(stage)' in engine
