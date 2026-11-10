@@ -29,7 +29,8 @@ assert 'reason: "confirmed_service_ms"' in diagnostics and 'reason: "recovery_se
 # Context bookkeeping: oldest entries first, never everything at once.
 assert "legacyModeContexts.removeAll(); legacyContextResets += 1" not in diagnostics
 assert "legacyModeContextOrder.removeFirst(dropped.count)" in diagnostics
-assert diagnostics.count("legacyModeContextOrder.removeAll()") == 1, "reset clears the order list with the contexts"
+# 2.3.2: a restart of capture also drops the per-caption tags, so the line appears twice (clearCollection and resumeRun).
+assert diagnostics.count("legacyModeContextOrder.removeAll()") == 2, "reset and restart clear the order list with the contexts"
 
 # Allowlists and the model-call parser accept the new names; the old names stay readable.
 assert '"pip_enqueue_fresh_text_changed"' in archive and '"pip_enqueue_legacy_recovery"' in archive

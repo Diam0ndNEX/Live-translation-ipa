@@ -1239,7 +1239,7 @@ final class TranslatorEngine: ObservableObject {
             status = "Capture stopped – iOS may have closed the capture extension. Tap the broadcast icon again (try Speed: Fast)."
             diag.log("Capture stopped")
             diag.noteRuntimeState("heartbeat_timeout")
-            diag.endRun(reason: "heartbeatTimeout"); refreshModeDiagnosticEpoch()
+            diag.pauseRun(reason: "heartbeatTimeout")
             if activeTranslationSystem != .legacy { invalidatePending() }
         }
         if captureAlive != alive { captureAlive = alive }
@@ -1791,14 +1791,14 @@ final class TranslatorEngine: ObservableObject {
             captureAlive = false; lastPacketDate = .distantPast
             invalidatePending()
             diag.noteRuntimeState("heartbeat_timeout")
-            diag.endRun(reason: "captureStopped"); refreshModeDiagnosticEpoch()
+            diag.pauseRun(reason: "captureStopped")
             return
         }
         let captureAdmission = captureIdentity.admit(p.captureSessionID)
         guard captureAdmission != .rejected else { return }
         captureReadiness.receive(frames: p.frames, session: p.captureSessionID, stopped: false, at: ProcessInfo.processInfo.systemUptime)
         publishCaptureStatus()
-        if captureAdmission == .newSession, captureAlive { invalidatePending(); captureAlive = false; diag.endRun(reason: "newCaptureSession"); refreshModeDiagnosticEpoch() }
+        if captureAdmission == .newSession, captureAlive { invalidatePending(); captureAlive = false; diag.pauseRun(reason: "newCaptureSession") }
         let wasAlive = captureAlive
         lastPacketDate = now
         if !captureAlive { captureAlive = true }

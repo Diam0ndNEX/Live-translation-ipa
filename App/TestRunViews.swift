@@ -204,8 +204,8 @@ struct TestCard: View {
 
             if runsSlice.value.activeStarted != nil, let run = diag.activeRun {
                 TimelineView(.periodic(from: .now, by: 1)) { context in
-                    StatusPill(text: "Recording \(TestRunText.modeTitle(run.mode)) · \(TestRunText.duration(context.date.timeIntervalSince(run.startedAt))) · \(runsSlice.value.captionCount) captions",
-                               symbol: "record.circle", severity: .error)
+                    StatusPill(text: "\(diag.isRunPaused ? "Paused" : "Recording") \(TestRunText.modeTitle(run.mode)) · \(TestRunText.duration(Swift.max(0, context.date.timeIntervalSince(run.startedAt) - diag.pausedSeconds))) · \(runsSlice.value.captionCount) captions",
+                               symbol: diag.isRunPaused ? "pause.circle" : "record.circle", severity: diag.isRunPaused ? .warning : .error)
                 }
             }
             // 2.2.1 (U1): the result of a Save stays visible while a run is recording (it used to be hidden then).

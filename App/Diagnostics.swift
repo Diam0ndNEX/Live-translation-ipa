@@ -222,6 +222,15 @@ final class Diagnostics: ObservableObject {
     @Published private(set) var structuredEvents: [StructuredDiagnosticEvent] = []
     @Published private(set) var archiveStatus = "Not saved"
     // v2.0.0 build 84 Test Runs (spec §11): runs are stored by TestRunStore, not in the memory database.
+    /// 2.3.2: stopping and restarting capture in the same mode no longer ends the run or clears anything.
+    /// The run is saved when capture stops, and carries on when capture connects again.
+    private(set) var pausedAt: Date?
+    private var pausedTotal: TimeInterval = 0
+    private var pauseReason = ""
+    private var captureRestartCount = 0
+    var isRunPaused: Bool { activeRun != nil && pausedAt != nil }
+    /// Seconds with capture off inside the current run. Left out of the run duration and of Time live.
+    var pausedSeconds: TimeInterval { pausedTotal + (pausedAt.map { Date().timeIntervalSince($0) } ?? 0) }
     struct ActiveRun {
         let id: UUID
         let startedAt: Date
@@ -940,6 +949,8 @@ final class Diagnostics: ObservableObject {
         counters["legacyDuplicateSpeculationSkips"] = s.legacyDuplicateSpeculationSkips
         counters["emptyOCRPasses"] = s.emptyOCRPasses
         counters["runCheckpointCaptureMicros"] = checkpointCaptureMicros
+        counters["captureRestarts"] = captureRestartCount
+        counters["runPausedSeconds"] = Int(pausedSeconds.rounded())
         var currentHealth = memoryHealth
         currentHealth.ramEntries = ramEntryCount?() ?? memoryHealth.ramEntries
         return DiagnosticSessionExport(translationModes: TranslationModeReport(warmups: initialWarmupTrace, active: modeActiveSystem,
@@ -1106,7 +1117,10 @@ final class Diagnostics: ObservableObject {
 
     /// Capture connected: a run starts. Keeps the opening warm-up trace already collected for this broadcast.
     func beginRun() {
-        if activeRun != nil { endRun(reason: "newRunStarted") }
+        if let run = activeRun {
+            if run.mode == modeActiveSystem { resumeRun(); return }
+            endRun(reason: "newRunStarted")
+        }
         // 2.2.1 (E8): numbers gathered before capture connected (compose, tests) must not count in the run.
         // The warm-up trace is kept; only the totals and the latency series start from zero.
         s = Stats()
@@ -1119,6 +1133,45 @@ final class Diagnostics: ObservableObject {
         startingRAMEntries = ramEntryCount?() ?? 0
         startRunState()
     }
+    /// Capture stopped, timed out or began a new capture session. The run and all live data stay; the run is saved
+    /// (same id, so a later save replaces it) so nothing is lost if the app is closed before capture restarts.
+    func pauseRun(reason: String) {
+        guard activeRun != nil, pausedAt == nil else { return }
+        pausedAt = Date()
+        pauseReason = reason
+        event(.state, "Capture stopped (\(reason)); the run is kept and continues when capture starts again")
+        guard enabled, runSavingMode == "automatic" else { return }
+        let snapshot = sessionSnapshot()
+        let previous = testRuns.first { $0.id == snapshot.id }
+        let meta = TestRunMeta.make(snapshot: snapshot, testID: currentTestID, testName: currentTestName,
+            endReason: reason, startingRAMEntries: startingRAMEntries, modeChanges: activeRun?.modeChanges ?? [],
+            completeness: "complete", label: previous?.label ?? "", pinned: previous?.pinned ?? false,
+            pausedSeconds: pausedSeconds)
+        if let (code, detail) = skipReason(for: meta) {
+            lastRunBanner = RunBanner(result: .skipped(code, detail: detail), mode: meta.mode, seconds: meta.durationSeconds)
+            return
+        }
+        activeRun?.lastCheckpointAt = Date()
+        let store = runStore
+        Task {
+            let result = await store.save(meta: meta, snapshot: snapshot)
+            lastRunBanner = RunBanner(result: result, mode: meta.mode, seconds: meta.durationSeconds)
+            await refreshRuns()
+        }
+    }
+
+    /// Capture connected again in the same mode: nothing is cleared. Only the gap is remembered.
+    private func resumeRun() {
+        if let paused = pausedAt {
+            pausedTotal += Date().timeIntervalSince(paused)
+            pausedAt = nil
+            captureRestartCount += 1
+            // Per-caption tags belong to the capture that stopped; a caption seen again after restart starts clean.
+            legacyModeContexts.removeAll(); legacyModeContextOrder.removeAll()
+            event(.state, "Capture started again; the same run continues (restart \(captureRestartCount))")
+        }
+    }
+
     private func startRunState() {
         activeRun = ActiveRun(id: diagnosticSessionID, startedAt: started, mode: modeActiveSystem,
                               startingRAMEntries: startingRAMEntries, lastCheckpointAt: Date())
@@ -1140,7 +1193,7 @@ final class Diagnostics: ObservableObject {
         var changes = run.modeChanges
         if modeActiveSystem != run.mode { changes.append(modeActiveSystem) }
         let meta = TestRunMeta.make(snapshot: snapshot, testID: currentTestID, testName: currentTestName,
-            endReason: reason, startingRAMEntries: startingRAMEntries, modeChanges: changes, completeness: "complete")
+            endReason: reason, startingRAMEntries: startingRAMEntries, modeChanges: changes, completeness: "complete", pausedSeconds: pausedSeconds)
         clearCollection()
         let store = runStore
         if let (code, detail) = skipReason(for: meta) {
@@ -1171,7 +1224,7 @@ final class Diagnostics: ObservableObject {
             var changes = run.modeChanges
             if modeActiveSystem != run.mode { changes.append(modeActiveSystem) }
             let meta = TestRunMeta.make(snapshot: snapshot, testID: currentTestID, testName: currentTestName,
-                endReason: "savedWhileRecording", startingRAMEntries: startingRAMEntries, modeChanges: changes, completeness: "complete")
+                endReason: "savedWhileRecording", startingRAMEntries: startingRAMEntries, modeChanges: changes, completeness: "complete", pausedSeconds: pausedSeconds)
             mode = meta.mode; seconds = meta.durationSeconds
             if let (code, detail) = skipReason(for: meta) { result = .skipped(code, detail: detail) }
             else { result = await runStore.save(meta: meta, snapshot: snapshot) }
@@ -1195,7 +1248,7 @@ final class Diagnostics: ObservableObject {
     /// Crash-safety checkpoint. Only the snapshot copy runs on the main actor (its cost is recorded);
     /// redaction, encoding, compression and the write run on the store actor.
     func checkpointRun() {
-        guard let run = activeRun, !checkpointInFlight, runSavingMode != "off", !privateSessionOn, enabled else { return }
+        guard let run = activeRun, pausedAt == nil, !checkpointInFlight, runSavingMode != "off", !privateSessionOn, enabled else { return }
         let begin = ProcessInfo.processInfo.systemUptime
         let snapshot = sessionSnapshot()
         let spent = ProcessInfo.processInfo.systemUptime - begin
@@ -1204,7 +1257,7 @@ final class Diagnostics: ObservableObject {
         var changes = run.modeChanges
         if modeActiveSystem != run.mode { changes.append(modeActiveSystem) }
         let meta = TestRunMeta.make(snapshot: snapshot, testID: currentTestID, testName: currentTestName,
-            endReason: "recovered", startingRAMEntries: startingRAMEntries, modeChanges: changes, completeness: "recovered")
+            endReason: "recovered", startingRAMEntries: startingRAMEntries, modeChanges: changes, completeness: "recovered", pausedSeconds: pausedSeconds)
         activeRun?.lastCheckpointAt = Date()
         checkpointInFlight = true
         let store = runStore
@@ -1415,8 +1468,10 @@ final class Diagnostics: ObservableObject {
     /// A reset during a run ends that run (reason diagnosticsReset) and starts a new one.
     func reset() {
         let wasRecording = activeRun != nil
+        let wasPaused = pausedAt != nil
         if wasRecording { endRun(reason: "diagnosticsReset") } else { clearCollection() }
         if wasRecording { startRunState() }
+        if wasPaused { pausedAt = Date(); pauseReason = "captureStopped" } // capture is still off
     }
 
     private func clearCollection() {
@@ -1440,6 +1495,7 @@ final class Diagnostics: ObservableObject {
         modelTimingSamples = [:]; completedWorkRecoveredUnits = 0
         sharedModelUnits = 0; sharedConfirmedModelUnits = 0; memoryAwareSpeculationSkipped = 0; ramCaptionBypasses = 0; exactCaptionHits = 0; exactUnitsCoalesced = 0
         speculativeUnitCounts = [:]; queueWaitSamples = [:]
+        pausedAt = nil; pausedTotal = 0; pauseReason = ; captureRestartCount = 0
         temporaryMemoryHits = 0; startingRAMEntries = ramEntryCount?() ?? 0
         // 2.3.2: the previous run's checkpoint cost must not appear in the next run's report.
         lastCheckpointCaptureMs = nil; checkpointCaptureMicros = 0
@@ -1533,7 +1589,8 @@ final class Diagnostics: ObservableObject {
             if let i = spans.indices.last { spans[i].end = Date() }
             if detailedCollection { spans.append(StateSpan(start: Date(), end: nil, state: st)) }
             if spans.count > 300 { spans.removeFirst() }
-            if let prev = lastState, prev != .idle, st == .idle { s.captureDrops += 1 }
+            // 2.3.2: a stop the user made is not a drop; a heartbeat timeout still is.
+            if let prev = lastState, prev != .idle, st == .idle, pausedAt == nil || pauseReason == "heartbeatTimeout" { s.captureDrops += 1 }
             event(.state, "Now \(st.title)")
             switch st {
             case .idle: noteRuntimeState("capture_idle")

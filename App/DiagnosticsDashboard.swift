@@ -829,7 +829,7 @@ private struct DiagnosticsBody: View {
 
     private var liveFraction: Double {
         let now = Date()
-        let total = now.timeIntervalSince(diag.started)
+        let total = now.timeIntervalSince(diag.started) - diag.pausedSeconds
         guard total > 1 else { return 0 }
         let live = diag.spans.filter { $0.state == .live }.reduce(0.0) { $0 + ($1.end ?? now).timeIntervalSince($1.start) }
         return Swift.min(1, live / total)

@@ -94,7 +94,7 @@ struct TestRunMeta: Codable, Identifiable, Equatable {
     /// Builds metadata from a snapshot. `startingRAM` and `modeChanges` come from the run, not the snapshot.
     static func make(snapshot: DiagnosticSessionExport, testID: UUID, testName: String, endReason: String,
                      startingRAMEntries: Int, modeChanges: [String], completeness: String,
-                     label: String = "", pinned: Bool = false) -> TestRunMeta {
+                     label: String = "", pinned: Bool = false, pausedSeconds: Double = 0) -> TestRunMeta {
         let mode = snapshot.translationModes?.active ?? "unknown"
         let first = snapshot.translationModes?.events.first
         let pair = first.map { "\($0.source)>\($0.target)" } ?? "?"
@@ -107,7 +107,7 @@ struct TestRunMeta: Codable, Identifiable, Equatable {
         let secondsSerious = Double(buckets.filter { $0.thermalLevel >= 2 }.count) * 15
         return TestRunMeta(id: snapshot.id, testID: testID, testName: testName, mode: mode,
             startedAt: snapshot.startedAt, endedAt: snapshot.endedAt,
-            durationSeconds: max(0, snapshot.endedAt.timeIntervalSince(snapshot.startedAt)),
+            durationSeconds: max(0, snapshot.endedAt.timeIntervalSince(snapshot.startedAt) - max(0, pausedSeconds)),
             endReason: endReason, appVersion: snapshot.appVersion, systemVersion: snapshot.systemVersion,
             hardwareModel: snapshot.hardwareModel ?? "?", languagePair: pair, label: cleanLabel(label),
             pinned: pinned, completeness: completeness, trimmed: [], captions: captions,

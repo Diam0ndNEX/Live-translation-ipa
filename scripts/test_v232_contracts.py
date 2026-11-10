@@ -25,23 +25,46 @@ for old in ('("2.3.2", "Build 109:', '("2.3.1", "Build 108:', '("2.3.0", "Build 
     assert old in shared, old
 print("v2.3.2 source contracts passed: path card, supersession split, switches line, bypassed note, version")
 
-# ---- Stop and start again: one run per capture, nothing from the old run carried over ----
+# ---- Stop and start again: the run continues, nothing is cleared (2.3.2) ----
 engine = (root / "App/TranslatorEngine.swift").read_text()
+runviews = (root / "App/TestRunViews.swift").read_text()
+store = (root / "App/TestRunStore.swift").read_text()
+archive = (root / "App/DiagnosticArchive.swift").read_text()
 def body(src, start, end):
     i = src.index(start); return src[i:src.index(end, i)]
+# the three stop paths pause the run; none ends it
+assert 'diag.pauseRun(reason: "captureStopped")' in engine
+assert 'diag.pauseRun(reason: "heartbeatTimeout")' in engine
+assert 'diag.pauseRun(reason: "newCaptureSession")' in engine
+for gone in ('endRun(reason: "captureStopped")', 'endRun(reason: "heartbeatTimeout")', 'endRun(reason: "newCaptureSession")'):
+    assert gone not in engine, gone
+# only a mode change, a reset or a different mode ends a run
+assert 'diag.endRun(reason: "modeChanged")' in engine
+assert 'endRun(reason: "diagnosticsReset")' in diag and 'endRun(reason: "newRunStarted")' in diag
+begin = body(diag, "func beginRun()", "private func startRunState()")
+assert "if run.mode == modeActiveSystem { resumeRun(); return }" in begin, "same mode continues the run"
+assert begin.index("resumeRun(); return") < begin.index("s = Stats()"), "resume returns before any zeroing"
+resume = body(diag, "private func resumeRun()", "private func startRunState()")
+for forbidden in ("clearCollection", "s = Stats()", "endRun", "modelTimingSamples", "modeEventCounts"):
+    assert forbidden not in resume, forbidden
+pause = body(diag, "func pauseRun(reason: String)", "private func resumeRun()")
+for forbidden in ("clearCollection", "s = Stats()", "endRun", "activeRun = nil"):
+    assert forbidden not in pause, forbidden
+assert "store.save(meta: meta, snapshot: snapshot)" in pause and "previous?.label" in pause and "previous?.pinned" in pause
+assert 'runSavingMode == "automatic"' in pause and "skipReason(for: meta)" in pause
+# the gap is not part of the run
+assert "pausedSeconds: Double = 0" in store and "- max(0, pausedSeconds)" in store
+assert diag.count("pausedSeconds: pausedSeconds") >= 3
+assert "pausedAt == nil, !checkpointInFlight" in diag, "no checkpoints while capture is off"
+assert "diag.pausedSeconds" in dash and "diag.isRunPaused" in runviews
+assert "pausedAt == nil || pauseReason == \"heartbeatTimeout\"" in diag, "a stop is not counted as a capture drop"
+assert '"captureRestarts"' in diag and '"captureRestarts"' in archive and '"runPausedSeconds"' in archive
+# a reset or a run end still clears everything, including the pause bookkeeping
 clear = body(diag, "private func clearCollection()", "\n    // MARK: Packets from the extension")
-# every per-run store added in 2.3.x, plus the checkpoint cost fixed here, is reset when a run ends
 for name in ("legacyModeContexts.removeAll()", "legacyModeContextOrder.removeAll()", "modeEventCounts.removeAll()",
              "modelTimingSamples = [:]", "queueWaitSamples = [:]", "memoryOutcomes = [:]", "s = Stats()",
-             "lastCheckpointCaptureMs = nil", "checkpointCaptureMicros = 0", "clearSpeakers()", "diagnosticSessionID = UUID()"):
+             "lastCheckpointCaptureMs = nil", "checkpointCaptureMicros = 0", "clearSpeakers()", "diagnosticSessionID = UUID()",
+             "pausedAt = nil; pausedTotal = 0"):
     assert name in clear, name
-end_run = body(diag, "func endRun(reason: String)", "func saveRunNow")
-assert "activeRun = nil" in end_run and "clearCollection()" in end_run
-assert end_run.index("sessionSnapshot()") < end_run.index("clearCollection()"), "snapshot is taken before the collection is cleared"
-# the three ways a run ends, and the one way a new run begins
-handle = body(engine, "private func handle(_ incoming: Packet)", "if frames != p.frames")
-assert 'diag.endRun(reason: "captureStopped")' in handle and 'diag.endRun(reason: "newCaptureSession")' in handle
-assert 'diag.endRun(reason: "heartbeatTimeout")' in engine
 assert "if !wasAlive {" in engine and "diag.beginRun(); refreshModeDiagnosticEpoch()" in engine
-assert "func beginRun()" in diag and 'endRun(reason: "newRunStarted")' in body(diag, "func beginRun()", "private func startRunState()")
-print("v2.3.2 stop/start contracts passed")
+print("v2.3.2 stop/start contracts passed: run continues across stop and restart")
