@@ -14,7 +14,7 @@ def read(relative):
     if relative.split("/")[0] in ("App", "Shared", "BroadcastExtension"):
         return read_source(Path(relative).stem)
     return (root / relative).read_text(encoding="utf-8")
-engine = read("App/TranslatorEngine.swift")
+engine = read_source("TranslatorEngine")
 app = read("App/ScreenTranslatorApp.swift")
 phase = read("App/UI/Model/SessionPhase.swift")
 snapshot = read("App/UI/Model/TranslateSnapshot.swift")
@@ -116,7 +116,7 @@ assert "scripts/test_v221_contracts.py" in workflow
 # ---- WP2: test-run integrity ----
 
 # E8: manual work is counted on its own and stays out of run totals; runs start from zero.
-shown = body_of(engine, "private func show(", "func runTest()")
+shown = body_of(engine, "func show(", "func runTest()")
 assert "let isManualEntry = packet == nil" in shown and 'hasPrefix("manual-")' in shown
 assert "diag.s.manualTranslations += 1" in shown
 assert "if !isManualEntry {\n            diag.recordPipeline(latency.last)" in shown

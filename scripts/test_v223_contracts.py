@@ -84,7 +84,7 @@ assert "static let relaxedBackoffMaxAge = 10.0" in system
 assert '(UserDefaults.standard.object(forKey: legacyOwnLanePinnedKey) as? Bool) ?? false' in work
 assert '@AppStorage("legacyConfirmedOwnLane") private var legacyConfirmedOwnLane = false' in experimental
 assert 'label: "Legacy confirmed own lane"' in index
-detach = engine[engine.index("private func detachCancelledSpeculationIfEnabled"):engine.index("private func presentQueuedFromRAMIfComplete")]
+detach = engine[engine.index("func detachCancelledSpeculationIfEnabled"):engine.index("func presentQueuedFromRAMIfComplete")]
 for token in ("TranslationHotPathAB.legacyConfirmedOwnLane", "activeTranslationSystem == .legacy", "activeQueueOwner == .speculative", "#available(iOS 26.0, *)", "drainEpoch += 1"):
     assert token in detach, token
 assert engine.count("detachCancelledSpeculationIfEnabled()") == 2, "defined once, called once"

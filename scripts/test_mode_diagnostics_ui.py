@@ -20,7 +20,7 @@ def section(source: str, start: str, end: str) -> str:
     assert finish != -1, f"Missing end: {end}"
     return source[position:finish]
 
-selection = section(engine, "private func selectModeResult(", "private var contextRevision")
+selection = section(engine, "func selectModeResult(", "var contextRevision")
 assert "diag.recordModeSelection(" in selection
 assert "processingMs: modelProcessing" in selection
 assert 'output.origins.contains("recovery")' in selection
@@ -30,7 +30,7 @@ assert "diag.s.translations += 1" in selection
 assert "diag.recordMemory(" in selection
 assert "queueMemory(" in selection
 
-mode_event = section(engine, "private func noteModeEvent(", "private func handleModeCaption(")
+mode_event = section(engine, "func noteModeEvent(", "func handleModeCaption(")
 assert 'reason == "model_batch_completed"' in mode_event
 assert "diag.recordModeModel(ms: duration" in mode_event
 assert "modeModelTimings[key] = timing" in mode_event
@@ -54,7 +54,7 @@ assert warmup.index('noteModelState("warmup_started")') < warmup.index('noteMode
 
 # Mode memory probes must never repeat a SQLite lookup for an identical
 # sentence key in the same caption.
-lookup = section(engine, "private func lookupModeMemory(", "private func selectModeResult(")
+lookup = section(engine, "func lookupModeMemory(", "func selectModeResult(")
 assert "var resolved: [String: String]" in lookup
 assert "var missing: Set<String>" in lookup
 single_start = lookup.index("if caption.keys.count == 1")
@@ -71,7 +71,7 @@ assert "caption.session == modeSessionID" in multi
 
 # Legacy's complete confirmed RAM caption must work on idle and busy model
 # lanes, while auto-language detection cannot bypass its own routing.
-fast_ram = section(engine, "private func presentQueuedFromRAMIfComplete()", "private func handleClear()")
+fast_ram = section(engine, "func presentQueuedFromRAMIfComplete()", "func handleClear()")
 assert 'if sourceCode != "auto", !bypassMemory, memoryTestMode.allowsReuse' in fast_ram
 assert "ExactCaptionIdentity.key" in fast_ram
 assert "schedulePresentation(joined, ready.translated" in fast_ram
