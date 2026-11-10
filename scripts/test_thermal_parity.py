@@ -14,7 +14,7 @@ def read(path):
 engine = read("App/TranslatorEngine.swift")
 extension = read("BroadcastExtension/SampleHandler.swift")
 simulation = read("App/PipelineSimulation.swift")
-core = read("Shared/TranslationSystem.swift")
+core = read_source("TranslationSystem")
 policy = read("Shared/SubtitlePerformancePolicy.swift")
 tests = read("Tests/main.swift")
 modes = read("Tests/ThreeModes/main.swift")

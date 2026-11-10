@@ -259,7 +259,7 @@ assert store.count("sqlite3_open_v2") <= 2 or True
 
 # ---- WP6: engine and extension additions ----
 shared_work = read("Shared/SharedTranslationWork.swift")
-shared_system = read("Shared/TranslationSystem.swift")
+shared_system = read_source("TranslationSystem")
 experimental = read("App/ExperimentalFeaturesView.swift")
 # D13: runtime A/B switches pinned at session start, defaults unchanged, compile flags still override.
 assert "static func pinSettings(" in shared_work and "static func pinSetting(" in shared_system
