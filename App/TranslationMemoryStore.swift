@@ -295,7 +295,7 @@ actor TranslationMemoryStore {
               let sourceText = String(bytes: bytes.dropFirst(size + 1), encoding: .utf8), !sourceText.isEmpty else { return nil }
         return KeyParts(source: String(languages[0]), target: String(languages[1]), sourceText: sourceText, context: context, rules: rules)
     }
-    private func digest(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
+    func digest(_ data: Data) -> String { SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined() }
     private func normalized(_ text: String) -> String {
         // Conservative: case and punctuation carry meaning and are retained.
         text.precomposedStringWithCanonicalMapping.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
@@ -723,10 +723,10 @@ actor TranslationMemoryStore {
         guard active else { throw MemoryStoreError.unavailable }
         try transaction { for id in ids { try execute("DELETE FROM memory_entries WHERE id=?", [.integer(id)]) } }
     }
-    private func readEntry(_ query: OpaquePointer) -> MemoryStoredEntry {
+    func readEntry(_ query: OpaquePointer) -> MemoryStoredEntry {
         MemoryStoredEntry(id: sqlite3_column_int64(query, 0), key: text(query, 1), sourceText: text(query, 2), translatedText: text(query, 3), sourceLanguage: text(query, 4), targetLanguage: text(query, 5), unitType: text(query, 6), validationState: text(query, 7), confirmationState: text(query, 8), createdAt: sqlite3_column_double(query, 9), updatedAt: sqlite3_column_double(query, 10), reuseCount: Int(sqlite3_column_int(query, 11)))
     }
-    private var entryColumns: String { "id,canonical_key,source_text,translated_text,source_language,target_language,unit_type,validation_state,confirmation_state,created_at,updated_at,reuse_count" }
+    var entryColumns: String { "id,canonical_key,source_text,translated_text,source_language,target_language,unit_type,validation_state,confirmation_state,created_at,updated_at,reuse_count" }
     /// Explicit management query, never called by the live translation path.
     func search(query: String = "", limit: Int = 100) throws -> [MemoryStoredEntry] {
         let escaped = query.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "%", with: "\\%").replacingOccurrences(of: "_", with: "\\_")
@@ -764,54 +764,5 @@ actor TranslationMemoryStore {
         return entries
     }
 
-    private struct ExportEnvelope: Codable {
-        let formatVersion: Int
-        let schemaVersion: Int
-        let exportedAt: Date
-        let entries: [MemoryStoredEntry]
-        let checksum: String
-    }
-    func exportData() throws -> Data {
-        let query = try statement("SELECT \(entryColumns) FROM memory_entries ORDER BY id")
-        defer { sqlite3_finalize(query) }
-        var entries: [MemoryStoredEntry] = []
-        while true {
-            let code = sqlite3_step(query)
-            if code == SQLITE_DONE { break }
-            guard code == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
-            entries.append(readEntry(query))
-        }
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        let checksum = digest(try encoder.encode(entries))
-        let data = try encoder.encode(ExportEnvelope(formatVersion: 1, schemaVersion: Self.schemaVersion, exportedAt: Date(), entries: entries, checksum: checksum))
-        // Keep exports within the same documented 256 MiB transfer ceiling as imports.
-        // A too-large export must fail explicitly instead of presenting an unusable file.
-        guard data.count <= 256 * 1024 * 1024 else { throw MemoryStoreError.tooLarge }
-        return data
-    }
-    func importData(_ data: Data) throws -> MemoryStoreHealth {
-        guard active else { throw MemoryStoreError.unavailable }
-        guard data.count <= 256 * 1024 * 1024 else { throw MemoryStoreError.tooLarge }
-        guard let envelope = try? JSONDecoder().decode(ExportEnvelope.self, from: data) else { throw MemoryStoreError.invalidImport }
-        guard envelope.formatVersion == 1, [1, Self.schemaVersion].contains(envelope.schemaVersion) else { throw MemoryStoreError.unsupportedImport }
-        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys]
-        guard digest(try encoder.encode(envelope.entries)) == envelope.checksum else { throw MemoryStoreError.integrityFailure }
-        try transaction {
-            for entry in envelope.entries {
-                let inserted = try insert(key: entry.key, value: entry.translatedText,
-                    compatible: entry.validationState == "ready" && entry.confirmationState == "persisted",
-                    revalidateExisting: false)
-                if inserted.inserted, keyParts(entry.key)?.rules == nil,
-                   ["validated_legacy", "superseded_legacy"].contains(entry.validationState) {
-                    try execute("""
-                        UPDATE memory_entries SET validation_state=?,confirmation_state=?
-                        WHERE id=? AND rules_version IS NULL
-                        """, [.text(entry.validationState),
-                               .text(entry.confirmationState), .integer(inserted.id)])
-                }
-            }
-        }
-        return try health()
-    }
 }
 
