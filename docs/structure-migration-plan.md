@@ -2,7 +2,7 @@
 
 Status: written 2026-11-10 for 2.3.2 (build 109). Nothing Swift was compiled. No Swift file has been moved or split.
 
-Progress: step 1 is done. Every Python test that reads Swift sources now loads them with `read_source`. The Python tests were run on a read-only clone of the branch and all CI-run ones pass. Steps 2 to 4 are open.
+Progress: step 1 is done. Every Python test that reads Swift sources now loads them with `read_source`. The Python tests were run on a read-only clone of the branch and all CI-run ones pass. Step 2 is partly done (see below). Steps 3 and 4 are open.
 
 ## Why files cannot just be moved
 I read 13 of the test scripts, the main workflow and 5 shell scripts. They hardcode full paths, and most assert on the WHOLE TEXT of a file, so a move or a split breaks them.
@@ -21,11 +21,13 @@ Most coupled files (number of scripts reading them, from the scripts read so far
 | App/UI/... views | v222, ui_layout_rules, ui_no_carryover, experimental_settings |
 | Shared/*.swift | many scripts, and `build.yml` / shell scripts use the glob `Shared/*.swift` (so Shared stays flat) |
 
-Explicit file lists in CI: `build.yml` swiftc steps name App/TextIntelligence, CaptionAssembly, MemoryWriter, PipelineSimulation, DesignSystem/AppRouter, DesignSystem/ObjectSlice, UI/Model/SessionPhase. Shell scripts name LoopbackServer, TextIntelligence, TranslationMemoryStore, DiagnosticArchive, TestRunStore.
+Explicit file lists in CI: `build.yml` swiftc steps name App/TextIntelligence, CaptionAssembly, MemoryWriter, PipelineSimulation, DesignSystem/AppRouter, DesignSystem/ObjectSlice, UI/Model/SessionPhase. Shell scripts named LoopbackServer, TextIntelligence, TranslationMemoryStore, DiagnosticArchive, TestRunStore (now looked up by name, see step 2).
 
 Two scripts walk the whole of `App/` (`rglob`): ui_layout_rules and ui_no_carryover. They also check by file NAME and by the substring `/UI/`, so a moved UI file must keep its name and stay under a `UI` folder.
 
-Still not read (needed for step 2 and before any move): preview_interface.sh, ui_screenshots.sh, make_contact_sheet, make_icon, the workflows memory-benchmark.yml and ui-screenshots.yml, and the Swift tests in `Tests/*/main.swift` (the comment in test_test_runs.sh says Tests/TestRuns reads App/Diagnostics.swift). compare_performance and compare_three_modes and their tests read no Swift files.
+Still not read (needed before any move): preview_interface.sh, ui_screenshots.sh, make_contact_sheet, make_icon, the workflows memory-benchmark.yml and ui-screenshots.yml (ui-screenshots.yml triggers on `App/**`, `Shared/**` and `App/UI/**`, so a move out of those folders would stop it triggering). compare_performance and compare_three_modes and their tests read no Swift files.
+
+Blocker found for splitting Diagnostics: `Tests/TestRuns/main.swift` (line 241) reads `App/Diagnostics.swift` at run time by that exact path. If Diagnostics is moved or split, that Swift test has to be changed to read the moved or split files. That is a Swift edit and cannot be compiled here.
 
 Not migrated on purpose: test_v197_experiments.py and test_v198_performance.py. CI does not run them and they already fail on this branch (they assert versions 1.9.7 and 1.9.8). Remove them or leave them; do not rely on them.
 
@@ -34,18 +36,21 @@ Not migrated on purpose: test_v197_experiments.py and test_v198_performance.py. 
 
 It does not fix comparisons with OLD commits. `old('App/TranslatorEngine.swift')` runs `git show <old commit>:<path>` and must keep the old path.
 
+`scripts/swift_sources.sh` is the same idea for swiftc lists: `$(bash scripts/swift_sources.sh TextIntelligence TranslationMemoryStore)` prints the main file and any `Name+Topic.swift` parts, and fails if a name is missing or exists twice.
+
 ## Order of work (each step is its own push and its own CI check)
 1. DONE. Migrate one test script at a time to `read_source`, newest first (v232, v231, v230, v223, v222, mode_diagnostics_ui, diag_allowlists, experimental_settings, test_three_modes, then the two UI lints and make_settings_index). Assertions stay exactly the same; only how the text is loaded changes. Say "no assertion changed" in each commit.
-2. Make the CI file lists layout-free: replace the explicit paths in `build.yml` and the shell scripts with a lookup (for example `$(find App -name TextIntelligence.swift)`), one step at a time.
-3. Only then move or split files, using extract-on-touch from `docs/structure-guidelines.md`. At that point tests need no path edits; only the two UI lints (name and `/UI/` rules) and any `function(source, name)` slicing need care.
+2. PARTLY DONE. Make the CI file lists layout-free. Done: the 5 shell scripts (test_memory, test_transport, test_diagnostics, test_test_runs, benchmark_memory) use `scripts/swift_sources.sh`; the resolved file lists were checked locally and are identical to the old lists. Open: 3 lines in `.github/workflows/build.yml`. The push was refused with Forbidden (workflow files need a permission this session does not have). The three edits are: replace `App/TextIntelligence.swift App/CaptionAssembly.swift App/MemoryWriter.swift App/PipelineSimulation.swift` with `$(bash scripts/swift_sources.sh TextIntelligence CaptionAssembly MemoryWriter PipelineSimulation)`; replace `App/DesignSystem/AppRouter.swift App/DesignSystem/ObjectSlice.swift` with `$(bash scripts/swift_sources.sh AppRouter ObjectSlice)`; replace `App/UI/Model/SessionPhase.swift` with `$(bash scripts/swift_sources.sh SessionPhase)`. Until they are made, those three CI steps would fail if their files move.
+3. Only then move or split files, using extract-on-touch from `docs/structure-guidelines.md`. At that point tests need no path edits; only the two UI lints (name and `/UI/` rules), the `Tests/TestRuns` path read and any `function(source, name)` slicing need care.
 4. Last: regroup the rest of `App/` into the target folders.
 
 Risks that stay (UNVERIFIED until CI):
 - `function(source, name)` in test_three_modes slices from one function to the next `private func`. With combined text of a split file it still works only if the function stays intact and the combined order is main file first (as `read_source` does).
 - `private` members cannot be used from another file; a split may need `fileprivate` or internal, which is a code change.
 - Assertions that count occurrences (for example `diagnostics.count("legacyModeContextOrder.removeAll()") == 2`) count over the combined text, so they stay correct after a split but must not be disturbed by moving code between files and a different file.
+- The shell step is new in CI and has not run there. `swiftc` is not available in the chat environment.
 
 ## Decision for the owner
 Step 1 is done: 15 scripts changed, no assertion changed, one script per commit. The Python tests were run locally on a clone, so those results are real. Swift was not compiled, and the GitHub Actions run is still the first real test of the whole branch.
 
-Next decision: step 2 edits `build.yml` and the shell scripts, which CI runs. It is the first step I cannot test locally, so I would do it one file per push.
+Step 2: the 3 `build.yml` lines are yours to apply (or give this session workflow permission). No Swift file should be moved before that.
