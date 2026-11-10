@@ -33,6 +33,7 @@ enum SettingsSearchIndex {
         SettingsSearchEntry(label: "Hybrid scheduler", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Hybrid shorter switch guard", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Incremental translation recovery", page: .experimental, pageTitle: "Experimental features"),
+        SettingsSearchEntry(label: "Independent capture heartbeat", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Legacy confirmed own lane", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Legacy shared session", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Legacy warm-up during capture", page: .experimental, pageTitle: "Experimental features"),
