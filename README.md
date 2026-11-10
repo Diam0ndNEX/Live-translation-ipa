@@ -1,3 +1,14 @@
+# ScreenLingo: current version 2.3.2 (build 109)
+
+Everything below this block is older release notes (1.2.x to 1.9.3), kept as history. Defaults and behavior may have changed since, so do not read them as the current state.
+
+- Current docs index: [docs/README.md](docs/README.md). Newest specification: [docs/v2.3.1-specification.md](docs/v2.3.1-specification.md). There is no separate 2.3.2 specification file; the 2.3.2 changelog entry is in `Shared/Shared.swift`.
+- Where code, tests and docs go: [docs/structure-guidelines.md](docs/structure-guidelines.md).
+- The app is built by GitHub Actions into an unsigned .ipa and installed with TrollStore.
+- CI compiles and runs the Swift and Python checks listed in `.github/workflows/build.yml`. Green CI means it compiles and the checks pass; it is not proof of speed or subtitle quality. No speed claim is made without Diagnostics data for Legacy, Hybrid Recovery and Low Latency on the same content.
+
+---
+
 # ScreenLingo v1.9.3 · build 74
 
 Restores legitimate next-caption speculative model requests in Hybrid and Low Latency while preserving v1.9.2's stale-request rejection and backend contention protection. Repairs live Diagnostics timing and selection events, mode-aware speculation counters, collection/reset boundaries and clearer sample-empty states across the UI. No measured device-speed claims until the same-content three-mode tests are repeated.
