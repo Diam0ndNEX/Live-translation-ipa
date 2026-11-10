@@ -2,10 +2,11 @@
 """Fast structural regression checks for Settings navigation, ownership and defaults."""
 import re
 from pathlib import Path
+from sources import read_source
 
 root = Path(__file__).resolve().parents[1]
 sources = {
-    name: (root / "App" / name).read_text()
+    name: read_source(Path(name).stem)
     for name in (
         "SettingsViews.swift", "CustomizationViews.swift", "SettingsCategories.swift",
         "ExperimentalFeaturesView.swift", "SmartPipelineSettings.swift",
@@ -14,10 +15,10 @@ sources = {
 }
 home = sources["SettingsViews.swift"]
 extra = sources["ExperimentalFeaturesView.swift"]
-engine = (root / "App" / "TranslatorEngine.swift").read_text()
-presets = (root / "App" / "Presets.swift").read_text()
-recognition_policy = (root / "Shared" / "SubtitlePerformancePolicy.swift").read_text()
-extension = (root / "BroadcastExtension" / "SampleHandler.swift").read_text()
+engine = read_source("TranslatorEngine")
+presets = read_source("Presets")
+recognition_policy = read_source("SubtitlePerformancePolicy")
+extension = read_source("SampleHandler")
 
 # Every editable option has one owner page. The Experimental page only
 # observes whether Skip unchanged frames is enabled.
@@ -131,7 +132,7 @@ assert 'Toggle("Save translation history"' in sources["SettingsCategories.swift"
 assert 'let subtitleStyle = mode == "movie"' in recognition_policy
 assert "static func apply(mode: String, to defaults: UserDefaults = .standard)" in recognition_policy
 for name in ("TranslateScreen.swift", "TuneSheet.swift"):
-    ui = (root / "App" / "UI" / "Translate" / name).read_text()
+    ui = read_source(Path(name).stem)
     assert "PresetRecognitionPolicy.apply(mode: $0)" in ui, f"{name} must apply the content style, not only store it"
 # 2.2.1 E3/E13: the dead toggle is gone, the CJK setting is on the Reading page and in reset.
 assert "homeMetrics" not in home
