@@ -108,7 +108,7 @@ assert "hybrid_unsubmitted_hedge_ms" in archive
 assert "legacyAdaptiveLowYieldSkips" in archive
 assert "CREATE TABLE" in memory
 assert "codex/screenlingo-v1.9.9-recovery-evidence" in workflow
-assert "codex/screenlingo-v1.9.6-hybrid-contention" in workflow
+assert "claude/**" in workflow
 assert "Verify v1.9.9 recovery and OCR regression contract" in workflow
 
 print("v1.9.9 nominal/fair, custom preset, exact-lane and A/B wiring contract passed")
