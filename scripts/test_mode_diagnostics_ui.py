@@ -91,7 +91,7 @@ assert "No" not in model
 settings = section(engine, "func diagnosticsSettingsChanged()", "Own-app visibility is observable")
 assert "modeDiagnosticEpochs[modeSessionID] = diag.started" in settings
 assert "func resetDiagnostics()" in settings
-ui = section(dashboard, "private struct DiagnosticsBody: View", "// MARK: Simple")
+ui = section(dashboard, "struct DiagnosticsBody: View", "// MARK: Simple")
 assert "engine.resetDiagnostics()" in ui
 # 2.2.1 (D2): changed from `in ui` to `not in ui`. The handler used to sit here AND in ScreenTranslatorApp, so every
 # toggle reset and ended the run twice (the second end produced a 0 s run). Only the root handlers remain.
