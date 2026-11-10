@@ -2,6 +2,9 @@
 
 Files are named by the version they were written for. Grouped here by purpose; the files themselves have not been moved or edited. Descriptions come from file names, not a re-read of every file.
 
+## Rules for code, tests and docs (read before an update)
+- structure-guidelines.md: where new code goes, extract-on-touch for the giant files, test and CI path rules, update checklist
+
 ## Current line (start here)
 - v2.3.1-specification.md: newest specification in this folder
 - v2.3.0-specification.md
@@ -27,5 +30,5 @@ Files are named by the version they were written for. Grouped here by purpose; t
 - memory2-baseline.md, memory2-handoff.md: memory 2 work
 
 ## Conventions
-- A new update adds its specification here as vX.Y.Z-specification.md.
+- A new update adds its specification here as vX.Y.Z-specification.md and lists it in this index.
 - Diagnostics analyses (builds, per-mode) live in the Claude Project, not in this folder.
