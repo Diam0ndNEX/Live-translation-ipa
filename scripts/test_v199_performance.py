@@ -24,7 +24,7 @@ coordinator = read_source("TranslationSystem")
 service = read("App/ModeTranslationService.swift")
 diagnostics = read_source("Diagnostics")
 archive = read("App/DiagnosticArchive.swift")
-memory = read("App/TranslationMemoryStore.swift")
+memory = read_source("TranslationMemoryStore")
 workflow = read(".github/workflows/build.yml")
 
 assert 'static let version = "2.3.7"' in shared

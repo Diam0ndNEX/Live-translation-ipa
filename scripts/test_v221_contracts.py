@@ -244,7 +244,7 @@ assert "New ones start switched off" not in read("App/ExperimentalFeaturesView.s
 assert "Legacy reference: 1.7.2" not in dashboard
 
 # ---- WP5: memory-store measurement only (D10) ----
-store = read("App/TranslationMemoryStore.swift")
+store = read_source("TranslationMemoryStore")
 assert "var waitMs: Double? = nil" in store and "var lastHealthMs: Double? = nil" in store
 assert "private func lookupBody(" in store and "measured.waitMs = waitMs" in store
 assert "status.lastHealthMs = " in store
