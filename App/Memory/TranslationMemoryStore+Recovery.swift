@@ -1,5 +1,6 @@
 import Foundation
 import SQLite3
+import CryptoKit
 
 extension TranslationMemoryStore {
     /// Make a consistent SQLite snapshot without copying live WAL/SHM files.

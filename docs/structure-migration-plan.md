@@ -76,3 +76,6 @@ DiagnosticArchive.swift went from 1731 to about 920 lines. What stays in it: the
 The new files are named `DiagnosticArchive+Topic.swift` on purpose even though each declares its own type: that name is what makes `read_source("DiagnosticArchive")` and `scripts/swift_sources.sh DiagnosticArchive` find them. A file named after the type would be invisible to those tests and scripts.
 
 Next candidates, not started and unverified: `Diagnostics.swift`, `TranslatorEngine.swift`, `TranslationMemoryStore.swift`, `DiagnosticsDashboard.swift`. Moving whole top-level types is the safe kind of split. Moving functions out of a class or actor into an `extension` can hit `private` members and needs a read of each function first.
+
+## Lesson from the 2.3.5 CI failure
+A moved block must get every `import` the original file had and the block uses. The 2.3.5 recovery file first had only `Foundation` and `SQLite3` and failed with `cannot find 'SHA256' in scope`; it needed `CryptoKit`. Python tests cannot catch this. Before each split, grep the block for symbols of every `import` at the top of the source file (CryptoKit: `SHA256`; SQLite3: `sqlite3_`, `SQLITE_`) and copy the imports that match.
