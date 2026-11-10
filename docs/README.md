@@ -9,7 +9,8 @@ Older documents are records of what was true when they were written. They name b
 - structure-migration-plan.md: which scripts depend on which files, and the order for moving and splitting existing files
 
 ## Current line (start here)
-- v2.3.7-specification.md: newest specification (the five big files split)
+- v2.3.8-specification.md: newest specification (remaining big files split, not TranslatorEngine)
+- v2.3.7-specification.md: the five big files split
 - v2.3.6-specification.md: memory store, dashboard and recorder models split
 - v2.3.5-specification.md: memory store split, stage 2
 - v2.3.4-specification.md: memory store split, stage 1
