@@ -10,11 +10,11 @@ def old(path, ref=base):
 def read(path):
     return (root / path).read_text()
 def function(source, name):
-    start = source.index('    private func ' + name + '(')
-    # A member may later lose its private marker (file splits), so any member start ends the function.
-    ends = [i for i in (source.find(m, start + 1) for m in ('\n    private func ', '\n    func ', '\n    private struct ', '\n    struct ')) if i != -1]
-    end = min(ends) if ends else -1
-    return source[start:end if end != -1 else len(source)]
+    start = max(source.find('    private func ' + name + '('), source.find('\n    func ' + name + '(') + 1)
+    assert start > 0 or source.startswith('    private func ' + name + '('), name
+    # The function ends at its own closing brace, so moving neighbouring members to other files does not change the text.
+    end = source.find('\n    }\n', start)
+    return source[start:end + 6 if end != -1 else len(source)]
 engine = read_source('TranslatorEngine')
 # 2.2.3 (L2, owner-approved): `drain` and `process` may differ from e94542ce ONLY by these listed edits. Undoing exactly
 # these edits must give back the original function, so nothing else in the Legacy drain/assembly algorithm changed.
