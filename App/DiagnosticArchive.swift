@@ -505,7 +505,7 @@ actor DiagnosticExportWriter {
         // on future callers never accidentally supplying a source-text key.
         let extraCounters: Set<String> = [
             "structured_events_dropped", "id_map_resets", "legacy_context_resets", "subtitle_traces_dropped",
-            "runCheckpointCaptureMicros", "captureRestarts", "runPausedSeconds", "legacyInventoryPending", "legacyInventoryOtherTarget", "legacyInventoryOtherSource",
+            "runCheckpointCaptureMicros", "captureRestarts", "runPausedSeconds", "captureStopsByPacket", "captureStopsByTimeout", "captureStopsByNewSession", "extensionFreeMBAtLastStop", "secondsIntoRunAtLastStop", "legacyInventoryPending", "legacyInventoryOtherTarget", "legacyInventoryOtherSource",
             "legacyInventoryOutsideLength", "legacyInventoryCandidates", "legacySkipKeyContext",
             "legacySkipCleanup", "legacySkipSegmentation", "legacySkipModel",
             "sessionCacheHits", "savedMemoryHits", "speculativeModelRequests",

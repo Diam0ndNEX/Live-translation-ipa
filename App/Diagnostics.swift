@@ -228,6 +228,11 @@ final class Diagnostics: ObservableObject {
     private var pausedTotal: TimeInterval = 0
     private var pauseReason = ""
     private var captureRestartCount = 0
+    /// Why capture stopped, per reason: the extension's own stop packet, a silent heartbeat timeout (the extension
+    /// stopped sending), or a new capture session replacing the old one. Plus what was known at the last stop.
+    private var captureStopCounts: [String: Int] = [:]
+    private var extFreeMBAtLastStop = 0
+    private var secondsIntoRunAtLastStop = 0
     var isRunPaused: Bool { activeRun != nil && pausedAt != nil }
     /// Seconds with capture off inside the current run. Left out of the run duration and of Time live.
     var pausedSeconds: TimeInterval { pausedTotal + (pausedAt.map { Date().timeIntervalSince($0) } ?? 0) }
@@ -950,6 +955,11 @@ final class Diagnostics: ObservableObject {
         counters["emptyOCRPasses"] = s.emptyOCRPasses
         counters["runCheckpointCaptureMicros"] = checkpointCaptureMicros
         counters["captureRestarts"] = captureRestartCount
+        counters["captureStopsByPacket"] = captureStopCounts["captureStopped", default: 0]
+        counters["captureStopsByTimeout"] = captureStopCounts["heartbeatTimeout", default: 0]
+        counters["captureStopsByNewSession"] = captureStopCounts["newCaptureSession", default: 0]
+        counters["extensionFreeMBAtLastStop"] = extFreeMBAtLastStop
+        counters["secondsIntoRunAtLastStop"] = secondsIntoRunAtLastStop
         counters["runPausedSeconds"] = Int(pausedSeconds.rounded())
         var currentHealth = memoryHealth
         currentHealth.ramEntries = ramEntryCount?() ?? memoryHealth.ramEntries
@@ -1139,7 +1149,10 @@ final class Diagnostics: ObservableObject {
         guard activeRun != nil, pausedAt == nil else { return }
         pausedAt = Date()
         pauseReason = reason
-        event(.state, "Capture stopped (\(reason)); the run is kept and continues when capture starts again")
+        captureStopCounts[reason, default: 0] += 1
+        extFreeMBAtLastStop = Int((extMem.last?.v ?? 0).rounded())
+        secondsIntoRunAtLastStop = Int((Date().timeIntervalSince(started) - pausedTotal).rounded())
+        event(.state, "Capture stopped (\(reason)) after \(secondsIntoRunAtLastStop) s of this run; extension free memory \(extFreeMBAtLastStop) MB; the run is kept")
         guard enabled, runSavingMode == "automatic" else { return }
         let snapshot = sessionSnapshot()
         let previous = testRuns.first { $0.id == snapshot.id }
@@ -1495,7 +1508,8 @@ final class Diagnostics: ObservableObject {
         modelTimingSamples = [:]; completedWorkRecoveredUnits = 0
         sharedModelUnits = 0; sharedConfirmedModelUnits = 0; memoryAwareSpeculationSkipped = 0; ramCaptionBypasses = 0; exactCaptionHits = 0; exactUnitsCoalesced = 0
         speculativeUnitCounts = [:]; queueWaitSamples = [:]
-        pausedAt = nil; pausedTotal = 0; pauseReason = ; captureRestartCount = 0
+        pausedAt = nil; pausedTotal = 0; pauseReason = ""; captureRestartCount = 0
+        captureStopCounts = [:]; extFreeMBAtLastStop = 0; secondsIntoRunAtLastStop = 0
         temporaryMemoryHits = 0; startingRAMEntries = ramEntryCount?() ?? 0
         // 2.3.2: the previous run's checkpoint cost must not appear in the next run's report.
         lastCheckpointCaptureMs = nil; checkpointCaptureMicros = 0

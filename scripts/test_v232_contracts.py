@@ -67,4 +67,11 @@ for name in ("legacyModeContexts.removeAll()", "legacyModeContextOrder.removeAll
              "pausedAt = nil; pausedTotal = 0"):
     assert name in clear, name
 assert "if !wasAlive {" in engine and "diag.beginRun(); refreshModeDiagnosticEpoch()" in engine
+for key in ("captureStopsByPacket", "captureStopsByTimeout", "captureStopsByNewSession", "extensionFreeMBAtLastStop", "secondsIntoRunAtLastStop"):
+    assert f'"{key}"' in diag and f'"{key}"' in archive, key
+assert "captureStopCounts = [:]" in clear
+# no assignment may be left without a value (a lost string literal once produced `pauseReason = ;`)
+import re
+assert not re.search(r"=\s*[;\n]", diag.replace("==", "")), "assignment without a value"
+assert 'pauseReason = ""' in diag
 print("v2.3.2 stop/start contracts passed: run continues across stop and restart")
