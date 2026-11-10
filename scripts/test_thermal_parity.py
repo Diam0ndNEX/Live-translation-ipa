@@ -11,7 +11,7 @@ def read(path):
         return read_source(Path(path).stem)
     return (root / path).read_text(encoding="utf-8")
 
-engine = read("App/TranslatorEngine.swift")
+engine = read_source("TranslatorEngine")
 extension = read_source("SampleHandler")
 simulation = read("App/PipelineSimulation.swift")
 core = read_source("TranslationSystem")

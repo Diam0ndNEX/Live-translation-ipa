@@ -19,7 +19,7 @@ project = read("project.yml")
 capture = read_source("SampleHandler")
 acquisition = read("Shared/SubtitleAcquisitionPolicy.swift")
 governor = read("Shared/SubtitlePerformancePolicy.swift")
-engine = read("App/TranslatorEngine.swift")
+engine = read_source("TranslatorEngine")
 coordinator = read_source("TranslationSystem")
 service = read("App/ModeTranslationService.swift")
 diagnostics = read_source("Diagnostics")
@@ -27,10 +27,10 @@ archive = read("App/DiagnosticArchive.swift")
 memory = read_source("TranslationMemoryStore")
 workflow = read(".github/workflows/build.yml")
 
-assert 'static let version = "2.3.8"' in shared
-assert "static let build = 115" in shared
-assert project.count('"2.3.8"') == 3
-assert project.count('"115"') == 3
+assert 'static let version = "2.3.9"' in shared
+assert "static let build = 116" in shared
+assert project.count('"2.3.9"') == 3
+assert project.count('"116"') == 3
 
 assert "SCREENLINGO_REFERENCE_CAPTURE_CADENCE" in capture
 assert "SubtitleAcquisitionPolicy.allowsEarlyVisualWake" in capture
