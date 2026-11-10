@@ -4,17 +4,17 @@
 Structural checks only. Nothing here compiles or runs the app, and nothing claims a device result or a speed gain.
 """
 from pathlib import Path
+from sources import read_source
 import re
 
 root = Path(__file__).resolve().parents[1]
-read = lambda relative: (root / relative).read_text(encoding="utf-8")
-shared_work = read("Shared/SharedTranslationWork.swift")
-service = read("App/ModeTranslationService.swift")
-experimental = read("App/ExperimentalFeaturesView.swift")
-engine = read("App/TranslatorEngine.swift")
-shared = read("Shared/Shared.swift")
-project = read("project.yml")
-index = read("App/UI/Model/SettingsSearchIndex.swift")
+shared_work = read_source("SharedTranslationWork")
+service = read_source("ModeTranslationService")
+experimental = read_source("ExperimentalFeaturesView")
+engine = read_source("TranslatorEngine")
+shared = read_source("Shared")
+project = (root / "project.yml").read_text(encoding="utf-8")
+index = read_source("SettingsSearchIndex")
 
 # L5: a third runtime switch, pinned at session start by the existing call, default OFF (current behaviour).
 assert 'static let availabilityRefreshSettingKey = "backgroundAvailabilityRefresh"' in shared_work
@@ -52,8 +52,8 @@ assert '@AppStorage("fastOCR") private var fastOCR = false' in experimental
 assert 'fastOCR: flag("fastOCR", false)' in engine
 
 # Diagnostics: the arm flag is exported (only when ON), allowlisted, and part of the cohort so on/off runs are not compared.
-diagnostics = (root / "App/Diagnostics.swift").read_text()
-archive = (root / "App/DiagnosticArchive.swift").read_text()
+diagnostics = read_source("Diagnostics")
+archive = read_source("DiagnosticArchive")
 assert 'if TranslationHotPathAB.refreshAvailabilityInBackground { settings["availabilityRefreshAB"] = "on" }' in diagnostics
 # 2.3.0: 3 uses now (settingsKeys, cohortKeys and the new "switches on" report column).
 assert archive.count('"availabilityRefreshAB"') == 3, "settingsKeys, cohortKeys and the 2.3.0 report column"
@@ -61,8 +61,8 @@ assert "deliveryFilteringMs matches confirmation-to-PiP time" in archive
 assert "hybrid_switch_guard_* values are the gap" in archive
 
 # L3 / L4: Hybrid-only arms, default OFF, pinned; constants unchanged when off.
-work = (root / "Shared/SharedTranslationWork.swift").read_text()
-system = (root / "Shared/TranslationSystem.swift").read_text()
+work = read_source("SharedTranslationWork")
+system = read_source("TranslationSystem")
 for name, pinned in (("hybridRelaxedBackoff", "hybridBackoffPinnedKey"), ("hybridShorterGuard", "hybridGuardPinnedKey")):
     assert f'(UserDefaults.standard.object(forKey: {pinned}) as? Bool) ?? false' in work, name
     assert f'@AppStorage("{name}") private var {name} = false' in experimental, name
@@ -94,11 +94,11 @@ assert "2400" not in "".join(l for l in diagnostics.splitlines() if "structuredE
 assert diagnostics.count("6000") >= 8 and "suffix(5840)" in diagnostics and "suffix(5872)" in diagnostics
 assert archive.count("suffix(6000)") >= 3
 
-store = (root / "App/TestRunStore.swift").read_text()
+store = read_source("TestRunStore")
 assert "maximumRunBytes: Int = TestRunStore.unlimitedRunBytes" in store and "static let unlimitedRunBytes = Int.max" in store
 
 assert "maximumTotalBytes: Int = Int.max" in store and "maximumUnpinnedRuns: Int = Int.max" in store, "no default storage limits"
-assert "100 MB" not in (root / "App/TestRunViews.swift").read_text()
+assert "100 MB" not in read_source("TestRunViews")
 
 # Version 2.2.3 build 106 in the places CI checks.
 assert 'static let version = "2.3.2"' in shared and "static let build = 109" in shared
