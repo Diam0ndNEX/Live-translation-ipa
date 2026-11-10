@@ -66,6 +66,7 @@ Each row is its own commit; every moved line is identical (line multiset compare
 | 4 | DiagnosticReviewedStage, DiagnosticReviewedCandidate, DiagnosticTraceReview | DiagnosticArchive+TraceReview.swift | 100 |
 | 5 | CombinedDiagnosticReport | DiagnosticArchive+CombinedReport.swift | 408 |
 | 6 | MemoryStoreHealth, MemoryLookupResult, MemoryStoredEntry, MemoryStoreError (from TranslationMemoryStore.swift) | App/Memory/TranslationMemoryStore+Types.swift | 55 |
+| 7 (2.3.4) | saveDiagnosticSession, loadDiagnosticEvents, loadDiagnosticSessions, clearDiagnosticSessions (from the TranslationMemoryStore actor, into an extension) | App/Memory/TranslationMemoryStore+DiagnosticSessions.swift | 61 |
 
 Not moved on purpose: the `TranslationMemoryStore` actor (1290 lines) and the private `MemoryLookupCompletion` class, and the private views in `DiagnosticsDashboard.swift`. Moving them needs `private` changed to `fileprivate` or internal, which is a Swift edit that cannot be compiled here. That needs the owner's OK.
 
