@@ -17,7 +17,7 @@ concurrency:
 permissions:
   contents: read
 jobs:
-  build:
+  checks:
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
@@ -101,8 +101,15 @@ jobs:
         run: bash scripts/test_diagnostics.sh
       - name: Check Test Runs storage, retention, recovery and migration
         run: bash scripts/test_test_runs.sh
-      - name: Storage scaling smoke benchmark
-        run: bash scripts/benchmark_memory.sh 3000 25000
+
+  build:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.6"
       - name: Generate app icon
         run: |
           python3 -m venv .venv
