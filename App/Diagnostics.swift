@@ -1441,6 +1441,8 @@ final class Diagnostics: ObservableObject {
         sharedModelUnits = 0; sharedConfirmedModelUnits = 0; memoryAwareSpeculationSkipped = 0; ramCaptionBypasses = 0; exactCaptionHits = 0; exactUnitsCoalesced = 0
         speculativeUnitCounts = [:]; queueWaitSamples = [:]
         temporaryMemoryHits = 0; startingRAMEntries = ramEntryCount?() ?? 0
+        // 2.3.2: the previous run's checkpoint cost must not appear in the next run's report.
+        lastCheckpointCaptureMs = nil; checkpointCaptureMicros = 0
         started = Date()
         subtitleTraces = []; recorderCosts = RecorderCosts()
         lastFrames = 0; lastFrameTime = Date(); tickN = 0
