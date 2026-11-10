@@ -4,14 +4,15 @@
 Nothing here compiles or runs the app. It guards the source shape of the fixes so a later edit cannot quietly undo them.
 """
 from pathlib import Path
+from sources import read_source
 root = Path(__file__).resolve().parent.parent
 read = lambda path: (root / path).read_text()
-pip = read("App/PiPRenderer.swift")
-engine = read("App/TranslatorEngine.swift")
-app = read("App/ScreenTranslatorApp.swift")
-diagnostics = read("App/Diagnostics.swift")
-archive = read("App/DiagnosticArchive.swift")
-translate = read("App/UI/Translate/TranslateScreen.swift")
+pip = read_source("PiPRenderer")
+engine = read_source("TranslatorEngine")
+app = read_source("ScreenTranslatorApp")
+diagnostics = read_source("Diagnostics")
+archive = read_source("DiagnosticArchive")
+translate = read_source("TranslateScreen")
 
 # P1: the video layer is mounted once, at the root, and is not hidden (iOS refuses PiP for a hidden layer).
 assert "PiPHost(layer: model.engine.pip.displayLayer)" in app
@@ -36,16 +37,16 @@ assert "pip.setAutomaticStart(captureAlive && flag(\"autoOpenPiP\", true))" in e
 # L1: accessibility-size layouts.
 assert "typeSize.isAccessibilitySize" in translate and "ComposeBar(engine: engine, composing: $composing)" in translate
 assert "minimumScaleFactor(0.7)" in translate
-assert ".font(.title.bold())" in read("App/UI/Kit/LanguagePairTitle.swift")
-assert "primaryLine" in read("App/UI/Kit/PhaseHeader.swift")
-assert "typeSize.isAccessibilitySize" in read("App/UI/Kit/SettingsKit.swift")
-assert "typeSize.isAccessibilitySize" in read("App/UI/Library/LibraryScreen.swift") and ".overlay { if items.isEmpty { emptyState } }" not in read("App/UI/Library/LibraryScreen.swift")
-assert "typeSize.isAccessibilitySize" in read("App/DiagnosticsDashboard.swift")
-assert "typeSize.isAccessibilitySize" in read("App/UI/Kit/AreaEditor.swift") and "typeSize.isAccessibilitySize" in read("App/Onboarding/OnboardingView.swift")
+assert ".font(.title.bold())" in read_source("LanguagePairTitle")
+assert "primaryLine" in read_source("PhaseHeader")
+assert "typeSize.isAccessibilitySize" in read_source("SettingsKit")
+assert "typeSize.isAccessibilitySize" in read_source("LibraryScreen") and ".overlay { if items.isEmpty { emptyState } }" not in read_source("LibraryScreen")
+assert "typeSize.isAccessibilitySize" in read_source("DiagnosticsDashboard")
+assert "typeSize.isAccessibilitySize" in read_source("AreaEditor") and "typeSize.isAccessibilitySize" in read_source("OnboardingView")
 
 # V: the current version (2.2.3 build 106, since the 2.2.3 update) in the three places the CI checks; the 2.2.2 changelog
 # entry must stay.
-shared = read("Shared/Shared.swift"); project = read("project.yml")
+shared = read_source("Shared"); project = read("project.yml")
 assert 'static let version = "2.3.2"' in shared and "static let build = 109" in shared
 assert project.count('"2.3.2"') == 3 and project.count('"109"') == 3
 assert '("2.2.2", "Build 105:' in shared
