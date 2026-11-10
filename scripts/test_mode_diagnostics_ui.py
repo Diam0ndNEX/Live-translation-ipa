@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """Static routing regressions paired with the Swift three-mode and iOS CI suites."""
 from pathlib import Path
+from sources import read_source
 
 root = Path(__file__).resolve().parents[1]
-engine = (root / "App/TranslatorEngine.swift").read_text()
-diagnostics = (root / "App/Diagnostics.swift").read_text()
+engine = read_source("TranslatorEngine")
+diagnostics = read_source("Diagnostics")
 # 2.0.0 build 86: the dashboard view moved to its own file; the recorder stays in Diagnostics.swift.
-dashboard = (root / "App/DiagnosticsDashboard.swift").read_text()
-coordinator = (root / "Shared/TranslationSystem.swift").read_text()
-backend = (root / "App/ModeTranslationService.swift").read_text()
-archive = (root / "App/DiagnosticArchive.swift").read_text()
+dashboard = read_source("DiagnosticsDashboard")
+coordinator = read_source("TranslationSystem")
+backend = read_source("ModeTranslationService")
+archive = read_source("DiagnosticArchive")
 tests = (root / "Tests/ThreeModes/main.swift").read_text()
 
 def section(source: str, start: str, end: str) -> str:
@@ -115,7 +116,7 @@ assert "The upcoming subtitle." in tests
 assert "Predicted B" in tests and "Confirmed C" in tests
 assert "Previous displayed text must not invalidate" in tests
 
-version = (root / "Shared/Shared.swift").read_text()
+version = read_source("Shared")
 project = (root / "project.yml").read_text()
 assert 'static let version = "2.3.2"' in version
 assert "static let build = 109" in version
