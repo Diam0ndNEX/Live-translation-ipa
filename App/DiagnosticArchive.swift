@@ -237,6 +237,9 @@ struct TranslationModeReport: Codable {
         "hybrid_physical_default_drain_wait_ms", "hybrid_default_drain_completed",
         "hybrid_default_drain_budget_exceeded", "hybrid_post_default_settlement_wait_ms",
         "hybrid_slow_post_default_ms", "hybrid_default_reentered_during_settlement",
+        // 2.4.0
+        "speculation_deferred_armed", "hybrid_pin_low_latency", "hybrid_pin_default", "hybrid_pin_wait_matching",
+        "hybrid_model_switch_low_latency", "hybrid_model_switch_default",
         "backend_availability_ms", "backend_task_dispatch_ms", "backend_installed_cache_hit",
         "backend_lane_wait_ms", "backend_lane_admission_rejected", "backend_stale_request_dropped",
         "backend_session_age_ms", "backend_session_reuse_count",
@@ -339,7 +342,9 @@ struct TranslationModeReport: Codable {
         "hybrid_hedge_suppressed", "hybrid_suppressed_hedge_deadline",
         "hybrid_physical_default_drain_wait_ms", "hybrid_default_drain_completed",
         "hybrid_default_drain_budget_exceeded", "hybrid_post_default_settlement_wait_ms",
-        "hybrid_slow_post_default_ms", "hybrid_default_reentered_during_settlement"
+        "hybrid_slow_post_default_ms", "hybrid_default_reentered_during_settlement",
+        "speculation_deferred_armed", "hybrid_pin_low_latency", "hybrid_pin_default", "hybrid_pin_wait_matching",
+        "hybrid_model_switch_low_latency", "hybrid_model_switch_default"
         ]
         for reason in sessionReasons {
             if let count = counters[reason], count >= 0 {

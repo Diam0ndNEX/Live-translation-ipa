@@ -33,8 +33,11 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("hotPathReuseLowLatencyPlan") private var hotPathReuseLowLatencyPlan = true
     @AppStorage("hotPathReuseLegacyUnits") private var hotPathReuseLegacyUnits = true
     @AppStorage("liveWarmupLegacy") private var liveWarmupLegacy = true
-    // 2.2.3 (L5): default OFF = current behaviour. Pinned at session start like the other A/B variants.
-    @AppStorage("backgroundAvailabilityRefresh") private var backgroundAvailabilityRefresh = false
+    // 2.2.3 (L5), default ON since 2.4.0. Pinned at session start like the other A/B variants.
+    @AppStorage("backgroundAvailabilityRefresh") private var backgroundAvailabilityRefresh = true
+    // 2.4.0: both default ON; off gives the 2.3.9 behaviour.
+    @AppStorage("hybridPinnedBackend") private var hybridPinnedBackend = true
+    @AppStorage("deferArmedSpeculation") private var deferArmedSpeculation = true
     // 2.2.3 (L3, L4): Hybrid-only, default OFF = current behaviour.
     @AppStorage("hybridRelaxedBackoff") private var hybridRelaxedBackoff = false
     @AppStorage("hybridShorterGuard") private var hybridShorterGuard = false
@@ -153,8 +156,16 @@ struct ExperimentalFeaturesView: View {
                     enabled: $liveWarmupLegacy)
                 ExperimentalOption(
                     title: "Refresh language check in background",
-                    explanation: "Off (default): the language-pack check is repeated when a translation needs it after 30 seconds, as before. On: it is refreshed in the background while nothing is translating, so a translation does not wait for it. Same translations either way. Unverified effect.",
+                    explanation: "On (default since 2.4.0): the language-pack check is refreshed in the background while nothing is translating, so a translation does not wait for it. Off: the check is repeated when a translation needs it after 30 seconds, as before 2.4.0. Same translations either way. Unverified effect.",
                     enabled: $backgroundAvailabilityRefresh)
+                ExperimentalOption(
+                    title: "Hybrid keeps one model",
+                    explanation: "Hybrid Recovery only. On (default): Hybrid stays on one model for a run of captions. It uses Low Latency when that language pack is installed and Apple Default when it is not, and does not go back and forth. New captions then use Low Latency wording. Off: as in 2.3.9, Apple Default for early work and Low Latency or Apple Default for recovery. In the 2.3.9 test the first call after a change of model took about one second. Unverified effect.",
+                    enabled: $hybridPinnedBackend)
+                ExperimentalOption(
+                    title: "Wait for confirmation before early Apple Default work",
+                    explanation: "Legacy, and Hybrid while it uses Apple Default. On (default): when a new caption can be confirmed on the next frame, no early translation is started for it; the confirmed caption starts the translation. Off: an early translation is started for every first reading, as in 2.3.9. Same model and same text either way. Unverified effect.",
+                    enabled: $deferArmedSpeculation)
                 ExperimentalOption(
                     title: "Hybrid relaxed backoff",
                     explanation: "Hybrid Recovery only. Off (default): after repeated unused early Apple Default work, the next 8 early requests are skipped. On: 4 are skipped, so early work resumes sooner. Same Apple Default text, but more unused calls may compete with confirmed ones. Unverified effect.",
@@ -194,7 +205,8 @@ struct ExperimentalFeaturesView: View {
                 "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
                 "adaptiveConfirmation", "confirmationDeadline", "continuousRotation",
                 "hybridSchedulerVariant", "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy",
-                "backgroundAvailabilityRefresh", "hybridRelaxedBackoff", "hybridShorterGuard", "legacyConfirmedOwnLane", "independentCaptureHeartbeat"
+                "backgroundAvailabilityRefresh", "hybridRelaxedBackoff", "hybridShorterGuard", "legacyConfirmedOwnLane", "independentCaptureHeartbeat",
+                "hybridPinnedBackend", "deferArmedSpeculation"
             ])
         }
         .settingsPage("Experimental features")

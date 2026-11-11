@@ -284,7 +284,8 @@ enum CombinedDiagnosticReport {
             // 2.3.0: these keys are written only when ON, so a missing key means OFF. Names the 2.2.3 switches that were on.
             let armsOn = [("legacyOwnLaneAB", "Legacy own lane"), ("availabilityRefreshAB", "background language check"),
                           ("hybridBackoffAB", "Hybrid relaxed backoff"), ("hybridGuardAB", "Hybrid shorter guard"),
-                          ("heartbeatAB", "independent capture heartbeat")]
+                          ("heartbeatAB", "independent capture heartbeat"),
+                          ("hybridPinAB", "Hybrid pinned backend"), ("armedDeferAB", "deferred early start")]
                 .filter { s[$0.0] == "on" }.map { $0.1 }
             let armsText = armsOn.isEmpty ? "none" : armsOn.joined(separator: ", ")
             out.append("| \(labels[i]) | \(s["hotPathAB"] ?? "?") | \(s["hybridSchedulerAB"] ?? "?") | \(s["detailedCollection"] ?? "?")\(s["detailSuspended"] == "true" ? " (suspended: thermal)" : "") | \(s["thermalStart"] ?? "?")/\(s["thermalEnd"] ?? "?")/\(s["thermalMax"] ?? "?") | \(s["focusedCaptionOCR"] ?? "?")/\(s["strictCaptionIdentity"] ?? "?") | \(session.counters["identicalFrameHolds", default: 0]) | \(session.counters["manualTranslations", default: 0]) | \(ms(session.distributions["memoryLookupWaitMs"]?.p50))/\(ms(session.distributions["memoryLookupWaitMs"]?.p95)) | \(ms(session.distributions["memoryHealthMs"]?.p50))/\(ms(session.distributions["memoryHealthMs"]?.p95)) | \(memoryTimeoutShare(session)) | \(armsText) |")
@@ -319,6 +320,22 @@ enum CombinedDiagnosticReport {
                 out.append("| \(labels[i]) | \(parts.first ?? "") | \(parts.last ?? "") | \(calls.count) | \(ms(median(calls.map { $0.serviceMs }))) | \(ms(calls.map { $0.serviceMs }.max())) |")
             }
         }
+
+        // 2.4.0: what the new switches did and what a confirmation needed. Counts are whole-session totals.
+        out.append("")
+        out.append("2.4.0 paths and capture (counts; reads and waits as P50/P95):")
+        out.append("")
+        out.append("| | early starts deferred | model changes to LL / to Default | pinned recoveries LL / Default | focused reads repeated | confirmations with a pixel rejection | OCR reads per confirmation | frame wait after OCR ms | overlap of confirmed Legacy calls ms |")
+        out.append("|---|---|---|---|---|---|---|---|---|")
+        for (i, session) in selected.enumerated() {
+            let m = session.translationModes?.counters ?? [:]
+            let c = session.counters
+            let d = session.distributions
+            func pair(_ name: String) -> String { "\(ms(d[name]?.p50))/\(ms(d[name]?.p95))" }
+            out.append("| \(labels[i]) | \(m["session_speculation_deferred_armed", default: 0]) | \(m["session_hybrid_model_switch_low_latency", default: 0]) / \(m["session_hybrid_model_switch_default", default: 0]) | \(m["session_hybrid_pin_low_latency", default: 0]) / \(m["session_hybrid_pin_default", default: 0]) | \(c["focusRediscoveries", default: 0]) | \(c["confirmedWithPixelRejection", default: 0]) | \(pair("confirmationOCRReads")) | \(pair("confirmationFrameWaitMs")) | \(pair("legacyConfirmedOverlapMs")) |")
+        }
+        out.append("")
+        out.append("Reading notes: confirmationMs runs from the start of the caption's first OCR read to its confirmation, so it contains that read (finalOCRMs); the two are not added. An early (speculative) call is one started for a first sighting; sections 4 and 5 show when it started relative to confirmed_ms.")
 
         out.append("")
         out.append("## 3. Stage timings per session (ms)")

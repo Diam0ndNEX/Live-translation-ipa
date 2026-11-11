@@ -184,6 +184,7 @@ struct Stats: Equatable {
     var queueReplacements = 0, visualChanges = 0, earlyVisualWakes = 0, earlyVisualWakesSuppressed = 0, emptyOCRPasses = 0
     var largePackets = 0, packetSendErrors = 0
     var pixelConfirmations = 0, pixelRejections = 0, watchSkippedOCR = 0, watchTriggeredOCR = 0
+    var focusRediscoveries = 0, confirmedWithPixelRejection = 0 // 2.4.0
     var firstSightVisualChangeLagMs = 0.0
     var effectiveOCRIntervalMs = 0.0
 }

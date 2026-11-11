@@ -57,13 +57,14 @@ assert engine.count("noteConfirmedSupersession(") == 1
 assert '| memory timeouts | switches on |' in archive
 assert 'armsOn' in archive and '("legacyOwnLaneAB", "Legacy own lane")' in archive
 
-# Defaults unchanged: every 2.2.3 switch still defaults to OFF.
+# Defaults: three 2.2.3 switches and the 2.3.2 heartbeat switch default to OFF.
+# 2.4.0 (deliberate change): the background language check now defaults to ON, so the count went from 5 to 4.
 work = read_source("SharedTranslationWork")
-assert work.count("?? false, forKey:") == 5, "the four 2.2.3 switches and the 2.3.2 heartbeat switch default to off"
+assert work.count("?? false, forKey:") == 4, "three 2.2.3 switches and the 2.3.2 heartbeat switch default to off"
 
 # Version 2.3.0 build 107 in the places CI checks; older changelog entries stay.
-assert 'static let version = "2.3.9"' in shared and "static let build = 116" in shared
-assert project.count('"2.3.9"') == 3 and project.count('"116"') == 3
+assert 'static let version = "2.4.0"' in shared and "static let build = 117" in shared
+assert project.count('"2.4.0"') == 3 and project.count('"117"') == 3
 assert '("2.3.0", "Build 107:' in shared and '("2.2.3", "Build 106:' in shared
 print("v2.3.0 source contracts passed: per-caption Legacy labels, confirmed_service_ms, oldest-first context drop, "
       "supersession measurement, switches column, defaults unchanged, version")

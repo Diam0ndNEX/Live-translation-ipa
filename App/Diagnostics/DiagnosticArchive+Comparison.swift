@@ -19,7 +19,7 @@ struct DiagnosticPerformanceComparison {
         "mode", "speed", "stability", "area", "customY0", "customY1", "translationTestMode",
         "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
         "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
-        "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "hybridBackoffAB", "hybridGuardAB", "legacyOwnLaneAB", "heartbeatAB", "detailedCollection", "performanceTier",
+        "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "hybridBackoffAB", "hybridGuardAB", "legacyOwnLaneAB", "heartbeatAB", "hybridPinAB", "armedDeferAB", "detailedCollection", "performanceTier",
         "focusedCaptionOCR", "strictCaptionIdentity", "cjkSingleCharacters", "liveWarmupLegacy"
     ]
     static let noteKeys = [

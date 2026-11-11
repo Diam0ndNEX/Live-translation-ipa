@@ -28,7 +28,17 @@ final class Diagnostics: ObservableObject {
     @Published var spans: [StateSpan] = []
     @Published var subtitleTraces: [SubtitleTrace] = []
     @Published var memoryHealth = MemoryDiagnosticHealth()
-    @Published var structuredEvents: [StructuredDiagnosticEvent] = []
+    /// 2.4.0: not @Published. An append to a published array reads, copies and writes back the whole array (up to
+    /// 6000 events) and notifies every observer, for each event of each caption. The Diagnostics screens redraw on
+    /// the other published values, which change at least as often.
+    var structuredEvents: [StructuredDiagnosticEvent] = []
+    /// 2.4.0: the two rings are cut back to 6000 in blocks of this size, not by one element on every event.
+    static let ringTrimBlock = 256
+    /// 2.4.0: capture facts the extension reports with each confirmed caption (numbers only).
+    var confirmationReadSamples: [Double] = []
+    var confirmationFrameWaitSamples: [Double] = []
+    var rediscoveryLeadSamples: [Double] = []
+    private var captionDigestCache: [String: String] = [:]
     @Published var archiveStatus = "Not saved"
     // v2.0.0 build 84 Test Runs (spec §11): runs are stored by TestRunStore, not in the memory database.
     /// 2.3.2: stopping and restarting capture in the same mode no longer ends the run or clears anything.
@@ -171,14 +181,20 @@ final class Diagnostics: ObservableObject {
                        fingerprint: String, reason: String, firstOCR: Double, duration: Double?, mode: String? = nil) {
         guard enabled else { return }
         // Caption identifiers are hashed by the producer, never OCR text.
-        let safeCaption = SHA256.hash(data: Data(caption.utf8)).map { String(format: "%02x", $0) }.joined()
+        // 2.4.0: one caption sends tens of events; its digest is computed once, not for each of them.
+        let safeCaption: String
+        if let cached = captionDigestCache[caption] { safeCaption = cached } else {
+            safeCaption = SHA256.hash(data: Data(caption.utf8)).map { String(format: "%02x", $0) }.joined()
+            if captionDigestCache.count >= 64 { captionDigestCache.removeAll(keepingCapacity: true) }
+            captionDigestCache[caption] = safeCaption
+        }
         let entry = TranslationModeTrace(mode: mode ?? modeActiveSystem, testMode: translationTestMode.rawValue,
             session: session, caption: safeCaption, revision: revision,
             source: source, target: target, fingerprint: fingerprint, reason: reason,
             monotonicTime: ProcessInfo.processInfo.systemUptime, firstOCR: firstOCR,
             durationMs: duration, thermal: ProcessInfo.processInfo.thermalState.rawValue)
         modeTrace.append(entry)
-        if modeTrace.count > 6000 {
+        if modeTrace.count > 6000 + Self.ringTrimBlock {
             let discarded = modeTrace.count - 6000
             modeTrace.removeFirst(discarded)
             modeEventCounts["mode_trace_ring_overwritten", default: 0] += discarded
@@ -268,6 +284,9 @@ final class Diagnostics: ObservableObject {
         if TranslationHotPathAB.hybridShorterGuard { settings["hybridGuardAB"] = "on" }
         if TranslationHotPathAB.legacyConfirmedOwnLane { settings["legacyOwnLaneAB"] = "on" }
         if TranslationHotPathAB.independentHeartbeat { settings["heartbeatAB"] = "on" }
+        // 2.4.0: both default ON. Written only when ON, like the others, so a run saved before 2.4.0 reads as off.
+        if TranslationHotPathAB.hybridPinnedBackend { settings["hybridPinAB"] = "on" }
+        if TranslationHotPathAB.deferArmedSpeculation { settings["armedDeferAB"] = "on" }
         settings["reductionReasons"] = captureReductionReasons.joined(separator: "_")
         settings["appRequestedCaptureIntervalMs"] = String(requestedCaptureIntervalMs)
         settings["appRequestedCaptureEdgePx"] = String(requestedCaptureEdgePx)
@@ -311,6 +330,8 @@ final class Diagnostics: ObservableObject {
         counters["pixelRejections"] = s.pixelRejections
         counters["watchSkippedOCR"] = s.watchSkippedOCR
         counters["watchTriggeredOCR"] = s.watchTriggeredOCR
+        counters["focusRediscoveries"] = s.focusRediscoveries
+        counters["confirmedWithPixelRejection"] = s.confirmedWithPixelRejection
         counters["legacyAdaptiveLowYieldSkips"] = s.legacyAdaptiveLowYieldSkips
         counters["legacyAdaptiveSavedSkips"] = s.legacyAdaptiveSavedSkips
         counters["legacyLowConfidenceSkips"] = s.legacyLowConfidenceSkips
@@ -353,6 +374,10 @@ final class Diagnostics: ObservableObject {
                 "legacyDetachedSpeculationReleaseMs": DiagnosticDistribution(modelTimingSamples["legacy_detached_speculation_released", default: []]),
                 "queueBehindSpeculationMs": DiagnosticDistribution(queueWaitSamples[.speculative, default: []]),
                 "confirmedSupersededAgeMs": DiagnosticDistribution(modelTimingSamples["confirmed_superseded_age_ms", default: []]),
+                "legacyConfirmedOverlapMs": DiagnosticDistribution(modelTimingSamples["legacy_confirmed_overlap_ms", default: []]),
+                "confirmationOCRReads": DiagnosticDistribution(confirmationReadSamples),
+                "confirmationFrameWaitMs": DiagnosticDistribution(confirmationFrameWaitSamples),
+                "rediscoveryLeadMs": DiagnosticDistribution(rediscoveryLeadSamples),
                 "queueBehindConfirmedMs": DiagnosticDistribution(queueWaitSamples[.confirmed, default: []]),
                 "queueSchedulingMs": DiagnosticDistribution(queueWaitSamples[.scheduling, default: []]),
                 "processingMs": DiagnosticDistribution(pipeline.map { $0.stages.translation }),
@@ -558,6 +583,8 @@ final class Diagnostics: ObservableObject {
         thermalMaxLevel = ProcessInfo.processInfo.thermalState.rawValue
         memoryOutcomes = [:]; lookupSamples = []; writeSamples = []; historySaveSamples = []; lookupWaitSamples = []; memoryHealthSamples = []
         modelTimingSamples = [:]; completedWorkRecoveredUnits = 0
+        confirmationReadSamples = []; confirmationFrameWaitSamples = []; rediscoveryLeadSamples = []
+        captionDigestCache.removeAll(keepingCapacity: true)
         sharedModelUnits = 0; sharedConfirmedModelUnits = 0; memoryAwareSpeculationSkipped = 0; ramCaptionBypasses = 0; exactCaptionHits = 0; exactUnitsCoalesced = 0
         speculativeUnitCounts = [:]; queueWaitSamples = [:]
         pausedAt = nil; pausedTotal = 0; pauseReason = ""; captureRestartCount = 0
@@ -600,6 +627,19 @@ final class Diagnostics: ObservableObject {
         s.pixelRejections = p.pixelRejections ?? s.pixelRejections
         s.watchSkippedOCR = p.watchSkippedOCR ?? s.watchSkippedOCR
         s.watchTriggeredOCR = p.watchTriggeredOCR ?? s.watchTriggeredOCR
+        s.focusRediscoveries = p.focusRediscoveries ?? s.focusRediscoveries
+        // 2.4.0: what a confirmation needed, reported by the extension with the confirmed packet. Numbers only.
+        if p.kind == "ocr", p.stable != false, let reads = p.confirmReads, reads > 0 {
+            func keep(_ samples: inout [Double], _ value: Double) {
+                guard value.isFinite, value >= 0 else { return }
+                samples.append(value)
+                if samples.count > 1200 { samples.removeFirst(samples.count - 1200) }
+            }
+            keep(&confirmationReadSamples, Double(reads))
+            if let wait = p.confirmFrameWaitMs { keep(&confirmationFrameWaitSamples, wait) }
+            if let lead = p.rediscoveryLeadMs { keep(&rediscoveryLeadSamples, lead) }
+            if (p.confirmPixelRejections ?? 0) > 0 { s.confirmedWithPixelRejection += 1 }
+        }
         s.emptyOCRPasses = p.totalEmptyOCRPasses ?? s.emptyOCRPasses
         s.effectiveOCRIntervalMs = p.effectiveOCRIntervalMs ?? s.effectiveOCRIntervalMs
         if let first = p.firstSeenAt, let visual = p.lastVisualChangeAt,

@@ -1,21 +1,21 @@
 # ScreenLingo structure guidelines
 
-Status: rewritten for 2.3.9 (build 116). Reviewed for: 2.3 (see section 9). The big files were split in 2.3.3 to 2.3.9 (see `docs/structure-migration-plan.md` for the log). Swift was never compiled in chat; the GitHub Actions run is the first test of any change. This file says where code, tests and docs go, and how to split safely.
+Status: rewritten for 2.3.9 (build 116), re-read against the code for 2.4.0 (build 117). Reviewed for: 2.4 (see section 9). The big files were split in 2.3.3 to 2.3.9 (see `docs/structure-migration-plan.md` for the log). Swift was never compiled in chat; the GitHub Actions run is the first test of any change. This file says where code, tests and docs go, and how to split safely.
 
-## 1. Current state (2.3.9)
+## 1. Current state (2.4.0)
 <!-- sizes:start -->
 | Main file | Lines (rounded to 50) | Part files |
 |---|---|---|
 | App/TranslatorEngine.swift | 1350 | 20 |
-| App/Diagnostics.swift | 650 | 8 |
-| BroadcastExtension/SampleHandler.swift | 500 | 3 |
-| App/DiagnosticArchive.swift | 400 | 7 |
+| App/Diagnostics.swift | 700 | 8 |
+| BroadcastExtension/SampleHandler.swift | 550 | 3 |
+| App/DiagnosticArchive.swift | 450 | 7 |
 | App/TranslationMemoryStore.swift | 400 | 9 |
 | App/ModeTranslationService.swift | 400 | 2 |
-| App/SettingsViews.swift | 300 | 2 |
 | App/DiagnosticsDashboard.swift | 300 | 5 |
+| App/SettingsViews.swift | 300 | 2 |
 | App/TestRunViews.swift | 250 | 2 |
-| Shared/TranslationSystem.swift | 250 | 2 |
+| Shared/TranslationSystem.swift | 250 | 3 |
 <!-- sizes:end -->
 Biggest remaining: TranslatorEngine (stored properties, `init`, test-pinned members) and `process` (391 lines, one function, left whole on purpose).
 
@@ -49,7 +49,7 @@ Main files stay where they are (`App/TranslatorEngine.swift` ...); only parts li
 5. Check with a line multiset (moved text plus parts equals the old file; only `private` removals, wrappers and imports differ).
 6. Run all `scripts/test_*.py` and `make_settings_index.py --check`. Fix tests only so that their meaning stays (see section 5).
 7. Bump the version (every update), write `docs/vX.Y.Z-specification.md`, list it in `docs/README.md`. One push per stage; a new push cancels the running CI.
-8. Hot paths (`SampleHandler`, `TranslatorEngine`, `TranslationSystem`) are guarded by tests that compare function text with old commits. Moving them is allowed when the body stays identical; changing them needs a measured reason.
+8. Hot paths (`SampleHandler`, `TranslatorEngine`, `TranslationSystem`) are guarded by tests. `test_three_modes.py` compares `process`, `drain`, `cachedCaption`, `extractTexts` and `selectBlocks` with the text of commit e94542ce; the other hot-path checks look for required lines. Moving a function is allowed when the body stays identical. Since 2.4.0 the owner allows changing them: change the test in the same commit and say in the specification which assertion changed and why. 2.4.0 itself did not change those five functions.
 9. Helper scripts for these checks are in `scripts/split_tools/` (see its README).
 
 ## 5. Tests and CI
@@ -58,14 +58,14 @@ Main files stay where they are (`App/TranslatorEngine.swift` ...); only parts li
 - Test strings should name a member without the access keyword (`func show(`, not `private func show(`).
 - Tests that slice source between two markers depend on member order in one file. Keep those members together in the main file.
 - Shell scripts and `build.yml` build `swiftc` lists with `$(bash scripts/swift_sources.sh Name1 Name2)`, never with a file name. `Shared/*.swift` stays a glob. Workflow files cannot be pushed from chat; hand the file to the owner to paste.
-- Do not add a `test_vXYZ_contracts.py` per version if the check fits an existing topic test.
+- Do not add a `test_vXYZ_contracts.py` per version if the check fits an existing topic test. A new script also needs a new step in `build.yml`, which only the owner can paste; 2.4.0 put its checks at the end of `test_three_modes.py` for that reason.
 - CI is two parallel jobs: `checks` (all tests) and `build` (xcodegen, xcodebuild, IPA). The IPA can exist while `checks` is red; read both.
 - CI green means it compiles and the tests pass. It is not proof of speed or correct subtitles.
 
 ## 6. Docs
 - One specification per update: `docs/vX.Y.Z-specification.md`. State what was read, what was not, what is unverified.
 - Docs of older versions are records; do not edit them. Add every new doc to `docs/README.md` in the same commit.
-- Diagnostics analyses stay in the Claude Project, not in `docs/`.
+- Diagnostics analyses of single test runs stay in the Claude Project, not in `docs/`. An audit written for an update (`docs/vX.Y.Z-audit.md`) is a doc and is listed in `docs/README.md`.
 
 ## 7. Branches and PRs
 - Work on `claude/screenlingo-v<version>` from the newest `claude/screenlingo-v*` branch. Open a draft PR into the branch you started from, never `main`. Old `codex/*` branches are history.
@@ -78,6 +78,7 @@ Main files stay where they are (`App/TranslatorEngine.swift` ...); only parts li
 - [ ] Version, build and changelog (no inner quotes) in `Shared/Shared.swift`; 3 places each in `project.yml`; every script that asserts the version.
 - [ ] `docs/vX.Y.Z-specification.md` added and listed in `docs/README.md`; `python3 scripts/test_structure_docs.py --write` run.
 - [ ] Commit messages say what changed. No speed claims without Diagnostics from all three modes.
+- [ ] A change that can alter wording or what is translated early has a switch (pinned at session start in `TranslationHotPathAB`), a line in the report's switches column, and a changelog sentence.
 - [ ] Say that nothing was compiled in chat; the CI run is the first test.
 
 ## 9. Keeping this file current

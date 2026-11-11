@@ -928,6 +928,72 @@ final class Harness {
             "Wall-clock changes cannot reset a supplied monotonic OCR origin")
         precondition(CaptionClockOrigin.monotonic(firstSeen: nil, wallFirstSeen: 995, wallNow: 1000, uptimeNow: 100) == 95)
         precondition(CaptionClockOrigin.monotonic(firstSeen: 500, wallFirstSeen: 995, wallNow: 1000, uptimeNow: 100) == 95)
+        // 2.4.0: the Hybrid backend pin. One model for a run of captions; a failed Low Latency request holds Apple Default.
+        var pin = HybridBackendPin()
+        precondition(pin.current == nil && pin.changes == 0)
+        precondition(pin.strategy(fastInstalled: true, now: 0) == .lowLatency && pin.changes == 0, "The first choice is not a change")
+        precondition(pin.strategy(fastInstalled: true, now: 1) == .lowLatency && pin.changes == 0)
+        pin.noteLowLatencyFailure(now: 1)
+        precondition(pin.peek(fastInstalled: true, now: 2) == .appleDefault && pin.changes == 0, "peek records nothing")
+        precondition(pin.strategy(fastInstalled: true, now: 2) == .appleDefault && pin.changes == 1)
+        precondition(pin.strategy(fastInstalled: true, now: 1 + HybridBackendPin.fallbackHold - 0.1) == .appleDefault && pin.changes == 1,
+            "No return to Low Latency inside the hold")
+        precondition(pin.strategy(fastInstalled: true, now: 1 + HybridBackendPin.fallbackHold + 0.1) == .lowLatency && pin.changes == 2)
+        var noPack = HybridBackendPin()
+        precondition(noPack.strategy(fastInstalled: false, now: 0) == .appleDefault, "Without the fast pack the pin is Apple Default")
+
+        // Pinned Hybrid: early work and recovery both use Low Latency, the Apple Default admission gate and the
+        // switch guard do not apply, and matching early work is awaited instead of duplicated.
+        let pinned = Harness(); pinned.coordinator.system = .hybridRecovery
+        pinned.coordinator.hybridPinnedBackend = true
+        pinned.coordinator.hybridSwitchGuard = true
+        pinned.coordinator.appleDefaultGapMs = { _ in 0 }
+        pinned.coordinator.hybridSpeculationPermitted = { false }
+        precondition(pinned.coordinator.nextSpeculativeStrategy == .lowLatency && pinned.coordinator.pinnedToLowLatency)
+        pinned.coordinator.observe(pinned.caption(), confirmed: false, speculate: true); await pinned.settle()
+        precondition(pinned.calls.count == 1 && pinned.calls[0].strategy == .lowLatency && pinned.calls[0].speculative,
+            "Pinned early work runs on Low Latency")
+        pinned.coordinator.observe(pinned.caption(), confirmed: true, speculate: true); await pinned.settle()
+        precondition(pinned.calls.count == 1 && pinned.events.contains("hybrid_pin_wait_matching"),
+            "A matching request on the pinned model is awaited, not started twice")
+        pinned.reply(0, ["Pinned"]); await pinned.settle()
+        precondition(pinned.selected.count == 1 && pinned.selected[0].1.strategies == [.lowLatency])
+        precondition(!pinned.events.contains("hybrid_model_switch_low_latency") && !pinned.events.contains("hybrid_model_switch_default"),
+            "Staying on one model reports no model change")
+        pinned.coordinator.observe(pinned.caption("Another line here.", revision: 2, id: "second"), confirmed: true, speculate: false)
+        await pinned.settle()
+        precondition(pinned.calls.count == 2 && pinned.calls[1].strategy == .lowLatency && !pinned.calls[1].speculative,
+            "Pinned recovery ignores the switch guard")
+        precondition(pinned.events.contains("hybrid_pin_low_latency") && !pinned.events.contains("hybrid_switch_guard_default"))
+        pinned.reply(1, nil); await pinned.settle()
+        precondition(pinned.calls.count == 3 && pinned.calls[2].strategy == .lowLatency)
+        pinned.reply(2, nil); await pinned.settle()
+        precondition(pinned.calls.count == 4 && pinned.calls[3].strategy == .appleDefault && pinned.events.contains("hybrid_default_fallback"))
+        precondition(pinned.events.contains("hybrid_model_switch_default"), "A change of model is reported")
+        pinned.reply(3, ["Fallback"]); await pinned.settle()
+        precondition(pinned.selected.count == 2)
+        precondition(pinned.coordinator.nextSpeculativeStrategy == .appleDefault && !pinned.coordinator.pinnedToLowLatency,
+            "A failed Low Latency request holds the pin on Apple Default")
+        pinned.coordinator.observe(pinned.caption("A third line.", revision: 3, id: "third"), confirmed: true, speculate: false)
+        await pinned.settle()
+        precondition(pinned.calls.count == 5 && pinned.calls[4].strategy == .appleDefault && pinned.events.contains("hybrid_pin_default"),
+            "The next caption stays on Apple Default instead of going back at once")
+        pinned.reply(4, ["Held"]); await pinned.settle()
+        precondition(pinned.selected.count == 3)
+        pinned.coordinator.reset()
+
+        // Pin off (the coordinator default): the 2.3.9 routing is unchanged.
+        let unpinned = Harness(); unpinned.coordinator.system = .hybridRecovery
+        precondition(!unpinned.coordinator.pinActive && unpinned.coordinator.nextSpeculativeStrategy == .appleDefault)
+        unpinned.coordinator.observe(unpinned.caption(), confirmed: false, speculate: true); await unpinned.settle()
+        precondition(unpinned.calls.count == 1 && unpinned.calls[0].strategy == .appleDefault)
+        unpinned.reply(0, ["Default"]); await unpinned.settle()
+        unpinned.coordinator.reset()
+        let fastMode = Harness(); fastMode.coordinator.system = .lowLatency
+        fastMode.coordinator.hybridPinnedBackend = true
+        precondition(!fastMode.coordinator.pinActive && fastMode.coordinator.nextSpeculativeStrategy == .lowLatency,
+            "The pin belongs to Hybrid only")
+
         print("Three-mode migration, sharing, atomic selection, mismatch, cancellation, memory isolation, strategy purity and semantic identity checks passed")
     }
 }

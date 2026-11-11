@@ -46,6 +46,7 @@ extension SampleHandler {
             // Changed or unverifiable: the normal OCR cadence decides.
             pendingPixelRead = nil
             pixelRejections += 1
+            confirmPixelRejections += 1
             return false
         }
         guard PixelConfirmation.dwellSatisfied(sinceFirstReadStart: uptime - pending.readStart,

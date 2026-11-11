@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "2.3.9"
-    static let build = 116
+    static let version = "2.4.0"
+    static let build = 117
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("2.4.0", "Build 117: latency rebuild, first step. Nothing is measured yet; every effect is unverified until Diagnostics from all three modes on the same video shows it. Hybrid Recovery now stays on one model for a run of captions: Low Latency when its language pack is installed, Apple Default when it is not or when Low Latency fails. New captions in Hybrid therefore use Low Latency wording; the switch Hybrid keeps one model in Experimental features restores the 2.3.9 behavior. Legacy, and Hybrid while it uses Apple Default, no longer start an early translation for a caption that can be confirmed on the next frame; the switch Wait for confirmation before early Apple Default work restores it. After a focused read finds changed text, the capture extension reads the whole area on the next frame instead of waiting for the usual interval. Model calls in Hybrid and Low Latency start without waiting for other main-thread work, the language check is refreshed in the background by default, and Diagnostics records events with less work. New Diagnostics rows: model changes, deferred early starts, OCR reads and frame wait per confirmation, overlap of Legacy calls. OCR accuracy, the read area and the confirmation rules are unchanged."),
         ("2.3.9", "Build 116: no change to translation, OCR, confirmation, the model choice or any default. Code layout only: another large part of the translator engine, including the OCR packet intake, the translation drain and the idle legacy validation, moved into its own files. Swift app behavior is unchanged."),
         ("2.3.8", "Build 115: no change to translation, OCR, confirmation, the model choice or any default. Code layout only: the translation system and its three-mode coordinator, the test run screens, the translation memory store, the capture extension and the mode translation service were split into smaller files. Swift app behavior is unchanged."),
         ("2.3.7", "Build 114: no change to translation, OCR, confirmation, the model choice or any default. Code layout only: the translator engine, the diagnostics recorder, the diagnostics archive writer, the diagnostics dashboard view and the settings pages were split into several smaller files, and the members they share lost their private marker. Swift app behavior is unchanged."),
@@ -148,6 +149,19 @@ struct Packet: Codable {
     var pixelRejections: Int? = nil
     var watchSkippedOCR: Int? = nil
     var watchTriggeredOCR: Int? = nil
+    /// 2.4.0, first-sighting packets only: the pixel check for this read is armed, so its confirmation follows on the
+    /// next frame when the text is stable. Nil (older extension) means unknown.
+    var pixelArmed: Bool? = nil
+    /// 2.4.0, numeric metadata only. Focused reads thrown away because the text changed (whole area read again).
+    var focusRediscoveries: Int? = nil
+    /// 2.4.0, confirmed packets only: OCR passes and pixel-check rejections this caption needed, and the longest wait
+    /// from the end of an OCR pass to the next processed frame, in milliseconds.
+    var confirmReads: Int? = nil
+    var confirmPixelRejections: Int? = nil
+    var confirmFrameWaitMs: Double? = nil
+    /// 2.4.0, confirmed packets only: when a focused read of this caption was thrown away just before its first
+    /// counted read, the time from the start of that read to the start of the first counted read, in milliseconds.
+    var rediscoveryLeadMs: Double? = nil
 }
 
 /// App → extension (sent back over the same localhost link)

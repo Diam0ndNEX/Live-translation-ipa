@@ -22,7 +22,7 @@ final class ModeTranslationService {
     var warmupPolicy = InitialWarmupPolicy()
     private var recentlyInstalled: [String: Double] = [:]
     private let installedCheckTTL: Double = 30
-    /// 2.2.3 (L5, UNVERIFIED): with the pinned backgroundAvailabilityRefresh switch on (default off), a cached
+    /// 2.2.3 (L5, UNVERIFIED): with the pinned backgroundAvailabilityRefresh switch on (default on since 2.4.0), a cached
     /// "installed" check at least this old is refreshed after a model call returns, so the first request after the
     /// 30 s TTL does not pay the availability check itself. Must stay below installedCheckTTL.
     private let availabilityRefreshAfter: Double = 20
@@ -294,111 +294,113 @@ final class ModeTranslationService {
         report(speculation ? "speculative_queue_ms" : "recovery_queue_ms",
                (ProcessInfo.processInfo.systemUptime - enqueued) * 1000)
         let dispatched = ProcessInfo.processInfo.systemUptime
-        return await withTaskCancellationHandler(operation: {
-            await withCheckedContinuation { continuation in
-                var completed = false
-                let start = ProcessInfo.processInfo.systemUptime
-                let finish: ([String]?) -> Void = { result in
-                    guard !completed else { return }
-                    completed = true; continuation.resume(returning: result)
-                }
-                let timeout = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 4_000_000_000)
-                    guard !Task.isCancelled, !completed else { return }
-                    lane.invalidated = true; lane.sharedDefaultLease.requestCancellation(); session.cancel()
-                    if lane.cancellationAt == nil {
-                        lane.cancellationAt = ProcessInfo.processInfo.systemUptime
-                        report("cancellation_requested")
-                    }
-                    self.activity.advance(activityID, to: .cancelling)
-                    report("model_timeout", nil)
-                    finish(nil)
-                }
-                Task { @MainActor in
-                    report("backend_task_dispatch_ms", (ProcessInfo.processInfo.systemUptime - dispatched) * 1000)
-                    report("backend_apple_call_entered", nil)
-                    let requests = indices.enumerated().map {
-                        TranslationSession.Request(sourceText: caption.units[$0.element], clientIdentifier: String($0.offset))
-                    }
-                    var output: [String]?
-                    do {
-                        let response = try await session.translations(from: requests)
-                        output = PipelineSafety.orderedTranslations(response.map { ($0.clientIdentifier, $0.targetText) }, count: indices.count)
-                    } catch {
-                        self.recentlyInstalled.removeValue(forKey: availabilityKey)
-                        report("model_error", nil)
-                    }
-                    timeout.cancel()
-                    let finishedAt = ProcessInfo.processInfo.systemUptime
-                    if strategy == .appleDefault { self.lastAppleDefaultReturn[languagePairKey] = finishedAt }
-                    let serviceMs = (finishedAt - start) * 1000
-                    report("backend_apple_call_returned", serviceMs)
-                    if let previousDefaultGap {
-                        report("hybrid_recovery_post_default_service_ms", serviceMs)
-                        if serviceMs >= 800 { report("hybrid_slow_post_default_ms", serviceMs) }
-                    } else if caption.system == .hybridRecovery && !speculation &&
-                              strategy == .lowLatency && !competingDefault {
-                        report("hybrid_recovery_no_recent_overlap_service_ms", serviceMs)
-                        if serviceMs >= 800 {
-                            report("hybrid_unexplained_slow_recovery_ms", serviceMs)
-                        }
-                    }
-                    report(output == nil ? "model_batch_failed" : "model_batch_completed", serviceMs)
-                    if output != nil {
-                        // Warm-up completion is accounted for by warmupEvent.
-                        // Do not also count it as a live model request.
-                        if !warmup {
-                            self.modelRequestCompleted?(caption.source, caption.target, strategy, serviceMs)
-                        }
-                        report(speculation ? "speculative_model_completed" : "confirmed_model_completed", serviceMs)
-                    }
-                    report(speculation ? "speculative_service_ms" : "recovery_service_ms", serviceMs)
-                    if competingDefault {
-                        report("hybrid_overlapped_recovery_ms", serviceMs)
-                        // Service time includes non-overlapping work; this second
-                        // metric measures simultaneous lane occupancy only.
-                        let overlapEnd = speculative.busy ? finishedAt : (speculative.lastFinishedAt ?? dispatched)
-                        let overlapMs = max(0, min(finishedAt, overlapEnd) - dispatched) * 1000
-                        report("hybrid_simultaneous_model_overlap_ms", overlapMs)
-                    }
-                    if lane.ticket == ticket {
-                        if let sharedDefaultTicket,
-                           !lane.sharedDefaultLease.finish(sharedDefaultTicket, successful: output != nil) {
-                            lane.invalidated = true
-                        }
-                        lane.lastFinishedAt = finishedAt
-                        lane.lastFinishedPair = languagePairKey
-                        if let cancelled = lane.cancellationAt {
-                            report("cancelled_call_returned", (ProcessInfo.processInfo.systemUptime - cancelled) * 1000)
-                        }
-                        lane.busy = false; lane.caption = nil; lane.cancellationAt = nil
-                        lane.activityID = nil
-                        if lane.invalidated || output == nil {
-                            lane.session = nil; lane.key = ""
-                            lane.createdAt = nil; lane.completedCalls = 0
-                            // Preserve the last physical return time so an
-                            // overlapped recovery can measure its actual span.
-                        } else {
-                            lane.completedCalls += 1
-                            report("backend_session_reuse_count", Double(lane.completedCalls))
-                        }
-                    }
-                    self.activity.end(activityID)
-                    // 2.2.3 (L5): no-op unless the pinned switch is on; never delays finish().
-                    self.refreshAvailabilityIfStale(source: source, target: target, strategy: strategy, key: availabilityKey)
-                    finish(lane.invalidated ? nil : output)
-                }
+        let requests = indices.enumerated().map {
+            TranslationSession.Request(sourceText: caption.units[$0.element], clientIdentifier: String($0.offset))
+        }
+        // 2.4.0: the Apple call starts at once in a task of its own that does not run on the main actor. Before, it
+        // was started from a new main-actor task, which had to wait for other main-actor work first
+        // (backend_task_dispatch_ms, P90 17 to 34 ms in the 2.3.9 device report). As before, the call is not tied to
+        // the caller's Swift cancellation: only session.cancel() stops it, and the lane stays occupied until it
+        // really returns. The time limit now asks the session to cancel instead of answering early.
+        let call = Task.detached(priority: .userInitiated) { () async -> Result<[String]?, Error> in
+            do {
+                let response = try await session.translations(from: requests)
+                return .success(PipelineSafety.orderedTranslations(
+                    response.map { ($0.clientIdentifier, $0.targetText) }, count: requests.count))
+            } catch {
+                return .failure(error)
             }
-        }, onCancel: {
+        }
+        report("backend_task_dispatch_ms", (ProcessInfo.processInfo.systemUptime - dispatched) * 1000)
+        report("backend_apple_call_entered", nil)
+        let start = dispatched
+        let timeout = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            guard !Task.isCancelled, lane.ticket == ticket, lane.busy else { return }
+            lane.invalidated = true; lane.sharedDefaultLease.requestCancellation(); session.cancel()
+            if lane.cancellationAt == nil {
+                lane.cancellationAt = ProcessInfo.processInfo.systemUptime
+                report("cancellation_requested")
+            }
+            self.activity.advance(activityID, to: .cancelling)
+            report("model_timeout", nil)
+        }
+        let outcome = await withTaskCancellationHandler(operation: { await call.value }, onCancel: {
             Task { @MainActor in
                 guard lane.ticket == ticket, lane.busy else { return }
                 lane.invalidated = true; lane.sharedDefaultLease.requestCancellation(); session.cancel()
                 if lane.cancellationAt == nil {
-                        lane.cancellationAt = ProcessInfo.processInfo.systemUptime
-                        report("cancellation_requested")
-                    }
+                    lane.cancellationAt = ProcessInfo.processInfo.systemUptime
+                    report("cancellation_requested")
+                }
                 self.activity.advance(activityID, to: .cancelling)
             }
         })
+        timeout.cancel()
+        var output: [String]?
+        switch outcome {
+        case .success(let values): output = values
+        case .failure:
+            recentlyInstalled.removeValue(forKey: availabilityKey)
+            report("model_error", nil)
+        }
+        let finishedAt = ProcessInfo.processInfo.systemUptime
+        if strategy == .appleDefault { lastAppleDefaultReturn[languagePairKey] = finishedAt }
+        let serviceMs = (finishedAt - start) * 1000
+        report("backend_apple_call_returned", serviceMs)
+        if previousDefaultGap != nil {
+            report("hybrid_recovery_post_default_service_ms", serviceMs)
+            if serviceMs >= 800 { report("hybrid_slow_post_default_ms", serviceMs) }
+        } else if caption.system == .hybridRecovery && !speculation &&
+                  strategy == .lowLatency && !competingDefault {
+            report("hybrid_recovery_no_recent_overlap_service_ms", serviceMs)
+            if serviceMs >= 800 {
+                report("hybrid_unexplained_slow_recovery_ms", serviceMs)
+            }
+        }
+        report(output == nil ? "model_batch_failed" : "model_batch_completed", serviceMs)
+        if output != nil {
+            // Warm-up completion is accounted for by warmupEvent.
+            // Do not also count it as a live model request.
+            if !warmup {
+                modelRequestCompleted?(caption.source, caption.target, strategy, serviceMs)
+            }
+            report(speculation ? "speculative_model_completed" : "confirmed_model_completed", serviceMs)
+        }
+        report(speculation ? "speculative_service_ms" : "recovery_service_ms", serviceMs)
+        if competingDefault {
+            report("hybrid_overlapped_recovery_ms", serviceMs)
+            // Service time includes non-overlapping work; this second
+            // metric measures simultaneous lane occupancy only.
+            let overlapEnd = speculative.busy ? finishedAt : (speculative.lastFinishedAt ?? dispatched)
+            let overlapMs = max(0, min(finishedAt, overlapEnd) - dispatched) * 1000
+            report("hybrid_simultaneous_model_overlap_ms", overlapMs)
+        }
+        if lane.ticket == ticket {
+            if let sharedDefaultTicket,
+               !lane.sharedDefaultLease.finish(sharedDefaultTicket, successful: output != nil) {
+                lane.invalidated = true
+            }
+            lane.lastFinishedAt = finishedAt
+            lane.lastFinishedPair = languagePairKey
+            if let cancelled = lane.cancellationAt {
+                report("cancelled_call_returned", (ProcessInfo.processInfo.systemUptime - cancelled) * 1000)
+            }
+            lane.busy = false; lane.caption = nil; lane.cancellationAt = nil
+            lane.activityID = nil
+            if lane.invalidated || output == nil {
+                lane.session = nil; lane.key = ""
+                lane.createdAt = nil; lane.completedCalls = 0
+                // Preserve the last physical return time so an
+                // overlapped recovery can measure its actual span.
+            } else {
+                lane.completedCalls += 1
+                report("backend_session_reuse_count", Double(lane.completedCalls))
+            }
+        }
+        activity.end(activityID)
+        // 2.2.3 (L5): no-op unless the pinned switch is on; never delays the return.
+        self.refreshAvailabilityIfStale(source: source, target: target, strategy: strategy, key: availabilityKey)
+        return lane.invalidated ? nil : output
     }
 }
