@@ -111,13 +111,32 @@ extension TranslatorEngine {
         let otherSessionNearby = measuresSwitch &&
             (legacyModelInFlight.contains { $0.key != sessionID && $0.value > 0 } ||
              (legacyLastModelReturn.map { $0.session != sessionID && began - $0.at < 1.5 } ?? false))
-        if measuresSwitch { legacyModelInFlight[sessionID, default: 0] += 1 }
+        if measuresSwitch {
+            legacyModelInFlight[sessionID, default: 0] += 1
+            if legacyModelStart[sessionID] == nil { legacyModelStart[sessionID] = began }
+        }
         defer {
             if measuresSwitch {
                 let remaining = (legacyModelInFlight[sessionID] ?? 1) - 1
                 legacyModelInFlight[sessionID] = remaining > 0 ? remaining : nil
-                legacyLastModelReturn = (sessionID, ProcessInfo.processInfo.systemUptime)
+                let ended = ProcessInfo.processInfo.systemUptime
+                legacyLastModelReturn = (sessionID, ended)
+                if remaining <= 0 {
+                    legacyLastModelSpan = (sessionID, legacyModelStart[sessionID] ?? began, ended)
+                    legacyModelStart[sessionID] = nil
+                }
             }
+        }
+        /// 2.4.0 (measurement): milliseconds this call ran at the same time as a call on another session.
+        func overlapWithOtherSession(until ended: Double) -> Double {
+            var overlap = 0.0
+            for (other, start) in legacyModelStart where other != sessionID {
+                overlap = max(overlap, ended - max(began, start))
+            }
+            if let last = legacyLastModelSpan, last.session != sessionID {
+                overlap = max(overlap, min(ended, last.end) - max(began, last.start))
+            }
+            return max(0, overlap) * 1000
         }
         let modelCandidate = warmup ? nil : currentPacket?.candidateID
         let first30s = !warmup && sessionStarted.map {
@@ -159,6 +178,8 @@ extension TranslatorEngine {
                 if measuresSwitch && !speculative {
                     record(otherSessionNearby ? "legacy_confirmed_after_switch" : "legacy_confirmed_no_switch",
                         durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
+                    record("legacy_confirmed_overlap_ms",
+                        durationMs: overlapWithOtherSession(until: ProcessInfo.processInfo.systemUptime))
                 }
             }
             if first30s {

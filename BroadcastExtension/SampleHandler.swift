@@ -85,6 +85,25 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var watchSkippedOCR = 0
     private var watchTriggeredOCR = 0
     private var info = (bw: 0, bh: 0, orient: 1, cw: 0, ch: 0)
+    // 2.4.0. All of this is read and written only while `recognitionLock` is held.
+    /// A focused read was thrown away because its text changed: read the whole area on the next frame instead of
+    /// waiting for the ordinary cadence. No read is skipped and no text is accepted sooner.
+    private var forceBroadRead = false
+    private var focusRediscoveries = 0
+    private var discardedFocusedReadAt: Double?
+    private var rediscoveryLeadMs: Double?
+    /// Measurement only: what the current caption needed until it was confirmed.
+    private var lastOCREndUptime: Double?
+    private var confirmReads = 0
+    var confirmPixelRejections = 0
+    private var confirmFrameWaitMs = 0.0
+    /// Set only around `admit` in `recognize`: whether the read being admitted has its pixel check armed.
+    private var sendPixelArmed: Bool?
+    /// The scheduling inputs of the current frame, kept so `recognize` can tell whether the pixel check of a first
+    /// read can pass on the next frame (short confirmation interval) or only later.
+    private var framePlannedInterval = 0.0
+    private var frameRapidText = false
+    private var framePressure = true
 
     private let cfgLock = NSLock()
     private var _config = Config(lang: "auto", y0: 0, y1: 1, maxEdge: 1400, interval: 0.25, paused: false)
@@ -152,6 +171,11 @@ class SampleHandler: RPBroadcastSampleHandler {
         guard type == .video, recognitionLock.try() else { return }
         defer { recognitionLock.unlock() }
         frames += 1
+        if let ended = lastOCREndUptime {
+            lastOCREndUptime = nil
+            confirmFrameWaitMs = max(confirmFrameWaitMs, (ProcessInfo.processInfo.systemUptime - ended) * 1000)
+        }
+        let forcedRead = forceBroadRead
         let now = Date()
         if now.timeIntervalSince(lastPing) > 2 { lastPing = now; send(kind: "ping", lines: []) }
 
@@ -165,6 +189,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             tracker.reset(); candidateID = nil
             pendingPixelRead = nil
             captionWatch = nil
+            forceBroadRead = false; discardedFocusedReadAt = nil
         }
         lastOCRConfig = cfg
         feedback.unchangedSeconds = now.timeIntervalSince(lastChanged)
@@ -187,6 +212,9 @@ class SampleHandler: RPBroadcastSampleHandler {
             pressure: pressure,
             processingMs: lastOcrMs)
         effectiveOCRIntervalMs = interval * 1000
+        framePlannedInterval = plan.interval * idleFactor
+        frameRapidText = rapidText
+        framePressure = pressure
         guard !cfg.paused && cfg.appInterfaceVisible != true else { pausedSkipped += 1; return }
         // v2.0.0 G1: a pixel-identical frame after the confirmation dwell is
         // the second identical read; it replaces a second OCR pass.
@@ -199,7 +227,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         // OCR is not needed except for a bounded heartbeat; when they change,
         // read now instead of waiting for the next cadence slot.
         var watchTriggered = false
-        if cfg.eventDrivenOCR == true, pendingPixelRead == nil, captionWatch != nil {
+        if cfg.eventDrivenOCR == true, pendingPixelRead == nil, captionWatch != nil, !forcedRead {
             switch watchCaption(sampleBuffer, cfg) {
             case .unchanged:
                 if now.timeIntervalSince(lastRun) <
@@ -220,7 +248,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         #if SCREENLINGO_REFERENCE_CAPTURE_CADENCE
         let mayProbeEarly = false
         #else
-        let mayProbeEarly = !ordinaryDue && candidateCount == 0 &&
+        let mayProbeEarly = !ordinaryDue && !forcedRead && candidateCount == 0 &&
             SubtitleAcquisitionPolicy.allowsEarlyVisualWake(
                 elapsed: elapsed, planned: interval, lastOCRMilliseconds: lastOcrMs,
                 rapidTextTracking: rapidText, pressure: pressure) &&
@@ -231,7 +259,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         #endif
         #if !SCREENLINGO_REFERENCE_CAPTURE_CADENCE
         // 2.2.1 (D11): count the wakes the cap suppressed. Measurement only; it changes no decision.
-        if !ordinaryDue && !mayProbeEarly && candidateCount == 0 &&
+        if !ordinaryDue && !mayProbeEarly && !forcedRead && candidateCount == 0 &&
             now.timeIntervalSince(lastVisualWakeProbe) >= 0.065 &&
             SubtitleAcquisitionPolicy.allowsEarlyVisualWake(
                 elapsed: elapsed, planned: interval, lastOCRMilliseconds: lastOcrMs,
@@ -239,7 +267,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             visualWakeSuppressedCount += 1
         }
         #endif
-        guard ordinaryDue || mayProbeEarly || watchTriggered else { cadenceSkipped += 1; return }
+        guard ordinaryDue || mayProbeEarly || watchTriggered || forcedRead else { cadenceSkipped += 1; return }
         guard let pb = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
         var orientation = CGImagePropertyOrientation.up
@@ -271,7 +299,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             }
             if comparable { feedback.motion = meanDiff(sig, ocrSig) }
             if changed { visualChanges += 1; lastVisualChangeAt = now }
-            if (cfg.skipUnchanged ?? true), candidateCount == 0,
+            if (cfg.skipUnchanged ?? true), candidateCount == 0, !forcedRead,
                comparable, now.timeIntervalSince(lastRun) <
                     SubtitleAcquisitionPolicy.maximumUnchangedDelay(rapidTextTracking: rapidText),
                !changed {
@@ -287,6 +315,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         // Count the interval from the start of OCR, not after OCR has already finished.
         // The lock also prevents overlapping callbacks from mutating confirmation state.
         lastRun = now
+        forceBroadRead = false
         readStartedAt = now.timeIntervalSince1970
         readStartedMonotonic = ProcessInfo.processInfo.systemUptime
         autoreleasepool { recognize(pb, orientation, cfg, edge: plan.edge) }
@@ -295,6 +324,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     private func recognize(_ pb: CVPixelBuffer, _ orientation: CGImagePropertyOrientation, _ cfg: Config, edge plannedEdge: Double) {
         let state = perf.beginInterval("OCRFrame")
         defer { perf.endInterval("OCRFrame", state) }
+        defer { lastOCREndUptime = ProcessInfo.processInfo.systemUptime }
         let t0 = CFAbsoluteTimeGetCurrent()
         passes += 1
 
@@ -355,9 +385,22 @@ class SampleHandler: RPBroadcastSampleHandler {
         // A new caption may extend beyond the old crop. Rediscover the whole
         // configured area before admitting changed text to source confirmation.
         if focusEnabled, captionFocus.requiresRediscovery(scan: focus, recognized: recognizedKey, previous: lastRecognizedKey) {
+            // 2.4.0: read the whole area on the next frame. Before, with no caption pending, that read waited for the
+            // ordinary cadence although new text was already known to be on screen.
+            focusRediscoveries += 1
+            forceBroadRead = true
+            discardedFocusedReadAt = readStartedMonotonic
             return
         }
-        if recognizedKey != lastRecognizedKey { lastChanged = Date(); lastRecognizedKey = recognizedKey }
+        if recognizedKey != lastRecognizedKey {
+            lastChanged = Date(); lastRecognizedKey = recognizedKey
+            confirmReads = 1; confirmPixelRejections = 0; confirmFrameWaitMs = 0
+            let lead = discardedFocusedReadAt.map { max(0, readStartedMonotonic - $0) * 1000 }
+            rediscoveryLeadMs = lead.flatMap { $0 < 1000 ? $0 : nil }
+        } else {
+            confirmReads += 1
+        }
+        discardedFocusedReadAt = nil
 
         if lines.isEmpty {
             if emptyReads.mayClear {
@@ -371,12 +414,23 @@ class SampleHandler: RPBroadcastSampleHandler {
 
         // v2.0.0 G1: remember the text boxes of an unconfirmed first read so
         // a later pixel-identical frame can confirm it without another OCR pass.
-        let outcome = admit(lines, cfg)
-        if outcome == .pending, cfg.pixelConfirmation == true {
+        // 2.4.0: the fingerprint is taken before the packet is sent, so a first-sighting packet can say whether its
+        // pixel check is armed (then its confirmation follows on the next frame). The check itself is unchanged.
+        if cfg.pixelConfirmation == true {
             preparePixelConfirmation(pb, orientation, cfg, lines: lines)
         } else {
             pendingPixelRead = nil
         }
+        // Armed means: one more read is needed, the pixel check is ready, and the wait it needs (the same wait as in
+        // `pixelConfirm`) is over about when this OCR pass ends. With a longer wait the app keeps its early start.
+        let confirmationWait = max(0.1, SubtitlePerformancePolicy.confirmationInterval(
+            planned: framePlannedInterval, pending: true, rapidTextTracking: frameRapidText,
+            pressure: framePressure, processingMs: lastOcrMs))
+        sendPixelArmed = pendingPixelRead != nil && max(1, cfg.stability ?? 2) == 2 &&
+            cfg.adaptiveConfirmation != true && confirmationWait <= lastOcrMs / 1000 + 0.05
+        let outcome = admit(lines, cfg)
+        sendPixelArmed = nil
+        if outcome != .pending { pendingPixelRead = nil }
         switch outcome {
         case .ready, .duplicate:
             if cfg.eventDrivenOCR == true { startCaptionWatch(pb, orientation, cfg, lines: lines) }
@@ -444,6 +498,13 @@ class SampleHandler: RPBroadcastSampleHandler {
         let largeSoFar = largePacketCount, errorsSoFar = sendErrorCount
         sendStatsLock.unlock()
         heartbeatLock.lock(); heartbeatFrames = frames; lastSendUptime = ProcessInfo.processInfo.systemUptime; heartbeatLock.unlock()
+        // 2.4.0 fields, worked out here so the long initializer below stays simple for the compiler.
+        let confirmedPacket = kind == "ocr" && stable == true
+        let armed: Bool? = (kind == "ocr" && stable == false) ? sendPixelArmed : nil
+        let reads: Int? = confirmedPacket ? confirmReads : nil
+        let rejections: Int? = confirmedPacket ? confirmPixelRejections : nil
+        let frameWait: Double? = confirmedPacket ? confirmFrameWaitMs : nil
+        let lead: Double? = confirmedPacket ? rediscoveryLeadMs : nil
         func encode(_ l: [OCRLine]) -> Data? {
             try? JSONEncoder().encode(Packet(kind: kind, version: AppVersion.version, frames: frames, lines: l,
                                              ocrMs: lastOcrMs, memFreeMB: freeMB(),
@@ -466,7 +527,10 @@ class SampleHandler: RPBroadcastSampleHandler {
                                              sentMonotonic: ProcessInfo.processInfo.systemUptime,
                                              largePackets: largeSoFar, sendErrors: errorsSoFar,
                                              pixelConfirmations: pixelConfirmations, pixelRejections: pixelRejections,
-                                             watchSkippedOCR: watchSkippedOCR, watchTriggeredOCR: watchTriggeredOCR))
+                                             watchSkippedOCR: watchSkippedOCR, watchTriggeredOCR: watchTriggeredOCR,
+                                             pixelArmed: armed, focusRediscoveries: focusRediscoveries,
+                                             confirmReads: reads, confirmPixelRejections: rejections,
+                                             confirmFrameWaitMs: frameWait, rediscoveryLeadMs: lead))
         }
         var data = encode(lines)
         if let d = data, d.count > 60000 { data = encode(Array(lines.prefix(30))) }

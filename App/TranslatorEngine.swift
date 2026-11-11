@@ -236,6 +236,10 @@ final class TranslatorEngine: ObservableObject {
     /// by whether another session's call was running or ended < 1.5 s earlier.
     var legacyModelInFlight: [ObjectIdentifier: Int] = [:]
     var legacyLastModelReturn: (session: ObjectIdentifier, at: Double)?
+    /// 2.4.0 (diagnostics only): when each Legacy call in flight started, and the span of the last one that
+    /// returned, to measure how long a confirmed call ran at the same time as a call on another session.
+    var legacyModelStart: [ObjectIdentifier: Double] = [:]
+    var legacyLastModelSpan: (session: ObjectIdentifier, start: Double, end: Double)?
 
     var translationActivity: TranslationActivity {
         if activeTranslationSystem != .legacy, let activity = backendActivity.activity { return activity }
@@ -520,16 +524,23 @@ final class TranslatorEngine: ObservableObject {
             noteModeEvent(caption, reason: "confirmed", duration: nil)
         }
         let thermal = ProcessInfo.processInfo.thermalState
-        let admitted = speculationAllowed && !ProcessInfo.processInfo.isLowPowerModeEnabled &&
-            memoryTestMode.allowsSpeculation && flag("translateAhead", true) &&
-            thermal != .serious && thermal != .critical &&
-            SpeculationPolicy.credible(lines: packet.lines, threshold: num("speculationConfidence", 0.85))
         modeCoordinator.allowsReuse = memoryTestMode.allowsReuse && !bypassMemory
         let fastPack = languageCoverage(for: source).lowLatency
         let fastPackKnownMissing = fastPack == .supported || fastPack == .unsupported
         modeCoordinator.fastRecoveryInstalled = !fastPackKnownMissing
         modeCoordinator.adaptiveHybrid = flag("adaptiveSpeculation", true) && !fastPackKnownMissing
         modeCoordinator.hybridSwitchGuard = flag("hybridSwitchGuard", true)
+        modeCoordinator.hybridPinnedBackend = TranslationHotPathAB.hybridPinnedBackend
+        // 2.4.0: a first sighting whose pixel check is armed is confirmed one frame later. An Apple Default call
+        // started for it now would only be in the way when the text is not the final one, so it is not started.
+        // Low Latency calls are short and stay as they were.
+        let deferredArmed = !confirmed && packet.pixelArmed == true && TranslationHotPathAB.deferArmedSpeculation &&
+            modeCoordinator.nextSpeculativeStrategy == .appleDefault
+        if deferredArmed { noteModeEvent(caption, reason: "speculation_deferred_armed", duration: nil) }
+        let admitted = !deferredArmed && speculationAllowed && !ProcessInfo.processInfo.isLowPowerModeEnabled &&
+            memoryTestMode.allowsSpeculation && flag("translateAhead", true) &&
+            thermal != .serious && thermal != .critical &&
+            SpeculationPolicy.credible(lines: packet.lines, threshold: num("speculationConfidence", 0.85))
         if confirmed, activeTranslationSystem != .legacy {
             let pair = source + ">" + caption.target + "|" + activeTranslationSystem.rawValue
             let needsCheck = modelReadiness.source != source || modelReadiness.target != caption.target ||
@@ -903,6 +914,7 @@ final class TranslatorEngine: ObservableObject {
             // real speculative Apple session, never just at OCR observation.
             if speculative && caption.system == .hybridRecovery &&
                 self.modeCoordinator.hybridVariant != .reference195 &&
+                !self.modeCoordinator.pinnedToLowLatency &&
                 self.modeService.hasConfirmedLowLatencyDemand { return false }
             return true
         }

@@ -258,7 +258,9 @@ struct DiagnosticsBody: View {
                   (TranslationHotPathAB.refreshAvailabilityInBackground, "background language check"),
                   (TranslationHotPathAB.hybridRelaxedBackoff, "Hybrid relaxed backoff"),
                   (TranslationHotPathAB.hybridShorterGuard, "Hybrid shorter guard"),
-                  (TranslationHotPathAB.independentHeartbeat, "independent capture heartbeat")].filter { $0.0 }.map { $0.1 }
+                  (TranslationHotPathAB.independentHeartbeat, "independent capture heartbeat"),
+                  (TranslationHotPathAB.hybridPinnedBackend, "Hybrid pinned backend"),
+                  (TranslationHotPathAB.deferArmedSpeculation, "deferred early start")].filter { $0.0 }.map { $0.1 }
         return on.isEmpty ? "Test switches on: none." : "Test switches on: " + on.joined(separator: ", ") + "."
     }
 

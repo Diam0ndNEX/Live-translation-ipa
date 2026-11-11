@@ -148,15 +148,20 @@ extension ModeTranslationService {
         progress?(.creatingSessions)
         activity.advance(activityID, to: .preparingSessions)
         let pair = "\(src.minimalIdentifier)>\(dst.minimalIdentifier)|"
-        let speculativeStrategy: RequestedTranslationStrategy = system == .lowLatency ? .lowLatency : .appleDefault
+        // 2.4.0: pinned Hybrid sends early work to Low Latency when its pack is installed, so that is the session
+        // to prepare on the speculative lane.
+        let pinnedFast = system == .hybridRecovery && TranslationHotPathAB.hybridPinnedBackend && lowInstalled
+        let speculativeStrategy: RequestedTranslationStrategy =
+            (system == .lowLatency || pinnedFast) ? .lowLatency : .appleDefault
+        let speculativeInstalled = speculativeStrategy == .lowLatency ? lowInstalled : defaultInstalled
         if lowInstalled && !confirmed.busy {
             install(confirmed, source: src, target: dst, strategy: .lowLatency)
         }
-        if (system == .lowLatency ? lowInstalled : defaultInstalled) && !speculative.busy {
+        if speculativeInstalled && !speculative.busy {
             install(speculative, source: src, target: dst, strategy: speculativeStrategy)
         }
         let confirmedSession = lowInstalled ? confirmed.session : nil
-        let speculativeSession = (system == .lowLatency ? lowInstalled : defaultInstalled) ? speculative.session : nil
+        let speculativeSession = speculativeInstalled ? speculative.session : nil
         progress?(.checkingSessions)
         let confirmedSessionReady = await confirmedSession?.isReady == true
         let speculativeSessionReady = await speculativeSession?.isReady == true

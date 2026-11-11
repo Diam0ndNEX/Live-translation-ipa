@@ -230,6 +230,14 @@ extension TranslatorEngine {
         }
         // First, unconfirmed sighting: translate quietly now so the result is ready the moment the text is confirmed.
         if p.stable == false {
+            // 2.4.0: this read's pixel check is armed, so its confirmation follows one frame later. An Apple
+            // Default call started now would be at most a few milliseconds ahead, and when the text is not the
+            // final one it would still be running when the real caption is confirmed.
+            if p.pixelArmed == true, TranslationHotPathAB.deferArmedSpeculation {
+                if diag.enabled { diag.s.specSkipped += 1 }
+                if let candidate = p.candidateID { diag.legacyModeEvent(candidate, reason: "speculation_deferred_armed") }
+                return
+            }
             if speculationAllowed && flag("translateAhead", true) {
                 let minimumSpecConfidence = flag("coolMode", false) ?
                     max(0.95, num("speculationConfidence", 0.85)) : num("speculationConfidence", 0.85)

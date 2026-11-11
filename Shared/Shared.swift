@@ -148,6 +148,19 @@ struct Packet: Codable {
     var pixelRejections: Int? = nil
     var watchSkippedOCR: Int? = nil
     var watchTriggeredOCR: Int? = nil
+    /// 2.4.0, first-sighting packets only: the pixel check for this read is armed, so its confirmation follows on the
+    /// next frame when the text is stable. Nil (older extension) means unknown.
+    var pixelArmed: Bool? = nil
+    /// 2.4.0, numeric metadata only. Focused reads thrown away because the text changed (whole area read again).
+    var focusRediscoveries: Int? = nil
+    /// 2.4.0, confirmed packets only: OCR passes and pixel-check rejections this caption needed, and the longest wait
+    /// from the end of an OCR pass to the next processed frame, in milliseconds.
+    var confirmReads: Int? = nil
+    var confirmPixelRejections: Int? = nil
+    var confirmFrameWaitMs: Double? = nil
+    /// 2.4.0, confirmed packets only: when a focused read of this caption was thrown away just before its first
+    /// counted read, the time from the start of that read to the start of the first counted read, in milliseconds.
+    var rediscoveryLeadMs: Double? = nil
 }
 
 /// App → extension (sent back over the same localhost link)

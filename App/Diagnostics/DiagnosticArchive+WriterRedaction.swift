@@ -38,7 +38,7 @@ extension DiagnosticExportWriter {
                 "legacy_speculation_saved_memory_backoff", "legacy_speculation_low_yield_backoff",
                 // found by guard C2 in 2.2.1: emitted by the engine, accepted by Diagnostics, dropped here
                 "legacy_shared_session_used", "speculative_lease_conflict",
-                "legacy_confirmed_own_lane", "legacy_detached_speculation_released"
+                "legacy_confirmed_own_lane", "legacy_detached_speculation_released", "legacy_confirmed_overlap_ms"
             ]).union(stageCodes)
         let safeEvents = snapshot.events.suffix(6000).map { event in
             StructuredDiagnosticEvent(id: event.id, timestamp: event.timestamp,
@@ -70,7 +70,7 @@ extension DiagnosticExportWriter {
             "rapidTextTracking", "joinAdjacentText", "activeTextFocus",
             "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
             "thermalState", "performanceTier", "reductionReasons",
-            "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "hybridBackoffAB", "hybridGuardAB", "legacyOwnLaneAB", "heartbeatAB", "detailSuspended",
+            "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "hybridBackoffAB", "hybridGuardAB", "legacyOwnLaneAB", "heartbeatAB", "hybridPinAB", "armedDeferAB", "detailSuspended",
             // 2.2.1 (D4, E12)
             "idleMinutes", "sessionLimit", "autoOpenPiP", "winSize", "textSize", "pipFont", "theme", "showOriginal",
             "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding",
@@ -109,7 +109,8 @@ extension DiagnosticExportWriter {
             "enqueuedCandidateFrames", "unchangedSkippedFrames",
             "cadenceSkippedFrames", "earlyVisualWakes", "earlyVisualWakesSuppressed", "largePackets", "packetSendErrors",
             "pixelConfirmations", "pixelRejections", "watchSkippedOCR", "watchTriggeredOCR", "pausedSkippedFrames", "emptyReads",
-            "contrastRetries", "emptyOCRPasses"
+            "contrastRetries", "emptyOCRPasses",
+            "focusRediscoveries", "confirmedWithPixelRejection"
         ]
         let allowedCounters = DiagnosticIntervalBucket.allowedCounters
             .union(MemoryDiagnosticOutcome.allCases.map { $0.rawValue })
@@ -133,6 +134,7 @@ extension DiagnosticExportWriter {
             "modeConfirmationToPiPMs", "modeReadyToPiPMs", "hybridMatchingWaitMs",
             "speculativeStopReleaseMs", "legacyDetachedSpeculationReleaseMs", "queueBehindSpeculationMs", "queueBehindConfirmedMs", "queueSchedulingMs",
             "confirmedSupersededAgeMs",
+            "legacyConfirmedOverlapMs", "confirmationOCRReads", "confirmationFrameWaitMs", "rediscoveryLeadMs",
             "legacyConfirmedAfterSessionSwitchMs", "legacyConfirmedNoSwitchMs",
             "hybridUnsubmittedHedgeMs", "hybridPreviousDefaultExitGapMs", "hybridPostDefaultRecoveryServiceMs",
             "hybridNoOverlapRecoveryServiceMs", "hybridUnexplainedSlowRecoveryMs"

@@ -109,8 +109,8 @@ struct AppleDefaultLeaseState {
 /// copied into a "pinned" value when a session starts, so a change applies from the next session and never mid-run.
 /// The compile flags above still override both, for the CI reference builds. Defaults are the optimized paths.
 ///
-/// 2.2.3 (L5): a third runtime switch, backgroundAvailabilityRefresh, is pinned the same way but defaults to OFF
-/// (current behaviour). It is not a build-flag switch and does not change the `label`.
+/// 2.2.3 (L5): a third runtime switch, backgroundAvailabilityRefresh, is pinned the same way. It defaulted to OFF
+/// until 2.3.9 and defaults to ON since 2.4.0. It is not a build-flag switch and does not change the `label`.
 enum TranslationHotPathAB {
     static let planSettingKey = "hotPathReuseLowLatencyPlan"
     static let unitsSettingKey = "hotPathReuseLegacyUnits"
@@ -129,6 +129,11 @@ enum TranslationHotPathAB {
     // 2.2.3 (L2): Legacy only, default OFF = current behaviour.
     static let legacyOwnLaneSettingKey = "legacyConfirmedOwnLane"
     static let legacyOwnLanePinnedKey = "legacyConfirmedOwnLanePinned"
+    // 2.4.0: both default ON. Off gives the 2.3.9 behaviour. Pinned at session start like the others.
+    static let hybridPinSettingKey = "hybridPinnedBackend"
+    static let hybridPinPinnedKey = "hybridPinnedBackendPinned"
+    static let armedDeferSettingKey = "deferArmedSpeculation"
+    static let armedDeferPinnedKey = "deferArmedSpeculationPinned"
 
     private static func pinned(_ key: String) -> Bool {
         (UserDefaults.standard.object(forKey: key) as? Bool) ?? true
@@ -138,11 +143,13 @@ enum TranslationHotPathAB {
     static func pinSettings(_ defaults: UserDefaults = .standard) {
         defaults.set((defaults.object(forKey: planSettingKey) as? Bool) ?? true, forKey: planPinnedKey)
         defaults.set((defaults.object(forKey: unitsSettingKey) as? Bool) ?? true, forKey: unitsPinnedKey)
-        defaults.set((defaults.object(forKey: availabilityRefreshSettingKey) as? Bool) ?? false, forKey: availabilityRefreshPinnedKey)
+        defaults.set((defaults.object(forKey: availabilityRefreshSettingKey) as? Bool) ?? true, forKey: availabilityRefreshPinnedKey)
         defaults.set((defaults.object(forKey: hybridBackoffSettingKey) as? Bool) ?? false, forKey: hybridBackoffPinnedKey)
         defaults.set((defaults.object(forKey: hybridGuardSettingKey) as? Bool) ?? false, forKey: hybridGuardPinnedKey)
         defaults.set((defaults.object(forKey: legacyOwnLaneSettingKey) as? Bool) ?? false, forKey: legacyOwnLanePinnedKey)
         defaults.set((defaults.object(forKey: independentHeartbeatSettingKey) as? Bool) ?? false, forKey: independentHeartbeatPinnedKey)
+        defaults.set((defaults.object(forKey: hybridPinSettingKey) as? Bool) ?? true, forKey: hybridPinPinnedKey)
+        defaults.set((defaults.object(forKey: armedDeferSettingKey) as? Bool) ?? true, forKey: armedDeferPinnedKey)
     }
 
     static var reuseStandaloneLowLatencyPlan: Bool {
@@ -179,14 +186,25 @@ enum TranslationHotPathAB {
         (UserDefaults.standard.object(forKey: hybridGuardPinnedKey) as? Bool) ?? false
     }
 
-    /// 2.2.3 (L5): refresh a cached language-availability check in the background. Default OFF.
+    /// 2.2.3 (L5): refresh a cached language-availability check in the background. Default ON since 2.4.0.
     static var refreshAvailabilityInBackground: Bool {
-        (UserDefaults.standard.object(forKey: availabilityRefreshPinnedKey) as? Bool) ?? false
+        (UserDefaults.standard.object(forKey: availabilityRefreshPinnedKey) as? Bool) ?? true
     }
 
     static var label: String {
         let legacy = reuseLegacyPreparedUnits ? "L1" : "L0"
         let fast = reuseStandaloneLowLatencyPlan ? "F1" : "F0"
         return legacy + "_" + fast
+    }
+
+    /// 2.4.0: Hybrid Recovery keeps one model for a run of captions (Low Latency when its pack is installed, Apple
+    /// Default as fallback) instead of alternating. Fresh captions then use Low Latency wording. Default ON.
+    static var hybridPinnedBackend: Bool {
+        (UserDefaults.standard.object(forKey: hybridPinPinnedKey) as? Bool) ?? true
+    }
+    /// 2.4.0: no Apple Default call is started for a first sighting whose pixel check is armed; the confirmed caption
+    /// starts it one frame later. Legacy, and Hybrid while it uses Apple Default. Default ON.
+    static var deferArmedSpeculation: Bool {
+        (UserDefaults.standard.object(forKey: armedDeferPinnedKey) as? Bool) ?? true
     }
 }

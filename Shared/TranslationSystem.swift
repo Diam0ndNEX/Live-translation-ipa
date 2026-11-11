@@ -14,7 +14,7 @@ enum TranslationSystem: String, CaseIterable, Codable {
     var explanation: String {
         switch self {
         case .legacy: return "Uses the established 1.7.2 pipeline and Apple default strategy."
-        case .hybridRecovery: return "Uses Apple Default ahead and Low Latency for confirmed recovery. Automatically reduces speculative work when it causes repeated waste or slow overlapping requests. Device acceptance pending."
+        case .hybridRecovery: return "Stays on one model for a run of captions: Low Latency when its language pack is installed, Apple Default when it is not or when Low Latency fails. New captions then use Low Latency wording. Experimental features can restore the 2.3.9 behaviour (Apple Default ahead, Low Latency for recovery). Device acceptance pending."
         case .lowLatency: return "Uses low latency for both early and confirmed text. Wording may differ from Legacy. Requires iOS 26.4 and installed supported languages."
         }
     }

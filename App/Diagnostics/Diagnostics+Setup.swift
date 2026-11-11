@@ -271,7 +271,8 @@ extension Diagnostics {
             "legacy_idle_completed", "legacy_idle_deferred",
             "legacy_confirmed_after_switch", "legacy_confirmed_no_switch", "legacy_shared_session_used", "speculative_lease_conflict",
             "legacy_queued_speculation_superseded", // 2.2.1 (E10): was emitted by the engine but dropped here
-            "legacy_confirmed_own_lane", "legacy_detached_speculation_released" // 2.2.3 (L2)
+            "legacy_confirmed_own_lane", "legacy_detached_speculation_released", // 2.2.3 (L2)
+            "legacy_confirmed_overlap_ms" // 2.4.0
         ]
         guard allowed.contains(reason) else { return }
         if modeActiveSystem == "legacy", let candidate {
@@ -285,7 +286,7 @@ extension Diagnostics {
             if reason == "speculative_model_completed" { legacyModeEvent(candidate, reason: "speculative_service_ms", duration: durationMs) }
         }
         if ["model_batch_completed", "confirmed_model_completed", "speculative_model_completed", "speculative_stop_released", "legacy_detached_speculation_released",
-            "legacy_confirmed_after_switch", "legacy_confirmed_no_switch"].contains(reason),
+            "legacy_confirmed_after_switch", "legacy_confirmed_no_switch", "legacy_confirmed_overlap_ms"].contains(reason),
            let durationMs, durationMs.isFinite, durationMs >= 0 {
             modelTimingSamples[reason, default: []].append(durationMs)
             if modelTimingSamples[reason, default: []].count > 1200 {
@@ -359,7 +360,7 @@ extension Diagnostics {
             stage: stage, outcome: outcome, reasonCode: reason,
             durationMs: durationMs.flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }, privacy: "metadataOnly")
         structuredEvents.append(event)
-        if structuredEvents.count > 6000 {
+        if structuredEvents.count > 6000 + Self.ringTrimBlock {
             structuredEventsDropped += structuredEvents.count - 6000
             structuredEvents.removeFirst(structuredEvents.count - 6000)
         }

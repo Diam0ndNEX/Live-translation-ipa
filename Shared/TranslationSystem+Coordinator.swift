@@ -25,6 +25,24 @@ final class ThreeModeCoordinator {
     /// 0 while an Apple Default call is in flight, ms since the last
     /// same-pair Default return, or nil when none is known.
     var appleDefaultGapMs: (ModeCaption) -> Double? = { _ in nil }
+    /// 2.4.0: Hybrid keeps one model for a run of captions. Off by default here so the reference behaviour stays
+    /// testable; the app sets it from the pinned `hybridPinnedBackend` switch.
+    var hybridPinnedBackend = false
+    private var backendPin = HybridBackendPin()
+    private var speculativeStrategy = RequestedTranslationStrategy.appleDefault
+    /// Last model a request was sent to and when a request of each model last returned. Kept across `reset()`:
+    /// which model iOS used last does not change when a caption context does.
+    private var lastCallStrategy: RequestedTranslationStrategy?
+    private var lastCallReturn: [RequestedTranslationStrategy: Double] = [:]
+    var pinActive: Bool { system == .hybridRecovery && hybridPinnedBackend }
+    /// The model a first sighting would be sent to now.
+    var nextSpeculativeStrategy: RequestedTranslationStrategy {
+        if system == .lowLatency { return .lowLatency }
+        guard pinActive else { return .appleDefault }
+        return backendPin.peek(fastInstalled: fastRecoveryInstalled, now: clock())
+    }
+    /// True while pinned Hybrid sends its work to Low Latency.
+    var pinnedToLowLatency: Bool { pinActive && nextSpeculativeStrategy == .lowLatency }
     var coldSpeculationCeiling = 0.7
     var matchingLowLatencyDeadline = 4.0
     private(set) var current: ModeCaption?
@@ -99,13 +117,16 @@ final class ThreeModeCoordinator {
         guard system != .legacy else { return }
         if !confirmed {
             guard speculate, speculation == nil, current == nil || committed == current else { return }
-            if system == .hybridRecovery && !hybridSpeculationPermitted() {
+            // 2.4.0: pinned to Low Latency, early work is a short call on its own lane, as in Low Latency mode.
+            // The admission rules below exist to keep Apple Default work away from Low Latency work.
+            let pinnedFast = pinnedToLowLatency
+            if system == .hybridRecovery && !pinnedFast && !hybridSpeculationPermitted() {
                 speculativeCaption = nil
                 speculativeOutput = nil
                 event(caption, "hybrid_speculation_backend_busy", nil)
                 return
             }
-            if system == .hybridRecovery && adaptiveHybrid &&
+            if system == .hybridRecovery && !pinnedFast && adaptiveHybrid &&
                 !hybridAdmission.admit(identity: "\(caption.session.uuidString)|\(caption.caption)|\(caption.revision)") {
                 speculativeCaption = nil
                 speculativeOutput = nil
@@ -117,7 +138,11 @@ final class ThreeModeCoordinator {
             speculativeEligible = true; speculativeModelSubmitted = false
             speculativeStarted = clock()
             event(caption, "speculation_admitted", nil)
-            let strategy: RequestedTranslationStrategy = system == .lowLatency ? .lowLatency : .appleDefault
+            let strategy: RequestedTranslationStrategy
+            if system == .lowLatency { strategy = .lowLatency }
+            else if pinActive { strategy = backendPin.strategy(fastInstalled: fastRecoveryInstalled, now: clock()) }
+            else { strategy = .appleDefault }
+            speculativeStrategy = strategy
             let ticket = UUID()
             speculationTicket = ticket
             speculation = Task { [weak self] in
@@ -183,6 +208,14 @@ final class ThreeModeCoordinator {
                     let wait: Double
                     if self.system == .lowLatency {
                         wait = max(0, self.matchingLowLatencyDeadline - (self.clock() - self.speculativeStarted))
+                    } else if self.pinActive {
+                        // 2.4.0: the matching request already runs on the pinned model. Wait for it; a second
+                        // request for the same text on the same model could only be slower.
+                        let elapsed = self.clock() - self.speculativeStarted
+                        wait = self.speculativeStrategy == .lowLatency ?
+                            max(0, self.matchingLowLatencyDeadline - elapsed) :
+                            HybridSchedulingPolicy.suppressedHedgeWait(elapsed: elapsed)
+                        self.event(caption, "hybrid_pin_wait_matching", wait * 1000)
                     } else if self.hybridSwitchGuard {
                         // H2: a parallel LL hedge beside a running Default call
                         // was the slowest recovery kind. Wait for the match.
@@ -328,7 +361,17 @@ final class ThreeModeCoordinator {
             guard !Task.isCancelled else { return nil }
             event(caption, speculative ? "speculative_enqueue" : "recovery_enqueue", nil)
             let began = clock()
+            if system == .hybridRecovery {
+                // 2.4.0 (measurement): a request goes to the other model than the previous one. The value is the
+                // time since a request of the previous model last returned, when one has.
+                if let previous = lastCallStrategy, previous != strategy {
+                    event(caption, strategy == .lowLatency ? "hybrid_model_switch_low_latency" :
+                        "hybrid_model_switch_default", lastCallReturn[previous].map { max(0, began - $0) * 1000 })
+                }
+                lastCallStrategy = strategy
+            }
             var result = await translate(caption, missing, strategy, speculative)
+            if system == .hybridRecovery { lastCallReturn[strategy] = clock() }
             if result == nil, !speculative, !Task.isCancelled,
                shouldStartModel(caption, speculative: false) {
                 event(caption, "same_strategy_retry", nil)
@@ -404,6 +447,12 @@ final class ThreeModeCoordinator {
             let useLowLatency: Bool
             if self.system == .lowLatency {
                 useLowLatency = true
+            } else if self.pinActive {
+                // 2.4.0: stay on the pinned model. The value is the time since the last Apple Default call.
+                useLowLatency = self.backendPin.strategy(fastInstalled: self.fastRecoveryInstalled,
+                                                         now: self.clock()) == .lowLatency
+                self.event(caption, useLowLatency ? "hybrid_pin_low_latency" : "hybrid_pin_default",
+                           self.appleDefaultGapMs(caption))
             } else if !self.fastRecoveryInstalled {
                 useLowLatency = false
                 self.event(caption, "hybrid_no_fast_pack_fallback", nil)
@@ -423,6 +472,8 @@ final class ThreeModeCoordinator {
             if result == nil, self.system == .hybridRecovery, useLowLatency,
                !Task.isCancelled, self.current == caption, self.committed != caption {
                 self.event(caption, "hybrid_default_fallback", nil)
+                // 2.4.0: a failed Low Latency request keeps pinned Hybrid on Apple Default for a while.
+                if self.pinActive { self.backendPin.noteLowLatencyFailure(now: self.clock()) }
                 result = await self.resolve(caption, strategy: .appleDefault, speculative: false)
             }
             guard !Task.isCancelled, self.current == caption, self.committed != caption else {
