@@ -103,13 +103,14 @@ assert "No measurements in this range" in dashboard
 # the view reads a DashboardFacts snapshot instead of the whole engine
 assert 'facts.system == .legacy' in dashboard
 
-ownership = section(coordinator, "func shouldStartModel(", "func noteOverlappingRecovery(")
+# 2.5.0 (changed with the code): noteOverlappingRecovery and the adaptive Hybrid admission are removed with the mode.
+ownership = section(coordinator, "func shouldStartModel(", "private func lookupValues(")
 assert "speculativeEligible" in ownership
 assert "return true" in ownership
 assert "current.matches(caption) && committed != current" not in ownership
 assert "noteSpeculativeModelSubmitted(" in ownership
 assert "speculativeModelSubmitted" in coordinator
-assert "if adaptiveHybrid && speculativeModelSubmitted" in coordinator
+assert "adaptiveHybrid" not in coordinator
 assert "speculation_superseded_before_confirmation" in archive
 assert "backend_stale_request_dropped" in archive
 assert "The upcoming subtitle." in tests
@@ -118,8 +119,8 @@ assert "Previous displayed text must not invalidate" in tests
 
 version = read_source("Shared")
 project = (root / "project.yml").read_text()
-assert 'static let version = "2.4.0"' in version
-assert "static let build = 117" in version
-assert project.count('"2.4.0"') == 3 and project.count('"117"') == 3
+assert 'static let version = "2.5.0"' in version
+assert "static let build = 118" in version
+assert project.count('"2.5.0"') == 3 and project.count('"118"') == 3
 
 print("v2.2.0 predictive ownership and all-mode Diagnostics routing contract passed")

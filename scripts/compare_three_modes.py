@@ -7,7 +7,10 @@ from pathlib import Path
 import statistics
 import zipfile
 
-MODES = {'legacy', 'hybridRecovery', 'lowLatency'}
+# 2.5.0: two modes. Hybrid Recovery was removed; its sessions in older reports are still read and then left out.
+# The file keeps its old name because build.yml runs its test by that name.
+MODES = {'legacy', 'lowLatency'}
+REMOVED_MODE = 'hybridRecovery'
 IGNORED_SETTINGS = {'translationSystem', 'lowLatencyTranslation', 'hybridTranslation', 'translationSystemMigration'}
 
 def read_session(path):
@@ -60,9 +63,14 @@ def cohorts(session):
 
 def compare(sessions, matched_memory=False, counterbalanced=False, matched_content=False):
     errors = []
+    ignored = [s for s in sessions if s.get('translationModes', {}).get('active') == REMOVED_MODE]
+    sessions = [s for s in sessions if s.get('translationModes', {}).get('active') != REMOVED_MODE]
     modes = [s.get('translationModes', {}).get('active') for s in sessions]
-    if set(modes) != MODES or len(sessions) != 3:
-        errors.append('Exactly one recorded session per mode is required')
+    if set(modes) != MODES or len(sessions) != 2:
+        errors.append('Exactly one recorded session per mode (Legacy and Low Latency) is required')
+    if not sessions:
+        return {'controlledConditionsAttested': False, 'limitations': errors, 'cohorts': {}, 'gates': [],
+                'ignoredRemovedModeSessions': len(ignored)}
     if not matched_content:
         errors.append("Matched content and equivalent retained capture windows are not attested")
     if not matched_memory:
@@ -79,7 +87,7 @@ def compare(sessions, matched_memory=False, counterbalanced=False, matched_conte
     results = {mode or 'unknown': cohorts(s) for mode, s in zip(modes, sessions)}
     gates = []
     baseline = results.get('legacy', {})
-    for mode in ['hybridRecovery', 'lowLatency']:
+    for mode in ['lowLatency']:
         current = results.get(mode, {})
         for key, old in baseline.items():
             equivalent = mode + key[len('legacy'):]
@@ -92,17 +100,13 @@ def compare(sessions, matched_memory=False, counterbalanced=False, matched_conte
                 changes = {metric: 100 * (new[metric] / old[metric] - 1)
                            for metric in ['mean', 'p95'] if old[metric] and new[metric] is not None}
                 item['changesPercent'] = changes
-                if mode == 'hybridRecovery' and route == 'recovery':
-                    item['status'] = 'pass' if len(changes) == 2 and all(v <= -20 for v in changes.values()) else 'fail'
-                elif mode == 'hybridRecovery' and route == 'overall' and '|temporaryMemory|' in key:
-                    item['status'] = 'pass' if len(changes) == 2 and all(v <= -10 for v in changes.values()) else 'fail'
-                elif route in ['memory', 'successful_speculation']:
+                if route in ['memory', 'successful_speculation']:
                     item['status'] = 'investigate' if any(v > 5 for v in changes.values()) else 'pass'
                 else:
                     item['status'] = 'reported_no_claim'
             gates.append(item)
     return {'controlledConditionsAttested': not errors, 'limitations': errors,
-            'cohorts': results, 'gates': gates,
+            'cohorts': results, 'gates': gates, 'ignoredRemovedModeSessions': len(ignored),
             'qualityParity': 'unverified; requires independent multilingual rubric and visual review',
             'physicalPresentation': 'unmeasured; timings end at PiP enqueue',
             'scope': 'bounded retained event samples; absent OCR captions require external ground truth',
@@ -110,7 +114,7 @@ def compare(sessions, matched_memory=False, counterbalanced=False, matched_conte
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('sessions', nargs=3)
+    parser.add_argument('sessions', nargs='+')
     parser.add_argument('--matched-content', action='store_true')
     parser.add_argument('--matched-memory', action='store_true')
     parser.add_argument('--counterbalanced', action='store_true')

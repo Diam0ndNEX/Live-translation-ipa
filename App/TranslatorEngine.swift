@@ -93,9 +93,9 @@ final class TranslatorEngine: ObservableObject {
         "displayPolicy", "pipWeight", "pipAlignment", "pipLineSpacing", "pipPadding", "originalFraction", "pipScale", "speakerAccent", "heartbeatInterval", "hapticStrength", "autoCopyFormat", "interruptSpeech", "ocrConfidence", "ocrCorrection", "idleBackoff", "coolMode", "adaptiveOCR", "adaptiveConfirmation", "subtitleTracking", "selectiveSpeculation", "speculationConfidence", "confirmationDeadline", "smartCool", "steadyCaptions", "languageRecovery", "deduplicateCopies", "continuousRotation", "contextualLanguage"
     ]
     /// App look & behaviour that presets do not touch.
-    static let interfaceKeys = ["memoryRAMCapacity", "memorySoftLimit", "testRunSaving", "suppressOwnInterface", "directPiPBuffer", "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession", "legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "temporaryMemoryTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment", "appearance", "cjkSingleCharacters", "hybridSchedulerVariant", "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy"]
+    static let interfaceKeys = ["memoryRAMCapacity", "memorySoftLimit", "testRunSaving", "suppressOwnInterface", "directPiPBuffer", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession", "legacyIdleValidationEnabled", "accent", "keepAwake", "saveHistory", "historyRetentionDays", "uiHaptics", "homePresets", "homeTools", "homeQuick", "homeStatus", "homeRecent", "privateSession", "diagIncludeText", "readerFont", "readerSpacing", "readerWidth", "historyCapacity", "diagSamples", "diagnosticsEnabled", "detailedCollection", "freshTranslationTest", "temporaryMemoryTest", "showSessionSpeakers", "homeMetrics", "homeQuickExpanded", "homeDetailsExpanded", "photoOCREdge", "photoAutoTranslate", "sessionLimit", "readerSize", "readerOriginal", "readerAlignment", "appearance", "cjkSingleCharacters", "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy"]
     static let defaults: [String: Any] = [
-        "suppressOwnInterface": true, "memoryRAMCapacity": 3000, "memorySoftLimit": 100000, "testRunSaving": "automatic", "directPiPBuffer": false, "hybridSwitchGuard": true,
+        "suppressOwnInterface": true, "memoryRAMCapacity": 3000, "memorySoftLimit": 100000, "testRunSaving": "automatic", "directPiPBuffer": false,
         "pixelConfirmation": true, "eventDrivenOCR": true, "fastOCR": false, "legacySharedSession": true, "liveWarmupLegacy": true,
         "source": "auto", "target": "en", "mode": "movie", "area": "smart", "customY0": 0.0, "customY1": 0.5,
         "speed": "balanced", "stability": 2, "minTextH": 0.0, "ignoreList": "", "frameRot": "auto",
@@ -109,7 +109,7 @@ final class TranslatorEngine: ObservableObject {
         "displayPolicy": "immediate", "pipWeight": "bold", "pipAlignment": "left", "pipLineSpacing": 0.0,
         "pipPadding": 24.0, "originalFraction": 0.27, "pipScale": 1.0, "speakerAccent": "blue", "heartbeatInterval": 1.0,
         "readerFont": "rounded", "readerSpacing": 8.0, "readerWidth": "full", "historyCapacity": 500,
-        "diagSamples": 600, "appearance": "system", "cjkSingleCharacters": true, "hybridSchedulerVariant": "evidenceBounded", "hotPathReuseLowLatencyPlan": true, "hotPathReuseLegacyUnits": true, "homeMetrics": true, "homeQuickExpanded": false,
+        "diagSamples": 600, "appearance": "system", "cjkSingleCharacters": true, "hotPathReuseLowLatencyPlan": true, "hotPathReuseLegacyUnits": true, "homeMetrics": true, "homeQuickExpanded": false,
         "homeDetailsExpanded": false, "hapticStrength": "light", "autoCopyFormat": "translation", "interruptSpeech": true,
         "photoOCREdge": 2400, "photoAutoTranslate": false,
         "adaptiveOCR": true, "adaptiveConfirmation": false, "subtitleTracking": true, "selectiveSpeculation": true,
@@ -320,10 +320,10 @@ final class TranslatorEngine: ObservableObject {
     private var modeResultReadyUptime: [String: Double] = [:]
     // Hash only once per full capture-session/caption revision. The trace
     // never exports OCR text or an unhashed fingerprint. This removes repeated
-    // SHA-256 and hex formatting from the high-frequency LL/Hybrid event path.
+    // SHA-256 and hex formatting from the high-frequency Low Latency event path.
     var modeFingerprintDigests: [String: String] = [:]
     let modeService = ModeTranslationService()
-    lazy var modeCoordinator = ThreeModeCoordinator(
+    lazy var modeCoordinator = ModeCoordinator(
         lookup: { [weak self] caption in await self?.lookupModeMemory(caption) ?? caption.keys.map { _ in nil } },
         translate: { [weak self] caption, indices, strategy, speculative in
             await self?.modeService.translate(caption, indices: indices, strategy: strategy, speculation: speculative)
@@ -358,10 +358,6 @@ final class TranslatorEngine: ObservableObject {
                 case "speculation_ready": diag.s.specCompleted += 1
                 case "speculation_failed": diag.s.specDiscarded += 1
                 case "speculative_model_submitted": diag.s.specModelRequests += 1
-                case "hybrid_speculation_throttled":
-                    diag.s.specSkipped += 1
-                    diag.s.adaptiveSpeculationSkipped += 1
-                case "hybrid_speculation_backend_busy": diag.s.specSkipped += 1
                 case "recovery_failed_missing": diag.s.failures += 1
                 default: break
                 }
@@ -413,17 +409,6 @@ final class TranslatorEngine: ObservableObject {
         }
         if ["speculative_model_submitted", "confirmed_model_submitted", "model_batch_failed", "model_batch_completed", "speculative_model_completed", "confirmed_model_completed"].contains(reason) {
             diag.noteModelState(reason, durationMs: duration, candidate: caption.caption)
-        }
-        if caption.session == modeSessionID,
-           reason == "hybrid_simultaneous_model_overlap_ms", let duration,
-           let fullRecovery = modeModelTimings[modeModelKey(caption)]?.confirmed {
-            // Use physical simultaneous lane occupancy, not the entire
-            // Low Latency service time, to drive speculative admission.
-            modeCoordinator.noteOverlappingRecovery(serviceMilliseconds: fullRecovery,
-                                                    simultaneousMilliseconds: duration)
-        }
-        if caption.session == modeSessionID, reason == "hybrid_default_fallback" {
-            modeAvailability = "Fast recovery unavailable; using Apple default for this caption"
         }
         // Diagnostics can be disabled without paying the SHA-256 work for
         // every request phase; while enabled, reuse the same privacy-safe digest
@@ -525,19 +510,9 @@ final class TranslatorEngine: ObservableObject {
         }
         let thermal = ProcessInfo.processInfo.thermalState
         modeCoordinator.allowsReuse = memoryTestMode.allowsReuse && !bypassMemory
-        let fastPack = languageCoverage(for: source).lowLatency
-        let fastPackKnownMissing = fastPack == .supported || fastPack == .unsupported
-        modeCoordinator.fastRecoveryInstalled = !fastPackKnownMissing
-        modeCoordinator.adaptiveHybrid = flag("adaptiveSpeculation", true) && !fastPackKnownMissing
-        modeCoordinator.hybridSwitchGuard = flag("hybridSwitchGuard", true)
-        modeCoordinator.hybridPinnedBackend = TranslationHotPathAB.hybridPinnedBackend
-        // 2.4.0: a first sighting whose pixel check is armed is confirmed one frame later. An Apple Default call
-        // started for it now would only be in the way when the text is not the final one, so it is not started.
-        // Low Latency calls are short and stay as they were.
-        let deferredArmed = !confirmed && packet.pixelArmed == true && TranslationHotPathAB.deferArmedSpeculation &&
-            modeCoordinator.nextSpeculativeStrategy == .appleDefault
-        if deferredArmed { noteModeEvent(caption, reason: "speculation_deferred_armed", duration: nil) }
-        let admitted = !deferredArmed && speculationAllowed && !ProcessInfo.processInfo.isLowPowerModeEnabled &&
+        // 2.5.0: this path is Low Latency only. Its early calls are short, so a first sighting is never deferred
+        // here (the 2.4.0 deferral remains for Legacy, in handleContent).
+        let admitted = speculationAllowed && !ProcessInfo.processInfo.isLowPowerModeEnabled &&
             memoryTestMode.allowsSpeculation && flag("translateAhead", true) &&
             thermal != .serious && thermal != .critical &&
             SpeculationPolicy.credible(lines: packet.lines, threshold: num("speculationConfidence", 0.85))
@@ -826,6 +801,10 @@ final class TranslatorEngine: ObservableObject {
     var lastWarm = Date.distantPast
     var lastUnresolvedWarmupNotice = Date.distantPast
     var startupWarmupTask: Task<Void, Never>?
+    /// 2.5.0 (item A, quiet re-warm): the newest warm-up started for live capture, and when one last succeeded.
+    var captureWarmTicket = UUID()
+    var lastCaptureWarmAttempt = Date.distantPast
+    var lastCaptureWarmSuccess = Date.distantPast
     var warmupSession: TranslationSession?
     var warmupSuperseded = false
     let memoryStore = TranslationMemoryStore(directory: FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("ScreenLingo/TranslationMemory", isDirectory: true))
@@ -897,26 +876,8 @@ final class TranslatorEngine: ObservableObject {
         Task { [weak diag] in await diag?.recoverRuns() } // leftover checkpoints become "Recovered (incomplete)" runs
         modeDiagnosticEpochs[modeSessionID] = diag.started
         modeCoordinator.system = activeTranslationSystem
-        modeCoordinator.hybridSpeculationPermitted = { [weak self] in
-            guard let self else { return false }
-            switch self.modeCoordinator.hybridVariant {
-            case .reference195: return self.modeService.mayAdmitReferenceHybridSpeculation
-            case .recoveryFirst, .evidenceBounded: return self.modeService.mayAdmitHybridSpeculation
-            }
-        }
-        modeCoordinator.appleDefaultGapMs = { [weak self] caption in
-            self?.modeService.appleDefaultGapMs(source: caption.source, target: caption.target)
-        }
         modeService.mayStartModel = { [weak self] caption, speculative in
-            guard let self, self.modeCoordinator.shouldStartModel(caption, speculative: speculative) else { return false }
-            // A request can suspend on RAM or language availability after it
-            // was admitted. Check *again* immediately before acquiring the
-            // real speculative Apple session, never just at OCR observation.
-            if speculative && caption.system == .hybridRecovery &&
-                self.modeCoordinator.hybridVariant != .reference195 &&
-                !self.modeCoordinator.pinnedToLowLatency &&
-                self.modeService.hasConfirmedLowLatencyDemand { return false }
-            return true
+            self?.modeCoordinator.shouldStartModel(caption, speculative: speculative) ?? false
         }
         modeService.hostedDefault = { [weak self] texts, source, target, speculative in
             await self?.translateLegacy(texts, source: source, target: target, speculative: speculative)
@@ -924,6 +885,9 @@ final class TranslatorEngine: ObservableObject {
         modeService.event = { [weak self] caption, reason, ms in self?.noteModeEvent(caption, reason: reason, duration: ms) }
         modeService.modelRequestCompleted = { [weak self] source, target, strategy, ms in
             self?.recordModelRun(source: source, target: target, strategy: strategy, milliseconds: ms)
+        }
+        modeService.modelLengthObserved = { [weak self] characters, ms in
+            self?.diag.noteV250(metric: ModelLengthBucket.bucket(characters: characters).metric, ms: ms)
         }
         modeService.activityChanged = { [weak self] activity in self?.backendActivity = activity }
         modeService.warmupEvent = { [weak self] observation in

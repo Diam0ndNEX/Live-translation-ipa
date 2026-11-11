@@ -29,7 +29,7 @@ required = {
     "nominal/fair shared policy history": 'thermal <= 1 ? "full_performance"' in core,
     "thermal excluded from caption identity": 'static func == (lhs: Self, rhs: Self) -> Bool' in core,
     "simulator uses shared pressure": 'ThermalPerformancePolicy.automaticPressure(named: s.thermal)' in simulation,
-    "all systems and presets parity": 'for system in ["legacy", "hybridRecovery", "lowLatency"]' in tests and 'for preset in ["movie", "comic", "game", "lyrics", "custom"]' in tests,
+    "all systems and presets parity": 'for system in ["legacy", "lowLatency"]' in tests and 'for preset in ["movie", "comic", "game", "lyrics", "custom"]' in tests,
     "active-caption thermal transition test": 'nominalCaption.policyCohort == fairCaption.policyCohort' in modes,
     "diagnostic parity evidence": '"performanceTier"' in diagnostics and '"reductionReasons"' in diagnostics,
 }

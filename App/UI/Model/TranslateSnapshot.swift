@@ -30,6 +30,11 @@ struct TranslateSnapshot: Equatable {
     var prep = PrepFacts()
     /// True while the compose bar has paused capture (U2).
     var manual = false
+    /// 2.5.0: what Start does with the chosen mode (Low Latency without its language pack asks first), and the
+    /// source language that decision is about.
+    var packGate = LowLatencyPackGate.Decision.start
+    var gateSource = ""
+    var gateSourceName = ""
 
     var hasOutput: Bool { !translated.isEmpty }
     var canSwap: Bool { sourceCode != "auto" }
@@ -55,6 +60,9 @@ struct TranslateSnapshot: Equatable {
         let recent = e.history.prefix(5).map {
             RecentLine(id: $0.id, translated: $0.translated, original: $0.original, date: $0.date)
         }
+        let gateSource = e.sourceCode != "auto" ? e.sourceCode : (e.detectedLang != "–" ? e.detectedLang : (e.lockedLang ?? ""))
+        let gate = LowLatencyPackGate.decision(system: e.pendingTranslationSystem, sourceKnown: !gateSource.isEmpty,
+                                               lowLatency: e.languageCoverage(for: gateSource).lowLatency)
         return TranslateSnapshot(
             phase: phase, sourceCode: pair.source, targetCode: pair.target,
             sourceName: LanguageNames.name(pair.source, in: pair.languages),
@@ -63,7 +71,8 @@ struct TranslateSnapshot: Equatable {
             translated: e.translated, original: e.original, stage: stage, held: e.frozen, paused: e.paused,
             pipActive: e.pipActive, sessionStarted: e.sessionStarted,
             modeName: e.activeTranslationSystem.shortName, recentPairs: pair.recent, recent: Array(recent),
-            prep: PrepFacts.read(e), manual: e.manualMode)
+            prep: PrepFacts.read(e), manual: e.manualMode, packGate: gate, gateSource: gateSource,
+            gateSourceName: LanguageNames.name(gateSource, in: pair.languages))
     }
 }
 
@@ -107,7 +116,6 @@ extension TranslationSystem {
     var shortName: String {
         switch self {
         case .legacy: return "Legacy"
-        case .hybridRecovery: return "Hybrid"
         case .lowLatency: return "Low Latency"
         }
     }

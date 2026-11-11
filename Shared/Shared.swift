@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "2.4.0"
-    static let build = 117
+    static let version = "2.5.0"
+    static let build = 118
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("2.5.0", "Build 118: two modes. Hybrid Recovery is removed: in the 2.4.0 device test it was either as fast as Low Latency or as slow as Legacy and never combined them. The modes are now Legacy and Low Latency everywhere (Translate, Settings, Diagnostics, test runs, reports). A saved Hybrid choice moves once to Low Latency and a notice says so. Low Latency never changes the model by itself: when its language pack is missing, Start asks first (Download, Use Legacy, Cancel). Runs saved by older builds stay readable; Hybrid runs are listed but left out of comparisons and reports. New, all on by default, each with a switch in Experimental features, New in 2.5.0, and all UNVERIFIED until Diagnostics from Legacy and Low Latency on the same video shows an effect: a warm-up translation when capture starts (both modes, timing only); the trusted caption band (Low Latency only, CHANGES WHAT IS READ: a new caption is read in the band where captions have been appearing, without reading the whole area again; text outside the band is found up to 0.75 s later); the Legacy head start (Legacy only, CHANGES WHAT IS READ WHEN: a quick first read may start the translation while the normal read runs; the normal read still decides what is shown, and the head start stops by itself when the quick read does not match); a re-warm after a quiet stretch (Low Latency only). Diagnostics: the report value early starts deferred and the other whole-session totals no longer read 0 for saved runs; the report says why a confirmation needed another read and groups translation times by caption length (numbers and fixed codes only, no text). If captions are missed, cut short, flicker or get slower, turn off the trusted caption band or the Legacy head start and repeat that mode. Nothing was compiled or run before the GitHub Actions build."),
         ("2.4.0", "Build 117: latency rebuild, first step. Nothing is measured yet; every effect is unverified until Diagnostics from all three modes on the same video shows it. Hybrid Recovery now stays on one model for a run of captions: Low Latency when its language pack is installed, Apple Default when it is not or when Low Latency fails. New captions in Hybrid therefore use Low Latency wording; the switch Hybrid keeps one model in Experimental features restores the 2.3.9 behavior. Legacy, and Hybrid while it uses Apple Default, no longer start an early translation for a caption that can be confirmed on the next frame; the switch Wait for confirmation before early Apple Default work restores it. After a focused read finds changed text, the capture extension reads the whole area on the next frame instead of waiting for the usual interval. Model calls in Hybrid and Low Latency start without waiting for other main-thread work, the language check is refreshed in the background by default, and Diagnostics records events with less work. New Diagnostics rows: model changes, deferred early starts, OCR reads and frame wait per confirmation, overlap of Legacy calls. OCR accuracy, the read area and the confirmation rules are unchanged."),
         ("2.3.9", "Build 116: no change to translation, OCR, confirmation, the model choice or any default. Code layout only: another large part of the translator engine, including the OCR packet intake, the translation drain and the idle legacy validation, moved into its own files. Swift app behavior is unchanged."),
         ("2.3.8", "Build 115: no change to translation, OCR, confirmation, the model choice or any default. Code layout only: the translation system and its three-mode coordinator, the test run screens, the translation memory store, the capture extension and the mode translation service were split into smaller files. Swift app behavior is unchanged."),
@@ -162,6 +163,21 @@ struct Packet: Codable {
     /// 2.4.0, confirmed packets only: when a focused read of this caption was thrown away just before its first
     /// counted read, the time from the start of that read to the start of the first counted read, in milliseconds.
     var rediscoveryLeadMs: Double? = nil
+    /// 2.5.0 (item F): this first-sighting packet comes from the fast first OCR pass of a Legacy read. It carries no
+    /// caption identity and may only start an early translation; it can never confirm or display anything.
+    var headStart: Bool? = nil
+    /// 2.5.0, numeric metadata only, whole-broadcast totals: changed focused reads used without a whole-area read
+    /// (item E); fast first passes run, sent as a head start, later confirmed with the same text, and not (item F).
+    var trustedBandReads: Int? = nil
+    var headStartPrePasses: Int? = nil
+    var headStartSent: Int? = nil
+    var headStartConfirmed: Int? = nil
+    var headStartMissed: Int? = nil
+    /// 2.5.0: duration of the fast first pass that ran just before this packet, in milliseconds.
+    var headStartPrePassMs: Double? = nil
+    /// 2.5.0 (item C), whole-broadcast totals: extra OCR reads of an unconfirmed caption by cause, in the order of
+    /// `V250Names.extraReadCounters`. Fixed codes only.
+    var extraReadReasons: [Int]? = nil
 }
 
 /// App → extension (sent back over the same localhost link)
@@ -207,6 +223,10 @@ struct Config: Codable, Equatable {
     /// 2.3.2: the extension also sends a keep-alive ping from a timer when its frame callback has been quiet.
     /// Nil (older app) or false means off.
     var independentHeartbeat: Bool? = nil
+    /// 2.5.0 switches (nil from an older app means off): item E, item F, item C.
+    var trustedCaptionBand: Bool? = nil
+    var legacyHeadStart: Bool? = nil
+    var extraReadReasons: Bool? = nil
 }
 
 /// Keeps the old memory context exactly unchanged unless a genuinely

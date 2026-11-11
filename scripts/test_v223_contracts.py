@@ -58,28 +58,18 @@ archive = read_source("DiagnosticArchive")
 assert 'if TranslationHotPathAB.refreshAvailabilityInBackground { settings["availabilityRefreshAB"] = "on" }' in diagnostics
 # 2.3.0: 3 uses now (settingsKeys, cohortKeys and the new "switches on" report column).
 assert archive.count('"availabilityRefreshAB"') == 3, "settingsKeys, cohortKeys and the 2.3.0 report column"
-assert "deliveryFilteringMs matches confirmation-to-PiP time" in archive
-assert "hybrid_switch_guard_* values are the gap" in archive
+# 2.5.0 (changed with the code): the two README sentences about Hybrid Recovery are removed with the mode.
+assert "deliveryFilteringMs matches confirmation-to-PiP time" not in archive and "hybrid_switch_guard_* values" not in archive
 
-# L3 / L4: Hybrid-only arms, default OFF, pinned; constants unchanged when off.
+# 2.5.0 (changed with the code): L3 and L4 were Hybrid-only switches. They are removed with the mode; their report
+# keys stay in the export allowlist so runs saved by older builds are still read.
 work = read_source("SharedTranslationWork")
 system = read_source("TranslationSystem")
-for name, pinned in (("hybridRelaxedBackoff", "hybridBackoffPinnedKey"), ("hybridShorterGuard", "hybridGuardPinnedKey")):
-    assert f'(UserDefaults.standard.object(forKey: {pinned}) as? Bool) ?? false' in work, name
-    assert f'@AppStorage("{name}") private var {name} = false' in experimental, name
-    assert experimental.count(f'"{name}"') >= 2, name
-assert 'label: "Hybrid relaxed backoff"' in index and 'label: "Hybrid shorter switch guard"' in index
-assert "static let switchGuardWindowMs = 1500.0" in system
-assert "TranslationHotPathAB.hybridShorterGuard ? 1000.0 : switchGuardWindowMs" in system
-assert "TranslationHotPathAB.hybridShorterGuard ? 120.0 : 220.0" in system
-assert "hybridRelaxedBackoff ? 4 : 8" in system
-assert "(relaxed ? 6 : 12) : (relaxed ? 2 : 4)" in system
-assert "gapMs < effectiveSwitchGuardWindowMs else { return .lowLatency }" in system
+for name in ("hybridRelaxedBackoff", "hybridShorterGuard"):
+    assert name not in work and name not in experimental and name not in system, name
+assert "Hybrid" not in index
 assert '"hybridBackoffAB"' in archive and '"hybridGuardAB"' in archive
-assert 'settings["hybridBackoffAB"] = "on"' in diagnostics and 'settings["hybridGuardAB"] = "on"' in diagnostics
-
-assert "TranslationHotPathAB.hybridRelaxedBackoff, skipped > 0, let set = skipSetAt" in system, "decay only in the arm"
-assert "static let relaxedBackoffMaxAge = 10.0" in system
+assert 'hybridBackoffAB' not in diagnostics and 'hybridGuardAB' not in diagnostics
 
 # L2: Legacy confirmed-own-lane arm, default OFF, iOS 26 only, epoch-guarded drain.
 assert '(UserDefaults.standard.object(forKey: legacyOwnLanePinnedKey) as? Bool) ?? false' in work
@@ -102,8 +92,8 @@ assert "maximumTotalBytes: Int = Int.max" in store and "maximumUnpinnedRuns: Int
 assert "100 MB" not in read_source("TestRunViews")
 
 # Version 2.2.3 build 106 in the places CI checks.
-assert 'static let version = "2.4.0"' in shared and "static let build = 117" in shared
-assert project.count('"2.4.0"') == 3 and project.count('"117"') == 3
+assert 'static let version = "2.5.0"' in shared and "static let build = 118" in shared
+assert project.count('"2.5.0"') == 3 and project.count('"118"') == 3
 assert '("2.2.3", "Build 106:' in shared
 assert '("2.2.2", "Build 105:' in shared, "older changelog entries stay"
 print("v2.2.3 source contracts passed: L5 switch (default off, pinned), unchanged request path and TTL, toggle, Fast OCR switch, version")

@@ -108,6 +108,52 @@ extension SampleHandler {
         return lines
     }
 
+    /// 2.5.0 (item F): a quick read of the image the normal read is about to use. Nil when the fast recognizer does
+    /// not support the selected language. Same confidence and length rules as `ocr`; no language correction.
+    func fastPass(_ img: CIImage, _ cfg: Config, _ y0: Double, _ y1: Double) -> [OCRLine]? {
+        let span = y1 - y0
+        var languages: [String]?
+        if cfg.lang != "auto" {
+            let lc = cfg.lang.lowercased()
+            let base = lc.split(separator: "-").first.map(String.init) ?? lc
+            guard let match = fastRecognitionLanguages.first(where: { $0.lowercased() == lc })
+                ?? fastRecognitionLanguages.first(where: { $0.lowercased() == base || $0.lowercased().hasPrefix(base + "-") })
+            else { return nil }
+            languages = [match]
+        }
+        let key = "\(cfg.lang)|\(span)"
+        let request: VNRecognizeTextRequest
+        if key == cachedFastRequestKey, let cached = cachedFastRequest {
+            request = cached
+        } else {
+            let created = VNRecognizeTextRequest()
+            created.recognitionLevel = .fast
+            created.usesLanguageCorrection = false
+            created.minimumTextHeight = Float(min(0.1, 0.01 / max(0.1, span)))
+            if let languages { created.recognitionLanguages = languages }
+            cachedFastRequest = created
+            cachedFastRequestKey = key
+            request = created
+        }
+        let handler = VNImageRequestHandler(ciImage: img, options: [:])
+        guard (try? handler.perform([request])) != nil, let results = request.results else { return [] }
+        let minimum = Float(min(0.95, max(0.1, cfg.confidence ?? 0.3)))
+        var lines: [OCRLine] = []
+        for observation in results {
+            guard let candidate = observation.topCandidates(1).first, candidate.confidence >= minimum else { continue }
+            let text = candidate.string
+            guard text.count >= 2 || (cfg.cjkSingleCharacters == true && CJKText.isSingleCJKWord(text)),
+                  text.contains(where: { $0.isLetter || $0.isNumber }) else { continue }
+            let box = observation.boundingBox
+            let y = y0 + Double(box.midY) * span
+            guard y < 0.96 else { continue }
+            lines.append(OCRLine(t: text, x: Double(box.midX), y: y, h: Double(box.height) * span,
+                                 w: Double(box.width), confidence: Double(candidate.confidence)))
+        }
+        lines.sort { $0.y != $1.y ? $0.y > $1.y : $0.x < $1.x }
+        return lines
+    }
+
     func freeMB() -> Double { Double(os_proc_available_memory()) / 1_048_576 }
 
     func enhanced(_ i: CIImage) -> CIImage {

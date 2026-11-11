@@ -19,7 +19,7 @@ final class Harness {
     var pendingLookups: [CheckedContinuation<[String?], Never>] = []
     var cancellations: [Bool] = []
     var backend = TranslationBackendActivity()
-    lazy var coordinator = ThreeModeCoordinator(
+    lazy var coordinator = ModeCoordinator(
         lookup: { [weak self] _ in
             guard let self else { return [nil] }
             self.lookupCount += 1
@@ -53,7 +53,7 @@ final class Harness {
     func settle() async { for _ in 0..<100 { await Task.yield() } }
 }
 
-@main struct ThreeModeTests {
+@main struct ThreeModeTests {  // name kept: build.yml and the scripts refer to this folder
     @MainActor static func main() async {
         // Capture readiness comes from transport evidence, not a translated caption.
         var readiness = CaptureReadiness()
@@ -75,40 +75,8 @@ final class Harness {
         readiness.requested(at: 12); readiness.tick(at: 42)
         precondition(readiness.state == .timedOut)
 
-        precondition(HybridSchedulingPolicy.preflightWait(
-            variant: .evidenceBounded, submitted: false, fastRecoveryInstalled: true,
-            proposed: 0.4) == 0.4,
-            "Matching Default speculation keeps its bounded winner opportunity")
-        precondition(HybridSchedulingPolicy.preflightWait(
-            variant: .reference195, submitted: false, fastRecoveryInstalled: true,
-            proposed: 0.4) == 0.4,
-            "H0 must preserve the v1.9.6 matching deadline")
-        precondition(HybridSchedulingPolicy.preflightWait(
-            variant: .evidenceBounded, submitted: true, fastRecoveryInstalled: true,
-            proposed: 0.4) == 0.4,
-            "Already-running matching Default retains bounded winner opportunity")
-        #if SCREENLINGO_REFERENCE_HYBRID_EXIT_SETTLING
-        precondition(HybridSchedulingPolicy.postDefaultSettlement(
-            variant: .evidenceBounded, millisecondsSinceReturn: 0) == 0)
-        #else
-        precondition(HybridSchedulingPolicy.postDefaultSettlement(
-            variant: .evidenceBounded, millisecondsSinceReturn: 0) == 0.22)
-        precondition(HybridSchedulingPolicy.postDefaultSettlement(
-            variant: .evidenceBounded, millisecondsSinceReturn: 100) == 0.12)
-        precondition(HybridSchedulingPolicy.postDefaultSettlement(
-            variant: .evidenceBounded, millisecondsSinceReturn: 250) == 0)
-        #endif
-        precondition(HybridSchedulingPolicy.postDefaultSettlement(
-            variant: .reference195, millisecondsSinceReturn: 0) == 0)
-        precondition(HybridSchedulingPolicy.postDefaultSettlement(
-            variant: .evidenceBounded, millisecondsSinceReturn: nil) == 0)
-        precondition(HybridSchedulingPolicy.physicalDrainBudget(
-            variant: .evidenceBounded, speculativeActive: true) == 0.45)
-        precondition(HybridSchedulingPolicy.physicalDrainBudget(
-            variant: .evidenceBounded, speculativeActive: false) == 0)
-        precondition(HybridSchedulingPolicy.physicalDrainBudget(
-            variant: .reference195, speculativeActive: true) == 0)
-        for mode in [TranslationSystem.lowLatency, .hybridRecovery] {
+        // 2.5.0: Hybrid Recovery was removed; the Hybrid policy checks that stood here went with it.
+        for mode in [TranslationSystem.lowLatency] {
             let probe = Harness()
             probe.coordinator.system = mode
             probe.coordinator.observe(probe.caption(id: "probe"), confirmed: true, speculate: false)
@@ -122,18 +90,6 @@ final class Harness {
             probe.coordinator.reset()
         }
 
-        let noFastPack = Harness()
-        noFastPack.coordinator.system = .hybridRecovery
-        noFastPack.coordinator.fastRecoveryInstalled = false
-        noFastPack.coordinator.observe(noFastPack.caption(id: "only-default"), confirmed: true, speculate: false)
-        await noFastPack.settle()
-        precondition(noFastPack.calls.count == 1)
-        precondition(noFastPack.calls[0].strategy == .appleDefault)
-        precondition(noFastPack.events.contains("hybrid_no_fast_pack_fallback"))
-        noFastPack.reply(0, ["Default fallback works"])
-        await noFastPack.settle()
-        precondition(noFastPack.selected.count == 1)
-        noFastPack.coordinator.reset()
         // Reset during an in-flight Apple call must not let its late response
         // clear the speculative owner of the next capture session.
         let resetRace = Harness()
@@ -154,7 +110,7 @@ final class Harness {
         await resetRace.settle()
         resetRace.coordinator.reset()
         let sameSession = UUID()
-        let nominalCaption = ModeCaption(system: .hybridRecovery, thermal: 0, session: sameSession,
+        let nominalCaption = ModeCaption(system: .lowLatency, thermal: 0, session: sameSession,
             caption: "candidate", revision: 1, source: "pt", target: "en", rules: "r",
             text: "Bom dia", units: ["Bom dia"], keys: ["key"], firstOCR: 7.0)
         var fairCaption = nominalCaption
@@ -167,115 +123,27 @@ final class Harness {
         precondition(nominalCaption == fairCaption &&
                      nominalCaption.policyCohort != fairCaption.policyCohort,
             "Serious protection changes scheduling evidence but not caption authority")
-        precondition(HybridSchedulingPolicy.maySubmitDefaultAfterAvailability(
-            variant: .reference195, confirmedDemand: true),
-            "H0 must preserve v1.9.5 late physical admission for comparison")
-        for variant in [HybridSchedulerVariant.recoveryFirst, .evidenceBounded] {
-            precondition(!HybridSchedulingPolicy.maySubmitDefaultAfterAvailability(
-                variant: variant, confirmedDemand: true),
-                "H1/H2 must yield unstarted Apple Default after LL demand begins")
-            precondition(HybridSchedulingPolicy.maySubmitDefaultAfterAvailability(
-                variant: variant, confirmedDemand: false),
-                "H1/H2 may still speculate without confirmed LL demand")
-        }
-        let referenceDecision = HybridSchedulingPolicy.matchingWait(variant: .reference195,
-            elapsed: 0.10, defaultSamples: [0.25, 0.25, 0.25, 0.25],
-            lowSamples: [0.04, 0.04, 0.04, 0.04], oldWait: 0.17, recentContention: 8)
-        precondition(abs(referenceDecision - 0.17) < 0.00001,
-            "Variant A must preserve v1.9.5 matching-deadline behavior")
-        let recoveryFirstDecision = HybridSchedulingPolicy.matchingWait(variant: .recoveryFirst,
-            elapsed: 0.10, defaultSamples: [0.25, 0.25, 0.25, 0.25],
-            lowSamples: [0.04, 0.04, 0.04, 0.04], oldWait: 0.17, recentContention: 8)
-        precondition(recoveryFirstDecision == referenceDecision,
-            "Variant B differs only in confirmed-demand admission, not result matching")
-        let fastRecovery = HybridSchedulingPolicy.matchingWait(variant: .evidenceBounded,
-            elapsed: 0.10, defaultSamples: [0.6, 0.6, 0.6, 0.6],
-            lowSamples: [0.04, 0.045, 0.05, 0.05], oldWait: 0.2, recentContention: 0)
-        precondition(fastRecovery == 0,
-            "A verified 40ms LL recovery must not wait for a distant 400ms+ speculative prediction")
-        let matchingFastDefault = HybridSchedulingPolicy.matchingWait(variant: .evidenceBounded,
-            elapsed: 0.10, defaultSamples: [0.25, 0.25, 0.25, 0.25],
-            lowSamples: [0.9, 1.2, 1.5, 1.5], oldWait: 0.05, recentContention: 5)
-        precondition(abs(matchingFastDefault - 0.15) < 0.00001,
-            "A matching 250ms Default request may finish before a costly contested LL request")
-        let boundedSlow = HybridSchedulingPolicy.matchingWait(variant: .evidenceBounded,
-            elapsed: 0.05, defaultSamples: [0.9, 1.2, 1.5, 1.5],
-            lowSamples: [0.9, 1.2, 1.5], oldWait: 0.05, recentContention: 8)
-        precondition(boundedSlow <= 0.58 && boundedSlow >= 0,
-            "Even 900-1500ms cross-strategy tails cannot create an indefinite wait")
-        let coldEvidence = HybridSchedulingPolicy.matchingWait(variant: .evidenceBounded,
-            elapsed: 0.05, defaultSamples: [], lowSamples: [],
-            oldWait: 0.18, recentContention: 0)
-        precondition(abs(coldEvidence - 0.18) < 0.00001,
-            "Cold/no-data scheduling must preserve bounded reference behavior")
-        let recoveringNoOverlap = HybridAdmissionPolicy()
-        var lastOverlap = recoveringNoOverlap
-        lastOverlap.recordRecovery(serviceMilliseconds: 1400, simultaneousMilliseconds: 100)
-        precondition(lastOverlap.admit(),
-            "A 1400ms recovery with only 100ms measured overlap cannot cause ungrounded backoff")
-        var governor = HybridAdmissionPolicy()
-        for _ in 0..<3 { precondition(governor.admit()); governor.record(used: false) }
-        for _ in 0..<8 { precondition(!governor.admit()) }
-        precondition(governor.admit())
-        governor.record(used: true)
-        precondition(governor.admit())
-        governor.recordRecovery(serviceMilliseconds: 900, simultaneousMilliseconds: 700)
-        for _ in 0..<12 { precondition(!governor.admit()) }
-        governor.recordRecovery(serviceMilliseconds: 900, simultaneousMilliseconds: 42)
-        precondition(governor.admit())
-        var shortOverlap = HybridAdmissionPolicy()
-        shortOverlap.recordRecovery(serviceMilliseconds: 900, simultaneousMilliseconds: 100)
-        precondition(shortOverlap.admit(), "A long recovery without physical overlap must not throttle speculation")
-        var realContention = HybridAdmissionPolicy()
-        realContention.recordRecovery(serviceMilliseconds: 900, simultaneousMilliseconds: 600)
-        precondition(!realContention.admit(), "A long simultaneous overlap warrants bounded backoff")
-        realContention.record(used: true)
-        precondition(realContention.admit(), "Useful speculation must restore opportunities")
-        var moderateOverlap = HybridAdmissionPolicy()
-        moderateOverlap.recordRecovery(serviceMilliseconds: 900, simultaneousMilliseconds: 360)
-        for _ in 0..<4 { precondition(!moderateOverlap.admit()) }
-        precondition(moderateOverlap.admit())
-        var invalidOverlap = HybridAdmissionPolicy()
-        invalidOverlap.recordRecovery(serviceMilliseconds: .nan, simultaneousMilliseconds: 800)
-        invalidOverlap.recordRecovery(serviceMilliseconds: 900, simultaneousMilliseconds: .infinity)
-        precondition(invalidOverlap.admit())
-        var distinctBackoff = HybridAdmissionPolicy()
-        for _ in 0..<3 { distinctBackoff.record(used: false) }
-        precondition(!distinctBackoff.admit(identity: "caption-A"))
-        for _ in 0..<20 { precondition(!distinctBackoff.admit(identity: "caption-A")) }
-        precondition(distinctBackoff.rejected == 1)
-        for i in 0..<7 { precondition(!distinctBackoff.admit(identity: "caption-\(i)")) }
-        precondition(distinctBackoff.rejected == 8)
-        precondition(distinctBackoff.admit(identity: "next-caption"))
-        distinctBackoff.recordRecovery(serviceMilliseconds: 900, simultaneousMilliseconds: 700)
-        precondition(!distinctBackoff.admit(identity: "slow-caption"))
-        distinctBackoff.record(used: true)
-        precondition(distinctBackoff.admit(identity: "after-useful"))
         let readinessStart = Date(timeIntervalSince1970: 100)
         precondition(InitialWarmupPolicy.strategies(for: .legacy).isEmpty)
         for source in ["en", "es", "fr", "de", "it", "pt", "ru", "ja", "ko", "zh-Hans", "zh-Hant", "ar", "tr", "hi", "id", "nl", "pl", "th", "vi", "uk"] {
             precondition(InitialWarmupSamples.units(source: source)?.count == 2)
         }
         precondition(InitialWarmupSamples.units(source: "zz") == nil)
-        precondition(InitialWarmupPolicy.strategies(for: .hybridRecovery) == [.appleDefault, .lowLatency])
         precondition(InitialWarmupPolicy.strategies(for: .lowLatency) == [.lowLatency])
         let both = TranslationLanguageCoverage(appleDefault: .installed, lowLatency: .installed)
-        precondition(both.overall(for: .hybridRecovery) == .installed)
-        precondition(both.nextDownload(for: .hybridRecovery) == nil)
+        precondition(both.overall(for: .legacy) == .installed && both.overall(for: .lowLatency) == .installed)
+        precondition(both.nextDownload(for: .legacy) == nil && both.nextDownload(for: .lowLatency) == nil)
         let onlyDefault = TranslationLanguageCoverage(appleDefault: .installed, lowLatency: .supported)
-        precondition(onlyDefault.overall(for: .hybridRecovery) == .installed)
         precondition(onlyDefault.overall(for: .lowLatency) == .supported)
-        precondition(onlyDefault.nextDownload(for: .hybridRecovery) == .lowLatency)
+        precondition(onlyDefault.nextDownload(for: .lowLatency) == .lowLatency)
         precondition(onlyDefault.nextDownload(for: .legacy) == nil)
         let onlyLow = TranslationLanguageCoverage(appleDefault: .supported, lowLatency: .installed)
-        precondition(onlyLow.overall(for: .hybridRecovery) == .installed)
-        precondition(onlyLow.nextDownload(for: .hybridRecovery) == .appleDefault)
+        precondition(onlyLow.overall(for: .legacy) == .supported && onlyLow.nextDownload(for: .legacy) == .appleDefault)
         precondition(onlyLow.nextDownload(for: .lowLatency) == nil)
         let unsupported = TranslationLanguageCoverage(appleDefault: .unsupported, lowLatency: .unsupported)
-        precondition(unsupported.overall(for: .hybridRecovery) == .unsupported)
-        precondition(unsupported.nextDownload(for: .hybridRecovery) == nil)
+        precondition(unsupported.overall(for: .lowLatency) == .unsupported && unsupported.nextDownload(for: .lowLatency) == nil)
         let unknown = TranslationLanguageCoverage(appleDefault: .unchecked, lowLatency: .unchecked)
-        precondition(unknown.overall(for: .hybridRecovery) == .unchecked)
+        precondition(unknown.overall(for: .lowLatency) == .unchecked && unknown.overall(for: .legacy) == .unchecked)
         var warmupBudget = InitialWarmupPolicy()
         precondition(warmupBudget.claim(source: "pt", target: "en", strategy: .appleDefault))
         precondition(warmupBudget.claim(source: "pt", target: "en", strategy: .lowLatency))
@@ -376,7 +244,8 @@ final class Harness {
         let suite = "three-mode-tests-" + UUID().uuidString
         let defaults = UserDefaults(suiteName: suite)!
         defer { defaults.removePersistentDomain(forName: suite) }
-        for (low, hybrid, expected) in [(false, false, TranslationSystem.legacy), (true, false, .lowLatency), (false, true, .hybridRecovery), (true, true, .hybridRecovery)] {
+        // 2.5.0: the old hybridTranslation switch is ignored; only the Low Latency switch decides.
+        for (low, hybrid, expected) in [(false, false, TranslationSystem.legacy), (true, false, .lowLatency), (false, true, .legacy), (true, true, .lowLatency)] {
             defaults.removePersistentDomain(forName: suite)
             defaults.set(low, forKey: "lowLatencyTranslation"); defaults.set(hybrid, forKey: "hybridTranslation")
             defaults.set("preserve", forKey: "unrelated")
@@ -390,7 +259,7 @@ final class Harness {
         defaults.set("future-mode", forKey: "translationSystem")
         precondition(TranslationSystem.migrate(defaults).0 == .legacy)
         precondition(defaults.string(forKey: "translationSystem") == "future-mode")
-        for system in [TranslationSystem.hybridRecovery, .lowLatency] {
+        for system in [TranslationSystem.lowLatency] {
             // Matching in-flight work is promoted, never translated a second time.
             let h = Harness(); h.coordinator.system = system
             let c = h.caption()
@@ -447,100 +316,10 @@ final class Harness {
             stop.coordinator.reset(); stop.reply(0, ["Must not display"]); await stop.settle()
             precondition(stop.selected.isEmpty)
         }
-        // Physical backend occupancy must prevent new Hybrid-only speculative
-        // requests. It must not prevent confirmed Low Latency recovery.
-        let busyAdmission = Harness()
-        busyAdmission.coordinator.system = .hybridRecovery
-        var physicalBusy = true
-        busyAdmission.coordinator.hybridSpeculationPermitted = { !physicalBusy }
-        busyAdmission.coordinator.observe(busyAdmission.caption("Blocked preview"), confirmed: false, speculate: true)
-        await busyAdmission.settle()
-        precondition(busyAdmission.calls.isEmpty)
-        precondition(busyAdmission.events.contains("hybrid_speculation_backend_busy"))
-        busyAdmission.coordinator.observe(busyAdmission.caption("Confirmed without preview"), confirmed: true, speculate: true)
-        await busyAdmission.settle()
-        precondition(busyAdmission.calls.count == 1 && busyAdmission.calls[0].strategy == .lowLatency)
-        busyAdmission.reply(0, ["Confirmed while speculative backend busy"])
-        await busyAdmission.settle()
-        physicalBusy = false
-        busyAdmission.coordinator.observe(busyAdmission.caption("Idle preview", id: "idle"), confirmed: false, speculate: true)
-        await busyAdmission.settle()
-        precondition(busyAdmission.calls.count == 2 && busyAdmission.calls[1].strategy == .appleDefault)
-        busyAdmission.reply(1, ["Idle speculative result"])
-        await busyAdmission.settle()
-        busyAdmission.coordinator.reset()
-
-        // An obsolete completed Hybrid recovery cannot present stale text, but
-        // its exact-key result remains available for a later matching caption.
-        let obsoleteCache = Harness()
-        obsoleteCache.coordinator.system = .hybridRecovery
-        let firstObsolete = obsoleteCache.caption("Old phrase", revision: 1, id: "old")
-        obsoleteCache.coordinator.observe(firstObsolete, confirmed: true, speculate: false)
-        await obsoleteCache.settle()
-        let changedObsolete = obsoleteCache.caption("New phrase", revision: 2, id: "new")
-        obsoleteCache.coordinator.observe(changedObsolete, confirmed: true, speculate: false)
-        await obsoleteCache.settle()
-        precondition(obsoleteCache.calls.count == 2)
-        obsoleteCache.reply(0, ["Cached old phrase"])
-        await obsoleteCache.settle()
-        precondition(obsoleteCache.selected.isEmpty)
-        let repeatedObsolete = obsoleteCache.caption("Old phrase", revision: 3, id: "again")
-        obsoleteCache.coordinator.observe(repeatedObsolete, confirmed: true, speculate: false)
-        await obsoleteCache.settle()
-        precondition(obsoleteCache.calls.count == 2)
-        precondition(obsoleteCache.selected.count == 1)
-        precondition(obsoleteCache.selected[0].1.origins == ["session_low_latency"])
-        precondition(obsoleteCache.selected[0].1.values == ["Cached old phrase"])
-        obsoleteCache.reply(1, ["Stale other phrase"])
-        await obsoleteCache.settle()
-        precondition(obsoleteCache.selected.count == 1)
-        obsoleteCache.coordinator.reset()
-
-        // Successful obsolete Apple-default output is stored separately from
-        // Low Latency and can be promoted only for an identical cache key.
-        let defaultCache = Harness()
-        defaultCache.coordinator.system = .hybridRecovery
-        defaultCache.coordinator.observe(defaultCache.caption("Preview phrase", id: "preview"), confirmed: false, speculate: true)
-        await defaultCache.settle()
-        defaultCache.coordinator.observe(defaultCache.caption("Changed phrase", revision: 2, id: "changed"), confirmed: true, speculate: false)
-        await defaultCache.settle()
-        precondition(defaultCache.calls.count == 2)
-        defaultCache.reply(0, ["Apple-default cached"])
-        await defaultCache.settle()
-        defaultCache.reply(1, ["Confirmed current"])
-        await defaultCache.settle()
-        defaultCache.coordinator.observe(defaultCache.caption("Preview phrase", revision: 3, id: "repeated"),
-                                          confirmed: false, speculate: true)
-        await defaultCache.settle()
-        precondition(defaultCache.calls.count == 2)
-        defaultCache.coordinator.observe(defaultCache.caption("Preview phrase", revision: 3, id: "repeated"),
-                                          confirmed: true, speculate: true)
-        await defaultCache.settle()
-        precondition(defaultCache.selected.count == 2)
-        precondition(defaultCache.selected[1].1.values == ["Apple-default cached"])
-        precondition(defaultCache.selected[1].1.origins == ["session_apple_default"])
-        defaultCache.coordinator.reset()
-
-        // Fresh mode bypasses all ephemeral translation caches.
-        let freshCache = Harness()
-        freshCache.coordinator.system = .hybridRecovery
-        freshCache.coordinator.observe(freshCache.caption(id: "first"), confirmed: true, speculate: false)
-        await freshCache.settle()
-        freshCache.reply(0, ["First result"])
-        await freshCache.settle()
-        freshCache.coordinator.allowsReuse = false
-        freshCache.coordinator.observe(freshCache.caption(id: "second"), confirmed: true, speculate: false)
-        await freshCache.settle()
-        precondition(freshCache.calls.count == 2)
-        freshCache.reply(1, ["Different fresh result"])
-        await freshCache.settle()
-        precondition(freshCache.selected.count == 2)
-        freshCache.coordinator.reset()
-
         // Regression: an early subtitle B MUST be eligible while the previous
         // confirmed subtitle A is still on screen. v1.9.2 rejected this
         // ordinary transition and effectively disabled both predictive modes.
-        for system in [TranslationSystem.hybridRecovery, .lowLatency] {
+        for system in [TranslationSystem.lowLatency] {
             let nextSubtitle = Harness()
             nextSubtitle.coordinator.system = system
             let previous = nextSubtitle.caption("Previously shown subtitle.", revision: 1, id: "A")
@@ -556,8 +335,7 @@ final class Harness {
             precondition(nextSubtitle.coordinator.shouldStartModel(next, speculative: true),
                          "Previous displayed text must not invalidate the next early OCR prediction")
             precondition(nextSubtitle.calls.count == 2)
-            precondition(nextSubtitle.calls[1].strategy ==
-                         (system == .hybridRecovery ? .appleDefault : .lowLatency))
+            precondition(nextSubtitle.calls[1].strategy == .lowLatency)
             nextSubtitle.coordinator.noteSpeculativeModelSubmitted(next)
             nextSubtitle.coordinator.observe(next, confirmed: true, speculate: true)
             await nextSubtitle.settle()
@@ -602,7 +380,7 @@ final class Harness {
         // Backend request ownership allows an early preview before confirmation
         // but refuses stale, selected and reset requests before model admission.
         let admission = Harness()
-        admission.coordinator.system = .hybridRecovery
+        admission.coordinator.system = .lowLatency
         let preview = admission.caption("Early line", id: "preview")
         admission.coordinator.observe(preview, confirmed: false, speculate: true)
         await admission.settle()
@@ -626,7 +404,7 @@ final class Harness {
         // A stale unsuccessful recovery must not re-enter the model lane for
         // its same-strategy retry or consume time ahead of the current caption.
         let staleRetry = Harness()
-        staleRetry.coordinator.system = .hybridRecovery
+        staleRetry.coordinator.system = .lowLatency
         let staleFirst = staleRetry.caption("First request", id: "first")
         staleRetry.coordinator.observe(staleFirst, confirmed: true, speculate: false)
         await staleRetry.settle()
@@ -699,7 +477,7 @@ final class Harness {
         legacy.coordinator.observe(legacy.caption(), confirmed: true, speculate: true); await legacy.settle()
         precondition(legacy.calls.isEmpty && legacy.selected.isEmpty)
         // A simultaneous speculative completion cannot outrun preferred-memory selection.
-        let preferredRace = Harness(); preferredRace.coordinator.system = .hybridRecovery
+        let preferredRace = Harness(); preferredRace.coordinator.system = .lowLatency
         preferredRace.coordinator.observe(preferredRace.caption(), confirmed: false, speculate: true); await preferredRace.settle()
         preferredRace.delayedMemory = true
         preferredRace.coordinator.observe(preferredRace.caption(), confirmed: true, speculate: true); await preferredRace.settle()
@@ -710,60 +488,6 @@ final class Harness {
         precondition(preferredRace.selected.count == 1 && preferredRace.selected[0].1.values == ["Preferred saved wording"])
         precondition(preferredRace.selected[0].2 == "memory_hit" && preferredRace.calls.count == 1)
         preferredRace.coordinator.reset()
-
-        // Hybrid hedges matching inference without destroying its warmed Default session.
-        let deadline = Harness(); deadline.coordinator.system = .hybridRecovery
-        deadline.coordinator.coldSpeculationCeiling = 0
-        deadline.coordinator.observe(deadline.caption(), confirmed: false, speculate: true); await deadline.settle()
-        deadline.coordinator.observe(deadline.caption(), confirmed: true, speculate: true); await deadline.settle()
-        precondition(deadline.calls.count == 2 && deadline.calls[1].strategy == .lowLatency)
-        precondition(deadline.cancellations.isEmpty)
-        deadline.reply(0, ["Default wins selection"]); await deadline.settle()
-        precondition(deadline.selected.count == 1 && deadline.selected[0].1.values == ["Default wins selection"])
-        precondition(deadline.events.contains("hybrid_hedged_recovery") && deadline.cancellations.isEmpty)
-        deadline.reply(1, ["Late recovery"]); await deadline.settle()
-        precondition(deadline.selected.count == 1)
-        deadline.coordinator.reset()
-
-        // A confirmed LL result wins first, while the Default call drains safely.
-        let recoveryWins = Harness(); recoveryWins.coordinator.system = .hybridRecovery
-        recoveryWins.coordinator.coldSpeculationCeiling = 0
-        recoveryWins.coordinator.observe(recoveryWins.caption(), confirmed: false, speculate: true)
-        await recoveryWins.settle()
-        recoveryWins.coordinator.observe(recoveryWins.caption(), confirmed: true, speculate: true)
-        await recoveryWins.settle()
-        precondition(recoveryWins.calls.count == 2)
-        recoveryWins.reply(1, ["Fast confirmed result"]); await recoveryWins.settle()
-        precondition(recoveryWins.selected.count == 1 && recoveryWins.selected[0].1.values == ["Fast confirmed result"])
-        precondition(recoveryWins.cancellations.isEmpty)
-        recoveryWins.reply(0, ["Late speculative result"]); await recoveryWins.settle()
-        precondition(recoveryWins.selected.count == 1 && recoveryWins.backend.activity == nil)
-        recoveryWins.coordinator.reset()
-
-        // OCR mismatch drops the obsolete result, not the underlying session.
-        let draining = Harness(); draining.coordinator.system = .hybridRecovery
-        draining.coordinator.observe(draining.caption("Old subtitle"), confirmed: false, speculate: true)
-        await draining.settle()
-        draining.coordinator.observe(draining.caption("New subtitle", revision: 2), confirmed: true, speculate: true)
-        await draining.settle()
-        precondition(draining.calls.count == 2 && draining.cancellations.isEmpty)
-        precondition(draining.events.contains("hybrid_obsolete_speculation_draining"))
-        draining.reply(1, ["Current confirmed text"]); await draining.settle()
-        draining.reply(0, ["Stale subtitle"]); await draining.settle()
-        precondition(draining.selected.count == 1 && draining.selected[0].1.values == ["Current confirmed text"])
-        draining.coordinator.observe(draining.caption("Third subtitle", revision: 3, id: "third"), confirmed: false, speculate: true)
-        await draining.settle()
-        precondition(draining.calls.count == 3 && draining.calls[2].speculative)
-        draining.reply(2, ["Fresh speculative result"]); await draining.settle()
-        draining.coordinator.reset()
-
-        // Failed speculation followed by failed LL permits default fallback only in Hybrid.
-        let fallback = Harness(); fallback.coordinator.system = .hybridRecovery
-        fallback.coordinator.observe(fallback.caption(), confirmed: true, speculate: false); await fallback.settle()
-        fallback.reply(0, nil); await fallback.settle(); fallback.reply(1, nil); await fallback.settle()
-        precondition(fallback.calls.count == 3 && fallback.calls[2].strategy == .appleDefault)
-        fallback.reply(2, ["Default fallback"]); await fallback.settle()
-        precondition(fallback.selected.count == 1); fallback.coordinator.reset()
 
         // Matching completed speculation is selected immediately, without another model call.
         let ready = Harness(); ready.coordinator.system = .lowLatency
@@ -836,7 +560,7 @@ final class Harness {
         language.coordinator.reset()
 
         // Pressure stops tentative work and gives confirmed work a recovery path.
-        let pressure = Harness(); pressure.coordinator.system = .hybridRecovery
+        let pressure = Harness(); pressure.coordinator.system = .lowLatency
         pressure.coordinator.observe(pressure.caption(), confirmed: false, speculate: true); await pressure.settle()
         pressure.coordinator.observe(pressure.caption(), confirmed: true, speculate: true); await pressure.settle()
         pressure.coordinator.reduceSpeculation(memoryPressure: true); await pressure.settle()
@@ -845,81 +569,6 @@ final class Harness {
         precondition(pressure.selected.count == 1 && pressure.events.contains("memory_pressure"))
         pressure.coordinator.reset()
 
-        // v2.0.0 H1: Hybrid recovers with Apple Default inside the switch window.
-        precondition(HybridSchedulingPolicy.recoveryStrategy(gapMs: 0, fastRecoveryInstalled: true, guardEnabled: true) == .appleDefault)
-        precondition(HybridSchedulingPolicy.recoveryStrategy(gapMs: 1499, fastRecoveryInstalled: true, guardEnabled: true) == .appleDefault)
-        precondition(HybridSchedulingPolicy.recoveryStrategy(gapMs: 1500, fastRecoveryInstalled: true, guardEnabled: true) == .lowLatency)
-        precondition(HybridSchedulingPolicy.recoveryStrategy(gapMs: nil, fastRecoveryInstalled: true, guardEnabled: true) == .lowLatency)
-        precondition(HybridSchedulingPolicy.recoveryStrategy(gapMs: .nan, fastRecoveryInstalled: true, guardEnabled: true) == .lowLatency)
-        precondition(HybridSchedulingPolicy.recoveryStrategy(gapMs: 0, fastRecoveryInstalled: true, guardEnabled: false) == .lowLatency,
-            "Guard off must keep the v1.9.9 Low Latency recovery")
-        precondition(HybridSchedulingPolicy.recoveryStrategy(gapMs: nil, fastRecoveryInstalled: false, guardEnabled: true) == .appleDefault)
-        precondition(HybridSchedulingPolicy.suppressedHedgeWait(elapsed: 0.2) == 1.0)
-        precondition(HybridSchedulingPolicy.suppressedHedgeWait(elapsed: 2) == 0)
-        precondition(HybridSchedulingPolicy.suppressedHedgeWait(elapsed: .nan) == 0)
-
-        let guardDefault = Harness(); guardDefault.coordinator.system = .hybridRecovery
-        guardDefault.coordinator.hybridSwitchGuard = true
-        guardDefault.coordinator.appleDefaultGapMs = { _ in 300 }
-        guardDefault.coordinator.observe(guardDefault.caption(id: "guard-default"), confirmed: true, speculate: false)
-        await guardDefault.settle()
-        precondition(guardDefault.calls.count == 1 && guardDefault.calls[0].strategy == .appleDefault,
-            "Recent Default work must keep recovery on Apple Default")
-        precondition(guardDefault.events.contains("hybrid_switch_guard_default"))
-        guardDefault.reply(0, ["Default recovery"]); await guardDefault.settle()
-        precondition(guardDefault.selected.count == 1 && guardDefault.selected[0].2 == "recovery_success")
-        guardDefault.coordinator.reset()
-
-        let guardFast = Harness(); guardFast.coordinator.system = .hybridRecovery
-        guardFast.coordinator.hybridSwitchGuard = true
-        guardFast.coordinator.appleDefaultGapMs = { _ in nil }
-        guardFast.coordinator.observe(guardFast.caption(id: "guard-fast"), confirmed: true, speculate: false)
-        await guardFast.settle()
-        precondition(guardFast.calls.count == 1 && guardFast.calls[0].strategy == .lowLatency,
-            "Isolated recoveries keep the fast Low Latency path")
-        precondition(guardFast.events.contains("hybrid_switch_guard_low_latency"))
-        guardFast.reply(0, nil); await guardFast.settle()
-        // Same-strategy retry, then the one Default fallback still exist.
-        precondition(guardFast.calls.count == 2 && guardFast.calls[1].strategy == .lowLatency)
-        guardFast.reply(1, nil); await guardFast.settle()
-        precondition(guardFast.calls.count == 3 && guardFast.calls[2].strategy == .appleDefault)
-        precondition(guardFast.events.contains("hybrid_default_fallback"))
-        guardFast.reply(2, ["Fallback"]); await guardFast.settle()
-        precondition(guardFast.selected.count == 1)
-        guardFast.coordinator.reset()
-
-        // v2.0.0 H2: no parallel Low Latency hedge beside matching Default work.
-        let noHedge = Harness(); noHedge.coordinator.system = .hybridRecovery
-        noHedge.coordinator.hybridSwitchGuard = true
-        noHedge.coordinator.coldSpeculationCeiling = 0
-        noHedge.coordinator.appleDefaultGapMs = { _ in 0 }
-        noHedge.coordinator.observe(noHedge.caption(), confirmed: false, speculate: true); await noHedge.settle()
-        noHedge.coordinator.observe(noHedge.caption(), confirmed: true, speculate: true); await noHedge.settle()
-        precondition(noHedge.calls.count == 1 && noHedge.calls[0].strategy == .appleDefault,
-            "Guard must not start a second model beside the matching Default call")
-        precondition(noHedge.events.contains("hybrid_hedge_suppressed") && !noHedge.events.contains("hybrid_hedged_recovery"))
-        noHedge.reply(0, ["Default prediction"]); await noHedge.settle()
-        precondition(noHedge.selected.count == 1 && noHedge.selected[0].1.values == ["Default prediction"])
-        precondition(noHedge.cancellations.isEmpty)
-        noHedge.coordinator.reset()
-
-        // A failed matching prediction recovers through the guard, i.e. Default.
-        let failedMatch = Harness(); failedMatch.coordinator.system = .hybridRecovery
-        failedMatch.coordinator.hybridSwitchGuard = true
-        failedMatch.coordinator.appleDefaultGapMs = { _ in 10 }
-        failedMatch.coordinator.observe(failedMatch.caption(), confirmed: false, speculate: true); await failedMatch.settle()
-        failedMatch.coordinator.observe(failedMatch.caption(), confirmed: true, speculate: true); await failedMatch.settle()
-        failedMatch.reply(0, nil); await failedMatch.settle()
-        precondition(failedMatch.calls.count == 2 && failedMatch.calls[1].strategy == .appleDefault && !failedMatch.calls[1].speculative)
-        failedMatch.reply(1, ["Recovered"]); await failedMatch.settle()
-        precondition(failedMatch.selected.count == 1 && failedMatch.selected[0].1.values == ["Recovered"])
-        failedMatch.coordinator.reset()
-
-        precondition(abs(SpeculationWaitPolicy.remaining(elapsed: 0.4, ordinary: [], recovery: [], coldCeiling: 0.7) - 0.05) < 0.0001)
-        precondition(SpeculationWaitPolicy.remaining(elapsed: 0.8, ordinary: [], recovery: [], coldCeiling: 0.7) == 0)
-        precondition(abs(SpeculationWaitPolicy.remaining(elapsed: 0.2, ordinary: [0.5, 0.5, 0.5, 0.5, 0.5], recovery: [0.1, 0.1, 0.1, 0.1, 0.1], coldCeiling: 0.7) - 0.1) < 0.0001)
-        precondition(abs(SpeculationWaitPolicy.remaining(elapsed: 0.2, ordinary: [0.5, 0.5, 0.5, 0.5, 0.5], recovery: [0.9, 0.9, 0.9, 0.9, 0.9], coldCeiling: 0.7) - 0.3) < 0.0001)
-        precondition(SpeculationWaitPolicy.remaining(elapsed: 0.6, ordinary: [0.5, 0.5, 0.5, 0.5, 0.5], recovery: [0.1, 0.1, 0.1, 0.1, 0.1], coldCeiling: 0.7) == 0)
         var thermalCaption = norm.caption(); thermalCaption.thermal = 1
         precondition(thermalCaption.policyCohort == norm.caption().policyCohort,
             "Nominal and fair thermal evidence must use one full-performance cohort")
@@ -928,72 +577,99 @@ final class Harness {
             "Wall-clock changes cannot reset a supplied monotonic OCR origin")
         precondition(CaptionClockOrigin.monotonic(firstSeen: nil, wallFirstSeen: 995, wallNow: 1000, uptimeNow: 100) == 95)
         precondition(CaptionClockOrigin.monotonic(firstSeen: 500, wallFirstSeen: 995, wallNow: 1000, uptimeNow: 100) == 95)
-        // 2.4.0: the Hybrid backend pin. One model for a run of captions; a failed Low Latency request holds Apple Default.
-        var pin = HybridBackendPin()
-        precondition(pin.current == nil && pin.changes == 0)
-        precondition(pin.strategy(fastInstalled: true, now: 0) == .lowLatency && pin.changes == 0, "The first choice is not a change")
-        precondition(pin.strategy(fastInstalled: true, now: 1) == .lowLatency && pin.changes == 0)
-        pin.noteLowLatencyFailure(now: 1)
-        precondition(pin.peek(fastInstalled: true, now: 2) == .appleDefault && pin.changes == 0, "peek records nothing")
-        precondition(pin.strategy(fastInstalled: true, now: 2) == .appleDefault && pin.changes == 1)
-        precondition(pin.strategy(fastInstalled: true, now: 1 + HybridBackendPin.fallbackHold - 0.1) == .appleDefault && pin.changes == 1,
-            "No return to Low Latency inside the hold")
-        precondition(pin.strategy(fastInstalled: true, now: 1 + HybridBackendPin.fallbackHold + 0.1) == .lowLatency && pin.changes == 2)
-        var noPack = HybridBackendPin()
-        precondition(noPack.strategy(fastInstalled: false, now: 0) == .appleDefault, "Without the fast pack the pin is Apple Default")
+        // ---- 2.5.0 ----
+        // A saved Hybrid choice moves once to Low Latency, with one notice and a reason code that stays.
+        let hybridSuite = "hybrid-migration-" + UUID().uuidString
+        let hybridDefaults = UserDefaults(suiteName: hybridSuite)!
+        defer { hybridDefaults.removePersistentDomain(forName: hybridSuite) }
+        hybridDefaults.set("hybridRecovery", forKey: "translationSystem")
+        let hybridMoved = TranslationSystem.migrate(hybridDefaults)
+        precondition(hybridMoved.0 == .lowLatency && hybridMoved.1 == TranslationSystem.migratedHybridReason)
+        precondition(hybridDefaults.string(forKey: "translationSystem") == "lowLatency" &&
+                     hybridDefaults.bool(forKey: TranslationSystem.hybridNoticePendingKey), "Moved once, notice pending")
+        let hybridAgain = TranslationSystem.migrate(hybridDefaults)
+        precondition(hybridAgain.0 == .lowLatency && hybridAgain.1 == TranslationSystem.migratedHybridReason,
+                     "The migration reason code stays for Diagnostics")
+        // After the notice was seen, a preset or backup that still says Hybrid moves again without a second notice.
+        hybridDefaults.set(false, forKey: TranslationSystem.hybridNoticePendingKey)
+        hybridDefaults.set(true, forKey: TranslationSystem.hybridNoticeShownKey)
+        hybridDefaults.set("hybridRecovery", forKey: "translationSystem")
+        precondition(TranslationSystem.migrate(hybridDefaults).0 == .lowLatency &&
+                     !hybridDefaults.bool(forKey: TranslationSystem.hybridNoticePendingKey), "The notice is shown once")
+        precondition(TranslationSystem.allCases == [.legacy, .lowLatency], "Two modes")
+        let oldModeNames = try? JSONDecoder().decode([TranslationSystem].self, from: Data("[\"hybridRecovery\",\"legacy\"]".utf8))
+        precondition(oldModeNames == [.lowLatency, .legacy], "A record that names the removed mode still decodes")
 
-        // Pinned Hybrid: early work and recovery both use Low Latency, the Apple Default admission gate and the
-        // switch guard do not apply, and matching early work is awaited instead of duplicated.
-        let pinned = Harness(); pinned.coordinator.system = .hybridRecovery
-        pinned.coordinator.hybridPinnedBackend = true
-        pinned.coordinator.hybridSwitchGuard = true
-        pinned.coordinator.appleDefaultGapMs = { _ in 0 }
-        pinned.coordinator.hybridSpeculationPermitted = { false }
-        precondition(pinned.coordinator.nextSpeculativeStrategy == .lowLatency && pinned.coordinator.pinnedToLowLatency)
-        pinned.coordinator.observe(pinned.caption(), confirmed: false, speculate: true); await pinned.settle()
-        precondition(pinned.calls.count == 1 && pinned.calls[0].strategy == .lowLatency && pinned.calls[0].speculative,
-            "Pinned early work runs on Low Latency")
-        pinned.coordinator.observe(pinned.caption(), confirmed: true, speculate: true); await pinned.settle()
-        precondition(pinned.calls.count == 1 && pinned.events.contains("hybrid_pin_wait_matching"),
-            "A matching request on the pinned model is awaited, not started twice")
-        pinned.reply(0, ["Pinned"]); await pinned.settle()
-        precondition(pinned.selected.count == 1 && pinned.selected[0].1.strategies == [.lowLatency])
-        precondition(!pinned.events.contains("hybrid_model_switch_low_latency") && !pinned.events.contains("hybrid_model_switch_default"),
-            "Staying on one model reports no model change")
-        pinned.coordinator.observe(pinned.caption("Another line here.", revision: 2, id: "second"), confirmed: true, speculate: false)
-        await pinned.settle()
-        precondition(pinned.calls.count == 2 && pinned.calls[1].strategy == .lowLatency && !pinned.calls[1].speculative,
-            "Pinned recovery ignores the switch guard")
-        precondition(pinned.events.contains("hybrid_pin_low_latency") && !pinned.events.contains("hybrid_switch_guard_default"))
-        pinned.reply(1, nil); await pinned.settle()
-        precondition(pinned.calls.count == 3 && pinned.calls[2].strategy == .lowLatency)
-        pinned.reply(2, nil); await pinned.settle()
-        precondition(pinned.calls.count == 4 && pinned.calls[3].strategy == .appleDefault && pinned.events.contains("hybrid_default_fallback"))
-        precondition(pinned.events.contains("hybrid_model_switch_default"), "A change of model is reported")
-        pinned.reply(3, ["Fallback"]); await pinned.settle()
-        precondition(pinned.selected.count == 2)
-        precondition(pinned.coordinator.nextSpeculativeStrategy == .appleDefault && !pinned.coordinator.pinnedToLowLatency,
-            "A failed Low Latency request holds the pin on Apple Default")
-        pinned.coordinator.observe(pinned.caption("A third line.", revision: 3, id: "third"), confirmed: true, speculate: false)
-        await pinned.settle()
-        precondition(pinned.calls.count == 5 && pinned.calls[4].strategy == .appleDefault && pinned.events.contains("hybrid_pin_default"),
-            "The next caption stays on Apple Default instead of going back at once")
-        pinned.reply(4, ["Held"]); await pinned.settle()
-        precondition(pinned.selected.count == 3)
-        pinned.coordinator.reset()
+        // Low Latency without its language pack asks; it never starts on another model.
+        precondition(LowLatencyPackGate.decision(system: .legacy, sourceKnown: true, lowLatency: .unsupported) == .start)
+        precondition(LowLatencyPackGate.decision(system: .lowLatency, sourceKnown: true, lowLatency: .installed) == .start)
+        precondition(LowLatencyPackGate.decision(system: .lowLatency, sourceKnown: true, lowLatency: .supported) == .askForPack(canDownload: true))
+        precondition(LowLatencyPackGate.decision(system: .lowLatency, sourceKnown: true, lowLatency: .unsupported) == .askForPack(canDownload: false))
+        precondition(LowLatencyPackGate.decision(system: .lowLatency, sourceKnown: false, lowLatency: .supported) == .start,
+                     "With an unknown source there is nothing to ask about yet")
+        precondition(LowLatencyPackGate.decision(system: .lowLatency, sourceKnown: true, lowLatency: .unchecked) == .start)
+        precondition(LowLatencyPackGate.message(source: "Portuguese", target: "English", canDownload: true).contains("Portuguese to English"),
+                     "The question names the pair")
 
-        // Pin off (the coordinator default): the 2.3.9 routing is unchanged.
-        let unpinned = Harness(); unpinned.coordinator.system = .hybridRecovery
-        precondition(!unpinned.coordinator.pinActive && unpinned.coordinator.nextSpeculativeStrategy == .appleDefault)
-        unpinned.coordinator.observe(unpinned.caption(), confirmed: false, speculate: true); await unpinned.settle()
-        precondition(unpinned.calls.count == 1 && unpinned.calls[0].strategy == .appleDefault)
-        unpinned.reply(0, ["Default"]); await unpinned.settle()
-        unpinned.coordinator.reset()
-        let fastMode = Harness(); fastMode.coordinator.system = .lowLatency
-        fastMode.coordinator.hybridPinnedBackend = true
-        precondition(!fastMode.coordinator.pinActive && fastMode.coordinator.nextSpeculativeStrategy == .lowLatency,
-            "The pin belongs to Hybrid only")
+        // Item F: the head start is used only while the fast pass keeps being right.
+        var headStart = HeadStartGovernor()
+        precondition(!headStart.maySend && headStart.shouldRunPrePass(), "Learning: the fast pass runs, nothing is sent")
+        for _ in 0..<5 { headStart.record(right: true) }
+        precondition(!headStart.maySend, "Five right answers are not enough")
+        headStart.record(right: true)
+        precondition(headStart.maySend && headStart.shouldRunPrePass())
+        headStart.record(right: false); headStart.record(right: false)
+        precondition(!headStart.maySend && headStart.samples == 8, "6 of 8 right is below the required share")
+        var headStartProbes = 0
+        for _ in 0..<12 { if headStart.shouldRunPrePass() { headStartProbes += 1 } }
+        precondition(headStartProbes == 2, "While it is off, one fast pass in six keeps the score current")
+        for _ in 0..<12 { headStart.record(right: true) }
+        precondition(headStart.maySend && headStart.samples == HeadStartGovernor.window, "It comes back when the fast pass is right again")
 
-        print("Three-mode migration, sharing, atomic selection, mismatch, cancellation, memory isolation, strategy purity and semantic identity checks passed")
+        // Items C and D: fixed names and buckets.
+        precondition(ModelLengthBucket.bucket(characters: 0) == .to20 && ModelLengthBucket.bucket(characters: 20) == .to20 &&
+                     ModelLengthBucket.bucket(characters: 21) == .to40 && ModelLengthBucket.bucket(characters: 80) == .to80 &&
+                     ModelLengthBucket.bucket(characters: 81) == .to160 && ModelLengthBucket.bucket(characters: 161) == .over160)
+        precondition(ModelLengthBucket.to40.metric == "modelLen21to40Ms" && V250Names.metrics.contains("modelLen161PlusMs"))
+        precondition(V250Names.extraReadCounters.count == 8 && V250Names.extraReadLabels.count == 8 &&
+                     ExtraReadCause.other.rawValue == 7 && V250Names.counters.count == 15)
+
+        // Item E: the trusted caption band.
+        func bandLine(_ center: Double, _ height: Double = 0.05, _ confidence: Double = 0.95) -> (center: Double, height: Double, confidence: Double) {
+            (center, height, confidence)
+        }
+        var band = CaptionFocus()
+        let bandFirst = band.scan(at: 0, y0: 0, y1: 1, context: "band", useBand: true)
+        precondition(bandFirst.broad)
+        band.learnBand(bounds: [bandLine(0.15)], broad: true); band.observe(bounds: [bandLine(0.15)])
+        precondition(band.bandAgreement == 1 && band.trustedScanArea(y0: 0, y1: 1) == nil, "One whole-area read is not enough")
+        let bandEarly = band.scan(at: 0.1, y0: 0, y1: 1, context: "band", useBand: true)
+        precondition(!bandEarly.broad && !band.trusts(bounds: [bandLine(0.15)], scan: bandEarly), "Not trusted yet: the 2.4.0 rule applies")
+        band.learnBand(bounds: [bandLine(0.4)], broad: false)
+        precondition(band.bandAgreement == 1, "Focused reads never build trust")
+        let bandSecond = band.scan(at: 0.8, y0: 0, y1: 1, context: "band", useBand: true)
+        precondition(bandSecond.broad)
+        band.learnBand(bounds: [bandLine(0.15)], broad: true); band.observe(bounds: [bandLine(0.15)])
+        precondition(band.bandAgreement == 2)
+        let bandFocused = band.scan(at: 0.9, y0: 0, y1: 1, context: "band", useBand: true)
+        precondition(!bandFocused.broad && abs(bandFocused.y0 - 0.045) < 0.000001 && abs(bandFocused.y1 - 0.255) < 0.000001,
+                     "A focused read covers the band: the caption lines plus 1.6 line heights each way")
+        precondition(band.trusts(bounds: [bandLine(0.15), bandLine(0.21)], scan: bandFocused), "A caption that grew by one line is read whole and trusted")
+        precondition(!band.trusts(bounds: [bandLine(0.24)], scan: bandFocused), "A line at the edge of the band may be cut off: not trusted")
+        precondition(!band.trusts(bounds: [bandLine(0.15, 0.05, 0.6)], scan: bandFocused), "An unclear read is not trusted")
+        precondition(!band.trusts(bounds: [bandLine(0.15)], scan: bandSecond), "A whole-area read needs no trust")
+        precondition(!band.trusts(bounds: [], scan: bandFocused), "No text is not trusted: the whole area is read to confirm it")
+        let bandOff = band.scan(at: 0.95, y0: 0, y1: 1, context: "band")
+        precondition(!bandOff.broad && bandOff.y0 > bandFocused.y0, "Switch off: the 2.4.0 crop")
+        band.observe(bounds: [])
+        let bandGap = band.scan(at: 1.0, y0: 0, y1: 1, context: "band", useBand: true)
+        precondition(!bandGap.broad && abs(bandGap.y0 - 0.045) < 0.000001, "The band outlives the gap between two captions")
+        precondition(band.scan(at: 1.6, y0: 0, y1: 1, context: "band", useBand: true).broad, "The whole area is still read every 0.75 s")
+        band.learnBand(bounds: [bandLine(0.15), bandLine(0.8)], broad: true)
+        precondition(band.bandAgreement == 1 && band.trustedScanArea(y0: 0, y1: 1) == nil, "Text outside the band ends the trust")
+        _ = band.scan(at: 5, y0: 0, y1: 1, context: "rotated", useBand: true)
+        precondition(band.bandAgreement == 0, "A new context forgets the band")
+
+        print("Two-mode migration, pack question, sharing, atomic selection, mismatch, cancellation, memory isolation, strategy purity, semantic identity and 2.5.0 policy checks passed")
     }
 }

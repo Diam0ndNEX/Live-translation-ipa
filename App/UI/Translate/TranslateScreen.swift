@@ -20,6 +20,10 @@ struct TranslateScreen: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var focus = false
     @State private var composing = false
+    // 2.5.0: the question before Start when Low Latency has no language pack, and the one-time notice for people
+    // whose saved mode was Hybrid Recovery.
+    @State private var askingForPack = false
+    @AppStorage(TranslationSystem.hybridNoticePendingKey) private var hybridNoticePending = false
     @Namespace private var morph
 
     init(engine: TranslatorEngine) {
@@ -80,6 +84,19 @@ struct TranslateScreen: View {
             .toolbar(.hidden, for: .navigationBar)
             .modifier(AllowsLandscape())
             .fullScreenCover(isPresented: $focus) { FocusMode(engine: engine) }
+            .alert(LowLatencyPackGate.title, isPresented: $askingForPack) {
+                if snap.packGate == .askForPack(canDownload: true) {
+                    Button("Download") { engine.download(snap.gateSource) }
+                }
+                Button("Use Legacy") {
+                    translationSystem = TranslationSystem.legacy.rawValue
+                    feedback.show("Legacy is selected. Tap Start capture again.", severity: .success)
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text(LowLatencyPackGate.message(source: snap.gateSourceName, target: snap.targetName,
+                                                canDownload: snap.packGate == .askForPack(canDownload: true)))
+            }
             .onChange(of: area) { _, _ in engine.syncConfig() }
             // 2.2.1 (E5): Speed and Content reach the extension now, not on the next ping, and stale work is dropped.
             .onChange(of: speed) { _, _ in engine.syncConfig() }
@@ -105,6 +122,27 @@ struct TranslateScreen: View {
             moreMenu
         }
         .frame(minHeight: 44)
+        .alert("Hybrid Recovery was removed", isPresented: hybridNotice) {
+            Button("OK") {}
+        } message: {
+            Text("Your translation mode was Hybrid Recovery. It is now Low Latency. In tests Hybrid behaved either like Low Latency or like Legacy, never better than both. You can choose Legacy or Low Latency on this screen.")
+        }
+    }
+
+    /// Shown once. Closing it marks the notice as seen.
+    private var hybridNotice: Binding<Bool> {
+        Binding(get: { hybridNoticePending }, set: { shown in
+            guard !shown else { return }
+            hybridNoticePending = false
+            UserDefaults.standard.set(true, forKey: TranslationSystem.hybridNoticeShownKey)
+        })
+    }
+
+    /// Nil lets Start open the system sheet. Low Latency without its language pack asks first; the app never
+    /// changes the model by itself.
+    private var packQuestion: (() -> Void)? {
+        if case .askForPack = snap.packGate { return { askingForPack = true } }
+        return nil
     }
 
     private var moreMenu: some View {
@@ -117,7 +155,7 @@ struct TranslateScreen: View {
                 Label(snap.pipActive ? "Close floating window" : "Open floating window", systemImage: snap.pipActive ? "pip.exit" : "pip.enter")
             }
             Button { focus = true } label: { Label("Focus mode", systemImage: "text.book.closed") }
-            Button { router.present(.test) } label: { Label("Test the three modes", systemImage: "checklist") }
+            Button { router.present(.test) } label: { Label("Test both modes", systemImage: "checklist") }
         } label: {
             Label("More", systemImage: "ellipsis.circle")
                 .labelStyle(.iconOnly)
@@ -131,7 +169,7 @@ struct TranslateScreen: View {
     // MARK: Idle
     @ViewBuilder private var idleHero: some View {
         VStack(spacing: KitSpace.unit) {
-            StartButton(live: false, onTap: startTapped)
+            StartButton(live: false, onTap: startTapped, intercept: packQuestion)
                 .modifier(MorphTarget(namespace: reduceMotion ? nil : morph))
                 .background { RippleBackdrop(live: false).frame(width: 260, height: 260) }
             Text("Start capture").font(.title3.weight(.semibold))
@@ -166,18 +204,16 @@ struct TranslateScreen: View {
 
     private func modeNote(_ s: TranslationSystem) -> String {
         switch s {
-        case .legacy: return "The proven original pipeline."
-        case .hybridRecovery: return "Apple Default translates early; Low Latency steps in when that guess is wrong or missing."
-        case .lowLatency: return "Low Latency translates both the early guess and the confirmed text."
+        case .legacy: return "The proven original pipeline with Apple's default translation. Works with every installed language pair."
+        case .lowLatency: return "The fast translation model for both the early guess and the confirmed text. Needs its own language pack; wording can differ from Legacy."
         }
     }
 
-    /// Translation system as three tappable mode chips with a one-line note, then three capsule menus.
+    /// Translation system as two tappable mode chips with a one-line note, then three capsule menus.
     private var controls: some View {
         VStack(alignment: .leading, spacing: KitSpace.row) {
             HStack(spacing: KitSpace.tight) {
                 modeChip("Legacy", "clock.arrow.circlepath", .legacy)
-                modeChip("Hybrid", "arrow.triangle.merge", .hybridRecovery)
                 modeChip("Low Latency", "bolt.fill", .lowLatency)
             }
             Text(modeNote(TranslationSystem(rawValue: translationSystem) ?? .legacy))
@@ -262,14 +298,14 @@ struct TranslateScreen: View {
         .background(Color(.secondarySystemGroupedBackground), in: Capsule())
     }
 
-    /// The saved three-mode test, one tap from Translate.
+    /// The saved two-mode test, one tap from Translate.
     private var testRow: some View {
         Button { router.present(.test) } label: {
             HStack(spacing: KitSpace.row) {
                 Image(systemName: "checklist").foregroundStyle(Color.accentColor).frame(width: 28).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("\(test.value.name) · \(test.value.savedModes) of 3 modes saved").font(.subheadline.weight(.semibold))
-                    Text(test.value.recording ? "Recording this run" : "Run the same content through all three modes")
+                    Text("\(test.value.name) · \(test.value.savedModes) of 2 modes saved").font(.subheadline.weight(.semibold))
+                    Text(test.value.recording ? "Recording this run" : "Run the same content through both modes")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: KitSpace.tight)
@@ -310,7 +346,7 @@ struct TranslateScreen: View {
         switch reason {
         case .captureLost, .timedOut:
             HStack(spacing: KitSpace.row) {
-                StartButton(live: false, size: 56, onTap: startTapped)
+                StartButton(live: false, size: 56, onTap: startTapped, intercept: packQuestion)
                 Text(reason.action).font(.headline)
             }
         case .packMissing:

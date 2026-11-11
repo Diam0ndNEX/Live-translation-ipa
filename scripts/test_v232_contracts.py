@@ -16,12 +16,13 @@ for name in ("memory_hit", "speculation_match_ready", "speculation_match_in_flig
     assert f'"{name}"' in dash, name
 assert "stats.supersededConfirmedInFlight" in dash and "stats.supersededConfirmedNotStarted" in dash
 assert "private var abSwitchLine" in dash and "Hint(abSwitchLine)" in dash
-for flag in ("legacyConfirmedOwnLane", "refreshAvailabilityInBackground", "hybridRelaxedBackoff", "hybridShorterGuard"):
+# 2.5.0 (changed with the code): the two Hybrid switches are removed with the mode.
+for flag in ("legacyConfirmedOwnLane", "refreshAvailabilityInBackground"):
     assert f"TranslationHotPathAB.{flag}" in dash, flag
 assert "Bypassed means" in dash
 
-assert 'static let version = "2.4.0"' in shared and "static let build = 117" in shared
-assert project.count('"2.4.0"') == 3 and project.count('"117"') == 3
+assert 'static let version = "2.5.0"' in shared and "static let build = 118" in shared
+assert project.count('"2.5.0"') == 3 and project.count('"118"') == 3
 for old in ('("2.3.9", "Build 116:', '("2.3.2", "Build 109:', '("2.3.1", "Build 108:', '("2.3.0", "Build 107:'):
     assert old in shared, old
 print("v2.3.2 source contracts passed: path card, supersession split, switches line, bypassed note, version")

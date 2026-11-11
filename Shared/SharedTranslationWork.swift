@@ -1,7 +1,6 @@
 import Foundation
 
-/// Shared, synchronous request preparation for Legacy and Hybrid Apple Default
-/// speculation. This does not own an Apple session or serialize model lanes.
+/// Shared, synchronous request preparation for Legacy and Low Latency work. This does not own an Apple session or serialize model lanes.
 /// Identity is deliberately byte-for-byte compatible with existing v4 memory
 /// keys so the SQLite and temporary memory formats need no migration.
 enum SharedTranslationWork {
@@ -65,8 +64,7 @@ struct ExactPlanReuseCache<Key: Equatable, Value> {
     var count: Int { entries.count }
 }
 
-/// Common physical-request ownership contract for Legacy and Hybrid Apple
-/// Default. Cancellation is advisory and never releases active ownership.
+/// Physical-request ownership contract for an Apple Default call. Cancellation is advisory and never releases active ownership.
 /// A completion may return a reusable session only for an unchanged epoch.
 struct AppleDefaultLeaseState {
     private(set) var active: UUID?
@@ -99,7 +97,6 @@ struct AppleDefaultLeaseState {
     }
 }
 
-    
 /// Build-time A/B controls used for the v1.9.5 comparison matrix. Defaults are
 /// the optimized implementations; define each reference flag separately with
 /// SWIFT_ACTIVE_COMPILATION_CONDITIONS to isolate L0 and F0 without a setting,
@@ -118,22 +115,49 @@ enum TranslationHotPathAB {
     static let unitsPinnedKey = "hotPathReuseLegacyUnitsPinned"
     static let availabilityRefreshSettingKey = "backgroundAvailabilityRefresh"
     static let availabilityRefreshPinnedKey = "backgroundAvailabilityRefreshPinned"
-    // 2.2.3 (L3, L4): Hybrid-only arms, default OFF = current behaviour.
-    static let hybridBackoffSettingKey = "hybridRelaxedBackoff"
-    static let hybridBackoffPinnedKey = "hybridRelaxedBackoffPinned"
-    static let hybridGuardSettingKey = "hybridShorterGuard"
-    static let hybridGuardPinnedKey = "hybridShorterGuardPinned"
     // 2.3.2: capture keep-alive from a timer in the extension, default OFF = current behaviour.
     static let independentHeartbeatSettingKey = "independentCaptureHeartbeat"
     static let independentHeartbeatPinnedKey = "independentCaptureHeartbeatPinned"
     // 2.2.3 (L2): Legacy only, default OFF = current behaviour.
     static let legacyOwnLaneSettingKey = "legacyConfirmedOwnLane"
     static let legacyOwnLanePinnedKey = "legacyConfirmedOwnLanePinned"
-    // 2.4.0: both default ON. Off gives the 2.3.9 behaviour. Pinned at session start like the others.
-    static let hybridPinSettingKey = "hybridPinnedBackend"
-    static let hybridPinPinnedKey = "hybridPinnedBackendPinned"
+    // 2.4.0: default ON. Off gives the 2.3.9 behaviour. Pinned at session start like the others.
     static let armedDeferSettingKey = "deferArmedSpeculation"
     static let armedDeferPinnedKey = "deferArmedSpeculationPinned"
+
+    /// 2.5.0 items A to F: (setting key, pinned key, report label). All default ON; OFF gives the 2.4.0 behaviour.
+    /// The Hybrid switches of 2.2.3 and 2.4.0 are gone with the mode; their saved values are ignored.
+    static let v250Switches: [(setting: String, pinned: String, report: String)] = [
+        ("warmAtCaptureStart", "warmAtCaptureStartPinned", "captureWarmAB"),
+        ("reportStoredSessionTotals", "reportStoredSessionTotalsPinned", "storedTotalsAB"),
+        ("confirmationReadReasons", "confirmationReadReasonsPinned", "readReasonsAB"),
+        ("modelLengthBuckets", "modelLengthBucketsPinned", "lengthBucketAB"),
+        ("trustedCaptionBand", "trustedCaptionBandPinned", "trustedBandAB"),
+        ("legacyHeadStart", "legacyHeadStartPinned", "headStartAB"),
+        ("quietRewarm", "quietRewarmPinned", "quietRewarmAB")
+    ]
+    /// A: one warm-up model call when capture starts (both modes). Timing only.
+    static var warmAtCaptureStart: Bool { pinned("warmAtCaptureStartPinned") }
+    /// B: the report keeps whole-session totals of a run that was already stored once.
+    static var reportStoredSessionTotals: Bool { pinned("reportStoredSessionTotalsPinned") }
+    /// C: the extension says why a confirmation needed another OCR read. Metadata only.
+    static var confirmationReadReasons: Bool { pinned("confirmationReadReasonsPinned") }
+    /// D: model call durations are also grouped by caption length. Metadata only.
+    static var modelLengthBuckets: Bool { pinned("modelLengthBucketsPinned") }
+    /// E: a changed caption read inside the trusted caption band is used without reading the whole area again.
+    /// Low Latency only (Legacy has no focused reads). CHANGES WHAT IS READ.
+    static var trustedCaptionBand: Bool { pinned("trustedCaptionBandPinned") }
+    /// F: Legacy may start its translation from a fast first OCR pass. CHANGES WHAT IS READ WHEN.
+    static var legacyHeadStart: Bool { pinned("legacyHeadStartPinned") }
+    /// Extra (spec 4b): Low Latency runs one short warm-up call after a quiet stretch during capture. Timing only.
+    static var quietRewarm: Bool { pinned("quietRewarmPinned") }
+    /// Report labels of the 2.5.0 switches, for the "switches on" column.
+    static let v250ReportLabels: [(key: String, label: String)] = [
+        ("captureWarmAB", "warm-up at capture start"), ("storedTotalsAB", "stored session totals"),
+        ("readReasonsAB", "extra-read reasons"), ("lengthBucketAB", "length buckets"),
+        ("trustedBandAB", "trusted caption band"), ("headStartAB", "Legacy head start"),
+        ("quietRewarmAB", "quiet re-warm")
+    ]
 
     private static func pinned(_ key: String) -> Bool {
         (UserDefaults.standard.object(forKey: key) as? Bool) ?? true
@@ -144,12 +168,12 @@ enum TranslationHotPathAB {
         defaults.set((defaults.object(forKey: planSettingKey) as? Bool) ?? true, forKey: planPinnedKey)
         defaults.set((defaults.object(forKey: unitsSettingKey) as? Bool) ?? true, forKey: unitsPinnedKey)
         defaults.set((defaults.object(forKey: availabilityRefreshSettingKey) as? Bool) ?? true, forKey: availabilityRefreshPinnedKey)
-        defaults.set((defaults.object(forKey: hybridBackoffSettingKey) as? Bool) ?? false, forKey: hybridBackoffPinnedKey)
-        defaults.set((defaults.object(forKey: hybridGuardSettingKey) as? Bool) ?? false, forKey: hybridGuardPinnedKey)
         defaults.set((defaults.object(forKey: legacyOwnLaneSettingKey) as? Bool) ?? false, forKey: legacyOwnLanePinnedKey)
         defaults.set((defaults.object(forKey: independentHeartbeatSettingKey) as? Bool) ?? false, forKey: independentHeartbeatPinnedKey)
-        defaults.set((defaults.object(forKey: hybridPinSettingKey) as? Bool) ?? true, forKey: hybridPinPinnedKey)
         defaults.set((defaults.object(forKey: armedDeferSettingKey) as? Bool) ?? true, forKey: armedDeferPinnedKey)
+        for item in v250Switches {
+            defaults.set((defaults.object(forKey: item.setting) as? Bool) ?? true, forKey: item.pinned)
+        }
     }
 
     static var reuseStandaloneLowLatencyPlan: Bool {
@@ -168,10 +192,6 @@ enum TranslationHotPathAB {
         #endif
     }
 
-    /// 2.2.3 (L3): Hybrid skips fewer early Apple Default requests after wasted ones. Default OFF.
-    static var hybridRelaxedBackoff: Bool {
-        (UserDefaults.standard.object(forKey: hybridBackoffPinnedKey) as? Bool) ?? false
-    }
     /// 2.2.3 (L2): a Legacy confirmed caption starts without waiting for a cancelled, different-text speculative
     /// call to finish unwinding. iOS 26 direct sessions only. Default OFF.
     static var legacyConfirmedOwnLane: Bool {
@@ -181,11 +201,6 @@ enum TranslationHotPathAB {
     static var independentHeartbeat: Bool {
         (UserDefaults.standard.object(forKey: independentHeartbeatPinnedKey) as? Bool) ?? false
     }
-    /// 2.2.3 (L4): shorter Hybrid switch-guard window and post-Default settling wait. Default OFF.
-    static var hybridShorterGuard: Bool {
-        (UserDefaults.standard.object(forKey: hybridGuardPinnedKey) as? Bool) ?? false
-    }
-
     /// 2.2.3 (L5): refresh a cached language-availability check in the background. Default ON since 2.4.0.
     static var refreshAvailabilityInBackground: Bool {
         (UserDefaults.standard.object(forKey: availabilityRefreshPinnedKey) as? Bool) ?? true
@@ -197,13 +212,8 @@ enum TranslationHotPathAB {
         return legacy + "_" + fast
     }
 
-    /// 2.4.0: Hybrid Recovery keeps one model for a run of captions (Low Latency when its pack is installed, Apple
-    /// Default as fallback) instead of alternating. Fresh captions then use Low Latency wording. Default ON.
-    static var hybridPinnedBackend: Bool {
-        (UserDefaults.standard.object(forKey: hybridPinPinnedKey) as? Bool) ?? true
-    }
     /// 2.4.0: no Apple Default call is started for a first sighting whose pixel check is armed; the confirmed caption
-    /// starts it one frame later. Legacy, and Hybrid while it uses Apple Default. Default ON.
+    /// starts it one frame later. Legacy only since 2.5.0. Default ON.
     static var deferArmedSpeculation: Bool {
         (UserDefaults.standard.object(forKey: armedDeferPinnedKey) as? Bool) ?? true
     }

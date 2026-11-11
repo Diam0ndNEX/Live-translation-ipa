@@ -175,6 +175,11 @@ extension TranslatorEngine {
                     (speculative ? "speculative_model_completed" : "confirmed_model_completed"),
                     durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000,
                     candidate: modelCandidate)
+                if !warmup, TranslationHotPathAB.modelLengthBuckets, diagnosticEpoch == diag.started {
+                    // 2.5.0 (item D): the same call, also grouped by how much text it translated. Numbers only.
+                    diag.noteV250(metric: ModelLengthBucket.bucket(characters: texts.reduce(0) { $0 + $1.count }).metric,
+                                  ms: (ProcessInfo.processInfo.systemUptime - began) * 1000)
+                }
                 if measuresSwitch && !speculative {
                     record(otherSessionNearby ? "legacy_confirmed_after_switch" : "legacy_confirmed_no_switch",
                         durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)

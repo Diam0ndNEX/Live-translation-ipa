@@ -71,6 +71,8 @@ extension DiagnosticExportWriter {
             "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
             "thermalState", "performanceTier", "reductionReasons",
             "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "hybridBackoffAB", "hybridGuardAB", "legacyOwnLaneAB", "heartbeatAB", "hybridPinAB", "armedDeferAB", "detailSuspended",
+            // 2.5.0
+            "captureWarmAB", "storedTotalsAB", "readReasonsAB", "lengthBucketAB", "trustedBandAB", "headStartAB", "quietRewarmAB",
             // 2.2.1 (D4, E12)
             "idleMinutes", "sessionLimit", "autoOpenPiP", "winSize", "textSize", "pipFont", "theme", "showOriginal",
             "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding",
@@ -115,6 +117,7 @@ extension DiagnosticExportWriter {
         let allowedCounters = DiagnosticIntervalBucket.allowedCounters
             .union(MemoryDiagnosticOutcome.allCases.map { $0.rawValue })
             .union(extraCounters)
+            .union(V250Names.counters)
         let safeCounters = snapshot.counters.filter {
             allowedCounters.contains($0.key) && $0.value >= 0
         }
@@ -140,7 +143,7 @@ extension DiagnosticExportWriter {
             "hybridNoOverlapRecoveryServiceMs", "hybridUnexplainedSlowRecoveryMs"
         ]
         let safeMetrics = snapshot.distributions.filter { key, value in
-            allowedMetrics.contains(key) && value.count >= 0 &&
+            (allowedMetrics.contains(key) || V250Names.metrics.contains(key)) && value.count >= 0 &&
                 value.mean.isFinite && value.mean >= 0 &&
                 [value.p50, value.p90, value.p95, value.p99, value.maximum].allSatisfy {
                     $0 == nil || ($0!.isFinite && $0! >= 0)

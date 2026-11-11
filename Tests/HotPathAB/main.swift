@@ -93,47 +93,6 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
                      modelCalls: calls, selectedUnits: finalPlan.units)
 }
 
-private struct HybridTrace {
-    let startRecoveryAt: Double
-    let defaultCompleteAt: Double
-    let recoveryCompleteAt: Double
-    let selectedAt: Double
-    let selected: String
-    let logicalOverlapMs: Double
-}
-
-/// Simulates logical request intervals, without asserting that two Apple
-/// sessions use separate hardware. The old Default request may finish even
-/// after LL recovery wins and must not select again.
-private func hybridTimeline(variant: HybridSchedulerVariant, matching: Bool,
-                            defaultMs: Double, lowMs: Double, oldWaitMs: Double,
-                            previousDefault: [Double], previousLow: [Double],
-                            correlatedContention: Int, overlapPenaltyMs: Double) -> HybridTrace {
-    let firstOCR = 0.0
-    let defaultSubmittedAt = firstOCR + 100
-    let confirmedAt = firstOCR + 200
-    let defaultDone = defaultSubmittedAt + defaultMs
-    // A mismatch is never eligible for the matching-Default deadline.
-    let remaining = matching ? HybridSchedulingPolicy.matchingWait(variant: variant,
-        elapsed: (confirmedAt - defaultSubmittedAt) / 1000,
-        defaultSamples: previousDefault.map { $0 / 1000 },
-        lowSamples: previousLow.map { $0 / 1000 },
-        oldWait: oldWaitMs / 1000, recentContention: correlatedContention) : 0
-    let recoveryAt = confirmedAt + remaining * 1000
-    let overlapped = max(0, defaultDone - recoveryAt)
-    let extra = overlapped > 0 ? overlapPenaltyMs : 0
-    let recoveredAt = recoveryAt + lowMs + extra
-    let defaultMayWin = matching && defaultDone <= recoveredAt
-    let winningAt = defaultMayWin ? defaultDone : recoveredAt
-    let selected = defaultMayWin ? "matching_apple_default" : "confirmed_low_latency"
-    precondition(winningAt >= confirmedAt)
-    if !matching { precondition(selected == "confirmed_low_latency") }
-    return HybridTrace(startRecoveryAt: recoveryAt, defaultCompleteAt: defaultDone,
-        recoveryCompleteAt: recoveredAt, selectedAt: winningAt,
-        selected: selected, logicalOverlapMs: min(defaultDone, recoveredAt) > recoveryAt ?
-            min(defaultDone, recoveredAt) - recoveryAt : 0)
-}
-
 @main struct HotPathTimedExperiments {
     static func main() {
         let candidate = CandidateIdentity(session: UUID(), caption: "speech-1",
@@ -189,54 +148,6 @@ private func hybridTimeline(variant: HybridSchedulerVariant, matching: Bool,
             reusePlan: true, memoryHit: true)
         precondition(memory.modelCalls == 0 && memory.selectedUnits.count == 2)
 
-        // A request may be logically admitted before awaiting availability;
-        // H1/H2 recheck actual LL demand at physical-call acquisition.
-        precondition(HybridSchedulingPolicy.maySubmitDefaultAfterAvailability(
-            variant: .reference195, confirmedDemand: true))
-        precondition(!HybridSchedulingPolicy.maySubmitDefaultAfterAvailability(
-            variant: .recoveryFirst, confirmedDemand: true))
-        precondition(!HybridSchedulingPolicy.maySubmitDefaultAfterAvailability(
-            variant: .evidenceBounded, confirmedDemand: true))
-        precondition(HybridSchedulingPolicy.maySubmitDefaultAfterAvailability(
-            variant: .evidenceBounded, confirmedDemand: false))
-
-        // C should hedge promptly toward a 40ms LL service when Default is
-        // predicted to take much longer and no contention has been observed.
-        let fast = hybridTimeline(variant: .evidenceBounded, matching: true,
-            defaultMs: 400, lowMs: 40, oldWaitMs: 100,
-            previousDefault: [400, 420, 430, 450], previousLow: [40, 42, 45, 50],
-            correlatedContention: 0, overlapPenaltyMs: 0)
-        let referenceFast = hybridTimeline(variant: .reference195, matching: true,
-            defaultMs: 400, lowMs: 40, oldWaitMs: 100,
-            previousDefault: [400, 420, 430, 450], previousLow: [40, 42, 45, 50],
-            correlatedContention: 0, overlapPenaltyMs: 0)
-        precondition(fast.selected == "confirmed_low_latency" && fast.selectedAt < referenceFast.selectedAt)
-
-        let slowLL = hybridTimeline(variant: .evidenceBounded, matching: true,
-            defaultMs: 250, lowMs: 1200, oldWaitMs: 50,
-            previousDefault: [250, 250, 250, 250], previousLow: [900, 1200, 1500, 1500],
-            correlatedContention: 5, overlapPenaltyMs: 200)
-        precondition(slowLL.selected == "matching_apple_default" &&
-            slowLL.selectedAt == slowLL.defaultCompleteAt)
-        let corrected = hybridTimeline(variant: .evidenceBounded, matching: false,
-            defaultMs: 250, lowMs: 45, oldWaitMs: 50,
-            previousDefault: [250, 250, 250, 250], previousLow: [45, 45, 45, 45],
-            correlatedContention: 0, overlapPenaltyMs: 0)
-        precondition(corrected.selected == "confirmed_low_latency" &&
-            corrected.startRecoveryAt == 200,
-            "Corrected OCR must start confirmed recovery immediately without waiting for obsolete Default")
-
-        let cold = hybridTimeline(variant: .evidenceBounded, matching: true,
-            defaultMs: 350, lowMs: 45, oldWaitMs: 100,
-            previousDefault: [], previousLow: [], correlatedContention: 0,
-            overlapPenaltyMs: 0)
-        let oldCold = hybridTimeline(variant: .reference195, matching: true,
-            defaultMs: 350, lowMs: 45, oldWaitMs: 100,
-            previousDefault: [], previousLow: [], correlatedContention: 0,
-            overlapPenaltyMs: 0)
-        precondition(cold.selectedAt == oldCold.selectedAt,
-            "Without calibrated samples C must retain the bounded reference deadline")
-
         var lease = AppleDefaultLeaseState()
         let oldTicket = lease.begin()!
         lease.requestCancellation()
@@ -249,26 +160,10 @@ private func hybridTimeline(variant: HybridSchedulerVariant, matching: Bool,
 
         // 2.2.1 D13: the A/B variants are run-time settings, pinned when a session starts. The compile flags used by the
         // reference CI builds override them, so this block only runs in the default build.
-        #if !SCREENLINGO_HYBRID_REFERENCE && !SCREENLINGO_HYBRID_RECOVERY_FIRST && !SCREENLINGO_REFERENCE_LL_PLAN && !SCREENLINGO_REFERENCE_LEGACY_UNITS
+        #if !SCREENLINGO_REFERENCE_LL_PLAN && !SCREENLINGO_REFERENCE_LEGACY_UNITS
         do {
-            let suite = UserDefaults(suiteName: "screenlingo-d13-\(UUID().uuidString)")!
-            precondition(HybridSchedulingPolicy.configuredVariant(suite) == .evidenceBounded, "D13: the default is evidenceBounded")
-            precondition(HybridSchedulingPolicy.buildVariant == .evidenceBounded, "D13: nothing pinned reads as the default")
-            for variant in [HybridSchedulerVariant.reference195, .recoveryFirst, .evidenceBounded] {
-                suite.set(variant.rawValue, forKey: HybridSchedulingPolicy.settingKey)
-                precondition(HybridSchedulingPolicy.configuredVariant(suite) == variant, "D13: \(variant) is selectable")
-            }
-            suite.set("not-a-variant", forKey: HybridSchedulingPolicy.settingKey)
-            precondition(HybridSchedulingPolicy.configuredVariant(suite) == .evidenceBounded, "D13: an unknown value falls back to the default")
-            // Pinning copies the setting; a later change does not reach the running value until the next pin.
+            // 2.5.0: the Hybrid scheduler variant that was pinned here is removed with the mode.
             let standard = UserDefaults.standard
-            standard.set("recoveryFirst", forKey: HybridSchedulingPolicy.settingKey)
-            precondition(HybridSchedulingPolicy.buildVariant == .evidenceBounded, "D13: changing the setting alone changes nothing")
-            HybridSchedulingPolicy.pinSetting()
-            precondition(HybridSchedulingPolicy.buildVariant == .recoveryFirst, "D13: the next session uses the new variant")
-            standard.removeObject(forKey: HybridSchedulingPolicy.settingKey)
-            standard.removeObject(forKey: HybridSchedulingPolicy.pinnedKey)
-            precondition(HybridSchedulingPolicy.buildVariant == .evidenceBounded)
             // Hot path flags: defaults are today's optimized paths, the label records what runs.
             precondition(TranslationHotPathAB.reuseStandaloneLowLatencyPlan && TranslationHotPathAB.reuseLegacyPreparedUnits &&
                          TranslationHotPathAB.label == "L1_F1", "D13: hot path defaults unchanged")
@@ -281,10 +176,23 @@ private func hybridTimeline(variant: HybridSchedulerVariant, matching: Bool,
             for key in [TranslationHotPathAB.planSettingKey, TranslationHotPathAB.unitsSettingKey,
                         TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey] { standard.removeObject(forKey: key) }
             precondition(TranslationHotPathAB.label == "L1_F1")
+            // 2.5.0: the new switches default to on, never change mid-run, and can be turned off for the next session.
+            precondition(TranslationHotPathAB.trustedCaptionBand && TranslationHotPathAB.legacyHeadStart &&
+                         TranslationHotPathAB.warmAtCaptureStart && TranslationHotPathAB.quietRewarm &&
+                         TranslationHotPathAB.reportStoredSessionTotals, "2.5.0 switches default to on")
+            standard.set(false, forKey: "trustedCaptionBand")
+            precondition(TranslationHotPathAB.trustedCaptionBand, "a switch does not apply mid-run")
+            TranslationHotPathAB.pinSettings()
+            precondition(!TranslationHotPathAB.trustedCaptionBand && TranslationHotPathAB.legacyHeadStart,
+                         "one switch can be turned off without touching the others")
+            standard.removeObject(forKey: "trustedCaptionBand")
+            for item in TranslationHotPathAB.v250Switches { standard.removeObject(forKey: item.pinned) }
+            for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey] { standard.removeObject(forKey: key) }
+            precondition(TranslationHotPathAB.trustedCaptionBand && TranslationHotPathAB.label == "L1_F1")
         }
         #endif
 
-        print("v1.9.6 timed software A/B matrix passed: LL, Legacy, Hybrid A/C, exact multi-line plans, correction, memory and late model completion")
+        print("v1.9.6 timed software A/B matrix passed: LL, Legacy, exact multi-line plans, correction, memory and late model completion")
         print("Synthetic values are not physical Apple model latency measurements")
     }
 }

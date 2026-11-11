@@ -53,8 +53,8 @@ extension DiagnosticsBody {
                 Text("Legacy declines · low confidence \(s.legacyLowConfidenceSkips) · low yield \(s.legacyAdaptiveLowYieldSkips) · saved memory \(s.legacyAdaptiveSavedSkips) · model busy \(s.legacyBusySpeculationSkips) · duplicate \(s.legacyDuplicateSpeculationSkips)").font(.caption).foregroundStyle(.secondary)
                 Text("Discarded work: \(Int(s.specDiscardedMs)) ms · unconsumed cached results: \(facts.unconsumedSpeculation).").font(.caption).foregroundStyle(.secondary)
             } else {
-                Text("Actual speculative model requests: \(s.specModelRequests) · Hybrid admission throttles: \(s.adaptiveSpeculationSkipped) · slow enqueues: \(s.slowTailEnqueues)").font(.footnote)
-                Text("New-mode predictions and confirmed recoveries have separate model lanes. A cache-only result is not counted as model execution. Captions may reuse completed obsolete work.").font(.caption).foregroundStyle(.secondary)
+                Text("Actual speculative model requests: \(s.specModelRequests) · slow enqueues: \(s.slowTailEnqueues)").font(.footnote)
+                Text("Low Latency early translations and confirmed recoveries have separate model lanes. A cache-only result is not counted as model execution. Captions may reuse completed obsolete work.").font(.caption).foregroundStyle(.secondary)
             }
             Text("Skipped frames · unchanged \(s.unchangedSkipped) · cadence \(s.cadenceSkipped) · paused \(s.pausedSkipped)").font(.caption)
             Text("Early OCR visual-change wakes: \(s.earlyVisualWakes) · derived from visual motion only, not confirmed text.").font(.caption).foregroundStyle(.secondary)

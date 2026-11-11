@@ -26,7 +26,7 @@ struct KitGallery: View {
                 }
                 Section("PhaseHeader") {
                     PhaseHeader(phase: .idle)
-                    PhaseHeader(phase: .starting, elapsed: 3, mode: "Hybrid")
+                    PhaseHeader(phase: .starting, elapsed: 3, mode: "Low Latency")
                     PhaseHeader(phase: .live, elapsed: 252, mode: "Low Latency", action: {})
                     PhaseHeader(phase: .paused, elapsed: 252, mode: "Legacy")
                     PhaseHeader(phase: .attention(.windowClosed), elapsed: 600)

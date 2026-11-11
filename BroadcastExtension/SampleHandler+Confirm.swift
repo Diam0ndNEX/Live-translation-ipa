@@ -11,12 +11,25 @@ extension SampleHandler {
     func preparePixelConfirmation(_ pb: CVPixelBuffer, _ orientation: CGImagePropertyOrientation,
                                           _ cfg: Config, lines: [OCRLine]) {
         let boxes = lines.map { (x: $0.x, y: $0.y, w: $0.w ?? 0, h: $0.h) }
-        guard let points = PixelConfirmation.samplePoints(lines: boxes),
-              let luma = sampleLuma(pb, orientation: orientation, rot: cfg.rot ?? 0, points: points),
-              let fingerprint = PixelConfirmation.fingerprint(luma) else {
+        // 2.5.0 (item C): the same three steps as before, one at a time, so the reason a check could not be
+        // prepared is known. The check itself is unchanged.
+        guard let points = PixelConfirmation.samplePoints(lines: boxes) else {
             pendingPixelRead = nil
+            nextReadCause = lines.count > PixelConfirmation.maximumLines ? .notArmedLines : .notArmedFrame
             return
         }
+        guard let luma = sampleLuma(pb, orientation: orientation, rot: cfg.rot ?? 0, points: points) else {
+            pendingPixelRead = nil
+            nextReadCause = .notArmedFrame
+            return
+        }
+        guard let fingerprint = PixelConfirmation.fingerprint(luma) else {
+            pendingPixelRead = nil
+            nextReadCause = .notArmedInk
+            return
+        }
+        // Armed. If another OCR read still happens, the reading rhythm came before the pixel check could confirm.
+        nextReadCause = .dwell
         pendingPixelRead = PendingPixelRead(lines: lines, points: points, fingerprint: fingerprint,
             readStart: readStartedMonotonic, context: pixelContext(orientation, cfg))
     }
@@ -47,6 +60,7 @@ extension SampleHandler {
             pendingPixelRead = nil
             pixelRejections += 1
             confirmPixelRejections += 1
+            nextReadCause = .pixelRejected
             return false
         }
         guard PixelConfirmation.dwellSatisfied(sinceFirstReadStart: uptime - pending.readStart,
@@ -62,6 +76,7 @@ extension SampleHandler {
         case .pending:
             pending.readStart = uptime
             pendingPixelRead = pending
+            nextReadCause = .moreReads
         case .duplicate:
             pendingPixelRead = nil
         }

@@ -1,36 +1,58 @@
 import Foundation
 
+/// 2.5.0: two translation systems. Hybrid Recovery was removed (it was either as fast as Low Latency or as slow as
+/// Legacy and never combined them; see docs/v2.5.0-specification.md).
 enum TranslationSystem: String, CaseIterable, Codable {
-    case legacy, hybridRecovery, lowLatency
+    case legacy, lowLatency
     static let referenceSHA = "e94542ce46cdb5b2426fdfd5dc258c932327762b"
     static let referenceVersion = "1.7.2 (58)"
+    /// The raw value of the removed mode. Saved settings, saved presets and reports from 2.4.0 and earlier contain it.
+    static let removedHybridRawValue = "hybridRecovery"
+    /// Set once when a saved Hybrid choice was moved to Low Latency, cleared when the notice was shown.
+    static let hybridNoticePendingKey = "hybridRemovalNoticePending"
+    static let hybridNoticeShownKey = "hybridRemovalNoticeShown"
+    static let migratedHybridReason = "migrated_hybrid_low_latency"
+    static let migrationReasons = ["explicit_low_latency", "legacy_or_ambiguous", "persisted", migratedHybridReason]
+
+    /// Old reports and warm-up records name the removed mode. They must still decode; a removed or unknown name reads
+    /// as Low Latency here, and the report code leaves sessions of the removed mode out of comparisons by their own
+    /// stored mode name, never by this value.
+    init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = Self(rawValue: raw) ?? .lowLatency
+    }
+
     var title: String {
         switch self {
         case .legacy: return "Legacy (1.7.2)"
-        case .hybridRecovery: return "Hybrid Recovery"
         case .lowLatency: return "Low Latency"
         }
     }
     var explanation: String {
         switch self {
         case .legacy: return "Uses the established 1.7.2 pipeline and Apple default strategy."
-        case .hybridRecovery: return "Stays on one model for a run of captions: Low Latency when its language pack is installed, Apple Default when it is not or when Low Latency fails. New captions then use Low Latency wording. Experimental features can restore the 2.3.9 behaviour (Apple Default ahead, Low Latency for recovery). Device acceptance pending."
-        case .lowLatency: return "Uses low latency for both early and confirmed text. Wording may differ from Legacy. Requires iOS 26.4 and installed supported languages."
+        case .lowLatency: return "Uses low latency for both early and confirmed text. Wording may differ from Legacy. Requires iOS 26.4 and the Low Latency language pack for the pair."
         }
     }
     static func migrate(_ defaults: UserDefaults) -> (TranslationSystem, String) {
         if let value = defaults.string(forKey: "translationSystem") {
+            if value == removedHybridRawValue {
+                // 2.5.0: a saved Hybrid choice (setting, backup or preset) moves to Low Latency once, with a notice.
+                defaults.set(TranslationSystem.lowLatency.rawValue, forKey: "translationSystem")
+                defaults.set(migratedHybridReason, forKey: "translationSystemMigration")
+                if defaults.object(forKey: hybridNoticeShownKey) as? Bool != true {
+                    defaults.set(true, forKey: hybridNoticePendingKey)
+                }
+                return (.lowLatency, migratedHybridReason)
+            }
             guard let mode = Self(rawValue: value) else { return (.legacy, "unknown_value_legacy") }
             let saved = defaults.string(forKey: "translationSystemMigration") ?? "persisted"
-            let reasons = ["explicit_hybrid", "explicit_low_latency", "legacy_or_ambiguous", "persisted"]
-            return (mode, reasons.contains(saved) ? saved : "persisted")
+            return (mode, migrationReasons.contains(saved) ? saved : "persisted")
         }
         let mode: Self
         let reason: String
-        // These old switches were opt-in, with false defaults. Hybrid took precedence.
-        if defaults.object(forKey: "hybridTranslation") as? Bool == true {
-            mode = .hybridRecovery; reason = "explicit_hybrid"
-        } else if defaults.object(forKey: "lowLatencyTranslation") as? Bool == true {
+        // The old opt-in switch had a false default. The old hybridTranslation switch is ignored since 2.5.0.
+        if defaults.object(forKey: "lowLatencyTranslation") as? Bool == true {
             mode = .lowLatency; reason = "explicit_low_latency"
         } else { mode = .legacy; reason = "legacy_or_ambiguous" }
         defaults.set(mode.rawValue, forKey: "translationSystem")
@@ -57,11 +79,6 @@ struct TranslationLanguageCoverage: Equatable {
         switch system {
         case .legacy: return appleDefault
         case .lowLatency: return lowLatency
-        case .hybridRecovery:
-            if appleDefault == .installed || lowLatency == .installed { return .installed }
-            if appleDefault == .supported || lowLatency == .supported { return .supported }
-            if appleDefault == .unchecked || lowLatency == .unchecked { return .unchecked }
-            return .unsupported
         }
     }
 
@@ -71,11 +88,6 @@ struct TranslationLanguageCoverage: Equatable {
             return appleDefault == .supported ? .appleDefault : nil
         case .lowLatency:
             return lowLatency == .supported ? .lowLatency : nil
-        case .hybridRecovery:
-            // Prefer completing fast recovery if default is already usable.
-            if lowLatency == .supported { return .lowLatency }
-            if appleDefault == .supported { return .appleDefault }
-            return nil
         }
     }
 
@@ -95,24 +107,28 @@ struct TranslationLanguageCoverage: Equatable {
             case .unsupported: return "Low Latency does not support this language pair"
             case .unchecked: return "Low Latency availability has not been checked"
             }
-        case .hybridRecovery:
-            if appleDefault == .installed && lowLatency == .installed {
-                return "Apple Default and Low Latency installed"
-            }
-            if appleDefault == .installed {
-                return lowLatency == .supported ?
-                    "Apple Default ready; install Low Latency for faster recovery" :
-                    "Apple Default ready; Low Latency recovery unavailable for this pair"
-            }
-            if lowLatency == .installed {
-                return appleDefault == .supported ?
-                    "Low Latency ready; Apple Default requires download" :
-                    "Low Latency ready; Apple Default unavailable for this pair"
-            }
-            if overall(for: system) == .unsupported { return "Neither strategy supports this language pair" }
-            if overall(for: system) == .supported { return "No installed strategy for this pair; download required" }
-            return "Checking Apple Default and Low Latency language availability"
         }
+    }
+}
+
+/// 2.5.0: what Start does when Low Latency is selected. Low Latency never falls back to another model by itself:
+/// without its language pack the person is asked (Download, Use Legacy, Cancel).
+enum LowLatencyPackGate {
+    enum Decision: Equatable { case start, askForPack(canDownload: Bool) }
+    static func decision(system: TranslationSystem, sourceKnown: Bool, lowLatency: LanguageAssetState) -> Decision {
+        guard system == .lowLatency, sourceKnown else { return .start }
+        switch lowLatency {
+        case .installed, .unchecked: return .start
+        case .supported: return .askForPack(canDownload: true)
+        case .unsupported: return .askForPack(canDownload: false)
+        }
+    }
+    static let title = "Low Latency needs a language pack"
+    static func message(source: String, target: String, canDownload: Bool) -> String {
+        let pair = "\(source) to \(target)"
+        return canDownload ?
+            "The Low Latency pack for \(pair) is not installed. Download it, or use Legacy for this pair." :
+            "Low Latency does not support \(pair) on this device. Use Legacy for this pair."
     }
 }
 
@@ -207,29 +223,5 @@ enum CaptionClockOrigin {
     static func monotonic(firstSeen: Double?, wallFirstSeen: Double, wallNow: Double, uptimeNow: Double) -> Double {
         if let firstSeen, firstSeen.isFinite, firstSeen >= 0, firstSeen <= uptimeNow { return firstSeen }
         return max(0, uptimeNow - max(0, wallNow - wallFirstSeen))
-    }
-}
-
-/// Per-language-pair and thermal-cohort timing guides the matching speculation
-/// hedge. Unknown performance has a bounded cold-start fallback; completed
-/// samples choose the likely Default finish and recovery crossover.
-enum SpeculationWaitPolicy {
-    static func remaining(elapsed: Double, ordinary: [Double], recovery: [Double], coldCeiling: Double) -> Double {
-        let age = max(0, elapsed)
-        let ceiling = max(0, min(coldCeiling, 0.70))
-        guard age < ceiling else { return 0 }
-        let ageBudget = ceiling - age
-        let sortedDefault = ordinary.filter { $0.isFinite && $0 >= 0 }.sorted()
-        guard sortedDefault.count >= 5 else { return min(ageBudget, max(0, 0.45 - age)) }
-        let expectedDefault = sortedDefault[min(sortedDefault.count - 1, Int(Double(sortedDefault.count - 1) * 0.75))]
-        let remainingDefault = max(0, expectedDefault - age)
-        guard remainingDefault > 0 else { return 0 }
-        let validRecovery = recovery.filter { $0.isFinite && $0 >= 0 }.sorted()
-        guard validRecovery.count >= 5 else { return min(ageBudget, remainingDefault) }
-        let recoveryMedian = validRecovery[validRecovery.count / 2]
-        // Fast recovery can start sooner; a slow contended recovery should
-        // not preempt an Apple Default request already nearing completion.
-        let hedgeBudget = max(0.10, min(0.65, recoveryMedian * 0.75))
-        return max(0, min(ageBudget, remainingDefault, hedgeBudget))
     }
 }

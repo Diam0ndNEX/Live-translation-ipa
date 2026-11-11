@@ -18,8 +18,11 @@ struct DiagnosticPerformanceComparison {
     static let cohortKeys = [
         "mode", "speed", "stability", "area", "customY0", "customY1", "translationTestMode",
         "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
-        "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
-        "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "hybridBackoffAB", "hybridGuardAB", "legacyOwnLaneAB", "heartbeatAB", "hybridPinAB", "armedDeferAB", "detailedCollection", "performanceTier",
+        "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
+        "hotPathAB", "availabilityRefreshAB", "legacyOwnLaneAB", "heartbeatAB", "armedDeferAB",
+        // 2.5.0: the switches that change timing or what is read. A run saved before 2.5.0 has none of them (off).
+        "captureWarmAB", "trustedBandAB", "headStartAB", "quietRewarmAB",
+        "detailedCollection", "performanceTier",
         "focusedCaptionOCR", "strictCaptionIdentity", "cjkSingleCharacters", "liveWarmupLegacy"
     ]
     static let noteKeys = [
@@ -43,6 +46,14 @@ struct DiagnosticPerformanceComparison {
 
     init(baseline: DiagnosticSessionExport, current: DiagnosticSessionExport) {
         notes = Self.differenceNotes(baseline, current)
+        // 2.5.0: runs of the removed Hybrid Recovery mode stay readable but are never compared.
+        if baseline.translationModes?.isRemovedMode == true || current.translationModes?.isRemovedMode == true {
+            comparable = false
+            reason = "One of the runs used Hybrid Recovery, which was removed in 2.5.0; it is kept for reading and is not compared"
+            p95Changes = [:]
+            medianChanges = [:]; meanChanges = [:]; p90Changes = [:]
+            return
+        }
         guard let baselineModel = baseline.hardwareModel, !baselineModel.isEmpty,
               baselineModel == current.hardwareModel,
               baseline.systemVersion == current.systemVersion,

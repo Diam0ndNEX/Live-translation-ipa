@@ -105,6 +105,29 @@ class SampleHandler: RPBroadcastSampleHandler {
     private var frameRapidText = false
     private var framePressure = true
 
+    // 2.5.0. All of this is read and written only while `recognitionLock` is held.
+    /// Item E: changed focused reads that were used without reading the whole area again.
+    private var trustedBandReads = 0
+    /// Item F: the fast first pass of a Legacy read, its score, and the text of the last pass not judged yet.
+    private var headStart = HeadStartGovernor()
+    private var headStartKey: String?
+    private var headStartPrePasses = 0, headStartSent = 0, headStartConfirmed = 0, headStartMissed = 0
+    private var headStartPrePassMs: Double?
+    private var sendingHeadStart = false
+    /// True when this read was started because the screen changed or no caption is being watched.
+    private var frameLikelyNewText = false
+    var cachedFastRequest: VNRecognizeTextRequest?
+    var cachedFastRequestKey = ""
+    lazy var fastRecognitionLanguages: [String] = {
+        let r = VNRecognizeTextRequest()
+        r.recognitionLevel = .fast
+        return (try? r.supportedRecognitionLanguages()) ?? []
+    }()
+    /// Item C: extra OCR reads of an unconfirmed caption by cause (order of `V250Names.extraReadCounters`), and the
+    /// cause the next such read will be booked under. Written by the confirmation part as well.
+    var extraReads = [Int](repeating: 0, count: V250Names.extraReadCounters.count)
+    var nextReadCause = ExtraReadCause.other
+
     private let cfgLock = NSLock()
     private var _config = Config(lang: "auto", y0: 0, y1: 1, maxEdge: 1400, interval: 0.25, paused: false)
     var config: Config {
@@ -190,6 +213,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             pendingPixelRead = nil
             captionWatch = nil
             forceBroadRead = false; discardedFocusedReadAt = nil
+            headStartKey = nil; nextReadCause = .other
         }
         lastOCRConfig = cfg
         feedback.unchangedSeconds = now.timeIntervalSince(lastChanged)
@@ -316,6 +340,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         // The lock also prevents overlapping callbacks from mutating confirmation state.
         lastRun = now
         forceBroadRead = false
+        frameLikelyNewText = watchTriggered || captionWatch == nil
         readStartedAt = now.timeIntervalSince1970
         readStartedMonotonic = ProcessInfo.processInfo.systemUptime
         autoreleasepool { recognize(pb, orientation, cfg, edge: plan.edge) }
@@ -333,7 +358,8 @@ class SampleHandler: RPBroadcastSampleHandler {
         let broadY0 = max(0, cfg.y0 - margin), broadY1 = min(1, cfg.y1 + margin)
         let focusEnabled = cfg.focusedCaptionOCR == true
         let focus = focusEnabled ? captionFocus.scan(at: readStartedMonotonic, y0: broadY0, y1: broadY1,
-            context: "\(orientation.rawValue)|\(cfg.rot ?? 0)|\(cfg.rev ?? 0)|\(cfg.lang)|\(cfg.y0)|\(cfg.y1)") :
+            context: "\(orientation.rawValue)|\(cfg.rot ?? 0)|\(cfg.rev ?? 0)|\(cfg.lang)|\(cfg.y0)|\(cfg.y1)",
+            useBand: cfg.trustedCaptionBand == true) :
             CaptionFocus.Scan(y0: broadY0, y1: broadY1, broad: true)
         let y0 = focus.y0, y1 = focus.y1
         var edge = plannedEdge
@@ -356,6 +382,32 @@ class SampleHandler: RPBroadcastSampleHandler {
         info.ch = Int(img.extent.height)
 
         let boost = cfg.boost ?? 1
+        // 2.5.0 (item F): Legacy only. A fast read of the same image may start the translation while the normal
+        // read below is still running. It never confirms or shows anything; the normal read and the pixel check
+        // decide that exactly as before. See `HeadStartGovernor` for when it is used.
+        if cfg.legacyHeadStart == true, !focusEnabled, cfg.fastOCR != true, boost != 2, candidateCount == 0,
+           frameLikelyNewText, !framePressure, freeMB() > 20, headStart.shouldRunPrePass() {
+            let began = CFAbsoluteTimeGetCurrent()
+            if let fast = fastPass(img, cfg, y0, y1) {
+                headStartPrePassMs = (CFAbsoluteTimeGetCurrent() - began) * 1000
+                headStartPrePasses += 1
+                let key = fast.map(\.t).joined(separator: "\n")
+                if let waiting = headStartKey, waiting != key {
+                    // The text of the last fast pass was replaced before it was confirmed.
+                    headStart.record(right: false); headStartMissed += 1
+                    headStartKey = nil
+                }
+                if !key.isEmpty, key != sentKey, headStartKey == nil {
+                    headStartKey = key
+                    if headStart.maySend {
+                        headStartSent += 1
+                        sendingHeadStart = true
+                        send(kind: "ocr", lines: Array(fast.prefix(60)), stable: false, revision: cfg.rev)
+                        sendingHeadStart = false
+                    }
+                }
+            }
+        }
         var lines = ocr(boost == 2 ? enhanced(img) : img, cfg, y0, y1)
         if lines.isEmpty {
             emptyReads.primaryEmpty()
@@ -368,8 +420,10 @@ class SampleHandler: RPBroadcastSampleHandler {
         }
         // A successful contrast retry is a successful read too. Otherwise the
         // old empty streak could clear the caption after just one later miss.
+        let lineBounds = lines.map { (center: $0.y, height: $0.h, confidence: $0.confidence ?? 0) }
         if focusEnabled {
-            captionFocus.observe(bounds: lines.map { (center: $0.y, height: $0.h, confidence: $0.confidence ?? 0) })
+            if cfg.trustedCaptionBand == true, !lines.isEmpty { captionFocus.learnBand(bounds: lineBounds, broad: focus.broad) }
+            captionFocus.observe(bounds: lineBounds)
         }
         emptyReads.finish(foundText: !lines.isEmpty)
         if !lines.isEmpty {
@@ -384,7 +438,13 @@ class SampleHandler: RPBroadcastSampleHandler {
         let recognizedKey = lines.map(\.t).joined(separator: "\n")
         // A new caption may extend beyond the old crop. Rediscover the whole
         // configured area before admitting changed text to source confirmation.
-        if focusEnabled, captionFocus.requiresRediscovery(scan: focus, recognized: recognizedKey, previous: lastRecognizedKey) {
+        // 2.5.0 (item E): changed text read inside the trusted caption band is used as it is. Text outside the band is
+        // found by the next whole-area read (at most 0.75 s later).
+        let trustedChange = focusEnabled && cfg.trustedCaptionBand == true && recognizedKey != lastRecognizedKey &&
+            captionFocus.trusts(bounds: lineBounds, scan: focus)
+        if trustedChange { trustedBandReads += 1 }
+        if focusEnabled, !trustedChange,
+           captionFocus.requiresRediscovery(scan: focus, recognized: recognizedKey, previous: lastRecognizedKey) {
             // 2.4.0: read the whole area on the next frame. Before, with no caption pending, that read waited for the
             // ordinary cadence although new text was already known to be on screen.
             focusRediscoveries += 1
@@ -397,8 +457,12 @@ class SampleHandler: RPBroadcastSampleHandler {
             confirmReads = 1; confirmPixelRejections = 0; confirmFrameWaitMs = 0
             let lead = discardedFocusedReadAt.map { max(0, readStartedMonotonic - $0) * 1000 }
             rediscoveryLeadMs = lead.flatMap { $0 < 1000 ? $0 : nil }
+            nextReadCause = .other
         } else {
             confirmReads += 1
+            // 2.5.0 (item C): the same text had to be read again before it was confirmed. Book the cause.
+            if cfg.extraReadReasons == true, candidateCount > 0 { extraReads[nextReadCause.rawValue] += 1 }
+            nextReadCause = .other
         }
         discardedFocusedReadAt = nil
 
@@ -420,6 +484,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             preparePixelConfirmation(pb, orientation, cfg, lines: lines)
         } else {
             pendingPixelRead = nil
+            nextReadCause = .pixelOff
         }
         // Armed means: one more read is needed, the pixel check is ready, and the wait it needs (the same wait as in
         // `pixelConfirm`) is over about when this OCR pass ends. With a longer wait the app keeps its early start.
@@ -431,6 +496,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         let outcome = admit(lines, cfg)
         sendPixelArmed = nil
         if outcome != .pending { pendingPixelRead = nil }
+        if outcome == .pending, pendingPixelRead != nil, max(1, cfg.stability ?? 2) > 2 { nextReadCause = .moreReads }
         switch outcome {
         case .ready, .duplicate:
             if cfg.eventDrivenOCR == true { startCaptionWatch(pb, orientation, cfg, lines: lines) }
@@ -461,6 +527,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             guard !decision.duplicate else { return .duplicate }
             if decision.ready {
                 sentKey = key
+                judgeHeadStart(confirmed: key)
                 send(kind: "ocr", lines: Array(lines.prefix(60)), stable: true, revision: cfg.rev)
             } else if key != specKey {
                 specKey = key
@@ -480,6 +547,7 @@ class SampleHandler: RPBroadcastSampleHandler {
         if candidateCount >= need {
             sentKey = key
             candidateCount = 0
+            judgeHeadStart(confirmed: key)
             send(kind: "ocr", lines: Array(lines.prefix(60)), stable: true, revision: cfg.rev)
             return .ready
         } else if candidateCount == 1, need > 1, cfg.speculate ?? true, !TextSim.similar(key, specKey) {
@@ -488,6 +556,15 @@ class SampleHandler: RPBroadcastSampleHandler {
             send(kind: "ocr", lines: Array(lines.prefix(60)), stable: false, revision: cfg.rev)
         }
         return .pending
+    }
+
+    /// 2.5.0 (item F): a caption was confirmed (by a read or by the pixel check). Was the fast pass right about it?
+    private func judgeHeadStart(confirmed key: String) {
+        guard let waiting = headStartKey else { return }
+        let right = waiting == key
+        headStart.record(right: right)
+        if right { headStartConfirmed += 1 } else { headStartMissed += 1 }
+        headStartKey = nil
     }
 
     enum WatchResult { case unchanged, changed, notChecked }
@@ -505,8 +582,12 @@ class SampleHandler: RPBroadcastSampleHandler {
         let rejections: Int? = confirmedPacket ? confirmPixelRejections : nil
         let frameWait: Double? = confirmedPacket ? confirmFrameWaitMs : nil
         let lead: Double? = confirmedPacket ? rediscoveryLeadMs : nil
+        let headStartPacket = kind == "ocr" && sendingHeadStart
+        let prePassMs = kind == "ocr" ? headStartPrePassMs : nil
+        if kind == "ocr" { headStartPrePassMs = nil }
+        let reasons: [Int]? = config.extraReadReasons == true ? extraReads : nil
         func encode(_ l: [OCRLine]) -> Data? {
-            try? JSONEncoder().encode(Packet(kind: kind, version: AppVersion.version, frames: frames, lines: l,
+            var packet = Packet(kind: kind, version: AppVersion.version, frames: frames, lines: l,
                                              ocrMs: lastOcrMs, memFreeMB: freeMB(),
                                              ts: Date().timeIntervalSince1970, rev: revision ?? config.rev,
                                              bufW: info.bw, bufH: info.bh, orient: info.orient,
@@ -530,7 +611,25 @@ class SampleHandler: RPBroadcastSampleHandler {
                                              watchSkippedOCR: watchSkippedOCR, watchTriggeredOCR: watchTriggeredOCR,
                                              pixelArmed: armed, focusRediscoveries: focusRediscoveries,
                                              confirmReads: reads, confirmPixelRejections: rejections,
-                                             confirmFrameWaitMs: frameWait, rediscoveryLeadMs: lead))
+                                             confirmFrameWaitMs: frameWait, rediscoveryLeadMs: lead)
+            // 2.5.0 fields, set after the long initializer.
+            if headStartPacket {
+                packet.headStart = true
+                packet.candidateID = "\(captureID):hs:\(headStartSent)"
+                packet.firstSeenAt = readStartedAt
+                packet.firstSeenMonotonic = nil
+                packet.pixelArmed = nil
+            }
+            if kind == "ocr" {
+                packet.trustedBandReads = trustedBandReads
+                packet.headStartPrePasses = headStartPrePasses
+                packet.headStartSent = headStartSent
+                packet.headStartConfirmed = headStartConfirmed
+                packet.headStartMissed = headStartMissed
+                packet.headStartPrePassMs = prePassMs
+                packet.extraReadReasons = reasons
+            }
+            return try? JSONEncoder().encode(packet)
         }
         var data = encode(lines)
         if let d = data, d.count > 60000 { data = encode(Array(lines.prefix(30))) }

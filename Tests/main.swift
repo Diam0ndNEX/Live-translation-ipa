@@ -184,7 +184,7 @@ let workKey = SharedTranslationWork.unitKey(source: "pt", target: "en", text: "B
     protectedWords: ["5:Maria"], rules: "privacy-rules")
 check(workKey == PipelineSafety.cacheKey(source: "pt", target: "en", text: "Bom dia",
     protectedWords: ["5:Maria"], rules: "privacy-rules"),
-    "Shared Legacy/Hybrid planning must preserve persisted exact context key bytes")
+    "Shared planning must preserve persisted exact context key bytes")
 check(workKey != SharedTranslationWork.unitKey(source: "pt", target: "en", text: "Bom dia",
     protectedWords: ["5:Maria"], rules: "changed-rules"),
     "Different language rules cannot silently share speculative memory")
@@ -644,7 +644,7 @@ for (state, expected) in fullPerformanceTransitions {
     check(ThermalPerformancePolicy.tier(for: state) == expected,
           "Thermal recovery must restore full performance without a cooldown")
 }
-for system in ["legacy", "hybridRecovery", "lowLatency"] {
+for system in ["legacy", "lowLatency"] {
     for preset in ["movie", "comic", "game", "lyrics", "custom"] {
         for rapid in [false, true] {
             var options = simulationOptions

@@ -61,7 +61,7 @@ struct TranslationSettings: View {
 
             AdvancedSection(title: "Warm-up", footer: "Warm-up prepares the translator before the first caption. Live translation always has priority.") {
                 Toggle("Keep the translator warm", isOn: $keepWarm)
-                Hint("Hybrid gets both translators ready, Low Latency only its own. Once ready, they stay ready for the same languages until the app closes.")
+                Hint("Gets the translator of the chosen mode ready before the first caption, and again when capture starts.")
                 Toggle("Predict the language for warm-up", isOn: $predictiveWarmup)
                 Hint("Prepares a recently confirmed language when Automatic has not decided yet.")
             }
@@ -75,7 +75,7 @@ struct TranslationSettings: View {
                     }
                 }
                 Toggle("Adapt early translation to how useful it is", isOn: $adaptiveSpeculation)
-                Hint("Does less early work when predictions are not paying off. Hybrid may also switch to Low Latency recovery when Apple Default early work keeps being wasted.")
+                Hint("Does less early work when predictions are not paying off.")
             }
             AdvancedSwitchSection()
             ResetSection(keys: [

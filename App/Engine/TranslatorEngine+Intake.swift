@@ -65,6 +65,8 @@ extension TranslatorEngine {
                     diag.noteRuntimeState("pip_auto_open_skipped_not_active")
                 }
             }
+            // 2.5.0 (item A): load the model now, before the first caption needs it.
+            warmAtCaptureStart()
         }
         if let orientation = p.orient {
             if let previous = lastCaptureOrientation, previous != orientation, frameRotMode == "auto" {

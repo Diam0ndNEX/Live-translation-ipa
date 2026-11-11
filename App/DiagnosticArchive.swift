@@ -200,7 +200,7 @@ struct TranslationModeReport: Codable {
 
     /// 2.3.1: where a caption's translation came from, in words that mean the same in every mode.
     /// memory: nothing was translated, the result was stored. early: the translation started before confirmation was used.
-    /// confirmed_time: the text was translated after confirmation (Legacy confirmed fresh or text changed; Hybrid and Low
+    /// confirmed_time: the text was translated after confirmation (Legacy confirmed fresh or text changed; Low
     /// Latency recovery_success). Returns nil for reasons that are not a translation source.
     static func pathGroup(_ reason: String) -> String? {
         switch reason {
@@ -211,6 +211,12 @@ struct TranslationModeReport: Codable {
         default: return nil
         }
     }
+
+    /// 2.5.0: Hybrid Recovery was removed and nothing writes its reason codes any more. They stay in these lists
+    /// only so that runs saved by 2.4.0 and earlier are still read whole. `removedMode` names such a run.
+    static let removedMode = "hybridRecovery"
+    static let currentModes = ["legacy", "lowLatency"]
+    var isRemovedMode: Bool { active == Self.removedMode }
 
     static let reasons: Set<String> = [
         "speculative_model_submitted", "confirmed_model_submitted", "model_batch_failed", "model_batch_completed", "speculative_model_completed", "confirmed_model_completed",
@@ -281,7 +287,8 @@ struct TranslationModeReport: Codable {
             "new_session_start", "retained_session_start", "unsupported_os", "unsupported_or_uninstalled_pair",
             "backend_lane_wait_ms", "backend_lane_admission_rejected", "backend_session_age_ms", "backend_session_reuse_count",
             "cancellation_requested", "cancelled_call_returned"]
-        let safeWarmups = Array((warmups ?? []).suffix(512)).filter {
+        // 2.5.0: warm-up records of a removed-mode run decode under another mode name, so they are dropped.
+        let safeWarmups = Array((active == Self.removedMode ? [] : (warmups ?? [])).suffix(512)).filter {
             $0.system != .legacy && ["normal", "temporaryMemory", "freshRequests"].contains($0.testMode) &&
             code($0.source, limit: 32) && code($0.target, limit: 32) && warmupPhases.contains($0.phase) &&
             $0.monotonicTime.isFinite && $0.monotonicTime >= 0 &&
@@ -346,11 +353,14 @@ struct TranslationModeReport: Codable {
         "speculation_deferred_armed", "hybrid_pin_low_latency", "hybrid_pin_default", "hybrid_pin_wait_matching",
         "hybrid_model_switch_low_latency", "hybrid_model_switch_default"
         ]
+        // 2.5.0 (item B): a run is cleaned once when it is stored and again when a report is made from it. The first
+        // pass renames each total to "session_<reason>"; the second pass looked for "<reason>" only, so every
+        // whole-session total of a stored run read 0 (early starts deferred in the 2.4.0 b117 reports).
+        let storedTotals = TranslationHotPathAB.reportStoredSessionTotals
         for reason in sessionReasons {
-            if let count = counters[reason], count >= 0 {
+            if let count = counters[reason] ?? (storedTotals ? counters["session_" + reason] : nil), count >= 0 {
                 counts["session_" + reason] = min(count, 1_000_000)
             }
-
         }
         let modes = ["legacy", "hybridRecovery", "lowLatency"]
         for warmup in safeWarmups {
@@ -360,14 +370,15 @@ struct TranslationModeReport: Codable {
         }
         var finalDistributions = samples.mapValues(DiagnosticDistribution.init)
         for reason in sessionReasons {
-            if let sample = distributions[reason], sample.count >= 0,
+            if let sample = distributions[reason] ?? (storedTotals ? distributions["session_" + reason] : nil), sample.count >= 0,
                sample.mean.isFinite, sample.mean >= 0 {
                 finalDistributions["session_" + reason] = sample
             }
         }
         return Self(warmups: safeWarmups, active: modes.contains(active) ? active : "legacy", pending: modes.contains(pending) ? pending : "legacy",
             referenceSHA: referenceSHA.count == 40 && referenceSHA.allSatisfy { $0.isHexDigit } ? referenceSHA : "unknown",
-            migration: ["persisted", "explicit_hybrid", "explicit_low_latency", "legacy_or_ambiguous", "unknown_value_legacy"].contains(migration) ? migration : "unknown",
+            migration: ["persisted", "explicit_hybrid", "explicit_low_latency", "legacy_or_ambiguous", "unknown_value_legacy",
+                        TranslationSystem.migratedHybridReason].contains(migration) ? migration : "unknown",
             events: safe, distributions: finalDistributions, counters: counts)
     }
 }

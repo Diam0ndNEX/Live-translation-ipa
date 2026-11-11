@@ -85,7 +85,7 @@ struct TestSnapshot: Equatable {
     var recording: Bool
     @MainActor static func read(_ d: Diagnostics) -> TestSnapshot {
         let id = d.currentTestID
-        let modes = Set(d.testRuns.filter { $0.testID == id }.map(\.mode))
+        let modes = Set(d.testRuns.filter { $0.testID == id }.map(\.mode)).intersection(TranslationModeReport.currentModes)
         return TestSnapshot(name: d.currentTestName, savedModes: modes.count, recording: d.activeRun != nil)
     }
 }

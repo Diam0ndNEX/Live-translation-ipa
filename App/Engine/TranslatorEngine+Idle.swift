@@ -269,7 +269,7 @@ extension TranslatorEngine {
         if activeTranslationSystem != .legacy {
             guard #available(iOS 26.4, *) else {
                 modelReadiness.prepare(.unavailable)
-                modeAvailability = activeTranslationSystem == .lowLatency ? "Explicit low latency requires iOS 26.4 or later" : "Fast recovery needs iOS 26.4; Apple default fallback remains available"
+                modeAvailability = "Explicit low latency requires iOS 26.4 or later"
                 return
             }
             guard !captureAlive, initialWarmupTask == nil, !Task.isCancelled else { return }
