@@ -16,13 +16,14 @@ shared = read_source("Shared")
 project = (root / "project.yml").read_text(encoding="utf-8")
 index = read_source("SettingsSearchIndex")
 
-# L5: a third runtime switch, pinned at session start by the existing call, default OFF (current behaviour).
+# L5: a third runtime switch, pinned at session start by the existing call.
+# 2.4.0 (deliberate change): the default is ON. The four assertions below said "default off" until 2.3.9.
 assert 'static let availabilityRefreshSettingKey = "backgroundAvailabilityRefresh"' in shared_work
 assert 'static let availabilityRefreshPinnedKey = "backgroundAvailabilityRefreshPinned"' in shared_work
-assert "?? false, forKey: availabilityRefreshPinnedKey)" in shared_work, "L5 must default to off"
+assert "?? true, forKey: availabilityRefreshPinnedKey)" in shared_work, "L5 defaults to on since 2.4.0"
 assert "static var refreshAvailabilityInBackground: Bool" in shared_work
 accessor = shared_work[shared_work.index("static var refreshAvailabilityInBackground"):shared_work.index("static var label")]
-assert "?? false" in accessor, "L5 pinned value must default to off"
+assert "?? true" in accessor and "?? false" not in accessor, "L5 pinned value defaults to on since 2.4.0"
 assert "TranslationHotPathAB.pinSettings()" in engine, "the switch is pinned when a session starts"
 
 # The refresh only runs behind the switch, only while nothing is translating, and is called once.
@@ -41,8 +42,8 @@ assert 'report("backend_availability_ms"' in service
 after = float(re.search(r"availabilityRefreshAfter: Double = (\d+(?:\.\d+)?)", service)[1])
 assert 0 < after < 30
 
-# The toggle exists, defaults to off and resets.
-assert '@AppStorage("backgroundAvailabilityRefresh") private var backgroundAvailabilityRefresh = false' in experimental
+# The toggle exists, defaults to on (2.4.0) and resets.
+assert '@AppStorage("backgroundAvailabilityRefresh") private var backgroundAvailabilityRefresh = true' in experimental
 assert experimental.count('"backgroundAvailabilityRefresh"') >= 2
 assert 'title: "Refresh language check in background"' in experimental
 assert 'label: "Refresh language check in background"' in index
@@ -101,8 +102,8 @@ assert "maximumTotalBytes: Int = Int.max" in store and "maximumUnpinnedRuns: Int
 assert "100 MB" not in read_source("TestRunViews")
 
 # Version 2.2.3 build 106 in the places CI checks.
-assert 'static let version = "2.3.9"' in shared and "static let build = 116" in shared
-assert project.count('"2.3.9"') == 3 and project.count('"116"') == 3
+assert 'static let version = "2.4.0"' in shared and "static let build = 117" in shared
+assert project.count('"2.4.0"') == 3 and project.count('"117"') == 3
 assert '("2.2.3", "Build 106:' in shared
 assert '("2.2.2", "Build 105:' in shared, "older changelog entries stay"
 print("v2.2.3 source contracts passed: L5 switch (default off, pinned), unchanged request path and TTL, toggle, Fast OCR switch, version")
