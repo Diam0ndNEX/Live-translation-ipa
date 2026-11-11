@@ -232,8 +232,13 @@ import Foundation
             precondition(loaded.translationModes?.counters["session_mode_trace_ring_overwritten"] == 37)
             precondition(loaded.translationModes?.distributions["session_hybrid_speculation_useful"]?.count == 3)
             precondition(loaded.translationModes?.counters["secret OCR text"] == nil)
-            let url = try await writer.exportCombinedReport([loaded], version: "2.0.0", build: 84,
-                runs: [meta(raw, changes: []).reportInfo])
+            // 2.5.0: a removed-mode (Hybrid) run is left out of combined reports, so the
+            // end-reason check uses a Low Latency run saved the same way.
+            let current = fullRun(mode: "lowLatency", seconds: 300, events: 50)
+            _ = saved(await store.save(meta: meta(current), snapshot: current))
+            let loadedCurrent = try await store.load(id: current.id).1
+            let url = try await writer.exportCombinedReport([loadedCurrent], version: "2.5.0", build: 118,
+                runs: [meta(current, changes: []).reportInfo])
             let report = try String(contentsOf: url, encoding: .utf8)
             precondition(report.contains("## 1. Sessions") && report.contains("captureStopped"),
                          "the report names the end reason of each run")
