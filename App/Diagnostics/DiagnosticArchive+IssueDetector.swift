@@ -81,7 +81,7 @@ enum DiagnosticIssueDetector {
             add("pip_enqueue_failure", "observed", failedEnqueues,
                 "The PiP renderer rejected one or more buffer enqueue attempts. A successful retry may have followed.")
         }
-        // 2.2.1 (D7, suspected): the old rule (P95 > max(1800, 2.5 x median)) never flagged Hybrid's 1.5 s tail.
+        // 2.2.1 (D7, suspected): the old rule (P95 > max(1800, 2.5 x median)) never flagged a 1.5 s tail.
         if let enqueue = session.distributions["enqueueLatencyMs"], enqueue.count >= 20,
            let median = enqueue.p50, median > 0,
            let p95 = enqueue.p95, p95 > max(1000, median * 2) {
@@ -92,43 +92,6 @@ enum DiagnosticIssueDetector {
            let median = enqueue.p50, median >= 1200 {
             add("enqueue_typical_latency", "suspected", enqueue.count,
                 "Typical OCR-to-PiP enqueue time is high, even if the slowest tail has improved.")
-        }
-        // Detect sustained expensive Hybrid recovery separately from physical
-        // overlap; the two values answer different performance questions.
-        let recovery = session.distributions["hybridOverlappedRecoveryMs"]
-        if let recovery, recovery.count >= 3,
-           let measured = recovery.p95 ?? recovery.p50, measured >= 1000 {
-            let statistic = recovery.p95 == nil ? "median" : "P95"
-            add("hybrid_slow_recovery", "observed", recovery.count,
-                "Hybrid full recovery \(statistic) is >=1000ms over \(recovery.count) observed samples. Percentiles below 20 samples are unavailable; these are service durations, not simultaneous model occupancy.")
-        }
-        // A confirmed Hybrid long tail can occur without an overlap-at-start
-        // flag, so examine all Hybrid confirmed calls separately as well.
-        if session.translationModes?.active == "hybridRecovery",
-           let confirmed = session.distributions["confirmedModelMs"],
-           confirmed.count >= 20, let tail = confirmed.p95, tail >= 1000 {
-            add("hybrid_confirmed_long_tail", "observed", confirmed.count,
-                "Hybrid confirmed-model P95 exceeds 1000ms with at least 20 measured calls. This does not by itself establish physical model contention.")
-        }
-        let fallbacks = session.translationModes?.counters["hybrid_default_fallback"] ?? 0
-        let recoveryDecisions = session.translationModes?.counters
-            .filter { $0.key.hasPrefix("recovery_decision_") }
-            .values.reduce(0, +) ?? 0
-        if fallbacks >= 3 && recoveryDecisions >= 6 &&
-           Double(fallbacks) / Double(recoveryDecisions) >= 0.25 {
-            add("hybrid_fallback_storm", "suspected", fallbacks,
-                "At least a quarter of the observed Hybrid recovery decisions needed Apple Default fallback. Verify fast-language assets and error events.")
-        }
-        let defaultDefault = session.translationModes?.counters["hybrid_default_default_overlap"] ?? 0
-        if defaultDefault > 0 {
-            add("hybrid_default_default_overlap", "observed", defaultDefault,
-                "A confirmed Apple Default request started while the speculative lane was also running Apple Default. Compare the confirmation time of these captions with the others.")
-        }
-        let observedOverlap = session.translationModes?.counters["hybrid_cross_strategy_overlap"] ?? 0
-        let measuredOverlap = session.distributions["hybridMeasuredOverlapMs"]?.count ?? 0
-        if observedOverlap >= 3 && measuredOverlap == 0 {
-            add("hybrid_missing_overlap_measurement", "observed", observedOverlap,
-                "Hybrid cross-strategy overlap was reported but no physical-overlap duration was measured. Inspect backend telemetry.")
         }
         return findings
     }

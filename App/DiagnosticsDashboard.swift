@@ -256,11 +256,14 @@ struct DiagnosticsBody: View {
     private var abSwitchLine: String {
         let on = [(TranslationHotPathAB.legacyConfirmedOwnLane, "Legacy own lane"),
                   (TranslationHotPathAB.refreshAvailabilityInBackground, "background language check"),
-                  (TranslationHotPathAB.hybridRelaxedBackoff, "Hybrid relaxed backoff"),
-                  (TranslationHotPathAB.hybridShorterGuard, "Hybrid shorter guard"),
                   (TranslationHotPathAB.independentHeartbeat, "independent capture heartbeat"),
-                  (TranslationHotPathAB.hybridPinnedBackend, "Hybrid pinned backend"),
-                  (TranslationHotPathAB.deferArmedSpeculation, "deferred early start")].filter { $0.0 }.map { $0.1 }
+                  (TranslationHotPathAB.deferArmedSpeculation, "deferred early start"),
+                  (TranslationHotPathAB.warmAtCaptureStart, "warm-up at capture start"),
+                  (TranslationHotPathAB.confirmationReadReasons, "extra-read reasons"),
+                  (TranslationHotPathAB.modelLengthBuckets, "length buckets"),
+                  (TranslationHotPathAB.trustedCaptionBand, "trusted caption band"),
+                  (TranslationHotPathAB.legacyHeadStart, "Legacy head start"),
+                  (TranslationHotPathAB.quietRewarm, "quiet re-warm")].filter { $0.0 }.map { $0.1 }
         return on.isEmpty ? "Test switches on: none." : "Test switches on: " + on.joined(separator: ", ") + "."
     }
 
@@ -286,7 +289,7 @@ struct DiagnosticsBody: View {
     }
 
     /// 2.3.2: how this session's captions reached PiP, with the same names the exported report uses.
-    /// Hybrid and Low Latency report `recovery_success`; Legacy reports the same situation as confirmed fresh.
+    /// Low Latency reports `recovery_success`; Legacy reports the same situation as confirmed fresh.
     private var enqueuePathCard: some View {
         let rows: [(String, String, Int)] = facts.system == .legacy
             ? [("Memory hit", "memory_hit", diag.enqueuePathCount("memory_hit")),

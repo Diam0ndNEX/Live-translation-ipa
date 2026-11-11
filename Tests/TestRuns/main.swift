@@ -174,13 +174,13 @@ import Foundation
         // 5. Migration from diagnostic_sessions rows (old pretty-printed payloads) -> imported runs, once.
         do {
             let store = TestRunStore(directory: tempDirectory())
-            let old = fullRun(mode: "hybridRecovery", seconds: 120)
+            let old = fullRun(mode: "lowLatency", seconds: 120)
             let payload = try await writer.encode(old)
             let imported = await store.migrate(payloads: [payload, Data("not json".utf8)])
             precondition(imported == 1)
             let runs = await store.index().runs
             precondition(runs.count == 1 && runs[0].completeness == "imported" && runs[0].mixedMode)
-            precondition(runs[0].mode == "hybridRecovery")
+            precondition(runs[0].mode == "lowLatency")
             let again = await store.migrate(payloads: [payload])
             precondition(again == 0, "migration runs once")
         }
@@ -221,18 +221,18 @@ import Foundation
         //    sessionSnapshot metric key survives redaction.
         do {
             let useful = DiagnosticDistribution([10, 20, 30])
-            let raw = fullRun(mode: "hybridRecovery", seconds: 300, events: 50,
-                modeCounters: ["hybrid_speculation_useful": 5, "mode_trace_ring_overwritten": 37, "secret OCR text": 999],
-                modeDistributions: ["hybrid_speculation_useful": useful, "unsafe_user_content": useful])
+            let raw = fullRun(mode: "lowLatency", seconds: 300, events: 50,
+                modeCounters: ["speculation_deferred_armed": 5, "mode_trace_ring_overwritten": 37, "secret OCR text": 999],
+                modeDistributions: ["backend_lane_wait_ms": useful, "unsafe_user_content": useful])
             let store = TestRunStore(directory: tempDirectory())
             _ = saved(await store.save(meta: meta(raw), snapshot: raw))
             let loaded = try await store.load(id: raw.id).1
-            precondition(loaded.translationModes?.counters["session_hybrid_speculation_useful"] == 5,
+            precondition(loaded.translationModes?.counters["session_speculation_deferred_armed"] == 5,
                          "session_* counters must survive the single sanitize")
             precondition(loaded.translationModes?.counters["session_mode_trace_ring_overwritten"] == 37)
-            precondition(loaded.translationModes?.distributions["session_hybrid_speculation_useful"]?.count == 3)
+            precondition(loaded.translationModes?.distributions["session_backend_lane_wait_ms"]?.count == 3)
             precondition(loaded.translationModes?.counters["secret OCR text"] == nil)
-            let url = try await writer.exportCombinedReport([loaded], version: "2.0.0", build: 84,
+            let url = try await writer.exportCombinedReport([loaded], version: "2.5.0", build: 118,
                 runs: [meta(raw, changes: []).reportInfo])
             let report = try String(contentsOf: url, encoding: .utf8)
             precondition(report.contains("## 1. Sessions") && report.contains("captureStopped"),

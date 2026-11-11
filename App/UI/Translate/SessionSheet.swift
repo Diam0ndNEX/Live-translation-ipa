@@ -71,7 +71,7 @@ struct SessionSheet: View {
                         }
                 }
                 Section {
-                    Button { router.present(.test) } label: { LensRow(title: "Test the three modes", symbol: "checklist") }
+                    Button { router.present(.test) } label: { LensRow(title: "Test both modes", symbol: "checklist") }
                     Button { router.go(.diagnostics) } label: { LensRow(title: "Open Diagnostics", symbol: "waveform.path.ecg") }
                 }
             }
@@ -126,7 +126,7 @@ struct TestSheet: View {
     var body: some View {
         NavigationStack {
             ScrollView { TestCard(diag: engine.diag, engine: engine).padding(KitSpace.margin) }
-                .navigationTitle("Test the three modes")
+                .navigationTitle("Test both modes")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } } }
         }

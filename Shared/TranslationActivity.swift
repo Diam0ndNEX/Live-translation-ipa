@@ -42,7 +42,6 @@ struct InitialWarmupPolicy {
     static func strategies(for system: TranslationSystem) -> [RequestedTranslationStrategy] {
         switch system {
         case .legacy: return []
-        case .hybridRecovery: return [.appleDefault, .lowLatency]
         case .lowLatency: return [.lowLatency]
         }
     }
@@ -280,12 +279,9 @@ struct TranslationActivity: Equatable {
         case "speculation_ready": title = "Early translation prepared"; detail = "Waiting for the source to be confirmed"; phase = .ready
         case "speculation_failed": title = "Waiting for confirmed text"; detail = "Early work failed; confirmed text can still be translated"; phase = .waiting
         case "speculation_match_unfinished": title = "Finishing matching early translation"; detail = "Checking the matching result before launching recovery"
-        case "hybrid_hedged_recovery": title = "Racing confirmed recovery"; detail = "Keeping the Apple Default request alive while Low Latency translates confirmed text"
-        case "hybrid_obsolete_speculation_draining": title = "Recovering corrected text"; detail = "Ignoring earlier text while preserving its warmed translation session"
         case "recovery_enqueue": title = "Waiting for confirmed translation resources"; detail = "Confirmed work is queued; model execution has not started yet"
         case "confirmed_model_submitted": title = "Translating confirmed text"; detail = "Working on the current confirmed source"
         case "same_strategy_retry": title = "Retrying translation"; detail = "The requested strategy is unchanged"
-        case "hybrid_default_fallback": title = "Trying Apple default fallback"; detail = "Low-latency recovery was unavailable or failed"
         case "pip_enqueue_memory_hit": title = "Saved translation reused"; detail = "Complete result sent to the floating window"; phase = .ready
         case "pip_enqueue_speculation_match_ready", "pip_enqueue_speculation_match_in_flight": title = "Early translation reused"; detail = "Confirmed result sent to the floating window"; phase = .ready
         case "display_failed": title = "Translation could not be displayed"; detail = "Check the floating window and capture controls"; phase = .attention

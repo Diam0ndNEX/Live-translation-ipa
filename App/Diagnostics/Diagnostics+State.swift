@@ -76,7 +76,7 @@ extension Diagnostics {
         legacyModeEvent(caption, reason: confirmed ? "confirmed" : "speculation_admitted")
     }
 
-    /// 2.3.1: Legacy counterpart of Hybrid's speculation_match_in_flight. Called when a confirmed caption arrives while
+    /// 2.3.1: Legacy counterpart of Low Latency's speculation_match_in_flight. Called when a confirmed caption arrives while
     /// the early translation of exactly that text is still running. Only tags the caption's diagnostics context.
     func noteLegacySpeculationInFlightMatch(candidate: String?) {
         guard enabled, modeActiveSystem == "legacy", let candidate else { return }
@@ -91,7 +91,7 @@ extension Diagnostics {
         // translation of the confirmed text; the only difference is that the caption's early text had changed.
         if context.fresh { reason = context.mismatch ? "pip_enqueue_fresh_text_changed" : "pip_enqueue_confirmed_fresh" }
         else if context.speculativeHit {
-            // 2.3.1: same two names Hybrid and Low Latency use for the same two situations.
+            // 2.3.1: same two names Low Latency uses for the same two situations.
             reason = context.speculationInFlight ? "pip_enqueue_speculation_match_in_flight" : "pip_enqueue_speculation_match_ready"
         }
         else { reason = "pip_enqueue_memory_hit" }

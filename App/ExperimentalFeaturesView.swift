@@ -21,7 +21,6 @@ struct ExperimentalFeaturesView: View {
     @EngineHandle private var engine
     @AppStorage("incrementalBatchRecovery") private var incrementalBatchRecovery = false
     @AppStorage("directPiPBuffer") private var directPiPBuffer = false
-    @AppStorage("hybridSwitchGuard") private var hybridSwitchGuard = true
     @AppStorage("pixelConfirmation") private var pixelConfirmation = true
     @AppStorage("eventDrivenOCR") private var eventDrivenOCR = true
     @AppStorage("fastOCR") private var fastOCR = false
@@ -29,18 +28,21 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("subtitleAwareChangeDetection") private var subtitleAwareChangeDetection = false
     @AppStorage("preserveRelatedMovieGroups") private var preserveRelatedMovieGroups = false
     // 2.2.1 (D13): run-time A/B variants. They are copied when a session starts, never changed mid-run.
-    @AppStorage("hybridSchedulerVariant") private var hybridSchedulerVariant = "evidenceBounded"
     @AppStorage("hotPathReuseLowLatencyPlan") private var hotPathReuseLowLatencyPlan = true
     @AppStorage("hotPathReuseLegacyUnits") private var hotPathReuseLegacyUnits = true
     @AppStorage("liveWarmupLegacy") private var liveWarmupLegacy = true
     // 2.2.3 (L5), default ON since 2.4.0. Pinned at session start like the other A/B variants.
     @AppStorage("backgroundAvailabilityRefresh") private var backgroundAvailabilityRefresh = true
-    // 2.4.0: both default ON; off gives the 2.3.9 behaviour.
-    @AppStorage("hybridPinnedBackend") private var hybridPinnedBackend = true
+    // 2.4.0: default ON; off gives the 2.3.9 behaviour.
     @AppStorage("deferArmedSpeculation") private var deferArmedSpeculation = true
-    // 2.2.3 (L3, L4): Hybrid-only, default OFF = current behaviour.
-    @AppStorage("hybridRelaxedBackoff") private var hybridRelaxedBackoff = false
-    @AppStorage("hybridShorterGuard") private var hybridShorterGuard = false
+    // 2.5.0 (items A to F and the quiet re-warm): all default ON; off gives the 2.4.0 behaviour.
+    @AppStorage("warmAtCaptureStart") private var warmAtCaptureStart = true
+    @AppStorage("reportStoredSessionTotals") private var reportStoredSessionTotals = true
+    @AppStorage("confirmationReadReasons") private var confirmationReadReasons = true
+    @AppStorage("modelLengthBuckets") private var modelLengthBuckets = true
+    @AppStorage("trustedCaptionBand") private var trustedCaptionBand = true
+    @AppStorage("legacyHeadStart") private var legacyHeadStart = true
+    @AppStorage("quietRewarm") private var quietRewarm = true
     @AppStorage("legacyConfirmedOwnLane") private var legacyConfirmedOwnLane = false
     @AppStorage("independentCaptureHeartbeat") private var independentCaptureHeartbeat = false
 
@@ -64,16 +66,12 @@ struct ExperimentalFeaturesView: View {
             }
             Section {
                 NavigationLink("Translation system") { TranslationSettings() }
-                Text("Pick Legacy, Hybrid or Low Latency in Settings > System, or on Translate.")
+                Text("Pick Legacy or Low Latency in Settings > System, or on Translate.")
                     .font(.footnote).foregroundStyle(.secondary)
                 ExperimentalOption(
                     title: "Incremental translation recovery",
                     explanation: "Keeps sentences that were already translated ahead of time, even if the rest of the batch was interrupted, so they can be reused. Never shows an unfinished caption.",
                     enabled: $incrementalBatchRecovery)
-                ExperimentalOption(
-                    title: "Hybrid model switch guard",
-                    explanation: "On (default): Hybrid avoids starting a second translation model while the first is busy or just finished. Turn off to compare with the older 1.9.9 behavior on the same video. Applies from the next subtitle.",
-                    enabled: $hybridSwitchGuard)
                 ExperimentalOption(
                     title: "Legacy shared session",
                     explanation: "On (default): Legacy reuses its already warmed-up translation session when it is free. Off: uses separate sessions like 1.9.9.",
@@ -137,11 +135,6 @@ struct ExperimentalFeaturesView: View {
             } header: { Text("Older optional experiments") }
 
             Section {
-                Picker("Hybrid scheduler", selection: $hybridSchedulerVariant) {
-                    Text("Evidence bounded (default)").tag("evidenceBounded")
-                    Text("Recovery first").tag("recoveryFirst")
-                    Text("Reference 1.9.5").tag("reference195")
-                }
                 ExperimentalOption(
                     title: "Reuse the Low Latency plan",
                     explanation: "On (default): Low Latency reuses the prepared plan for the same caption. Off prepares it again each time, for comparison.",
@@ -159,21 +152,9 @@ struct ExperimentalFeaturesView: View {
                     explanation: "On (default since 2.4.0): the language-pack check is refreshed in the background while nothing is translating, so a translation does not wait for it. Off: the check is repeated when a translation needs it after 30 seconds, as before 2.4.0. Same translations either way. Unverified effect.",
                     enabled: $backgroundAvailabilityRefresh)
                 ExperimentalOption(
-                    title: "Hybrid keeps one model",
-                    explanation: "Hybrid Recovery only. On (default): Hybrid stays on one model for a run of captions. It uses Low Latency when that language pack is installed and Apple Default when it is not, and does not go back and forth. New captions then use Low Latency wording. Off: as in 2.3.9, Apple Default for early work and Low Latency or Apple Default for recovery. In the 2.3.9 test the first call after a change of model took about one second. Unverified effect.",
-                    enabled: $hybridPinnedBackend)
-                ExperimentalOption(
                     title: "Wait for confirmation before early Apple Default work",
-                    explanation: "Legacy, and Hybrid while it uses Apple Default. On (default): when a new caption can be confirmed on the next frame, no early translation is started for it; the confirmed caption starts the translation. Off: an early translation is started for every first reading, as in 2.3.9. Same model and same text either way. Unverified effect.",
+                    explanation: "Legacy only. On (default): when a new caption can be confirmed on the next frame, no early translation is started for it; the confirmed caption starts the translation. Off: an early translation is started for every first reading, as in 2.3.9. Same model and same text either way. Unverified effect.",
                     enabled: $deferArmedSpeculation)
-                ExperimentalOption(
-                    title: "Hybrid relaxed backoff",
-                    explanation: "Hybrid Recovery only. Off (default): after repeated unused early Apple Default work, the next 8 early requests are skipped. On: 4 are skipped, so early work resumes sooner. Same Apple Default text, but more unused calls may compete with confirmed ones. Unverified effect.",
-                    enabled: $hybridRelaxedBackoff)
-                ExperimentalOption(
-                    title: "Hybrid shorter switch guard",
-                    explanation: "Hybrid Recovery only. Off (default): Low Latency recovery waits until 1.5 s after an Apple Default call, with a 220 ms settling wait. On: 1.0 s and 120 ms. Same models and text; a slow 900 ms recovery may return. Unverified effect.",
-                    enabled: $hybridShorterGuard)
                 ExperimentalOption(
                     title: "Legacy confirmed own lane",
                     explanation: "Legacy mode, iOS 26 and later. Off (default): when a caption is confirmed while a different early translation is still running, the confirmed one waits for the early one to stop. On: it starts right away on its own session, so two Apple Default calls can run at once and may slow each other. Same text. Unverified effect.",
@@ -184,6 +165,39 @@ struct ExperimentalFeaturesView: View {
                     enabled: $independentCaptureHeartbeat)
             } header: { Text("A/B test variants") } footer: {
                 Text("For comparing builds on the same video. A change applies from the next session, never during one. Each run's report names the variant it used.")
+            }
+
+            Section {
+                ExperimentalOption(
+                    title: "Warm up when capture starts",
+                    explanation: "Both modes. On (default): one short practice translation runs when capture starts, so the first caption does not wait for the model to load. Its result is thrown away. Off: the model loads with the first caption, as in 2.4.0. Same captions and wording either way. UNVERIFIED effect.",
+                    enabled: $warmAtCaptureStart)
+                ExperimentalOption(
+                    title: "Trusted caption band",
+                    explanation: "Low Latency only. CHANGES WHAT IS READ. On (default): once captions have appeared in the same band of the screen, a new caption is read in that band only, without reading the whole area again. Text outside the band is found up to 0.75 s later. Off: every new caption is read in the whole area, as in 2.4.0. Turn off if captions are missed, cut short or flicker. UNVERIFIED effect.",
+                    enabled: $trustedCaptionBand)
+                ExperimentalOption(
+                    title: "Legacy head start",
+                    explanation: "Legacy only. CHANGES WHAT IS READ WHEN. On (default): a quick first read of a new caption may start its translation while the normal read is still running. The normal read still decides what is shown. It is used only while the quick read keeps matching the confirmed text, and stops by itself when it does not. Off: the translation starts after the normal read, as in 2.4.0. Turn off if Legacy gets slower. UNVERIFIED effect.",
+                    enabled: $legacyHeadStart)
+                ExperimentalOption(
+                    title: "Re-warm after a quiet stretch",
+                    explanation: "Low Latency only. On (default): after 15 seconds without a caption, at most once a minute, one short practice translation keeps the model ready. Its result is thrown away. Off: no practice translations during capture, as in 2.4.0. Same captions and wording. UNVERIFIED effect; may use a little more battery.",
+                    enabled: $quietRewarm)
+                ExperimentalOption(
+                    title: "Report: reasons for extra reads",
+                    explanation: "All modes, Diagnostics only. On (default): when a caption needed another read before it was confirmed, the report says why (fixed codes, no text). Off: not recorded, as in 2.4.0.",
+                    enabled: $confirmationReadReasons)
+                ExperimentalOption(
+                    title: "Report: model time by caption length",
+                    explanation: "All modes, Diagnostics only. On (default): translation times are also grouped by how many characters were translated (a number, no text). Off: not recorded, as in 2.4.0.",
+                    enabled: $modelLengthBuckets)
+                ExperimentalOption(
+                    title: "Report: keep totals of saved runs",
+                    explanation: "Diagnostics only. On (default): a report made from a saved run keeps its whole-session totals, for example early starts deferred. Off: those totals read 0 for saved runs, as in 2.4.0 (a fault, kept only for comparison).",
+                    enabled: $reportStoredSessionTotals)
+            } header: { Text("New in 2.5.0") } footer: {
+                Text("All on by default and not measured yet. A change applies from the next session. Each run's report names the switches that were on.")
             }
 
             Section {
@@ -200,13 +214,15 @@ struct ExperimentalFeaturesView: View {
             } header: { Text("Always on") }
 
             ResetSection(keys: [
-                "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard",
+                "incrementalBatchRecovery", "directPiPBuffer",
                 "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
                 "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
                 "adaptiveConfirmation", "confirmationDeadline", "continuousRotation",
-                "hybridSchedulerVariant", "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy",
-                "backgroundAvailabilityRefresh", "hybridRelaxedBackoff", "hybridShorterGuard", "legacyConfirmedOwnLane", "independentCaptureHeartbeat",
-                "hybridPinnedBackend", "deferArmedSpeculation"
+                "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy",
+                "backgroundAvailabilityRefresh", "legacyConfirmedOwnLane", "independentCaptureHeartbeat",
+                "deferArmedSpeculation",
+                "warmAtCaptureStart", "reportStoredSessionTotals", "confirmationReadReasons", "modelLengthBuckets",
+                "trustedCaptionBand", "legacyHeadStart", "quietRewarm"
             ])
         }
         .settingsPage("Experimental features")

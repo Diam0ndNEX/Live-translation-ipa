@@ -27,10 +27,10 @@ archive = read("App/DiagnosticArchive.swift")
 memory = read_source("TranslationMemoryStore")
 workflow = read(".github/workflows/build.yml")
 
-assert 'static let version = "2.4.0"' in shared
-assert "static let build = 117" in shared
-assert project.count('"2.4.0"') == 3
-assert project.count('"117"') == 3
+assert 'static let version = "2.5.0"' in shared
+assert "static let build = 118" in shared
+assert project.count('"2.5.0"') == 3
+assert project.count('"118"') == 3
 
 assert "SCREENLINGO_REFERENCE_CAPTURE_CADENCE" in capture
 assert "SubtitleAcquisitionPolicy.allowsEarlyVisualWake" in capture
@@ -43,20 +43,14 @@ assert "visualWakeWindowCount += 1" in capture
 assert "visualWakeCount += 1" in capture
 assert "recognize(pb, orientation, cfg, edge: plan.edge)" in capture
 assert "earlyVisualWakes: visualWakeCount" in capture
-assert "static func physicalDrainBudget" in coordinator
-assert "postDefaultSettlement" in coordinator
-assert "SCREENLINGO_REFERENCE_HYBRID_EXIT_SETTLING" in coordinator
-assert "hybrid_post_default_settlement_wait_ms" in service
-assert "hybrid_previous_default_exit_gap_ms" in service
-assert "hybrid_slow_post_default_ms" in service
+# 2.5.0 (changed with the code): Hybrid Recovery was removed, so the 1.9.9 Hybrid drain, settling wait and hedge
+# invariants that stood here and below have nothing left to pin. What they pinned must now be absent.
+assert "physicalDrainBudget" not in coordinator and "postDefaultSettlement" not in coordinator
+assert '"hybrid_' not in coordinator and "hybrid_" not in service
 assert "let availabilityKey = languagePairKey" in service
 assert "lane.lastFinishedPair = languagePairKey" in service
 assert "mayProbeEarlyInWindow" in acquisition
 assert "visualWakeWindowCount" in capture
-assert "hybrid_physical_default_drain_wait_ms" in service
-assert "hybrid_default_drain_completed" in service
-assert "hybrid_default_drain_budget_exceeded" in service
-assert "return max(0, proposed)" in coordinator
 assert "discardPendingSpeculation" in engine
 assert "legacy_queued_speculation_superseded" in engine
 assert "lastVisualWakeProbe = .distantPast" in capture
@@ -82,15 +76,7 @@ assert "verifiedConfirmedMemory" in coordinator
 assert "verified.caption == caption" in coordinator
 assert "verified.hits.count == caption.units.count" in coordinator
 assert "confirmed_memory_probe_reused" in coordinator
-assert "physicalDrainBudget" in coordinator
-assert "hybrid_unsubmitted_hedge_ms" in coordinator
-assert "hybridVariant" in coordinator
-assert "hybrid_default_fallback" in coordinator
-assert "maySubmitDefaultAfterAvailability" in service
-assert "hybrid_previous_default_exit_gap_ms" in service
-assert "hybrid_recovery_post_default_service_ms" in service
-assert "hybrid_recovery_no_recent_overlap_service_ms" in service
-assert "hybrid_unexplained_slow_recovery_ms" in service
+assert "hybridVariant" not in coordinator and "maySubmitDefaultAfterAvailability" not in service
 assert "lane.sharedDefaultLease.requestCancellation()" in service
 
 for flag in (
@@ -104,7 +90,7 @@ assert "ThermalPerformancePolicy.automaticPressure" in capture
 assert "ThermalPerformancePolicy.automaticPressure" in engine
 assert "mode_trace_ring_overwritten" in archive
 assert "earlyVisualWakes" in archive
-assert "hybrid_unsubmitted_hedge_ms" in archive
+assert "hybrid_unsubmitted_hedge_ms" not in archive
 assert "legacyAdaptiveLowYieldSkips" in archive
 assert "CREATE TABLE" in memory
 assert "codex/screenlingo-v1.9.9-recovery-evidence" in workflow
@@ -114,4 +100,4 @@ assert "Verify v1.9.9 recovery and OCR regression contract" in workflow
 print("v1.9.9 nominal/fair, custom preset, exact-lane and A/B wiring contract passed")
 
 assert "            (cfg.skipUnchanged ?? true) &&\n            SubtitleAcquisitionPolicy.allowsEarlyVisualWake(" not in capture
-print("v1.9.9 skip-independent early wake and bounded Hybrid drain source invariants passed")
+print("v1.9.9 skip-independent early wake source invariants passed (the Hybrid drain invariants ended with the mode in 2.5.0)")

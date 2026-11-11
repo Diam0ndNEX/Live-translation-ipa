@@ -38,7 +38,6 @@ enum TestRunText {
     static func modeTitle(_ mode: String) -> String {
         switch mode {
         case "legacy": return "Legacy"
-        case "hybridRecovery": return "Hybrid"
         case "lowLatency": return "Low Latency"
         default: return "Unknown mode"
         }
@@ -46,7 +45,6 @@ enum TestRunText {
     static func modeIcon(_ mode: String) -> String {
         switch mode {
         case "legacy": return "clock.arrow.circlepath"
-        case "hybridRecovery": return "arrow.triangle.merge"
         case "lowLatency": return "bolt"
         default: return "questionmark.circle"
         }
@@ -63,7 +61,8 @@ enum TestRunText {
         case .writeFailed: return "the file could not be written"
         }
     }
-    static let modes = ["legacy", "hybridRecovery", "lowLatency"]
+    /// 2.5.0: the modes a test compares.
+    static let modes = ["legacy", "lowLatency"]
 }
 
 private struct RunBadges: View {

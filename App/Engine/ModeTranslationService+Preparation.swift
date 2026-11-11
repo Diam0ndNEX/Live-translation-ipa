@@ -2,19 +2,6 @@ import Foundation
 import Translation
 
 extension ModeTranslationService {
-    /// For the v2.0.0 Hybrid switch guard: 0 while any lane runs a real Apple
-    /// Default call, otherwise milliseconds since the last Default call for
-    /// this pair returned, or nil when none is recorded. Logical lane state,
-    /// not proof of Apple's physical model residency.
-    func appleDefaultGapMs(source: String, target: String) -> Double? {
-        for lane in [speculative, confirmed, warmupLane]
-            where lane.busy && lane.requestedStrategy == .appleDefault { return 0 }
-        if hostedTask != nil { return 0 }
-        guard let returned = lastAppleDefaultReturn[Self.pairKey(source, target)] else { return nil }
-        let gap = (ProcessInfo.processInfo.systemUptime - returned) * 1000
-        return gap.isFinite && gap >= 0 ? gap : nil
-    }
-
     func cancel(speculation: Bool) {
         let lane = speculation ? speculative : confirmed
         if hostedIsSpeculative == speculation {
@@ -58,8 +45,6 @@ extension ModeTranslationService {
             if #available(iOS 26.0, *) { lane.session?.cancel() }
             lane.invalidated = true
             if let id = lane.activityID { activity.advance(id, to: .cancelling) }
-            if #available(iOS 26.0, *) { lane.spareSession?.cancel() }
-            lane.spareSession = nil; lane.spareKey = ""; lane.spareCreatedAt = nil
             if !lane.busy {
                 lane.session = nil; lane.key = ""
                 lane.createdAt = nil; lane.completedCalls = 0
@@ -70,7 +55,10 @@ extension ModeTranslationService {
     }
 
     /// Once per pair/strategy/process. Output is discarded here and never reaches the coordinator.
-    func warmInitially(source: String, target: String, system: TranslationSystem, testMode: String, samples: [String]) async -> Int? {
+    /// `repeatable` (2.5.0, item A): the warm-up at capture start and after a quiet stretch runs again even when
+    /// this pair was already warmed earlier in the process.
+    func warmInitially(source: String, target: String, system: TranslationSystem, testMode: String, samples: [String],
+                       repeatable: Bool = false) async -> Int? {
         guard #available(iOS 26.4, *), !samples.isEmpty, !warmupLane.busy,
               !speculative.busy, !confirmed.busy else { return nil }
         let revision = generation
@@ -79,7 +67,7 @@ extension ModeTranslationService {
         for strategy in InitialWarmupPolicy.strategies(for: system) {
             guard !Task.isCancelled, generation == revision, !warmupLane.busy,
                   !speculative.busy, !confirmed.busy else { return nil }
-            guard warmupPolicy.claim(source: source, target: target, strategy: strategy) else {
+            guard repeatable || warmupPolicy.claim(source: source, target: target, strategy: strategy) else {
                 warmupSkipDescription = warmupPolicy.skippedReason(source: source, target: target, strategy: strategy)
                 continue
             }
@@ -95,7 +83,7 @@ extension ModeTranslationService {
                 return completedStrategies > 0 ? completedStrategies : nil
             }
             // Promote only an actual successful idle session, never an abandoned handle.
-            let destination = system == .hybridRecovery && strategy == .lowLatency ? confirmed : speculative
+            let destination = speculative
             guard !destination.busy, let session = warmupLane.session else {
                 warmupPolicy.finish(source: source, target: target, strategy: strategy, succeeded: false)
                 return completedStrategies > 0 ? completedStrategies : nil
@@ -125,35 +113,28 @@ extension ModeTranslationService {
         let preparation = preparationRevision
         guard #available(iOS 26.4, *) else {
             progress?(.unavailable)
-            return system == .hybridRecovery ? "Fast recovery needs iOS 26.4; Apple default fallback remains available" : "Explicit low latency requires iOS 26.4 or later"
+            return "Explicit low latency requires iOS 26.4 or later"
         }
         let revision = generation
         let src = Locale.Language(identifier: source), dst = Locale.Language(identifier: target)
         progress?(.checkingLanguages)
         let lowState = await LanguageAvailability(preferredStrategy: .lowLatency).status(from: src, to: dst)
-        let defaultState = system == .hybridRecovery ?
-            await LanguageAvailability().status(from: src, to: dst) : .unsupported
         guard revision == generation, preparation == preparationRevision, !Task.isCancelled else {
             return "Preparation superseded"
         }
         let lowInstalled = lowState == .installed
-        let defaultInstalled = defaultState == .installed
-        guard lowInstalled || (system == .hybridRecovery && defaultInstalled) else {
+        guard lowInstalled else {
             progress?(.languagesUnavailable)
             return lowState == .unsupported ?
-                "Low Latency does not support this pair; check Apple Default in Languages." :
+                "Low Latency does not support this pair. Choose Legacy for it." :
                 "The required language pack is not installed. Open Languages for this pair."
         }
         progress?(.languagesInstalled)
         progress?(.creatingSessions)
         activity.advance(activityID, to: .preparingSessions)
         let pair = "\(src.minimalIdentifier)>\(dst.minimalIdentifier)|"
-        // 2.4.0: pinned Hybrid sends early work to Low Latency when its pack is installed, so that is the session
-        // to prepare on the speculative lane.
-        let pinnedFast = system == .hybridRecovery && TranslationHotPathAB.hybridPinnedBackend && lowInstalled
-        let speculativeStrategy: RequestedTranslationStrategy =
-            (system == .lowLatency || pinnedFast) ? .lowLatency : .appleDefault
-        let speculativeInstalled = speculativeStrategy == .lowLatency ? lowInstalled : defaultInstalled
+        let speculativeStrategy = RequestedTranslationStrategy.lowLatency
+        let speculativeInstalled = lowInstalled
         if lowInstalled && !confirmed.busy {
             install(confirmed, source: src, target: dst, strategy: .lowLatency)
         }
@@ -174,14 +155,8 @@ extension ModeTranslationService {
         let speculativeReady = !speculative.invalidated &&
             speculative.key == pair + speculativeStrategy.rawValue &&
             speculative.session === speculativeSession && speculativeSessionReady
-        let ready = system == .hybridRecovery ? (speculativeReady || confirmedReady) : (speculativeReady && confirmedReady)
+        let ready = speculativeReady && confirmedReady
         progress?(ready ? .sessionsReady : .sessionsWaiting)
-        if ready && system == .hybridRecovery && !lowInstalled {
-            return "Apple Default ready. Fast Low Latency recovery needs its language pack; translation can continue."
-        }
-        if ready && system == .hybridRecovery && !defaultInstalled {
-            return "Low Latency ready. Apple Default needs its language pack; translation can continue."
-        }
         return ready ? "Languages and sessions ready; model residency unmeasured" :
             "Languages installed; waiting for valid session resources"
     }
@@ -191,29 +166,6 @@ extension ModeTranslationService {
                          strategy: RequestedTranslationStrategy) {
         let key = "\(source.minimalIdentifier)>\(target.minimalIdentifier)|\(strategy.rawValue)"
         guard lane.session == nil || lane.key != key || lane.invalidated else { return }
-        if lane === confirmed {
-            let pair = "\(source.minimalIdentifier)>\(target.minimalIdentifier)|"
-            // A spare for another language pair is never reused.
-            if lane.spareSession != nil && !lane.spareKey.hasPrefix(pair) {
-                lane.spareSession?.cancel()
-                lane.spareSession = nil; lane.spareKey = ""; lane.spareCreatedAt = nil
-            }
-            let outgoing = !lane.invalidated && lane.key.hasPrefix(pair) ? lane.session : nil
-            let outgoingKey = lane.key, outgoingCreated = lane.createdAt
-            if lane.spareKey == key, let spare = lane.spareSession {
-                // H3: reuse the idle session of the requested strategy.
-                lane.session = spare; lane.key = key; lane.invalidated = false
-                lane.createdAt = lane.spareCreatedAt
-                lane.spareSession = outgoing; lane.spareKey = outgoing == nil ? "" : outgoingKey
-                lane.spareCreatedAt = outgoing == nil ? nil : outgoingCreated
-                lane.completedCalls = 0
-                return
-            }
-            if let outgoing {
-                lane.spareSession?.cancel()
-                lane.spareSession = outgoing; lane.spareKey = outgoingKey; lane.spareCreatedAt = outgoingCreated
-            }
-        }
         if strategy == .lowLatency {
             guard #available(iOS 26.4, *) else { return }
             lane.session = TranslationSession(installedSource: source, target: target, preferredStrategy: .lowLatency)

@@ -54,7 +54,7 @@ struct TestCard: View {
             }
             // Mode · Median · P95 · Captions, newest run per mode (§13.5.4).
             VStack(alignment: .leading, spacing: KitSpace.tight) {
-                Text("Three systems, same content").font(.headline)
+                Text("Two systems, same content").font(.headline)
                 Grid(alignment: .leading, horizontalSpacing: KitSpace.row, verticalSpacing: KitSpace.tight) {
                     GridRow {
                         Text("Mode"); Text("Median"); Text("P95"); Text("Captions")

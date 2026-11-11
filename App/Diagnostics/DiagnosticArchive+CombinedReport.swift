@@ -70,7 +70,6 @@ enum CombinedDiagnosticReport {
         var origin = ""
         var strategy = ""
         var recoveryStrategy = ""
-        var guardGapMs: Double?
     }
 
     struct DecisionRow {
@@ -86,39 +85,9 @@ enum CombinedDiagnosticReport {
         var captions: [CaptionRow] = []
         var decisions: [DecisionRow] = []
         var fingerprints = Set<String>()
-        /// 2.2.1 (D9): per caption ref, the gap since the previous Default call ended and whether Low Latency
-        /// started while a Default call was still running. Both come from events that already exist.
-        var exitGaps: [String: Double] = [:]
-        var overlapped = Set<String>()
     }
 
-    /// 2.2.1 (D9): bands for the Hybrid question "does the Low Latency recovery cost more right after Default?".
-    static let hybridBandNames = ["in flight", "0-150 ms", "150-500 ms", "500-1500 ms", "none/older"]
-
-    static func hybridBand(overlapped: Bool, gapMs: Double?) -> String {
-        if overlapped { return "in flight" }
-        guard let gap = gapMs, gap >= 0 else { return "none/older" }
-        if gap < 150 { return "0-150 ms" }
-        if gap < 500 { return "150-500 ms" }
-        if gap < 1500 { return "500-1500 ms" }
-        return "none/older"
-    }
-
-    /// Low Latency confirmed-lane service time per band, paired by caption.
-    static func hybridBands(_ parsed: Parsed) -> [(band: String, n: Int, median: Double?, max: Double?)] {
-        let calls = parsed.calls.filter { $0.lane == "confirmed" && $0.strategy == "lowLatency" }
-        var byBand: [String: [Double]] = [:]
-        for call in calls {
-            let band = hybridBand(overlapped: parsed.overlapped.contains(call.caption), gapMs: parsed.exitGaps[call.caption])
-            byBand[band, default: []].append(call.serviceMs)
-        }
-        return hybridBandNames.map { name in
-            let values = byBand[name] ?? []
-            return (name, values.count, median(values), values.max())
-        }
-    }
-
-    /// Rebuild model calls, caption timelines and Hybrid decisions from the
+    /// Rebuild model calls, caption timelines and recovery decisions from the
     /// bounded mode trace. Times are milliseconds from the first trace time.
     static func parse(_ report: TranslationModeReport?, label: String) -> Parsed {
         var parsed = Parsed()
@@ -178,16 +147,6 @@ enum CombinedDiagnosticReport {
                     serviceMs: service, queueMs: call.queueMs, warm: call.warm, caption: ref))
             case "confirmed":
                 if row.confirmedMs == nil { row.confirmedMs = t }
-            case "hybrid_previous_default_exit_gap_ms":
-                if let gap = event.durationMs { parsed.exitGaps[ref] = gap }
-            case "hybrid_cross_strategy_overlap":
-                parsed.overlapped.insert(ref)
-            case "hybrid_switch_guard_default":
-                row.recoveryStrategy = "appleDefault"; row.guardGapMs = event.durationMs
-            case "hybrid_switch_guard_low_latency":
-                row.recoveryStrategy = "lowLatency"; row.guardGapMs = event.durationMs
-            case "hybrid_no_fast_pack_fallback":
-                row.recoveryStrategy = "appleDefault"
             case "recovery_enqueue":
                 if row.recoveryStrategy.isEmpty { row.recoveryStrategy = requested[event.caption] ?? "" }
             default:
@@ -203,7 +162,7 @@ enum CombinedDiagnosticReport {
                     if row.pipMs == nil { row.pipMs = t }
                 }
             }
-            if reason.hasPrefix("hybrid_") || reason.hasPrefix("recovery_decision_") {
+            if reason.hasPrefix("recovery_decision_") {
                 parsed.decisions.append(DecisionRow(session: label, caption: ref, timeMs: t,
                                                     reason: reason, valueMs: event.durationMs))
             }
@@ -223,7 +182,8 @@ enum CombinedDiagnosticReport {
 
     static func markdown(_ sessions: [DiagnosticSessionExport], version: String, build: Int,
                          generatedAt: Date, runs: [RunReportInfo] = []) -> String {
-        let selected = Array(sessions.sorted { $0.startedAt < $1.startedAt }.prefix(maximumSessions))
+        let ordered = sessions.sorted { $0.startedAt < $1.startedAt }
+        let selected = Array(ordered.prefix(maximumSessions))
         let labels = selected.indices.map { "S\($0 + 1)" }
         let parsed = selected.indices.map { parse(selected[$0].translationModes, label: labels[$0]) }
         var out: [String] = []
@@ -234,8 +194,8 @@ enum CombinedDiagnosticReport {
         out.append("")
         out.append("## 1. Sessions")
         out.append("")
-        out.append("| | mode | started | min | device | iOS | pair | preset | speed | memory | RAM at start | rapid/join/focus | switch guard | pixel/watch/fast OCR |")
-        out.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
+        out.append("| | mode | started | min | device | iOS | pair | preset | speed | memory | RAM at start | rapid/join/focus | pixel/watch/fast OCR |")
+        out.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         for (i, session) in selected.enumerated() {
             let s = session.settings
             let pair = session.translationModes?.events.first.map { "\($0.source)>\($0.target)" } ??
@@ -244,7 +204,7 @@ enum CombinedDiagnosticReport {
             let ram = Int(s["startingRAMEntries"] ?? "") ?? 0
             let switches = ["effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus"]
                 .map { s[$0] ?? "?" }.joined(separator: "/")
-            out.append("| \(labels[i]) | \(session.translationModes?.active ?? "unknown") | \(session.startedAt.ISO8601Format()) | \(String(format: "%.1f", minutes)) | \(session.hardwareModel ?? "?") | \(session.systemVersion) | \(pair) | \(s["mode"] ?? "?") | \(s["speed"] ?? "?") | \(s["translationTestMode"] ?? "?") | \(ram)\(ram > 0 ? " ⚠️" : "") | \(switches) | \(s["hybridSwitchGuard"] ?? "default") | \(s["pixelConfirmation"] ?? "-")/\(s["eventDrivenOCR"] ?? "-")/\(s["fastOCR"] ?? "-") |")
+            out.append("| \(labels[i]) | \(session.translationModes?.active ?? "unknown") | \(session.startedAt.ISO8601Format()) | \(String(format: "%.1f", minutes)) | \(session.hardwareModel ?? "?") | \(session.systemVersion) | \(pair) | \(s["mode"] ?? "?") | \(s["speed"] ?? "?") | \(s["translationTestMode"] ?? "?") | \(ram)\(ram > 0 ? " ⚠️" : "") | \(switches) | \(s["pixelConfirmation"] ?? "-")/\(s["eventDrivenOCR"] ?? "-")/\(s["fastOCR"] ?? "-") |")
         }
         if !runs.isEmpty {
             // Run facts (v2.0.0 build 84): metadata only, matched to sessions by id.
@@ -277,18 +237,18 @@ enum CombinedDiagnosticReport {
 
         // 2.2.1 (D8): the variables the next A/B tests change, and a warning for sessions with no timing.
         out.append("")
-        out.append("| | hot path | Hybrid scheduler | detailed | thermal start/end/max | focused/strict | identical-frame holds | manual | memory wait P50/P95 | health P50/P95 | memory timeouts | switches on |")
-        out.append("|---|---|---|---|---|---|---|---|---|---|---|---|")
+        out.append("| | hot path | detailed | thermal start/end/max | focused/strict | identical-frame holds | manual | memory wait P50/P95 | health P50/P95 | memory timeouts | switches on |")
+        out.append("|---|---|---|---|---|---|---|---|---|---|---|")
         for (i, session) in selected.enumerated() {
             let s = session.settings
             // 2.3.0: these keys are written only when ON, so a missing key means OFF. Names the 2.2.3 switches that were on.
             let armsOn = [("legacyOwnLaneAB", "Legacy own lane"), ("availabilityRefreshAB", "background language check"),
-                          ("hybridBackoffAB", "Hybrid relaxed backoff"), ("hybridGuardAB", "Hybrid shorter guard"),
-                          ("heartbeatAB", "independent capture heartbeat"),
-                          ("hybridPinAB", "Hybrid pinned backend"), ("armedDeferAB", "deferred early start")]
+                          ("heartbeatAB", "independent capture heartbeat"), ("armedDeferAB", "deferred early start")]
                 .filter { s[$0.0] == "on" }.map { $0.1 }
-            let armsText = armsOn.isEmpty ? "none" : armsOn.joined(separator: ", ")
-            out.append("| \(labels[i]) | \(s["hotPathAB"] ?? "?") | \(s["hybridSchedulerAB"] ?? "?") | \(s["detailedCollection"] ?? "?")\(s["detailSuspended"] == "true" ? " (suspended: thermal)" : "") | \(s["thermalStart"] ?? "?")/\(s["thermalEnd"] ?? "?")/\(s["thermalMax"] ?? "?") | \(s["focusedCaptionOCR"] ?? "?")/\(s["strictCaptionIdentity"] ?? "?") | \(session.counters["identicalFrameHolds", default: 0]) | \(session.counters["manualTranslations", default: 0]) | \(ms(session.distributions["memoryLookupWaitMs"]?.p50))/\(ms(session.distributions["memoryLookupWaitMs"]?.p95)) | \(ms(session.distributions["memoryHealthMs"]?.p50))/\(ms(session.distributions["memoryHealthMs"]?.p95)) | \(memoryTimeoutShare(session)) | \(armsText) |")
+            // 2.5.0: items A to F and the quiet re-warm (default on; a run saved before 2.5.0 has none).
+            let v250On = TranslationHotPathAB.v250ReportLabels.filter { s[$0.key] == "on" }.map { $0.label }
+            let armsText = (armsOn + v250On).isEmpty ? "none" : (armsOn + v250On).joined(separator: ", ")
+            out.append("| \(labels[i]) | \(s["hotPathAB"] ?? "?") | \(s["detailedCollection"] ?? "?")\(s["detailSuspended"] == "true" ? " (suspended: thermal)" : "") | \(s["thermalStart"] ?? "?")/\(s["thermalEnd"] ?? "?")/\(s["thermalMax"] ?? "?") | \(s["focusedCaptionOCR"] ?? "?")/\(s["strictCaptionIdentity"] ?? "?") | \(session.counters["identicalFrameHolds", default: 0]) | \(session.counters["manualTranslations", default: 0]) | \(ms(session.distributions["memoryLookupWaitMs"]?.p50))/\(ms(session.distributions["memoryLookupWaitMs"]?.p95)) | \(ms(session.distributions["memoryHealthMs"]?.p50))/\(ms(session.distributions["memoryHealthMs"]?.p95)) | \(memoryTimeoutShare(session)) | \(armsText) |")
         }
         for (i, session) in selected.enumerated() where (session.distributions["enqueueLatencyMs"]?.count ?? 0) == 0 {
             out.append("")
@@ -321,18 +281,54 @@ enum CombinedDiagnosticReport {
             }
         }
 
-        // 2.4.0: what the new switches did and what a confirmation needed. Counts are whole-session totals.
+        // 2.4.0 and 2.5.0: what the switches did and what a confirmation needed. Counts are whole-session totals.
+        func pair(_ d: [String: DiagnosticDistribution], _ name: String) -> String { "\(ms(d[name]?.p50))/\(ms(d[name]?.p95))" }
+        func timed(_ d: [String: DiagnosticDistribution], _ name: String) -> String {
+            guard let v = d[name], v.count > 0 else { return "0" }
+            return "\(v.count) (\(ms(v.p50)) ms)"
+        }
         out.append("")
-        out.append("2.4.0 paths and capture (counts; reads and waits as P50/P95):")
+        out.append("Paths and capture (counts; reads and waits as P50/P95):")
         out.append("")
-        out.append("| | early starts deferred | model changes to LL / to Default | pinned recoveries LL / Default | focused reads repeated | confirmations with a pixel rejection | OCR reads per confirmation | frame wait after OCR ms | overlap of confirmed Legacy calls ms |")
-        out.append("|---|---|---|---|---|---|---|---|---|")
+        out.append("| | early starts deferred | focused reads repeated | trusted band reads | confirmations with a pixel rejection | OCR reads per confirmation | frame wait after OCR ms | overlap of confirmed Legacy calls ms |")
+        out.append("|---|---|---|---|---|---|---|---|")
         for (i, session) in selected.enumerated() {
             let m = session.translationModes?.counters ?? [:]
             let c = session.counters
             let d = session.distributions
-            func pair(_ name: String) -> String { "\(ms(d[name]?.p50))/\(ms(d[name]?.p95))" }
-            out.append("| \(labels[i]) | \(m["session_speculation_deferred_armed", default: 0]) | \(m["session_hybrid_model_switch_low_latency", default: 0]) / \(m["session_hybrid_model_switch_default", default: 0]) | \(m["session_hybrid_pin_low_latency", default: 0]) / \(m["session_hybrid_pin_default", default: 0]) | \(c["focusRediscoveries", default: 0]) | \(c["confirmedWithPixelRejection", default: 0]) | \(pair("confirmationOCRReads")) | \(pair("confirmationFrameWaitMs")) | \(pair("legacyConfirmedOverlapMs")) |")
+            out.append("| \(labels[i]) | \(m["session_speculation_deferred_armed", default: 0]) | \(c["focusRediscoveries", default: 0]) | \(c["trustedBandReads", default: 0]) | \(c["confirmedWithPixelRejection", default: 0]) | \(pair(d, "confirmationOCRReads")) | \(pair(d, "confirmationFrameWaitMs")) | \(pair(d, "legacyConfirmedOverlapMs")) |")
+        }
+        out.append("")
+        out.append("Warm-up and Legacy head start (2.5.0; warm-ups as count and median ms):")
+        out.append("")
+        out.append("| | warm-ups at capture start | quiet re-warms | fast passes | fast pass P50/P95 ms | head starts sent | fast pass right | fast pass wrong |")
+        out.append("|---|---|---|---|---|---|---|---|")
+        for (i, session) in selected.enumerated() {
+            let c = session.counters
+            let d = session.distributions
+            out.append("| \(labels[i]) | \(timed(d, "captureStartWarmupMs")) | \(timed(d, "quietRewarmMs")) | \(c["headStartPrePasses", default: 0]) | \(pair(d, "headStartPrePassMs")) | \(c["headStartSent", default: 0]) | \(c["headStartConfirmed", default: 0]) | \(c["headStartMissed", default: 0]) |")
+        }
+        out.append("")
+        out.append("Why a confirmation needed another OCR read (2.5.0; whole-session counts):")
+        out.append("")
+        out.append("| | " + V250Names.extraReadLabels.joined(separator: " | ") + " |")
+        out.append("|---|" + V250Names.extraReadLabels.map { _ in "---|" }.joined())
+        for (i, session) in selected.enumerated() {
+            let c = session.counters
+            out.append("| \(labels[i]) | " + V250Names.extraReadCounters.map { String(c[$0, default: 0]) }.joined(separator: " | ") + " |")
+        }
+        out.append("")
+        out.append("Model call ms by characters translated (2.5.0; n, P50/P95):")
+        out.append("")
+        out.append("| | " + ModelLengthBucket.allCases.map { $0.label }.joined(separator: " | ") + " |")
+        out.append("|---|" + ModelLengthBucket.allCases.map { _ in "---|" }.joined())
+        for (i, session) in selected.enumerated() {
+            let d = session.distributions
+            let cells = ModelLengthBucket.allCases.map { bucket -> String in
+                guard let v = d[bucket.metric], v.count > 0 else { return "–" }
+                return "\(v.count): \(ms(v.p50))/\(ms(v.p95))"
+            }
+            out.append("| \(labels[i]) | " + cells.joined(separator: " | ") + " |")
         }
         out.append("")
         out.append("Reading notes: confirmationMs runs from the start of the caption's first OCR read to its confirmation, so it contains that read (finalOCRMs); the two are not added. An early (speculative) call is one started for a first sighting; sections 4 and 5 show when it started relative to confirmed_ms.")
@@ -369,16 +365,16 @@ enum CombinedDiagnosticReport {
         out.append("## 5. Captions")
         out.append("")
         out.append("```csv")
-        out.append("session,caption_ref,first_ocr_ms,confirmed_ms,selected_ms,pip_ms,ocr_to_pip_ms,reason,origin,strategy,recovery_strategy,guard_gap_ms")
+        out.append("session,caption_ref,first_ocr_ms,confirmed_ms,selected_ms,pip_ms,ocr_to_pip_ms,reason,origin,strategy,recovery_strategy")
         for row in parsed.flatMap({ $0.captions }) {
             let total: String
             if let pip = row.pipMs, let first = row.firstOCRMs { total = ms(pip - first) } else { total = "" }
-            out.append("\(row.session),\(row.caption),\(row.firstOCRMs.map { ms($0) } ?? ""),\(row.confirmedMs.map { ms($0) } ?? ""),\(row.selectedMs.map { ms($0) } ?? ""),\(row.pipMs.map { ms($0) } ?? ""),\(total),\(row.reason),\(row.origin),\(row.strategy),\(row.recoveryStrategy),\(row.guardGapMs.map { ms($0) } ?? "")")
+            out.append("\(row.session),\(row.caption),\(row.firstOCRMs.map { ms($0) } ?? ""),\(row.confirmedMs.map { ms($0) } ?? ""),\(row.selectedMs.map { ms($0) } ?? ""),\(row.pipMs.map { ms($0) } ?? ""),\(total),\(row.reason),\(row.origin),\(row.strategy),\(row.recoveryStrategy)")
         }
         out.append("```")
 
         out.append("")
-        out.append("## 6. Hybrid and recovery decisions")
+        out.append("## 6. Recovery decisions")
         out.append("")
         out.append("```csv")
         out.append("session,caption_ref,t_ms,reason,value_ms")
@@ -386,18 +382,6 @@ enum CombinedDiagnosticReport {
             out.append("\(row.session),\(row.caption),\(ms(row.timeMs)),\(row.reason),\(row.valueMs.map { ms($0) } ?? "")")
         }
         out.append("```")
-
-        // 2.2.1 (D9): Low Latency recovery service by how recently a Default call ran (same 1.5 s window as the build 74-81 analysis).
-        out.append("")
-        out.append("Low Latency recovery service by distance from the previous Default call (paired by caption):")
-        out.append("")
-        out.append("| | band | n | median | max |")
-        out.append("|---|---|---|---|---|")
-        for i in selected.indices where selected[i].translationModes?.active == "hybridRecovery" {
-            for row in hybridBands(parsed[i]) {
-                out.append("| \(labels[i]) | \(row.band) | \(row.n) | \(ms(row.median)) | \(ms(row.max)) |")
-            }
-        }
 
         out.append("")
         out.append("## 7. Findings")

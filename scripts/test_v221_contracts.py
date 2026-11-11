@@ -164,7 +164,8 @@ for code in ("detailed_collection_off", "detail_suspended_thermal", "manual_tran
 assert "p95 > max(1000, median * 2)" in archive, "D7: tail rule"
 for counter in ("structured_events_dropped", "id_map_resets", "legacy_context_resets", "subtitle_traces_dropped"):
     assert f'counters["{counter}"]' in diagnostics and f'"{counter}"' in archive, counter
-assert "static func hybridBands" in archive and "hybridBandNames" in archive, "D9"
+# 2.5.0 (changed with the code): D9 was the Hybrid distance-band table; it is removed with the mode.
+assert "hybridBands" not in archive and "hybridBandNames" not in archive, "D9 removed with Hybrid"
 assert "n = 0" in archive, "D8: warning row"
 for key in ("idleMinutes", "sessionLimit", "autoOpenPiP", "winSize", "textSize", "pipFont", "theme", "showOriginal",
             "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding"):
@@ -262,14 +263,13 @@ shared_work = read("Shared/SharedTranslationWork.swift")
 shared_system = read_source("TranslationSystem")
 experimental = read("App/ExperimentalFeaturesView.swift")
 # D13: runtime A/B switches pinned at session start, defaults unchanged, compile flags still override.
-assert "static func pinSettings(" in shared_work and "static func pinSetting(" in shared_system
+# 2.5.0 (changed with the code): the Hybrid scheduler variant and its build flags are removed with the mode.
+assert "static func pinSettings(" in shared_work and "static func pinSetting(" not in shared_system
 assert "return pinned(planPinnedKey)" in shared_work and "return pinned(unitsPinnedKey)" in shared_work
 assert "#if SCREENLINGO_REFERENCE_LL_PLAN" in shared_work and "#if SCREENLINGO_REFERENCE_LEGACY_UNITS" in shared_work
-assert "#if SCREENLINGO_HYBRID_REFERENCE" in shared_system and "#elseif SCREENLINGO_HYBRID_RECOVERY_FIRST" in shared_system
-assert "?? .evidenceBounded" in shared_system and "?? true" in shared_work
-assert "HybridSchedulingPolicy.pinSetting()" in engine and "TranslationHotPathAB.pinSettings()" in engine
-assert "modeCoordinator.hybridVariant = HybridSchedulingPolicy.buildVariant" in engine
-for key in ("hybridSchedulerVariant", "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits"):
+assert "SCREENLINGO_HYBRID" not in shared_system and "evidenceBounded" not in shared_system and "?? true" in shared_work
+assert "HybridSchedulingPolicy" not in engine and "TranslationHotPathAB.pinSettings()" in engine
+for key in ("hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits"):
     assert experimental.count(f'"{key}"') >= 2 and engine.count(f'"{key}"') >= 2, key
 assert "applies from the next session, never during one" in experimental
 
@@ -281,8 +281,9 @@ assert "var earlyVisualWakesSuppressed: Int?" in shared_main
 assert diagnostics.count("earlyVisualWakesSuppressed") >= 3 and '"earlyVisualWakesSuppressed"' in archive
 # D12: Default-vs-Default marker, with an allowlisted reason and a finding.
 service = read("App/ModeTranslationService.swift")
-assert 'report("hybrid_default_default_overlap", nil)' in service
-assert archive.count("hybrid_default_default_overlap") >= 3 and "hybrid_default_default_overlap" in diagnostics
+# 2.5.0 (changed with the code): the marker and its finding are gone; the reason code stays readable in old reports.
+assert "hybrid_default_default_overlap" not in service and "hybrid_default_default_overlap" not in diagnostics
+assert "hybrid_default_default_overlap" not in archive, "2.5.0: the reason code is gone from the archive too"
 # E9: identical-frame holds are counted where the held frame is detected.
 assert "diag.s.identicalFrameHolds += 1" in engine and '"identicalFrameHolds"' in archive
 # E11: no precondition crash in the speculative owner; a conflict is logged.

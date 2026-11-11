@@ -182,7 +182,7 @@ struct SettingsView: View {
 
     @ViewBuilder private var translation: some View {
         SettingsGroup(title: "Translation") {
-            if shows("System", "legacy hybrid low latency mode translate ahead speculation model warm memory") {
+            if shows("System", "legacy low latency mode translate ahead speculation model warm memory") {
                 link("System", "cpu", .blue, value: engine.pendingTranslationSystem.shortName, destination: TranslationSettings())
             }
             if shows("Language packs", "languages download offline pair source target") {
@@ -268,7 +268,7 @@ struct SettingsView: View {
                 if shows("Pipeline simulator", "simulate test pipeline") {
                     link("Pipeline simulator", "point.3.connected.trianglepath.dotted", .indigo, destination: PipelineSimulatorView())
                 }
-                if shows("Test runs", "compare modes legacy hybrid low latency") {
+                if shows("Test runs", "compare modes legacy low latency") {
                     Button { router.present(.testRuns) } label: { SettingsRow(title: "Test runs", symbol: "checklist", tint: .teal) }
                         .buttonStyle(PressableStyle())
                 }

@@ -18,8 +18,11 @@ struct DiagnosticPerformanceComparison {
     static let cohortKeys = [
         "mode", "speed", "stability", "area", "customY0", "customY1", "translationTestMode",
         "effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus",
-        "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
-        "hotPathAB", "hybridSchedulerAB", "availabilityRefreshAB", "hybridBackoffAB", "hybridGuardAB", "legacyOwnLaneAB", "heartbeatAB", "hybridPinAB", "armedDeferAB", "detailedCollection", "performanceTier",
+        "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
+        "hotPathAB", "availabilityRefreshAB", "legacyOwnLaneAB", "heartbeatAB", "armedDeferAB",
+        // 2.5.0: the switches that change timing or what is read. A run saved before 2.5.0 has none of them (off).
+        "captureWarmAB", "trustedBandAB", "headStartAB", "quietRewarmAB",
+        "detailedCollection", "performanceTier",
         "focusedCaptionOCR", "strictCaptionIdentity", "cjkSingleCharacters", "liveWarmupLegacy"
     ]
     static let noteKeys = [

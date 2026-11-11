@@ -38,6 +38,9 @@ final class Diagnostics: ObservableObject {
     var confirmationReadSamples: [Double] = []
     var confirmationFrameWaitSamples: [Double] = []
     var rediscoveryLeadSamples: [Double] = []
+    /// 2.5.0: counts and millisecond samples under the fixed names of `V250Names` (see Diagnostics+V250.swift).
+    var v250Counts: [String: Int] = [:]
+    var v250Samples: [String: [Double]] = [:]
     private var captionDigestCache: [String: String] = [:]
     @Published var archiveStatus = "Not saved"
     // v2.0.0 build 84 Test Runs (spec §11): runs are stored by TestRunStore, not in the memory database.
@@ -160,7 +163,7 @@ final class Diagnostics: ObservableObject {
         let counter = "initial_warmup_\(strategy)_\(observation.phase)"
         modeEventCounts[counter, default: 0] += 1
         if observation.phase == "model_submitted" {
-            // A real model request is the common denominator across all three modes.
+            // A real model request is the common denominator across the modes.
             // Do not count a policy claim or a skipped preparation as an attempt.
             noteModelState("warmup_started")
             noteModelState("warmup_model_submitted")
@@ -203,8 +206,7 @@ final class Diagnostics: ObservableObject {
         if Date().timeIntervalSince(started) < 120, openingModeTrace.count < 160,
            (reason.hasPrefix("recovery_decision_") || reason.hasPrefix("pip_enqueue_") ||
             reason == "pip_held_unchanged" || reason == "confirmed" ||
-            reason == "hybrid_cross_strategy_overlap" || reason == "hybrid_default_default_overlap" || reason == "hybrid_speculation_throttled" ||
-            reason == "hybrid_speculation_backend_busy" || reason == "backend_lane_admission_rejected" ||
+            reason == "backend_lane_admission_rejected" ||
             reason == "speculative_model_completed" || reason == "confirmed_model_completed") {
             openingModeTrace.append(entry)
         }
@@ -227,7 +229,7 @@ final class Diagnostics: ObservableObject {
                     "selectiveSpeculation", "speculationConfidence", "confirmationDeadline",
                     "translateAhead", "coolMode", "steadyCaptions", "ocrConfidence", "freshTranslationTest",
                     "adaptiveSpeculation", "protectConfirmedPresentation", "predictiveWarmup",
-                    "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer", "hybridSwitchGuard", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
+                    "lowLatencyTranslation", "incrementalBatchRecovery", "directPiPBuffer", "pixelConfirmation", "eventDrivenOCR", "fastOCR", "legacySharedSession",
                     "subtitleAwareChangeDetection", "preserveRelatedMovieGroups",
                     "deduplicateCopies", "contextualLanguage", "languageRecovery",
                     "continuousRotation", "smartCool", "testRunSaving",
@@ -276,17 +278,18 @@ final class Diagnostics: ObservableObject {
         settings["strictCaptionIdentity"] = String(!legacyActive)
         settings["focusedCaptionOCR"] = String(!legacyActive && ((UserDefaults.standard.object(forKey: "subtitleTracking") as? Bool) ?? true))
         settings["hotPathAB"] = TranslationHotPathAB.label
-        settings["hybridSchedulerAB"] = HybridSchedulingPolicy.buildVariant.rawValue
         // 2.2.3 (L5): written only when the pinned switch is ON. A missing value means off, so default runs stay
         // comparable with runs saved before 2.2.3 (a missing cohort value counts as "-").
         if TranslationHotPathAB.refreshAvailabilityInBackground { settings["availabilityRefreshAB"] = "on" }
-        if TranslationHotPathAB.hybridRelaxedBackoff { settings["hybridBackoffAB"] = "on" }
-        if TranslationHotPathAB.hybridShorterGuard { settings["hybridGuardAB"] = "on" }
         if TranslationHotPathAB.legacyConfirmedOwnLane { settings["legacyOwnLaneAB"] = "on" }
         if TranslationHotPathAB.independentHeartbeat { settings["heartbeatAB"] = "on" }
-        // 2.4.0: both default ON. Written only when ON, like the others, so a run saved before 2.4.0 reads as off.
-        if TranslationHotPathAB.hybridPinnedBackend { settings["hybridPinAB"] = "on" }
+        // 2.4.0: default ON. Written only when ON, like the others, so a run saved before 2.4.0 reads as off.
         if TranslationHotPathAB.deferArmedSpeculation { settings["armedDeferAB"] = "on" }
+        // 2.5.0: items A to F and the quiet re-warm, all default ON, written only when ON.
+        for item in TranslationHotPathAB.v250Switches
+            where (UserDefaults.standard.object(forKey: item.pinned) as? Bool) ?? true {
+            settings[item.report] = "on"
+        }
         settings["reductionReasons"] = captureReductionReasons.joined(separator: "_")
         settings["appRequestedCaptureIntervalMs"] = String(requestedCaptureIntervalMs)
         settings["appRequestedCaptureEdgePx"] = String(requestedCaptureEdgePx)
@@ -350,6 +353,9 @@ final class Diagnostics: ObservableObject {
         counters["extensionFramesDuringLastGap"] = framesDuringLastGap
         counters["longestStopGapSeconds"] = longestStopGapSeconds
         counters["runPausedSeconds"] = Int(pausedSeconds.rounded())
+        for name in V250Names.counters { counters[name] = v250Counts[name, default: 0] }
+        var allDistributions = v250Samples.mapValues(DiagnosticDistribution.init)
+        allDistributions["lowLatencyWarmupMs"] = DiagnosticDistribution(modeTimingSamples["initial_warmup_lowLatency_model_completed_ms", default: []])
         var currentHealth = memoryHealth
         currentHealth.ramEntries = ramEntryCount?() ?? memoryHealth.ramEntries
         return DiagnosticSessionExport(translationModes: TranslationModeReport(warmups: initialWarmupTrace, active: modeActiveSystem,
@@ -359,7 +365,7 @@ final class Diagnostics: ObservableObject {
             counters: modeEventCounts), id: diagnosticSessionID, startedAt: started, endedAt: Date(),
             appVersion: AppVersion.full, systemVersion: UIDevice.current.systemVersion,
             hardwareModel: Self.hardwareModelCode, settings: settings, health: currentHealth, counters: counters,
-            distributions: ["memoryLookupMs": DiagnosticDistribution(lookupSamples), "memoryWriteMs": DiagnosticDistribution(writeSamples),
+            distributions: allDistributions.merging(["memoryLookupMs": DiagnosticDistribution(lookupSamples), "memoryWriteMs": DiagnosticDistribution(writeSamples),
                 "historySaveMs": DiagnosticDistribution(historySaveSamples),
                 "memoryLookupWaitMs": DiagnosticDistribution(lookupWaitSamples),
                 "memoryHealthMs": DiagnosticDistribution(memoryHealthSamples),
@@ -395,22 +401,12 @@ final class Diagnostics: ObservableObject {
                 "modeBackendLaneWaitMs": DiagnosticDistribution(modeTimingSamples["backend_lane_wait_ms", default: []]),
                 "modeSessionAgeMs": DiagnosticDistribution(modeTimingSamples["backend_session_age_ms", default: []]),
                 "modeSessionCompletedCalls": DiagnosticDistribution(modeTimingSamples["backend_session_reuse_count", default: []]),
-                "hybridDefaultWarmupMs": DiagnosticDistribution(modeTimingSamples["initial_warmup_appleDefault_model_completed_ms", default: []]),
-                "hybridLowLatencyWarmupMs": DiagnosticDistribution(modeTimingSamples["initial_warmup_lowLatency_model_completed_ms", default: []]),
-                "hybridOverlappedRecoveryMs": DiagnosticDistribution(modeTimingSamples["hybrid_overlapped_recovery_ms", default: []]),
-                "hybridMeasuredOverlapMs": DiagnosticDistribution(modeTimingSamples["hybrid_simultaneous_model_overlap_ms", default: []]),
                 "modeCancellationReleaseMs": DiagnosticDistribution(modeTimingSamples["cancelled_call_returned", default: []]),
                 "modePlanBuiltMs": DiagnosticDistribution(modeTimingSamples["mode_plan_built_ms", default: []]),
                 "modePlanReusedMs": DiagnosticDistribution(modeTimingSamples["mode_plan_reused_ms", default: []]),
                 "modeCommitToPiPMs": DiagnosticDistribution(modeTimingSamples["mode_commit_to_pip_ms", default: []]),
                 "modeConfirmationToPiPMs": DiagnosticDistribution(modeTimingSamples["mode_confirmation_to_pip_ms", default: []]),
-                "modeReadyToPiPMs": DiagnosticDistribution(modeTimingSamples["mode_ready_to_pip_ms", default: []]),
-                "hybridMatchingWaitMs": DiagnosticDistribution(modeTimingSamples["hybrid_matching_wait_ms", default: []]),
-                "hybridUnsubmittedHedgeMs": DiagnosticDistribution(modeTimingSamples["hybrid_unsubmitted_hedge_ms", default: []]),
-                "hybridPreviousDefaultExitGapMs": DiagnosticDistribution(modeTimingSamples["hybrid_previous_default_exit_gap_ms", default: []]),
-                "hybridPostDefaultRecoveryServiceMs": DiagnosticDistribution(modeTimingSamples["hybrid_recovery_post_default_service_ms", default: []]),
-                "hybridNoOverlapRecoveryServiceMs": DiagnosticDistribution(modeTimingSamples["hybrid_recovery_no_recent_overlap_service_ms", default: []]),
-                "hybridUnexplainedSlowRecoveryMs": DiagnosticDistribution(modeTimingSamples["hybrid_unexplained_slow_recovery_ms", default: []])],
+                "modeReadyToPiPMs": DiagnosticDistribution(modeTimingSamples["mode_ready_to_pip_ms", default: []])]) { _, base in base },
             events: exportEventWindow(),
             intervals: diagnosticIntervals(at: Date()),
             oneSecondIntervals: detailedCollection ? recentIntervals(at: Date(), period: 1) : nil,
@@ -436,6 +432,7 @@ final class Diagnostics: ObservableObject {
         structuredEventsDropped = 0; idMapResets = 0; legacyContextResets = 0; subtitleTracesDropped = 0
         thermalStartLevel = ProcessInfo.processInfo.thermalState.rawValue
         thermalMaxLevel = thermalStartLevel ?? 0
+        resetV250()
         started = Date()
         startingRAMEntries = ramEntryCount?() ?? 0
         startRunState()
@@ -584,6 +581,7 @@ final class Diagnostics: ObservableObject {
         memoryOutcomes = [:]; lookupSamples = []; writeSamples = []; historySaveSamples = []; lookupWaitSamples = []; memoryHealthSamples = []
         modelTimingSamples = [:]; completedWorkRecoveredUnits = 0
         confirmationReadSamples = []; confirmationFrameWaitSamples = []; rediscoveryLeadSamples = []
+        resetV250()
         captionDigestCache.removeAll(keepingCapacity: true)
         sharedModelUnits = 0; sharedConfirmedModelUnits = 0; memoryAwareSpeculationSkipped = 0; ramCaptionBypasses = 0; exactCaptionHits = 0; exactUnitsCoalesced = 0
         speculativeUnitCounts = [:]; queueWaitSamples = [:]
@@ -628,6 +626,7 @@ final class Diagnostics: ObservableObject {
         s.watchSkippedOCR = p.watchSkippedOCR ?? s.watchSkippedOCR
         s.watchTriggeredOCR = p.watchTriggeredOCR ?? s.watchTriggeredOCR
         s.focusRediscoveries = p.focusRediscoveries ?? s.focusRediscoveries
+        noteV250Packet(p)
         // 2.4.0: what a confirmation needed, reported by the extension with the confirmed packet. Numbers only.
         if p.kind == "ocr", p.stable != false, let reads = p.confirmReads, reads > 0 {
             func keep(_ samples: inout [Double], _ value: Double) {

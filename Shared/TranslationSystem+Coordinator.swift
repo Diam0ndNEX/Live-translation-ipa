@@ -2,8 +2,10 @@ import Foundation
 
 /// Main-actor ownership is the atomic display selection latch. Model cancellation
 /// is advisory; both backend lanes remain occupied until their real calls return.
+/// 2.5.0: this coordinator serves Low Latency only (Legacy has its own drain; Hybrid Recovery was removed), so
+/// every request it makes uses the Low Latency strategy and there is one session cache.
 @MainActor
-final class ThreeModeCoordinator {
+final class ModeCoordinator {
     typealias Lookup = (ModeCaption) async -> [String?]
     typealias Translate = (ModeCaption, [Int], RequestedTranslationStrategy, Bool) async -> [String]?
     var lookup: Lookup
@@ -15,35 +17,6 @@ final class ThreeModeCoordinator {
     var clock: () -> Double = { ProcessInfo.processInfo.systemUptime }
     var system: TranslationSystem = .legacy
     var allowsReuse = true
-    var adaptiveHybrid = true
-    var hybridVariant: HybridSchedulerVariant = HybridSchedulingPolicy.buildVariant
-    var fastRecoveryInstalled = true
-    var hybridSpeculationPermitted: () -> Bool = { true }
-    /// v2.0.0 switch guard (H1/H2). Off by default here so the reference
-    /// behaviour stays testable; the app sets it from `hybridSwitchGuard`.
-    var hybridSwitchGuard = false
-    /// 0 while an Apple Default call is in flight, ms since the last
-    /// same-pair Default return, or nil when none is known.
-    var appleDefaultGapMs: (ModeCaption) -> Double? = { _ in nil }
-    /// 2.4.0: Hybrid keeps one model for a run of captions. Off by default here so the reference behaviour stays
-    /// testable; the app sets it from the pinned `hybridPinnedBackend` switch.
-    var hybridPinnedBackend = false
-    private var backendPin = HybridBackendPin()
-    private var speculativeStrategy = RequestedTranslationStrategy.appleDefault
-    /// Last model a request was sent to and when a request of each model last returned. Kept across `reset()`:
-    /// which model iOS used last does not change when a caption context does.
-    private var lastCallStrategy: RequestedTranslationStrategy?
-    private var lastCallReturn: [RequestedTranslationStrategy: Double] = [:]
-    var pinActive: Bool { system == .hybridRecovery && hybridPinnedBackend }
-    /// The model a first sighting would be sent to now.
-    var nextSpeculativeStrategy: RequestedTranslationStrategy {
-        if system == .lowLatency { return .lowLatency }
-        guard pinActive else { return .appleDefault }
-        return backendPin.peek(fastInstalled: fastRecoveryInstalled, now: clock())
-    }
-    /// True while pinned Hybrid sends its work to Low Latency.
-    var pinnedToLowLatency: Bool { pinActive && nextSpeculativeStrategy == .lowLatency }
-    var coldSpeculationCeiling = 0.7
     var matchingLowLatencyDeadline = 4.0
     private(set) var current: ModeCaption?
     private var committed: ModeCaption?
@@ -60,15 +33,9 @@ final class ThreeModeCoordinator {
     private var speculativeEligible = false
     private var speculativeModelSubmitted = false
     private var recoveryStarted = false
-    private var hybridAdmission = HybridAdmissionPolicy()
-    private var scoredSpeculation: ModeCaption?
     private var cacheEpoch = UUID()
     private var lowCache: [String: String] = [:]
     private var lowOrder: [String] = []
-    private var defaultCache: [String: String] = [:]
-    private var defaultOrder: [String] = []
-    private var defaultService: [String: [Double]] = [:]
-    private var lowService: [String: [Double]] = [:]
 
     init(lookup: @escaping Lookup, translate: @escaping Translate,
          cancel: @escaping (Bool) -> Void, selected: @escaping (ModeCaption, ModeOutput, String) -> Void,
@@ -83,7 +50,6 @@ final class ThreeModeCoordinator {
         speculativeEligible = false
         if memoryPressure {
             lowCache.removeAll(); lowOrder.removeAll()
-            defaultCache.removeAll(); defaultOrder.removeAll()
         }
         if let current, committed != current {
             event(current, memoryPressure ? "memory_pressure" : "thermal_reduced_speculation", nil)
@@ -105,49 +71,23 @@ final class ThreeModeCoordinator {
         speculativeEligible = false; speculativeModelSubmitted = false
         // The speculative task clears its occupied slot only after completion.
         recoveryStarted = false
-        hybridAdmission = HybridAdmissionPolicy()
-        scoredSpeculation = nil
         cacheEpoch = UUID()
         lowCache.removeAll(); lowOrder.removeAll()
-        defaultCache.removeAll(); defaultOrder.removeAll()
-        defaultService.removeAll(); lowService.removeAll()
     }
 
     func observe(_ caption: ModeCaption, confirmed: Bool, speculate: Bool) {
         guard system != .legacy else { return }
         if !confirmed {
             guard speculate, speculation == nil, current == nil || committed == current else { return }
-            // 2.4.0: pinned to Low Latency, early work is a short call on its own lane, as in Low Latency mode.
-            // The admission rules below exist to keep Apple Default work away from Low Latency work.
-            let pinnedFast = pinnedToLowLatency
-            if system == .hybridRecovery && !pinnedFast && !hybridSpeculationPermitted() {
-                speculativeCaption = nil
-                speculativeOutput = nil
-                event(caption, "hybrid_speculation_backend_busy", nil)
-                return
-            }
-            if system == .hybridRecovery && !pinnedFast && adaptiveHybrid &&
-                !hybridAdmission.admit(identity: "\(caption.session.uuidString)|\(caption.caption)|\(caption.revision)") {
-                speculativeCaption = nil
-                speculativeOutput = nil
-                event(caption, "hybrid_speculation_throttled", nil)
-                return
-            }
-            scoredSpeculation = nil
             speculativeCaption = caption; speculativeOutput = nil; speculativeFailed = false
             speculativeEligible = true; speculativeModelSubmitted = false
             speculativeStarted = clock()
             event(caption, "speculation_admitted", nil)
-            let strategy: RequestedTranslationStrategy
-            if system == .lowLatency { strategy = .lowLatency }
-            else if pinActive { strategy = backendPin.strategy(fastInstalled: fastRecoveryInstalled, now: clock()) }
-            else { strategy = .appleDefault }
-            speculativeStrategy = strategy
             let ticket = UUID()
             speculationTicket = ticket
             speculation = Task { [weak self] in
                 guard let self else { return }
-                let output = await self.resolve(caption, strategy: strategy, speculative: true)
+                let output = await self.resolve(caption, speculative: true)
                 // An older cancelled task must not erase the next capture's
                 // active speculation slot or publish an obsolete response.
                 guard self.speculationTicket == ticket else { return }
@@ -176,14 +116,8 @@ final class ThreeModeCoordinator {
         }
         current = caption; committed = nil; memoryProbePending = caption
         verifiedConfirmedMemory = nil; recoveryStarted = false
-        // Obsolete Hybrid work loses display authority without cancelling its
-        // warmed backend session. Only one physical call may occupy each lane.
-        if system != .hybridRecovery {
-            cancel(false)
-            confirmation?.cancel()
-        } else {
-            event(caption, "hybrid_preserve_confirmed_session", nil)
-        }
+        cancel(false)
+        confirmation?.cancel()
         deadline?.cancel()
         // Never wait for model work before the independent memory probe.
         confirmation = Task { [weak self] in
@@ -204,60 +138,20 @@ final class ThreeModeCoordinator {
                 if let result = self.speculativeOutput { self.commit(caption, result, "speculation_match_ready"); return }
                 if self.speculation != nil && !self.speculativeFailed {
                     self.event(caption, "speculation_match_unfinished", nil)
-                    // LL shares the original request. A hung request has a same-strategy deadline.
-                    let wait: Double
-                    if self.system == .lowLatency {
-                        wait = max(0, self.matchingLowLatencyDeadline - (self.clock() - self.speculativeStarted))
-                    } else if self.pinActive {
-                        // 2.4.0: the matching request already runs on the pinned model. Wait for it; a second
-                        // request for the same text on the same model could only be slower.
-                        let elapsed = self.clock() - self.speculativeStarted
-                        wait = self.speculativeStrategy == .lowLatency ?
-                            max(0, self.matchingLowLatencyDeadline - elapsed) :
-                            HybridSchedulingPolicy.suppressedHedgeWait(elapsed: elapsed)
-                        self.event(caption, "hybrid_pin_wait_matching", wait * 1000)
-                    } else if self.hybridSwitchGuard {
-                        // H2: a parallel LL hedge beside a running Default call
-                        // was the slowest recovery kind. Wait for the match.
-                        wait = HybridSchedulingPolicy.suppressedHedgeWait(
-                            elapsed: self.clock() - self.speculativeStarted)
-                        self.event(caption, "hybrid_hedge_suppressed", wait * 1000)
-                    } else {
-                        let ordinary = self.remainingWait(caption)
-                        wait = HybridSchedulingPolicy.preflightWait(
-                            variant: self.hybridVariant,
-                            submitted: self.speculativeModelSubmitted,
-                            fastRecoveryInstalled: self.fastRecoveryInstalled,
-                            proposed: ordinary)
-                        if wait < ordinary { self.event(caption, "hybrid_unsubmitted_hedge_ms", wait * 1000) }
-                    }
+                    // The confirmed caption shares the running request. A hung request has a deadline.
+                    let wait = max(0, self.matchingLowLatencyDeadline - (self.clock() - self.speculativeStarted))
                     self.deadline = Task { [weak self] in
                         try? await Task.sleep(nanoseconds: UInt64(max(0, wait) * 1_000_000_000))
                         guard let self, !Task.isCancelled, self.current == caption, self.committed != caption else { return }
-                        if self.system == .hybridRecovery {
-                            // Hedge: the existing matching Apple Default request
-                            // can still win, so its session must not be cancelled.
-                            self.event(caption, self.hybridSwitchGuard ?
-                                "hybrid_suppressed_hedge_deadline" : "hybrid_hedged_recovery", nil)
-                        } else {
-                            self.cancel(true)
-                        }
+                        self.cancel(true)
                         self.startRecovery(caption, reason: "matching_deadline")
                     }
                     return
                 }
             }
             let reason = self.speculativeCaption == nil ? "speculation_absent" : (self.speculativeFailed ? "speculation_failed" : "source_mismatch")
-            if self.system == .hybridRecovery {
-                if self.speculation != nil {
-                    // Incorrect OCR speculation is discarded when it returns,
-                    // but the warmed session survives if the request succeeds.
-                    self.event(caption, "hybrid_obsolete_speculation_draining", nil)
-                }
-            } else {
-                self.speculation?.cancel()
-                self.cancel(true)
-            }
+            self.speculation?.cancel()
+            self.cancel(true)
             self.startRecovery(caption, reason: reason)
         }
     }
@@ -275,45 +169,10 @@ final class ThreeModeCoordinator {
         return current == caption && committed != caption
     }
 
-    /// Feedback must reflect actual Apple-default work, not a local admission
-    /// rejection or a cache-only result. Match the complete caption identity.
+    /// Records that the early request really reached the model (not only a cache or an admission check).
     func noteSpeculativeModelSubmitted(_ caption: ModeCaption) {
         guard speculativeCaption == caption, speculativeEligible else { return }
         speculativeModelSubmitted = true
-    }
-
-    func noteOverlappingRecovery(serviceMilliseconds: Double, simultaneousMilliseconds: Double) {
-        guard system == .hybridRecovery, adaptiveHybrid else { return }
-        hybridAdmission.recordRecovery(serviceMilliseconds: serviceMilliseconds,
-                                       simultaneousMilliseconds: simultaneousMilliseconds)
-    }
-
-    private func scoreSpeculation(for caption: ModeCaption, useful: Bool) {
-        guard system == .hybridRecovery, let early = speculativeCaption,
-              early.session == caption.session, scoredSpeculation != early else { return }
-        scoredSpeculation = early
-        if !speculativeModelSubmitted && !useful {
-            event(caption, "hybrid_speculation_unexecuted", nil)
-            return
-        }
-        if adaptiveHybrid && speculativeModelSubmitted {
-            hybridAdmission.record(used: useful)
-        }
-        event(caption, useful ? "hybrid_speculation_useful" : "hybrid_speculation_wasted", nil)
-    }
-
-    private func remainingWait(_ caption: ModeCaption) -> Double {
-        let elapsed = max(0, clock() - speculativeStarted)
-        let ordinary = defaultService[caption.policyCohort, default: []]
-        let recovery = lowService[caption.policyCohort, default: []]
-        let referenceWait = SpeculationWaitPolicy.remaining(elapsed: elapsed,
-            ordinary: ordinary, recovery: recovery, coldCeiling: coldSpeculationCeiling)
-        guard system == .hybridRecovery else { return referenceWait }
-        let chosen = HybridSchedulingPolicy.matchingWait(variant: hybridVariant,
-            elapsed: elapsed, defaultSamples: ordinary, lowSamples: recovery,
-            oldWait: referenceWait, recentContention: hybridAdmission.recentContention)
-        event(caption, "hybrid_matching_wait_ms", chosen * 1000)
-        return chosen
     }
 
     private func lookupValues(_ caption: ModeCaption) async -> [String?] {
@@ -325,7 +184,8 @@ final class ThreeModeCoordinator {
         return preferred
     }
 
-    private func resolve(_ caption: ModeCaption, strategy: RequestedTranslationStrategy, speculative: Bool) async -> ModeOutput? {
+    private func resolve(_ caption: ModeCaption, speculative: Bool) async -> ModeOutput? {
+        let strategy = RequestedTranslationStrategy.lowLatency
         let workEpoch = cacheEpoch
         let valuesFromProbe: [String?]
         #if SCREENLINGO_REFERENCE_CONFIRMED_PROBE
@@ -344,10 +204,9 @@ final class ThreeModeCoordinator {
         var strategies: [RequestedTranslationStrategy?] = values.map { _ in nil }
         if allowsReuse {
             for i in values.indices where values[i] == nil {
-                let cached = strategy == .lowLatency ? lowCache[caption.keys[i]] : defaultCache[caption.keys[i]]
-                if let cached {
+                if let cached = lowCache[caption.keys[i]] {
                     values[i] = cached
-                    origins[i] = strategy == .lowLatency ? "session_low_latency" : "session_apple_default"
+                    origins[i] = "session_low_latency"
                     strategies[i] = strategy
                     event(caption, "strategy_cache_hit_" + strategy.rawValue, nil)
                 }
@@ -360,18 +219,7 @@ final class ThreeModeCoordinator {
         if !missing.isEmpty {
             guard !Task.isCancelled else { return nil }
             event(caption, speculative ? "speculative_enqueue" : "recovery_enqueue", nil)
-            let began = clock()
-            if system == .hybridRecovery {
-                // 2.4.0 (measurement): a request goes to the other model than the previous one. The value is the
-                // time since a request of the previous model last returned, when one has.
-                if let previous = lastCallStrategy, previous != strategy {
-                    event(caption, strategy == .lowLatency ? "hybrid_model_switch_low_latency" :
-                        "hybrid_model_switch_default", lastCallReturn[previous].map { max(0, began - $0) * 1000 })
-                }
-                lastCallStrategy = strategy
-            }
             var result = await translate(caption, missing, strategy, speculative)
-            if system == .hybridRecovery { lastCallReturn[strategy] = clock() }
             if result == nil, !speculative, !Task.isCancelled,
                shouldStartModel(caption, speculative: false) {
                 event(caption, "same_strategy_retry", nil)
@@ -379,8 +227,7 @@ final class ThreeModeCoordinator {
             }
             guard !Task.isCancelled, let result, result.count == missing.count,
                   result.allSatisfy({ !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) else { return nil }
-            // An obsolete Hybrid model result has no display authority, but its
-            // exact-key translation is safe to reuse in this capture session.
+            // A result that lost display authority is still safe to reuse by exact key in this capture session.
             if allowsReuse && SharedTranslationWork.mayReuse(
                 workEpoch: workEpoch, currentEpoch: cacheEpoch,
                 requestedCancellation: Task.isCancelled, compatibleContext: true) {
@@ -388,17 +235,6 @@ final class ThreeModeCoordinator {
                     cacheCompleted(result[position], for: caption.keys[index], strategy: strategy)
                 }
                 event(caption, "strategy_cache_populated_" + strategy.rawValue, nil)
-            }
-            let duration = clock() - began
-            let cohort = caption.policyCohort
-            if strategy == .appleDefault {
-                if defaultService.count >= 64 && defaultService[cohort] == nil { defaultService.removeAll() }
-                defaultService[cohort, default: []].append(duration)
-                defaultService[cohort] = Array(defaultService[cohort, default: []].suffix(32))
-            } else {
-                if lowService.count >= 64 && lowService[cohort] == nil { lowService.removeAll() }
-                lowService[cohort, default: []].append(duration)
-                lowService[cohort] = Array(lowService[cohort, default: []].suffix(32))
             }
             if missing.count == 1 && allMissing.count == 1 {
                 // The common single-unresolved-unit case needs no duplicate-key scan.
@@ -421,68 +257,26 @@ final class ThreeModeCoordinator {
     }
 
     private func cacheCompleted(_ value: String, for key: String, strategy: RequestedTranslationStrategy) {
-        if strategy == .lowLatency {
-            if lowCache[key] == nil { lowOrder.append(key) }
-            lowCache[key] = value
-            if lowOrder.count > 256 { lowCache.removeValue(forKey: lowOrder.removeFirst()) }
-        } else {
-            if defaultCache[key] == nil { defaultOrder.append(key) }
-            defaultCache[key] = value
-            if defaultOrder.count > 256 { defaultCache.removeValue(forKey: defaultOrder.removeFirst()) }
-        }
+        guard strategy == .lowLatency else { return }
+        if lowCache[key] == nil { lowOrder.append(key) }
+        lowCache[key] = value
+        if lowOrder.count > 256 { lowCache.removeValue(forKey: lowOrder.removeFirst()) }
     }
 
     private func startRecovery(_ caption: ModeCaption, reason: String) {
         guard current == caption, committed != caption, !recoveryStarted else { return }
-        // A matching request can still finish first after the hedge starts.
-        if speculativeCaption?.matches(caption) != true {
-            scoreSpeculation(for: caption, useful: false)
-        }
         recoveryStarted = true
         event(caption, "recovery_decision_" + reason, nil)
         confirmation = Task { [weak self] in
             guard let self else { return }
-            // If Hybrid's optional fast language pack is known missing, do not
-            // burn two failed Low Latency requests before Apple Default fallback.
-            let useLowLatency: Bool
-            if self.system == .lowLatency {
-                useLowLatency = true
-            } else if self.pinActive {
-                // 2.4.0: stay on the pinned model. The value is the time since the last Apple Default call.
-                useLowLatency = self.backendPin.strategy(fastInstalled: self.fastRecoveryInstalled,
-                                                         now: self.clock()) == .lowLatency
-                self.event(caption, useLowLatency ? "hybrid_pin_low_latency" : "hybrid_pin_default",
-                           self.appleDefaultGapMs(caption))
-            } else if !self.fastRecoveryInstalled {
-                useLowLatency = false
-                self.event(caption, "hybrid_no_fast_pack_fallback", nil)
-            } else if self.hybridSwitchGuard {
-                // H1: avoid switching models right after or during Default work.
-                let gap = self.appleDefaultGapMs(caption)
-                useLowLatency = HybridSchedulingPolicy.recoveryStrategy(
-                    gapMs: gap, fastRecoveryInstalled: true, guardEnabled: true) == .lowLatency
-                self.event(caption, useLowLatency ? "hybrid_switch_guard_low_latency" :
-                    "hybrid_switch_guard_default", gap)
-            } else {
-                useLowLatency = true
-            }
-            var result = await self.resolve(caption, strategy: useLowLatency ? .lowLatency : .appleDefault,
-                                            speculative: false)
-            // Hybrid alone permits one default fallback after bounded LL failure.
-            if result == nil, self.system == .hybridRecovery, useLowLatency,
-               !Task.isCancelled, self.current == caption, self.committed != caption {
-                self.event(caption, "hybrid_default_fallback", nil)
-                // 2.4.0: a failed Low Latency request keeps pinned Hybrid on Apple Default for a while.
-                if self.pinActive { self.backendPin.noteLowLatencyFailure(now: self.clock()) }
-                result = await self.resolve(caption, strategy: .appleDefault, speculative: false)
-            }
+            let result = await self.resolve(caption, speculative: false)
             guard !Task.isCancelled, self.current == caption, self.committed != caption else {
                 self.event(caption, "stale_rejected", nil)
                 return
             }
             guard let result else {
                 self.event(caption, "recovery_failed_missing", nil)
-                self.status("Translation unavailable. Check installed languages or select another translation system, then Retry.")
+                self.status("Translation unavailable. Check that the Low Latency language pack is installed, or choose Legacy, then Retry.")
                 return
             }
             self.commit(caption, result, "recovery_success")
@@ -490,20 +284,13 @@ final class ThreeModeCoordinator {
     }
 
     private func commit(_ caption: ModeCaption, _ output: ModeOutput, _ proposedReason: String) {
-        let memoryOnly = output.origins.allSatisfy {
-            $0 == "compatible_memory" || $0 == "session_low_latency" || $0 == "session_apple_default"
-        }
+        let memoryOnly = output.origins.allSatisfy { $0 == "compatible_memory" || $0 == "session_low_latency" }
         let reason = memoryOnly ? "memory_hit" : proposedReason
         guard current == caption, committed != caption, output.complete else { event(caption, "stale_rejected", nil); return }
         committed = caption; deadline?.cancel()
         if speculativeCaption?.matches(caption) == true {
             speculativeEligible = false
         }
-        let matchedPreview = proposedReason == "speculation_match_ready" ||
-            proposedReason == "speculation_match_in_flight"
-        let previewUseful = output.origins.contains("speculation") ||
-            (matchedPreview && output.origins.contains("session_apple_default"))
-        scoreSpeculation(for: caption, useful: previewUseful)
         if allowsReuse {
             for i in output.values.indices {
                 if let strategy = output.strategies[i] {
@@ -517,16 +304,7 @@ final class ThreeModeCoordinator {
         }
         event(caption, "selected_" + reason, nil)
         selected(caption, output, reason)
-        // After selection, Hybrid ignores losing output but lets the bounded
-        // underlying call drain. This preserves successful warm-up and cannot
-        // change the selected text. Hard cancel remains for shutdown/pressure.
-        if system == .hybridRecovery {
-            if speculation != nil || recoveryStarted {
-                event(caption, "hybrid_losing_request_draining", nil)
-            }
-        } else {
-            speculation?.cancel(); cancel(true)
-            confirmation?.cancel(); cancel(false)
-        }
+        speculation?.cancel(); cancel(true)
+        confirmation?.cancel(); cancel(false)
     }
 }

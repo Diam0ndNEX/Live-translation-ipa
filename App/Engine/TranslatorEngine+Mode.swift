@@ -9,8 +9,7 @@ import os.signpost
 extension TranslatorEngine {
     func restoreModelRun(source: String, target: String, system: TranslationSystem) {
         guard modelReadiness.completedAt == nil else { return }
-        let strategies: [RequestedTranslationStrategy] = system == .legacy ? [.appleDefault] :
-            (system == .lowLatency ? [.lowLatency] : [.appleDefault, .lowLatency])
+        let strategies: [RequestedTranslationStrategy] = system == .legacy ? [.appleDefault] : [.lowLatency]
         let previous = strategies.compactMap { strategy -> (at: Date, milliseconds: Double?)? in
             observedModelRuns[modelRunKey(source, target, strategy)]
         }.max(by: { $0.at < $1.at })

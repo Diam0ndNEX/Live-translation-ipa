@@ -283,13 +283,9 @@ extension DiagnosticExportWriter {
             findings.json: observed and suspected issues; heuristics, not verified errors.
             README.txt: this file.
 
-            In Hybrid Recovery, deliveryFilteringMs matches confirmation-to-PiP time: it is the wait for the
-            Apple Default model, booked under that stage name, not a separate filtering cost. The
-            hybrid_switch_guard_* values are the gap since the last Default call returned, not a delay.
-
             Names (2.3.1): the same three sources are summed in every mode as path_memory (stored result),
             path_early (early translation reused, ready or still running) and path_confirmed_time (translated after
-            confirmation). In Hybrid Recovery and Low Latency a translation after confirmation is called a recovery
+            confirmation). In Low Latency a translation after confirmation is called a recovery
             (recovery_decision_*, recovery_service_ms, pip_enqueue_recovery_success). Legacy has the same situation and
             calls it confirmed fresh (confirmed_service_ms, pip_enqueue_confirmed_fresh), or pip_enqueue_fresh_text_changed
             when the caption's early text had changed; reports before 2.3.0 called that pip_enqueue_legacy_recovery and

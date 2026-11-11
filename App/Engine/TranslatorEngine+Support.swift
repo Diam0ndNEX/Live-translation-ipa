@@ -72,9 +72,7 @@ extension TranslatorEngine {
         activeTranslationSystem = selection.0
         modeCoordinator.system = selection.0
         // 2.2.1 (D13): the A/B settings are read here, at the start of a session, so a change never applies mid-run.
-        HybridSchedulingPolicy.pinSetting()
         TranslationHotPathAB.pinSettings()
-        modeCoordinator.hybridVariant = HybridSchedulingPolicy.buildVariant
         diag.modeActiveSystem = selection.0.rawValue
         diag.modePendingSystem = selection.0.rawValue
         diag.modeMigration = selection.1
@@ -84,7 +82,7 @@ extension TranslatorEngine {
             restoreModelRun(source: sourceCode, target: targetCode, system: selection.0)
         }
         if #unavailable(iOS 26.4), selection.0 != .legacy {
-            modeAvailability = selection.0 == .lowLatency ? "Explicit low latency requires iOS 26.4 or later" : "Fast recovery needs iOS 26.4; Apple default fallback remains available"
+            modeAvailability = "Explicit low latency requires iOS 26.4 or later"
         }
         if selection.0 != .legacy, sourceCode != "auto" {
             let session = modeSessionID, source = sourceCode, target = targetCode

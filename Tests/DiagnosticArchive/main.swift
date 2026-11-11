@@ -254,11 +254,11 @@ import Foundation
             "confirmed_continuity_loss", "pip_enqueue_failure",
             "enqueue_slow_tail", "enqueue_typical_latency"
         ]), "Diagnostic findings must identify normal latency, slow tail and continuity separately")
-        let hybridEvidence = DiagnosticSessionExport(
-            translationModes: TranslationModeReport(active: "hybridRecovery",
-                pending: "hybridRecovery", referenceSHA: String(repeating: "0", count: 40),
+        let thermalEvidence = DiagnosticSessionExport(
+            translationModes: TranslationModeReport(active: "lowLatency",
+                pending: "lowLatency", referenceSHA: String(repeating: "0", count: 40),
                 migration: "persisted", events: [], distributions: [:],
-                counters: ["hybrid_cross_strategy_overlap": 6]),
+                counters: [:]),
             id: UUID(), startedAt: Date(), endedAt: Date(),
             appVersion: "1.9.5", systemVersion: "test",
             settings: ["thermalState": "fair", "performanceTier": "full_performance",
@@ -266,63 +266,26 @@ import Foundation
                        "joinAdjacentText": "true", "activeTextFocus": "true",
                        "effectiveRapidTextTracking": "true",
                        "effectiveJoinAdjacentText": "true", "effectiveActiveTextFocus": "true",
-                       "hotPathAB": "L1_F1", "hybridSchedulerAB": "evidenceBounded",
+                       "hotPathAB": "L1_F1",
                        "glossary": "private-protected-names"],
             health: MemoryDiagnosticHealth(), counters: [:],
-            distributions: [
-                "hybridOverlappedRecoveryMs": DiagnosticDistribution([1010, 1150, 1209, 1320, 1400]),
-                "hybridMeasuredOverlapMs": DiagnosticDistribution([100, 140, 302, 330, 360])
-            ], events: [], measurementBoundary: "OCR through PiP enqueue", textCapture: false)
-        let hybridFindings = DiagnosticIssueDetector.assess(hybridEvidence)
-        precondition(hybridFindings.contains { $0.code == "hybrid_slow_recovery" && $0.occurrences == 5 },
-            "Full recovery over one second must yield a bounded, sample-counted finding")
-        precondition(!hybridFindings.contains { $0.code == "hybrid_missing_overlap_measurement" },
-            "Actual overlap measurements must not be misclassified as missing")
-        let hybridArchive = try await writer.decode(try await writer.encode(hybridEvidence))
-        precondition(hybridArchive.settings["thermalState"] == "fair" &&
-                     hybridArchive.settings["performanceTier"] == "full_performance" &&
-                     hybridArchive.settings["reductionReasons"] == "none" &&
-                     hybridArchive.settings["effectiveRapidTextTracking"] == "true" &&
-                     hybridArchive.settings["effectiveJoinAdjacentText"] == "true" &&
-                     hybridArchive.settings["effectiveActiveTextFocus"] == "true" &&
-                     hybridArchive.settings["hotPathAB"] == "L1_F1" &&
-                     hybridArchive.settings["hybridSchedulerAB"] == "evidenceBounded" &&
-                     hybridArchive.settings["glossary"] == nil,
+            distributions: [:], events: [], measurementBoundary: "OCR through PiP enqueue", textCapture: false)
+        let thermalArchive = try await writer.decode(try await writer.encode(thermalEvidence))
+        precondition(thermalArchive.settings["thermalState"] == "fair" &&
+                     thermalArchive.settings["performanceTier"] == "full_performance" &&
+                     thermalArchive.settings["reductionReasons"] == "none" &&
+                     thermalArchive.settings["effectiveRapidTextTracking"] == "true" &&
+                     thermalArchive.settings["effectiveJoinAdjacentText"] == "true" &&
+                     thermalArchive.settings["effectiveActiveTextFocus"] == "true" &&
+                     thermalArchive.settings["hotPathAB"] == "L1_F1" &&
+                     thermalArchive.settings["glossary"] == nil,
             "Effective thermal and custom-preset values must survive privacy filtering")
-        let absentOverlapEvidence = DiagnosticSessionExport(
-            translationModes: hybridEvidence.translationModes,
-            id: UUID(), startedAt: Date(), endedAt: Date(),
-            appVersion: "1.9.5", systemVersion: "test",
-            settings: [:], health: MemoryDiagnosticHealth(), counters: [:],
-            distributions: [
-                "hybridOverlappedRecoveryMs": DiagnosticDistribution([1010, 1150, 1209])],
-            events: [], measurementBoundary: "OCR through PiP enqueue", textCapture: false)
-        precondition(DiagnosticIssueDetector.assess(absentOverlapEvidence).contains {
-            $0.code == "hybrid_missing_overlap_measurement" && $0.occurrences == 6
-        }, "Repeated overlap events without timings must generate a diagnostic finding")
         let ringOverflow = TranslationModeReport(active: "lowLatency", pending: "lowLatency",
             referenceSHA: String(repeating: "0", count: 40), migration: "persisted",
             events: [], distributions: [:],
             counters: ["mode_trace_ring_overwritten": 37]).sanitized()
         precondition(ringOverflow.counters["session_mode_trace_ring_overwritten"] == 37,
             "Full-session event loss must survive the 6000-event privacy ring boundary")
-        let fallbackCounters: [String: Int] = [
-            "hybrid_default_fallback": 5, "recovery_decision_source_mismatch": 12]
-        let fallbackEvidence = DiagnosticSessionExport(
-            translationModes: TranslationModeReport(active: "hybridRecovery",
-                pending: "hybridRecovery", referenceSHA: String(repeating: "0", count: 40),
-                migration: "persisted", events: [], distributions: [:], counters: fallbackCounters),
-            id: UUID(), startedAt: Date(), endedAt: Date(),
-            appVersion: "1.9.6", systemVersion: "test",
-            settings: [:], health: MemoryDiagnosticHealth(), counters: [:],
-            distributions: ["confirmedModelMs": DiagnosticDistribution(
-                Array(repeating: 80.0, count: 17) + [1050, 1220, 1500])],
-            events: [], measurementBoundary: "OCR through PiP enqueue", textCapture: false)
-        let fallbackFindings = DiagnosticIssueDetector.assess(fallbackEvidence)
-        precondition(fallbackFindings.contains { $0.code == "hybrid_confirmed_long_tail" },
-            "Hybrid confirmed model tail must not require an overlap-at-admission tag")
-        precondition(fallbackFindings.contains { $0.code == "hybrid_fallback_storm" },
-            "Repeated fast-pack failures must generate a thresholded finding")
         let safeContinuity = try await writer.decode(try await writer.encode(continuityEvidence))
         precondition(safeContinuity.settings["lowLatencyTranslation"] == "true" &&
                      safeContinuity.settings["directPiPBuffer"] == "false",
@@ -553,17 +516,16 @@ import Foundation
         precondition(abs(decisionDistribution.mean - 350) < 0.001)
         // v1.9.2 timing and cache events must survive the strict privacy
         // sanitizer rather than silently disappearing from the ZIP.
-        let revisedModeReport = TranslationModeReport(warmups: nil, active: "lowLatency", pending: "hybridRecovery",
+        let revisedModeReport = TranslationModeReport(warmups: nil, active: "lowLatency", pending: "lowLatency",
             referenceSHA: String(repeating: "b", count: 40), migration: "persisted",
-            events: [modeEvent("hybrid_speculation_backend_busy", at: 2.1),
+            events: [modeEvent("speculative_model_submitted", at: 2.1),
                      modeEvent("backend_lane_wait_ms", at: 2.2, duration: 42),
                      modeEvent("strategy_cache_hit_appleDefault", at: 2.3),
                      modeEvent("selected_origin_session_apple_default", at: 2.4)],
             distributions: ["backend_lane_wait_ms": dist, "unsafe_user_content": dist],
-            counters: ["hybrid_speculation_backend_busy": 2, "backend_lane_wait_ms": 3,
+            counters: ["backend_lane_wait_ms": 3,
                        "strategy_cache_hit_appleDefault": 1, "unsafe_user_content": 999]).sanitized()
         precondition(revisedModeReport.events.count == 4)
-        precondition(revisedModeReport.counters["session_hybrid_speculation_backend_busy"] == 2)
         precondition(revisedModeReport.counters["session_strategy_cache_hit_appleDefault"] == 1)
         precondition(revisedModeReport.distributions["session_backend_lane_wait_ms"] != nil)
         precondition(revisedModeReport.distributions.keys.allSatisfy { !$0.contains("unsafe") })
@@ -584,16 +546,15 @@ import Foundation
                     revision: 1, source: "pt", target: "en", fingerprint: safeHash, reason: reason,
                     monotonicTime: offset + at, firstOCR: offset + 1, durationMs: duration, thermal: 1)
             }
-            var events = [
-                trace("confirmed", 1.2), trace("requested_lowLatency", 1.21),
+            let events = [
+                trace("confirmed", 1.2), trace("requested_lowLatency", 1.21), trace("recovery_enqueue", 1.215),
                 trace("confirmed_model_submitted", 1.220), trace("new_session_start", 1.221),
-                trace("recovery_queue_ms", 1.222, 2), trace("hybrid_switch_guard_low_latency", 1.2),
+                trace("recovery_queue_ms", 1.222, 2),
                 trace("recovery_service_ms", 1.27, 45), trace("selected_origin_recovery", 1.28),
                 trace("selected_strategy_lowLatency", 1.28), trace("selected_recovery_success", 1.28),
                 trace("pip_enqueue_recovery_success", 1.30),
                 trace("confirmed", 2, caption: "secret OCR text")
             ]
-            events.append(trace("hybrid_hedge_suppressed", 1.25, 900))
             let modes = TranslationModeReport(warmups: nil, active: mode, pending: mode,
                 referenceSHA: String(repeating: "a", count: 40), migration: "persisted",
                 events: events, distributions: [:], counters: [:])
@@ -601,15 +562,14 @@ import Foundation
                 endedAt: Date(timeIntervalSince1970: 1_300 + offset), appVersion: "2.0.0", systemVersion: "27.0.1",
                 hardwareModel: "iPhone18,2",
                 settings: ["speed": "balanced", "translationTestMode": "temporaryMemory", "startingRAMEntries": "0",
-                           "hybridSwitchGuard": "true", "source": "secret OCR text"],
+                           "source": "secret OCR text"],
                 health: MemoryDiagnosticHealth(), counters: ["enqueueFailed": 0],
                 distributions: ["enqueueLatencyMs": DiagnosticDistribution((1...40).map { Double($0) * 10 })],
                 events: [event], measurementBoundary: "OCR through PiP enqueue", textCapture: false)
             export.translationModes = modes
             return export
         }
-        let three = [reportSession("legacy", offset: 0), reportSession("hybridRecovery", offset: 400),
-                     reportSession("lowLatency", offset: 800)]
+        let three = [reportSession("legacy", offset: 0), reportSession("lowLatency", offset: 800)]
         let reportURL = try await writer.exportCombinedReport(three, version: "2.0.0", build: 83)
         precondition(reportURL.lastPathComponent.hasPrefix("ScreenLingo-Report-2.0.0-b83-") &&
                      reportURL.pathExtension == "md")
@@ -617,12 +577,12 @@ import Foundation
         precondition(reportData.count < 150_000, "Combined report must stay small")
         let reportText = String(decoding: reportData, as: UTF8.self)
         for header in ["## 1. Sessions", "## 2. Comparison", "## 3. Stage timings", "## 4. Model calls",
-                       "## 5. Captions", "## 6. Hybrid and recovery decisions", "## 7. Findings", "## 8. Truncation"] {
+                       "## 5. Captions", "## 6. Recovery decisions", "## 7. Findings", "## 8. Truncation"] {
             precondition(reportText.contains(header), "Missing report section " + header)
         }
         precondition(!reportText.contains("secret"), "Report must not contain OCR or source text")
         precondition(reportText.contains("S1,legacy,confirmed,lowLatency,0,"), "Model call row reconstructed")
-        precondition(reportText.contains("hybrid_hedge_suppressed"))
+        precondition(!reportText.contains("hybrid") && reportText.contains("· 2 session(s)"), "Two modes in the report")
         precondition(reportText.contains(",c1,") && !reportText.contains("cap1"), "Caption ids are replaced by sequence refs")
         precondition(reportText.contains("S1–S2: 100%"), "Same-content fingerprint overlap")
         let parsedTrace = CombinedDiagnosticReport.parse(three[0].translationModes?.sanitized(), label: "S1")
@@ -644,10 +604,10 @@ import Foundation
         precondition(warmComparison.notes.contains { $0.hasPrefix("thermalEnd:") } &&
                      warmComparison.notes.contains { $0.hasPrefix("startingRAMEntries:") }, "D3: differences are listed as notes")
         let blockedOther = DiagnosticPerformanceComparison(
-            baseline: variant(snapshot, ["hybridSchedulerAB": "evidenceBounded"]),
-            current: variant(snapshot, ["hybridSchedulerAB": "recoveryFirst"]))
-        precondition(!blockedOther.comparable && blockedOther.reason.contains("hybridSchedulerAB"),
-                     "D3: a different Hybrid scheduler variant is a different cohort and the reason names it")
+            baseline: variant(snapshot, ["trustedBandAB": "on"]),
+            current: variant(snapshot, [:]))
+        precondition(!blockedOther.comparable && blockedOther.reason.contains("trustedBandAB"),
+                     "D3: a switch that changes what is read is a different cohort and the reason names it")
         precondition(DiagnosticPerformanceComparison.cohortKeys.contains("hotPathAB") &&
                      DiagnosticPerformanceComparison.cohortKeys.contains("detailedCollection") &&
                      DiagnosticPerformanceComparison.cohortKeys.contains("cjkSingleCharacters"), "D3: cohort keys include the A/B and Detailed settings")
@@ -668,40 +628,39 @@ import Foundation
         precondition(DiagnosticIssueDetector.assess(tailRun).contains { $0.code == "enqueue_slow_tail" },
                      "D7: a 1.5 s tail over a 0.6 s median is flagged (it was not under the old rule)")
 
-        // 2.2.1 D9: Low Latency recovery service by distance from the previous Default call.
-        func band(_ reason: String, _ at: Double, _ duration: Double? = nil, caption: String) -> TranslationModeTrace {
-            TranslationModeTrace(mode: "hybridRecovery", testMode: "normal", session: session, caption: caption, revision: 1,
-                source: "pt", target: "en", fingerprint: safeHash, reason: reason, monotonicTime: at, firstOCR: 0, durationMs: duration, thermal: 0)
-        }
-        let bandReport = TranslationModeReport(warmups: nil, active: "hybridRecovery", pending: "hybridRecovery",
-            referenceSHA: String(repeating: "b", count: 40), migration: "persisted", events: [
-                band("requested_lowLatency", 1.0, caption: "k1"), band("hybrid_cross_strategy_overlap", 1.0, caption: "k1"),
-                band("recovery_service_ms", 1.3, 300, caption: "k1"),
-                band("requested_lowLatency", 2.0, caption: "k2"), band("hybrid_previous_default_exit_gap_ms", 2.0, 100, caption: "k2"),
-                band("recovery_service_ms", 2.2, 200, caption: "k2"),
-                band("requested_lowLatency", 3.0, caption: "k3"), band("hybrid_previous_default_exit_gap_ms", 3.0, 700, caption: "k3"),
-                band("recovery_service_ms", 3.4, 400, caption: "k3"),
-                band("requested_lowLatency", 4.0, caption: "k4"), band("recovery_service_ms", 4.1, 100, caption: "k4"),
-                band("requested_lowLatency", 5.0, caption: "k5"), band("hybrid_previous_default_exit_gap_ms", 5.0, 120, caption: "k5"),
-                band("recovery_service_ms", 5.3, 260, caption: "k5")
-            ], distributions: [:], counters: [:])
-        let bands = CombinedDiagnosticReport.hybridBands(CombinedDiagnosticReport.parse(bandReport, label: "S1"))
-        func row(_ name: String) -> (n: Int, median: Double?, max: Double?) {
-            let r = bands.first { $0.band == name }!; return (r.n, r.median, r.max)
-        }
-        precondition(row("in flight").n == 1 && row("in flight").max == 300, "D9: in flight")
-        precondition(row("0-150 ms").n == 2 && row("0-150 ms").max == 260, "D9: 0-150 ms holds k2 and k5")
-        precondition(row("150-500 ms").n == 0 && row("500-1500 ms").n == 1 && row("none/older").n == 1, "D9: other bands")
-        var bandSession = variant(snapshot, [:])
-        bandSession.translationModes = bandReport
-        let bandText = CombinedDiagnosticReport.markdown([bandSession], version: "2.2.1", build: 104, generatedAt: Date())
-        precondition(bandText.contains("| S1 | in flight | 1 |") && bandText.contains("| S1 | 0-150 ms | 2 |"), "D9: the table is in the report")
+        // 2.5.0 (item B): a stored run is cleaned twice (when it is stored and when a report is made from it).
+        // Its whole-session totals must survive both passes; before 2.5.0 the second pass dropped them.
+        let onceCleaned = TranslationModeReport(warmups: nil, active: "legacy", pending: "legacy",
+            referenceSHA: String(repeating: "b", count: 40), migration: TranslationSystem.migratedHybridReason,
+            events: [], distributions: [:], counters: ["speculation_deferred_armed": 91]).sanitized()
+        precondition(onceCleaned.counters["session_speculation_deferred_armed"] == 91)
+        precondition(onceCleaned.sanitized().counters["session_speculation_deferred_armed"] == 91,
+                     "B: early starts deferred must not read 0 for a saved run")
+        precondition(onceCleaned.migration == TranslationSystem.migratedHybridReason, "The migration reason code reaches the report")
+        // 2.5.0: the new numbers reach the report and the export, and only under their fixed names.
+        let v250Run = DiagnosticSessionExport(id: UUID(), startedAt: Date(timeIntervalSince1970: 1_000),
+            endedAt: Date(timeIntervalSince1970: 1_300), appVersion: "2.5.0", systemVersion: "test",
+            hardwareModel: "iPhoneTest1,1",
+            settings: ["trustedBandAB": "on", "headStartAB": "on"], health: MemoryDiagnosticHealth(),
+            counters: ["trustedBandReads": 12, "headStartSent": 5, "extraReadNotArmedInk": 3, "secret text": 9],
+            distributions: ["modelLen21to40Ms": DiagnosticDistribution([300, 310, 320]),
+                            "captureStartWarmupMs": DiagnosticDistribution([1100])],
+            events: [], measurementBoundary: "test", textCapture: false)
+        let v250Text = CombinedDiagnosticReport.markdown([v250Run], version: "2.5.0", build: 118, generatedAt: Date())
+        precondition(v250Text.contains("trusted caption band, Legacy head start"), "2.5.0 switches are named in the report")
+        precondition(v250Text.contains("| S1 | 0 | 0 | 3 | 0 | 0 | 0 | 0 | 0 |"), "C: extra reads by cause")
+        precondition(v250Text.contains("| S1 | 1 (") && v250Text.contains(" | 3: "), "A and D: warm-up and length bucket rows")
+        precondition(!v250Text.contains("secret"), "Report must not contain text")
+        let v250Safe = try await writer.decode(try await writer.encode(v250Run))
+        precondition(v250Safe.counters["trustedBandReads"] == 12 && v250Safe.counters["secret text"] == nil &&
+                     v250Safe.distributions["modelLen21to40Ms"] != nil && v250Safe.settings["trustedBandAB"] == "on",
+                     "2.5.0 names pass the export allowlists; anything else is dropped")
 
         // 2.2.1 D6 and D8: truncation counters and the variables / n = 0 rows appear in the report.
         let truncated = DiagnosticSessionExport(id: UUID(), startedAt: Date(timeIntervalSince1970: 1_000),
             endedAt: Date(timeIntervalSince1970: 1_600), appVersion: "2.2.1", systemVersion: "test",
             hardwareModel: "iPhoneTest1,1",
-            settings: ["hotPathAB": "L1_F1", "hybridSchedulerAB": "evidenceBounded", "detailedCollection": "false",
+            settings: ["hotPathAB": "L1_F1", "detailedCollection": "false",
                        "thermalStart": "nominal", "thermalEnd": "fair", "thermalMax": "fair"],
             health: MemoryDiagnosticHealth(),
             counters: ["structured_events_dropped": 7, "id_map_resets": 2, "legacy_context_resets": 1,

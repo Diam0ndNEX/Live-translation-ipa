@@ -8,6 +8,9 @@ struct StartButton: View {
     var live: Bool
     var size: CGFloat = 88
     var onTap: () -> Void = {}
+    /// 2.5.0: when set, a tap runs this instead of opening the system broadcast sheet (Low Latency without its
+    /// language pack asks what to do first). Nil is the normal button.
+    var intercept: (() -> Void)? = nil
 
     @State private var breathe = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -38,12 +41,21 @@ struct StartButton: View {
                 .offset(x: live ? 0 : 3)
                 .accessibilityHidden(true)
             // The real picker sits on top with its own glyph hidden, so taps reach ReplayKit.
-            BroadcastPicker(onTap: onTap, hidesGlyph: true)
-                .frame(width: size, height: size)
-                .clipShape(Circle())
-                .contentShape(Circle())
-                .accessibilityLabel(live ? "Stop capture" : "Start capture")
-                .accessibilityHint("Opens the system broadcast sheet")
+            if let intercept {
+                Button(action: intercept) { Color.clear }
+                    .frame(width: size, height: size)
+                    .clipShape(Circle())
+                    .contentShape(Circle())
+                    .accessibilityLabel("Start capture")
+                    .accessibilityHint("Asks about the missing language pack first")
+            } else {
+                BroadcastPicker(onTap: onTap, hidesGlyph: true)
+                    .frame(width: size, height: size)
+                    .clipShape(Circle())
+                    .contentShape(Circle())
+                    .accessibilityLabel(live ? "Stop capture" : "Start capture")
+                    .accessibilityHint("Opens the system broadcast sheet")
+            }
         }
         .frame(width: size * 1.9, height: size * 1.9)
         .onAppear { startAnimating() }

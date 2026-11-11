@@ -1,11 +1,11 @@
-# ScreenLingo: current version 2.3.3 (build 110)
+# ScreenLingo: current version 2.5.0 (build 118)
 
 Everything below this block is older release notes (1.2.x to 1.9.3), kept as history. Defaults and behavior may have changed since, so do not read them as the current state.
 
-- Current docs index: [docs/README.md](docs/README.md). Newest specification: [docs/v2.3.3-specification.md](docs/v2.3.3-specification.md). There is no separate 2.3.2 specification file; the 2.3.2 changelog entry is in `Shared/Shared.swift`.
+- Current docs index: [docs/README.md](docs/README.md). Newest specification: [docs/v2.5.0-specification.md](docs/v2.5.0-specification.md). There is no separate 2.3.2 specification file; the 2.3.2 changelog entry is in `Shared/Shared.swift`.
 - Where code, tests and docs go: [docs/structure-guidelines.md](docs/structure-guidelines.md).
 - The app is built by GitHub Actions into an unsigned .ipa and installed with TrollStore.
-- CI compiles and runs the Swift and Python checks listed in `.github/workflows/build.yml`. Green CI means it compiles and the checks pass; it is not proof of speed or subtitle quality. No speed claim is made without Diagnostics data for Legacy, Hybrid Recovery and Low Latency on the same content.
+- CI compiles and runs the Swift and Python checks listed in `.github/workflows/build.yml`. Green CI means it compiles and the checks pass; it is not proof of speed or subtitle quality. No speed claim is made without Diagnostics data for Legacy and Low Latency on the same content. Since 2.5.0 there are two modes; Hybrid Recovery was removed, and the older notes below that mention it are history.
 
 ---
 

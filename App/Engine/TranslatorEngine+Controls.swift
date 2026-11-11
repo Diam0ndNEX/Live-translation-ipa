@@ -44,6 +44,7 @@ extension TranslatorEngine {
            ProcessInfo.processInfo.thermalState == .serious || ProcessInfo.processInfo.thermalState == .critical {
             modeCoordinator.reduceSpeculation(memoryPressure: false)
         }
+        rewarmAfterQuietIfDue()
         diag.noteThermalState()
         diag.tick(alive: alive, paused: paused, frozen: frozen)
         if tickCount % 5 == 0 { saveMemory() }
@@ -129,6 +130,8 @@ extension TranslatorEngine {
         invalidatePending()
         diag.noteRuntimeState(visible ? "app_interface_visible" : "external_capture_period")
         syncConfig()
+        // 2.5.0 (item A): leaving the app dropped unfinished work above, a running warm-up included. Start it again.
+        if !visible { warmAtCaptureStart() }
     }
 
     func pipelineSettingsChanged() {
@@ -184,7 +187,12 @@ extension TranslatorEngine {
                            eventDrivenOCR: flag("eventDrivenOCR", true),
                            fastOCR: flag("fastOCR", false),
                            cjkSingleCharacters: flag("cjkSingleCharacters", true),
-                           independentHeartbeat: TranslationHotPathAB.independentHeartbeat ? true : nil))
+                           independentHeartbeat: TranslationHotPathAB.independentHeartbeat ? true : nil,
+                           // 2.5.0: E only where focused reads exist (Low Latency), F only for Legacy.
+                           trustedCaptionBand: (TranslationHotPathAB.trustedCaptionBand && activeTranslationSystem != .legacy) ? true : nil,
+                           legacyHeadStart: (TranslationHotPathAB.legacyHeadStart && activeTranslationSystem == .legacy &&
+                                             speculationAllowed && flag("translateAhead", true)) ? true : nil,
+                           extraReadReasons: TranslationHotPathAB.confirmationReadReasons ? true : nil))
     }
 
     /// Invalidate suspended work before changing language, capture state, or settings.
