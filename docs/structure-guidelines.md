@@ -9,13 +9,13 @@ Status: rewritten for 2.3.9 (build 116), re-read against the code for 2.4.0 (bui
 | App/TranslatorEngine.swift | 1300 | 21 |
 | App/Diagnostics.swift | 700 | 9 |
 | BroadcastExtension/SampleHandler.swift | 650 | 3 |
-| App/DiagnosticArchive.swift | 450 | 7 |
 | App/TranslationMemoryStore.swift | 400 | 9 |
+| App/DiagnosticArchive.swift | 400 | 7 |
 | App/DiagnosticsDashboard.swift | 300 | 5 |
 | App/SettingsViews.swift | 300 | 2 |
 | App/ModeTranslationService.swift | 300 | 2 |
 | App/TestRunViews.swift | 250 | 2 |
-| Shared/TranslationSystem.swift | 250 | 2 |
+| Shared/TranslationSystem.swift | 200 | 2 |
 <!-- sizes:end -->
 Since 2.5.0 there are two translation modes, Legacy and Low Latency. Hybrid Recovery was removed; `Shared/TranslationSystem+Coordinator.swift` (`ModeCoordinator`) and `App/ModeTranslationService.swift` serve Low Latency only. Test folders and scripts keep their old names (`Tests/ThreeModes`, `scripts/test_three_modes.py`, `compare_three_modes.py`) because `build.yml` names them.
 Biggest remaining: TranslatorEngine (stored properties, `init`, test-pinned members) and `process` (391 lines, one function, left whole on purpose).

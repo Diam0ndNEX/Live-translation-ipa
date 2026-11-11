@@ -46,14 +46,6 @@ struct DiagnosticPerformanceComparison {
 
     init(baseline: DiagnosticSessionExport, current: DiagnosticSessionExport) {
         notes = Self.differenceNotes(baseline, current)
-        // 2.5.0: runs of the removed Hybrid Recovery mode stay readable but are never compared.
-        if baseline.translationModes?.isRemovedMode == true || current.translationModes?.isRemovedMode == true {
-            comparable = false
-            reason = "One of the runs used Hybrid Recovery, which was removed in 2.5.0; it is kept for reading and is not compared"
-            p95Changes = [:]
-            medianChanges = [:]; meanChanges = [:]; p90Changes = [:]
-            return
-        }
         guard let baselineModel = baseline.hardwareModel, !baselineModel.isEmpty,
               baselineModel == current.hardwareModel,
               baseline.systemVersion == current.systemVersion,

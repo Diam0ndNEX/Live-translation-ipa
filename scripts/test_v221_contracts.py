@@ -283,7 +283,7 @@ assert diagnostics.count("earlyVisualWakesSuppressed") >= 3 and '"earlyVisualWak
 service = read("App/ModeTranslationService.swift")
 # 2.5.0 (changed with the code): the marker and its finding are gone; the reason code stays readable in old reports.
 assert "hybrid_default_default_overlap" not in service and "hybrid_default_default_overlap" not in diagnostics
-assert archive.count("hybrid_default_default_overlap") == 2, "mode reasons and whole-session reasons only"
+assert "hybrid_default_default_overlap" not in archive, "2.5.0: the reason code is gone from the archive too"
 # E9: identical-frame holds are counted where the held frame is detected.
 assert "diag.s.identicalFrameHolds += 1" in engine and '"identicalFrameHolds"' in archive
 # E11: no precondition crash in the speculative owner; a conflict is logged.

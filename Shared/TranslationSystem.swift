@@ -14,9 +14,7 @@ enum TranslationSystem: String, CaseIterable, Codable {
     static let migratedHybridReason = "migrated_hybrid_low_latency"
     static let migrationReasons = ["explicit_low_latency", "legacy_or_ambiguous", "persisted", migratedHybridReason]
 
-    /// Old reports and warm-up records name the removed mode. They must still decode; a removed or unknown name reads
-    /// as Low Latency here, and the report code leaves sessions of the removed mode out of comparisons by their own
-    /// stored mode name, never by this value.
+    /// An unknown name (for example a removed mode in an old saved record) reads as Low Latency instead of failing.
     init(from decoder: Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
         self = Self(rawValue: raw) ?? .lowLatency

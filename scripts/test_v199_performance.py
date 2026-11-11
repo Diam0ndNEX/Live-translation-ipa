@@ -90,7 +90,7 @@ assert "ThermalPerformancePolicy.automaticPressure" in capture
 assert "ThermalPerformancePolicy.automaticPressure" in engine
 assert "mode_trace_ring_overwritten" in archive
 assert "earlyVisualWakes" in archive
-assert "hybrid_unsubmitted_hedge_ms" in archive
+assert "hybrid_unsubmitted_hedge_ms" not in archive
 assert "legacyAdaptiveLowYieldSkips" in archive
 assert "CREATE TABLE" in memory
 assert "codex/screenlingo-v1.9.9-recovery-evidence" in workflow

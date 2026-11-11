@@ -68,7 +68,7 @@ system = read_source("TranslationSystem")
 for name in ("hybridRelaxedBackoff", "hybridShorterGuard"):
     assert name not in work and name not in experimental and name not in system, name
 assert "Hybrid" not in index
-assert '"hybridBackoffAB"' in archive and '"hybridGuardAB"' in archive
+assert '"hybridBackoffAB"' not in archive and '"hybridGuardAB"' not in archive
 assert 'hybridBackoffAB' not in diagnostics and 'hybridGuardAB' not in diagnostics
 
 # L2: Legacy confirmed-own-lane arm, default OFF, iOS 26 only, epoch-guarded drain.

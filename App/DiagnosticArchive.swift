@@ -212,40 +212,20 @@ struct TranslationModeReport: Codable {
         }
     }
 
-    /// 2.5.0: Hybrid Recovery was removed and nothing writes its reason codes any more. They stay in these lists
-    /// only so that runs saved by 2.4.0 and earlier are still read whole. `removedMode` names such a run.
-    static let removedMode = "hybridRecovery"
     static let currentModes = ["legacy", "lowLatency"]
-    var isRemovedMode: Bool { active == Self.removedMode }
 
     static let reasons: Set<String> = [
         "speculative_model_submitted", "confirmed_model_submitted", "model_batch_failed", "model_batch_completed", "speculative_model_completed", "confirmed_model_completed",
         "cancellation_requested", "cancelled_call_returned",
-        "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
-        "hybrid_speculation_unexecuted",
-        "hybrid_speculation_backend_busy", "hybrid_speculation_yielded_to_confirmed",
-        "hybrid_matching_wait_ms", "hybrid_unsubmitted_hedge_ms",
         "confirmed_memory_probe_reused", "backend_apple_call_entered", "backend_apple_call_returned",
-        "hybrid_previous_default_exit_gap_ms", "hybrid_recovery_post_default_service_ms",
-        "hybrid_recovery_no_recent_overlap_service_ms", "hybrid_unexplained_slow_recovery_ms",
         "mode_plan_reused_ms", "mode_plan_built_ms",
         "mode_commit_to_pip_ms", "mode_confirmation_to_pip_ms", "mode_ready_to_pip_ms",
         "mode_trace_ring_overwritten",
         "strategy_cache_hit_appleDefault", "strategy_cache_hit_lowLatency",
         "strategy_cache_populated_appleDefault", "strategy_cache_populated_lowLatency",
-        "hybrid_cross_strategy_overlap", "hybrid_default_default_overlap", "hybrid_overlapped_recovery_ms", "hybrid_simultaneous_model_overlap_ms",
-        "hybrid_preserve_confirmed_session", "hybrid_hedged_recovery",
-        "hybrid_obsolete_speculation_draining", "hybrid_losing_request_draining",
-        "hybrid_no_fast_pack_fallback",
         "memory_probe_reused",
-        "hybrid_switch_guard_default", "hybrid_switch_guard_low_latency",
-        "hybrid_hedge_suppressed", "hybrid_suppressed_hedge_deadline",
-        "hybrid_physical_default_drain_wait_ms", "hybrid_default_drain_completed",
-        "hybrid_default_drain_budget_exceeded", "hybrid_post_default_settlement_wait_ms",
-        "hybrid_slow_post_default_ms", "hybrid_default_reentered_during_settlement",
         // 2.4.0
-        "speculation_deferred_armed", "hybrid_pin_low_latency", "hybrid_pin_default", "hybrid_pin_wait_matching",
-        "hybrid_model_switch_low_latency", "hybrid_model_switch_default",
+        "speculation_deferred_armed",
         "backend_availability_ms", "backend_task_dispatch_ms", "backend_installed_cache_hit",
         "backend_lane_wait_ms", "backend_lane_admission_rejected", "backend_stale_request_dropped",
         "backend_session_age_ms", "backend_session_reuse_count",
@@ -258,7 +238,7 @@ struct TranslationModeReport: Codable {
         "speculation_admitted", "speculation_failed", "speculation_ready", "superseded_missing",
         "speculation_superseded_before_confirmation",
         "source_correction", "speculation_match_unfinished", "memory_lookup_start", "memory_lookup_end",
-        "speculative_enqueue", "recovery_enqueue", "same_strategy_retry", "hybrid_default_fallback",
+        "speculative_enqueue", "recovery_enqueue", "same_strategy_retry",
         "stale_rejected", "recovery_failed_missing", "confirmed", "display_failed",
         "unsupported_os", "unsupported_or_uninstalled_pair", "requested_appleDefault", "requested_lowLatency",
         "retained_session_start", "new_session_start", "speculative_queue_ms", "recovery_queue_ms",
@@ -275,7 +255,7 @@ struct TranslationModeReport: Codable {
             }
         }
         let safe = Array(events.suffix(6000)).filter {
-            ["legacy", "hybridRecovery", "lowLatency"].contains($0.mode ?? active) &&
+            ["legacy", "lowLatency"].contains($0.mode ?? active) &&
             ["normal", "temporaryMemory", "freshRequests"].contains($0.testMode ?? "normal") &&
             Self.reasons.contains($0.reason) && code($0.caption) && code($0.source, limit: 32) && code($0.target, limit: 32) &&
             $0.fingerprint.count == 64 && $0.fingerprint.allSatisfy { $0.isHexDigit } &&
@@ -288,7 +268,7 @@ struct TranslationModeReport: Codable {
             "backend_lane_wait_ms", "backend_lane_admission_rejected", "backend_session_age_ms", "backend_session_reuse_count",
             "cancellation_requested", "cancelled_call_returned"]
         // 2.5.0: warm-up records of a removed-mode run decode under another mode name, so they are dropped.
-        let safeWarmups = Array((active == Self.removedMode ? [] : (warmups ?? [])).suffix(512)).filter {
+        let safeWarmups = Array((warmups ?? []).suffix(512)).filter {
             $0.system != .legacy && ["normal", "temporaryMemory", "freshRequests"].contains($0.testMode) &&
             code($0.source, limit: 32) && code($0.target, limit: 32) && warmupPhases.contains($0.phase) &&
             $0.monotonicTime.isFinite && $0.monotonicTime >= 0 &&
@@ -329,29 +309,16 @@ struct TranslationModeReport: Codable {
         // Full-session totals survive bounded event-ring eviction. Only known
         // metadata reasons and numeric samples can reach the exported report.
         let sessionReasons = [
-            "hybrid_speculation_throttled", "hybrid_speculation_useful", "hybrid_speculation_wasted",
-        "hybrid_speculation_unexecuted",
-            "hybrid_speculation_backend_busy", "hybrid_speculation_yielded_to_confirmed",
             "strategy_cache_hit_appleDefault", "strategy_cache_hit_lowLatency",
             "strategy_cache_populated_appleDefault", "strategy_cache_populated_lowLatency",
             "speculation_superseded_before_confirmation", "speculative_model_submitted", "confirmed_model_submitted",
-            "hybrid_cross_strategy_overlap", "hybrid_default_default_overlap", "hybrid_overlapped_recovery_ms", "hybrid_simultaneous_model_overlap_ms",
-        "hybrid_no_fast_pack_fallback",
             "pip_held_unchanged", "backend_availability_ms", "backend_task_dispatch_ms",
             "backend_installed_cache_hit", "backend_lane_wait_ms", "backend_lane_admission_rejected",
             "backend_stale_request_dropped", "backend_session_age_ms", "backend_session_reuse_count",
             "speculative_queue_ms", "recovery_queue_ms", "model_batch_completed",
             "cancelled_call_returned", "mode_trace_ring_overwritten",
-            "confirmed_memory_probe_reused", "hybrid_unsubmitted_hedge_ms",
-            "hybrid_previous_default_exit_gap_ms", "hybrid_recovery_post_default_service_ms",
-            "hybrid_recovery_no_recent_overlap_service_ms", "hybrid_unexplained_slow_recovery_ms",
-            "hybrid_switch_guard_default", "hybrid_switch_guard_low_latency",
-        "hybrid_hedge_suppressed", "hybrid_suppressed_hedge_deadline",
-        "hybrid_physical_default_drain_wait_ms", "hybrid_default_drain_completed",
-        "hybrid_default_drain_budget_exceeded", "hybrid_post_default_settlement_wait_ms",
-        "hybrid_slow_post_default_ms", "hybrid_default_reentered_during_settlement",
-        "speculation_deferred_armed", "hybrid_pin_low_latency", "hybrid_pin_default", "hybrid_pin_wait_matching",
-        "hybrid_model_switch_low_latency", "hybrid_model_switch_default"
+            "confirmed_memory_probe_reused",
+        "speculation_deferred_armed",
         ]
         // 2.5.0 (item B): a run is cleaned once when it is stored and again when a report is made from it. The first
         // pass renames each total to "session_<reason>"; the second pass looked for "<reason>" only, so every
@@ -362,7 +329,7 @@ struct TranslationModeReport: Codable {
                 counts["session_" + reason] = min(count, 1_000_000)
             }
         }
-        let modes = ["legacy", "hybridRecovery", "lowLatency"]
+        let modes = ["legacy", "lowLatency"]
         for warmup in safeWarmups {
             let cohort = "warmup_" + warmup.system.rawValue + "_" + warmup.testMode + "_" + warmup.source + "_" + warmup.target + "_" + warmup.strategy.rawValue
             counts[cohort + "_" + warmup.phase, default: 0] += 1
@@ -377,7 +344,7 @@ struct TranslationModeReport: Codable {
         }
         return Self(warmups: safeWarmups, active: modes.contains(active) ? active : "legacy", pending: modes.contains(pending) ? pending : "legacy",
             referenceSHA: referenceSHA.count == 40 && referenceSHA.allSatisfy { $0.isHexDigit } ? referenceSHA : "unknown",
-            migration: ["persisted", "explicit_hybrid", "explicit_low_latency", "legacy_or_ambiguous", "unknown_value_legacy",
+            migration: ["persisted", "explicit_low_latency", "legacy_or_ambiguous", "unknown_value_legacy",
                         TranslationSystem.migratedHybridReason].contains(migration) ? migration : "unknown",
             events: safe, distributions: finalDistributions, counters: counts)
     }

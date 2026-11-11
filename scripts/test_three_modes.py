@@ -123,8 +123,8 @@ assert 'HybridAdmissionPolicy' not in core and 'HybridSchedulingPolicy' not in c
 assert '"hybrid_' not in core and 'SpeculationWaitPolicy' not in core
 assert 'final class ModeCoordinator' in core and 'let strategy = RequestedTranslationStrategy.lowLatency' in core
 assert 'self.committed != caption' in core
-# Old reports stay readable: the archive still accepts the removed mode's name and reason codes.
-assert 'hybrid_hedged_recovery' in read_source('DiagnosticArchive')
+# Dropped later in 2.5.0: the archive no longer carries the removed mode's name or reason codes.
+assert 'hybrid_hedged_recovery' not in read_source('DiagnosticArchive')
 assert 'modeAvailabilityCheckMs' in read_source('Diagnostics')
 assert 'exportModeEventWindow()' in read_source('Diagnostics')
 assert 'backend_installed_cache_hit' in service
@@ -144,9 +144,10 @@ for setting, pinned, accessor, arm in (('deferArmedSpeculation', 'armedDeferPinn
     assert f'if TranslationHotPathAB.{accessor} {{ settings["{arm}"] = "on" }}' in diagnostics
     assert archive.count(f'"{arm}"') == 3, arm + ': export allowlist, cohort keys and the report column'
 assert not (root / 'Shared/TranslationSystem+BackendPin.swift').exists() and not (root / 'Shared/TranslationSystem+HybridPolicy.swift').exists()
+assert archive.count('"speculation_deferred_armed"') == 2, 'speculation_deferred_armed stays in the mode reasons and the whole-session reasons'
 for reason in ('hybrid_pin_low_latency', 'hybrid_pin_default', 'hybrid_pin_wait_matching',
-               'hybrid_model_switch_low_latency', 'hybrid_model_switch_default', 'speculation_deferred_armed'):
-    assert archive.count('"' + reason + '"') == 2, reason + ' must stay readable in the mode reasons and the whole-session reasons'
+               'hybrid_model_switch_low_latency', 'hybrid_model_switch_default'):
+    assert '"' + reason + '"' not in archive, reason + ' is gone from the archive with the mode'
 # Pinned or not, Low Latency output still never enters the shared memory namespace.
 assert 'where output.strategies[i] == .appleDefault' in engine
 # Deferral: only for a first sighting whose pixel check is armed, only for Apple Default work, never for confirmed text.
@@ -214,10 +215,8 @@ for button in ('Button("Download") { engine.download(snap.gateSource) }', 'Butto
     assert button in ui, button
 assert 'intercept: packQuestion' in ui and 'if let intercept {' in read_source('StartButton')
 assert 'hybrid_default_fallback' not in core and 'strategy: .appleDefault' not in core, 'the coordinator has no fallback to another model'
-# Old reports: Hybrid runs are read, never compared or reported.
-assert 'var isRemovedMode: Bool { active == Self.removedMode }' in archive
-assert 'ordered.filter { $0.translationModes?.isRemovedMode != true }' in archive
-assert 'baseline.translationModes?.isRemovedMode == true || current.translationModes?.isRemovedMode == true' in archive
+# Old Hybrid runs get no special support any more: no removed-mode code in the archive, report or comparison.
+assert 'isRemovedMode' not in archive and 'removedMode' not in archive and '"hybridRecovery"' not in archive
 assert 'self = Self(rawValue: raw) ?? .lowLatency' in system, 'an old record that names the removed mode still decodes'
 # Every 2.5.0 item has a switch: default ON, pinned at session start, a toggle, a reset entry and a report label.
 switches = re.findall(r'\("(\w+)", "(\w+Pinned)", "(\w+AB)"\)', work)

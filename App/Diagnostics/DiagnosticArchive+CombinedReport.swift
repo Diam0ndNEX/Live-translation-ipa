@@ -182,11 +182,8 @@ enum CombinedDiagnosticReport {
 
     static func markdown(_ sessions: [DiagnosticSessionExport], version: String, build: Int,
                          generatedAt: Date, runs: [RunReportInfo] = []) -> String {
-        // 2.5.0: Hybrid Recovery was removed. Its saved runs stay readable in the app, but a report compares only
-        // the two current modes, so those runs are left out here and counted in one line.
         let ordered = sessions.sorted { $0.startedAt < $1.startedAt }
-        let removedModeRuns = ordered.filter { $0.translationModes?.isRemovedMode == true }.count
-        let selected = Array(ordered.filter { $0.translationModes?.isRemovedMode != true }.prefix(maximumSessions))
+        let selected = Array(ordered.prefix(maximumSessions))
         let labels = selected.indices.map { "S\($0 + 1)" }
         let parsed = selected.indices.map { parse(selected[$0].translationModes, label: labels[$0]) }
         var out: [String] = []
@@ -194,9 +191,6 @@ enum CombinedDiagnosticReport {
         out.append("")
         out.append("App \(version) build \(build) · generated \(generatedAt.ISO8601Format()) · \(selected.count) session(s)")
         out.append("Boundary: first OCR sighting → PiP enqueue (not physical display). Metadata only: no subtitle, OCR or translated text.")
-        if removedModeRuns > 0 {
-            out.append("\(removedModeRuns) run(s) of the removed Hybrid Recovery mode were left out of this report.")
-        }
         out.append("")
         out.append("## 1. Sessions")
         out.append("")
