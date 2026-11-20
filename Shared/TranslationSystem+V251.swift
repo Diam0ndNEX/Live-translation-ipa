@@ -29,8 +29,10 @@ extension TranslationHotPathAB {
     }
     /// 2.5.2, Legacy only: every live model call uses `translate(batch:)`, which Apple documents as returning sooner
     /// than `translations(from:)`. Same requests, same model, same order of results.
+    /// 2.5.3: default OFF. On the 2.5.2 device run confirmed calls were not faster (1 to 20 characters: P50 235 ms,
+    /// as in 2.5.0) and longer ones were slower; 2.4.0, without it, had the fastest Legacy model calls on record.
     static var streamLegacyCalls: Bool {
-        (UserDefaults.standard.object(forKey: "streamLegacyCallsPinned") as? Bool) ?? true
+        (UserDefaults.standard.object(forKey: "streamLegacyCallsPinned") as? Bool) ?? false
     }
     static let v251ReportLabels: [(key: String, label: String)] = [
         ("eagerSpeculationAB", "eager early translation"),
@@ -57,6 +59,8 @@ enum LegacyV251Defaults {
         }
         if defaults.object(forKey: v253AppliedKey) as? Bool != true {
             defaults.removeObject(forKey: "legacyHeadStart")
+            defaults.removeObject(forKey: "streamLegacyCalls")
+            defaults.removeObject(forKey: "subtitleAwareChangeDetection")
             defaults.set(true, forKey: v253AppliedKey)
         }
     }

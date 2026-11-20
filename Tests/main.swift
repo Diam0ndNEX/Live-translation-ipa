@@ -1245,7 +1245,7 @@ do {
         for index in stride(from: 0, to: 3000, by: 3) where flipped < PixelConfirmation.maximumAllowance + 1 {
             changed[index] = 120; flipped += 1
         }
-        check(!PixelConfirmation.matches(widePrint, changed), "Seven lost strokes never confirm, however long the caption")
+        check(!PixelConfirmation.matches(widePrint, changed), "More lost strokes than the cap never confirm, however long the caption")
     } else { check(false, "A wide caption has a fingerprint") }
     let points = PixelConfirmation.samplePoints(lines: [(x: 0.5, y: 0.1, w: 0.6, h: 0.05)]) ?? []
     check(points.count == PixelConfirmation.columns * PixelConfirmation.rows &&

@@ -17,8 +17,11 @@ enum PixelConfirmation {
     /// reason a 2.5.0 caption needed a second OCR read (about 150 ms each) in the device runs.
     static let maximumLines = 8
     /// 2.5.1: lost or gained ink points tolerated, at most. Without a cap the allowance grew with every extra
-    /// line, so a small change in a long caption could pass. Captions of up to about 4 lines are unaffected.
-    static let maximumAllowance = 6
+    /// line, so a small change in a long caption could pass. 2.5.3: 16 (was 6). With 6, ordinary 1 to 3 line
+    /// captions were checked more strictly than in 2.5.0 and rejected more often (67 pixel rejections in 11 min on
+    /// the 2.5.2 device run vs 24 in 15 min in 2.5.0), each costing a second OCR read. 16 is what 2.5.0 allowed for
+    /// up to 4 fully inked lines (4 x 384 points / 2 / 50), so only captions read as more than 4 lines are capped.
+    static let maximumAllowance = 16
     /// A grid point is "ink" when it differs this much from the box median.
     static let inkContrast = 60
     /// An ink point is lost when its luminance moves more than this.

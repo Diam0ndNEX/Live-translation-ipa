@@ -289,6 +289,7 @@ assert capture.count('HeadStartText.matches(') == 3 and 'waiting == key' not in 
 assert 'created.usesLanguageCorrection = correction' in capture and '!headStartHeld(cfg)' in capture
 # Pixel check: more lines, capped tolerance; evidence constants unchanged (asserted above).
 assert 'static let maximumLines = 8' in confirm and 'max(1, min(maximumAllowance, original.inkCount / 50))' in confirm
+assert 'static let maximumAllowance = 16' in confirm, '2.5.3: 2.5.0 tolerance for up to 4 lines'
 # Link: a dead peer is dropped, the listener restarts after silence, the capture replaces a failed connection.
 assert 'else { self.dropPeer(connection) }' in loop and 'func restart()' in loop
 assert 'server.restart()' in engine
@@ -314,7 +315,8 @@ assert 'OCRLine' not in v251.replace('OCRLine` ', ''), 'TranslationSystem parts 
 batches = read_source('TranslatorEngine')
 assert '(!warmup && activeTranslationSystem == .legacy && TranslationHotPathAB.streamLegacyCalls)' in batches and 'if stream {' in batches
 for setting, arm in (('ocrDuplicateFilter', 'duplicateLinesAB'), ('streamLegacyCalls', 'streamCallsAB')):
-    assert f'@AppStorage("{setting}") private var {setting} = true' in experimental and experimental.count(f'"{setting}"') == 2, setting
+    default = 'false' if setting == 'streamLegacyCalls' else 'true'  # 2.5.3: streaming off by default
+    assert f'@AppStorage("{setting}") private var {setting} = {default}' in experimental and experimental.count(f'"{setting}"') == 2, setting
     assert archive.count(f'"{arm}"') == 2 and f'("{setting}", "{setting}Pinned", "{arm}")' in v251, arm
 print('v2.5.2 source contracts passed: finish the running caption (switch, Legacy only, own call only, hold below the replay limit), version')
 
