@@ -32,6 +32,9 @@ extension TranslatorEngine {
             diag.noteRuntimeState("heartbeat_timeout")
             diag.pauseRun(reason: "heartbeatTimeout", frames: frames)
             if activeTranslationSystem != .legacy { invalidatePending() }
+            // 2.5.1: reopen the local link. If the capture is still running, its next message reconnects without
+            // restarting the app; if it really stopped, this costs nothing.
+            server.restart()
         }
         if captureAlive != alive { captureAlive = alive }
         if alive, let started = limitBase ?? sessionStarted, int("sessionLimit", 0) > 0,

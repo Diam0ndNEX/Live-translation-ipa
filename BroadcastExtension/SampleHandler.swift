@@ -9,7 +9,7 @@ import os.signpost
 
 class SampleHandler: RPBroadcastSampleHandler {
     var conn: NWConnection?
-    private let recognitionLock = NSLock()
+    let recognitionLock = NSLock()
     // Send completions run on the connection queue; guard the counters.
     private let sendStatsLock = NSLock()
     private var largePacketCount = 0
@@ -145,6 +145,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
         let c = NWConnection(host: NWEndpoint.Host("127.0.0.1"),
                              port: NWEndpoint.Port(rawValue: Loopback.port)!, using: .udp)
+        watchLink(c) // 2.5.1: a failed link is replaced (SampleHandler+Reconnect.swift)
         c.start(queue: .global(qos: .userInitiated))
         conn = c
         heartbeatLock.lock(); heartbeatConn = c; heartbeatLock.unlock()
@@ -642,6 +643,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             if error != nil, let self {
                 self.sendStatsLock.lock(); self.sendErrorCount += 1; self.sendStatsLock.unlock()
             }
+            if let connection, !closeConnection { self?.noteSendResult(failed: error != nil, on: connection) }
             if closeConnection { connection?.cancel() }
         })
     }

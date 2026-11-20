@@ -33,6 +33,15 @@ final class LoopbackServer {
                 // A restarted extension owns the link; retire the previous peer.
                 self.peer?.cancel()
                 self.peer = connection
+                // 2.5.1: a peer that fails or is cancelled is dropped, so the next datagram from the extension opens
+                // a new connection instead of going to a dead one (before, only killing the app recovered).
+                connection.stateUpdateHandler = { [weak self, weak connection] state in
+                    guard let self, let connection else { return }
+                    switch state {
+                    case .failed, .cancelled: self.dropPeer(connection)
+                    default: break
+                    }
+                }
                 connection.start(queue: self.queue)
                 self.receive(on: connection, ticket: ticket)
             }
@@ -83,6 +92,26 @@ final class LoopbackServer {
                 Task(priority: .userInitiated) { @MainActor [weak self] in self?.onPacket?(packet) }
             }
             if error == nil { self.receive(on: connection, ticket: ticket) }
+            else { self.dropPeer(connection) } // 2.5.1: never leave a peer whose receive loop has ended
+        }
+    }
+
+    /// 2.5.1: runs on `queue`. Forgets a peer whose receive loop ended; the listener stays up.
+    private func dropPeer(_ connection: NWConnection) {
+        guard peer === connection else { return }
+        peer = nil
+        connection.cancel()
+    }
+
+    /// 2.5.1: used when capture went quiet. Starts the listener again from scratch, so a listener or peer that
+    /// iOS left half-dead after the app was in the background cannot keep the app deaf until it is killed.
+    func restart() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            self.generation &+= 1
+            self.listener?.cancel(); self.listener = nil
+            self.peer?.cancel(); self.peer = nil
+            self.startOnQueue()
         }
     }
 }
