@@ -121,14 +121,16 @@ extension SampleHandler {
             else { return nil }
             languages = [match]
         }
-        let key = "\(cfg.lang)|\(span)"
+        // 2.5.1: the quick read uses the same language correction as the normal read, so their words can match.
+        let correction = cfg.correction ?? true
+        let key = "\(cfg.lang)|\(span)|\(correction)"
         let request: VNRecognizeTextRequest
         if key == cachedFastRequestKey, let cached = cachedFastRequest {
             request = cached
         } else {
             let created = VNRecognizeTextRequest()
             created.recognitionLevel = .fast
-            created.usesLanguageCorrection = false
+            created.usesLanguageCorrection = correction
             created.minimumTextHeight = Float(min(0.1, 0.01 / max(0.1, span)))
             if let languages { created.recognitionLanguages = languages }
             cachedFastRequest = created

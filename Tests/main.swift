@@ -1231,8 +1231,22 @@ do {
     let blank = [UInt8](repeating: 120, count: stroke.count)
     check(PixelConfirmation.fingerprint(blank) == nil, "No text strokes means no pixel confirmation")
     check(PixelConfirmation.samplePoints(lines: []) == nil, "No lines -> OCR")
-    let five = Array(repeating: (x: 0.5, y: 0.2, w: 0.6, h: 0.05), count: 5)
-    check(PixelConfirmation.samplePoints(lines: five) == nil, "More than four lines -> OCR")
+    // 2.5.1: up to eight lines are fingerprinted (was four); more still go to OCR.
+    let eight = Array(repeating: (x: 0.5, y: 0.2, w: 0.6, h: 0.05), count: 8)
+    check(PixelConfirmation.samplePoints(lines: eight)?.count == 8 * PixelConfirmation.columns * PixelConfirmation.rows, "Eight lines are fingerprinted")
+    let nine = Array(repeating: (x: 0.5, y: 0.2, w: 0.6, h: 0.05), count: 9)
+    check(PixelConfirmation.samplePoints(lines: nine) == nil, "More than eight lines -> OCR")
+    // 2.5.1: the tolerance no longer grows without limit with the amount of ink.
+    var wide = [UInt8](repeating: 120, count: 3000)
+    for index in stride(from: 0, to: 3000, by: 3) { wide[index] = 240 }
+    if let widePrint = PixelConfirmation.fingerprint(wide) {
+        var changed = wide
+        var flipped = 0
+        for index in stride(from: 0, to: 3000, by: 3) where flipped < PixelConfirmation.maximumAllowance + 1 {
+            changed[index] = 120; flipped += 1
+        }
+        check(!PixelConfirmation.matches(widePrint, changed), "Seven lost strokes never confirm, however long the caption")
+    } else { check(false, "A wide caption has a fingerprint") }
     let points = PixelConfirmation.samplePoints(lines: [(x: 0.5, y: 0.1, w: 0.6, h: 0.05)]) ?? []
     check(points.count == PixelConfirmation.columns * PixelConfirmation.rows &&
           points.allSatisfy { $0.x >= 0 && $0.x <= 1 && $0.y >= 0 && $0.y <= 1 }, "Sample grid stays inside the frame")
