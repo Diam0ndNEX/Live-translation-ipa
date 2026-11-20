@@ -25,7 +25,7 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("eventDrivenOCR") private var eventDrivenOCR = true
     @AppStorage("fastOCR") private var fastOCR = false
     @AppStorage("legacySharedSession") private var legacySharedSession = true
-    @AppStorage("subtitleAwareChangeDetection") private var subtitleAwareChangeDetection = true
+    @AppStorage("subtitleAwareChangeDetection") private var subtitleAwareChangeDetection = false
     @AppStorage("preserveRelatedMovieGroups") private var preserveRelatedMovieGroups = false
     // 2.2.1 (D13): run-time A/B variants. They are copied when a session starts, never changed mid-run.
     @AppStorage("hotPathReuseLowLatencyPlan") private var hotPathReuseLowLatencyPlan = true
@@ -41,13 +41,13 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("confirmationReadReasons") private var confirmationReadReasons = true
     @AppStorage("modelLengthBuckets") private var modelLengthBuckets = true
     @AppStorage("trustedCaptionBand") private var trustedCaptionBand = true
-    @AppStorage("legacyHeadStart") private var legacyHeadStart = true
+    @AppStorage("legacyHeadStart") private var legacyHeadStart = false
     @AppStorage("quietRewarm") private var quietRewarm = true
     @AppStorage("legacyConfirmedOwnLane") private var legacyConfirmedOwnLane = true
     @AppStorage("legacyEagerSpeculation") private var legacyEagerSpeculation = true
     @AppStorage("finishRunningCaption") private var finishRunningCaption = true
     @AppStorage("ocrDuplicateFilter") private var ocrDuplicateFilter = true
-    @AppStorage("streamLegacyCalls") private var streamLegacyCalls = true
+    @AppStorage("streamLegacyCalls") private var streamLegacyCalls = false
     @AppStorage("independentCaptureHeartbeat") private var independentCaptureHeartbeat = true
 
     // Previous opt-in Smart pipeline controls are experimental, not core defaults.
@@ -177,7 +177,7 @@ struct ExperimentalFeaturesView: View {
                     enabled: $ocrDuplicateFilter)
                 ExperimentalOption(
                     title: "Streamed Legacy translation calls",
-                    explanation: "Legacy only. On (default, new in 2.5.2): every live translation uses Apple's streaming batch call, which Apple documents as returning sooner than the all-at-once call. Same text, same model. Off: single-sentence captions use the all-at-once call, as in 2.5.1. Unverified effect.",
+                    explanation: "Legacy only. Off by default since 2.5.3 (no gain in the 2.5.2 device run). On: every live translation uses Apple's streaming batch call, which Apple documents as returning sooner than the all-at-once call. Same text, same model. Off: single-sentence captions use the all-at-once call, as in 2.4.0. Unverified effect.",
                     enabled: $streamLegacyCalls)
                 ExperimentalOption(
                     title: "Independent capture heartbeat",
@@ -198,7 +198,7 @@ struct ExperimentalFeaturesView: View {
                     enabled: $trustedCaptionBand)
                 ExperimentalOption(
                     title: "Legacy head start",
-                    explanation: "Legacy only. CHANGES WHAT IS READ WHEN. On (default): a quick first read of a new caption may start its translation while the normal read is still running. The normal read still decides what is shown. It is used only while the quick read keeps matching the confirmed text, and stops by itself when it does not. Off: the translation starts after the normal read, as in 2.4.0. Turn off if Legacy gets slower. UNVERIFIED effect.",
+                    explanation: "Legacy only. CHANGES WHAT IS READ WHEN. Off by default since 2.5.3: in the device runs the quick read almost never matched the normal one and never started a translation. On: a quick first read of a new caption may start its translation while the normal read is still running. The normal read still decides what is shown. It is used only while the quick read keeps matching the confirmed text, and stops by itself when it does not. Off: the translation starts after the normal read, as in 2.4.0. Turn off if Legacy gets slower. UNVERIFIED effect.",
                     enabled: $legacyHeadStart)
                 ExperimentalOption(
                     title: "Re-warm after a quiet stretch",

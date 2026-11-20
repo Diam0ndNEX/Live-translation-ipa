@@ -9,7 +9,8 @@ Older documents are records of what was true when they were written. They name b
 - structure-migration-plan.md: which scripts depend on which files, and the order for moving and splitting existing files
 
 ## Current line (start here)
-- v2.5.2-specification.md: newest specification (Legacy finishes the caption it is translating instead of dropping it; open items)
+- v2.5.3-specification.md: newest specification (Legacy head start off by default, from device data)
+- v2.5.2-specification.md: Legacy handoff and research specification (Legacy finishes the caption it is translating instead of dropping it; open items)
 - v2.5.1-specification.md: Legacy speed specification (Legacy speed: early translation back, eager queueing, own lane on, head start and pixel check fixes; self-healing capture link; what is unverified, device test)
 - v2.5.0-specification.md: two modes specification (two modes: Hybrid Recovery removed, pack question, items A to F, what is unverified, device test)
 - v2.4.0-specification.md: latency rebuild, first step (what was built, what is unverified, device test plan)

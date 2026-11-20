@@ -191,8 +191,8 @@ for field in ('pixelArmed', 'focusRediscoveries', 'confirmReads', 'confirmPixelR
     declaration = re.search(r'var ' + field + r': (Bool|Int|Double)\? = nil', shared)
     assert declaration, field + ' must be an optional number or flag (no text) so older builds ignore it'
 assert 'privacy: "metadataOnly"' in diagnostics and 'textCapture: false' in diagnostics
-assert 'static let version = "2.5.2"' in shared and 'static let build = 120' in shared
-assert read('project.yml').count('"2.5.2"') == 3 and read('project.yml').count('"120"') == 3
+assert 'static let version = "2.5.3"' in shared and 'static let build = 121' in shared
+assert read('project.yml').count('"2.5.3"') == 3 and read('project.yml').count('"121"') == 3
 assert '("2.4.0", "Build 117:' in shared and '("2.3.9", "Build 116:' in shared and '("2.5.0", "Build 118:' in shared
 print('v2.4.0 source contracts passed: deferral (default off since 2.5.1, Legacy only), unchanged OCR and confirmation evidence, forced re-read, direct model call, metadata-only diagnostics, version')
 
@@ -230,7 +230,9 @@ assert [s[0] for s in switches] == ['warmAtCaptureStart', 'reportStoredSessionTo
 assert 'defaults.set((defaults.object(forKey: item.setting) as? Bool) ?? true, forKey: item.pinned)' in work
 for setting, pinned, arm in switches:
     assert f'static var {setting}: Bool {{ pinned("{pinned}") }}' in work, setting
-    assert f'@AppStorage("{setting}") private var {setting} = true' in experimental and experimental.count(f'"{setting}"') == 2, setting
+    # 2.5.3 (changed with the code): the Legacy head start defaults to off.
+    default = 'false' if setting == 'legacyHeadStart' else 'true'
+    assert f'@AppStorage("{setting}") private var {setting} = {default}' in experimental and experimental.count(f'"{setting}"') == 2, setting
     assert f'("{arm}", "' in work and archive.count(f'"{arm}"') >= 1, arm
 assert experimental.count('UNVERIFIED effect') == 4 and 'CHANGES WHAT IS READ.' in experimental and 'CHANGES WHAT IS READ WHEN.' in experimental
 # A: warm-up when capture starts, both modes, output never kept.
@@ -287,6 +289,7 @@ assert capture.count('HeadStartText.matches(') == 3 and 'waiting == key' not in 
 assert 'created.usesLanguageCorrection = correction' in capture and '!headStartHeld(cfg)' in capture
 # Pixel check: more lines, capped tolerance; evidence constants unchanged (asserted above).
 assert 'static let maximumLines = 8' in confirm and 'max(1, min(maximumAllowance, original.inkCount / 50))' in confirm
+assert 'static let maximumAllowance = 16' in confirm, '2.5.3: 2.5.0 tolerance for up to 4 lines'
 # Link: a dead peer is dropped, the listener restarts after silence, the capture replaces a failed connection.
 assert 'else { self.dropPeer(connection) }' in loop and 'func restart()' in loop
 assert 'server.restart()' in engine
@@ -303,7 +306,7 @@ assert 'ConfirmedHandoffPolicy.holdWhileOwnCallRuns(' in handle and 'enabled: Tr
 assert 'now.timeIntervalSince(receivedAt) < 1.2' in handle, 'a held caption is replayed within 1.2 s or dropped; the hold stays below that'
 assert '@AppStorage("finishRunningCaption") private var finishRunningCaption = true' in experimental and experimental.count('"finishRunningCaption"') == 2
 assert archive.count('"finishRunningAB"') == 2
-assert 'static let version = "2.5.2"' in shared and 'static let build = 120' in shared and '("2.5.2", "Build 120:' in shared
+assert '("2.5.2", "Build 120:' in shared
 dup = read('Shared/OCRDuplicateFilter.swift')
 assert 'enum OCRDuplicateFilter' in dup and 'abs(outer.y - inner.y) <= max(outer.h, inner.h) * 0.5' in dup and 'a.contains(b)' in dup
 assert capture.count('if cfg.dropDuplicateLines == true { lines = OCRDuplicateFilter.filter(lines) }') == 2, 'normal and quick read'
@@ -312,6 +315,13 @@ assert 'OCRLine' not in v251.replace('OCRLine` ', ''), 'TranslationSystem parts 
 batches = read_source('TranslatorEngine')
 assert '(!warmup && activeTranslationSystem == .legacy && TranslationHotPathAB.streamLegacyCalls)' in batches and 'if stream {' in batches
 for setting, arm in (('ocrDuplicateFilter', 'duplicateLinesAB'), ('streamLegacyCalls', 'streamCallsAB')):
-    assert f'@AppStorage("{setting}") private var {setting} = true' in experimental and experimental.count(f'"{setting}"') == 2, setting
+    default = 'false' if setting == 'streamLegacyCalls' else 'true'  # 2.5.3: streaming off by default
+    assert f'@AppStorage("{setting}") private var {setting} = {default}' in experimental and experimental.count(f'"{setting}"') == 2, setting
     assert archive.count(f'"{arm}"') == 2 and f'("{setting}", "{setting}Pinned", "{arm}")' in v251, arm
 print('v2.5.2 source contracts passed: finish the running caption (switch, Legacy only, own call only, hold below the replay limit), version')
+
+# ---- 2.5.3: Legacy head start off by default (device data). ----
+assert 'LegacyV251Defaults.pinHeadStartDefault(defaults)' in work and 'defaults.set(false, forKey: "legacyHeadStartPinned")' in v251
+assert 'defaults.removeObject(forKey: "legacyHeadStart")' in v251 and 'static let v253AppliedKey = "legacyV253DefaultsApplied"' in v251
+assert 'static let version = "2.5.3"' in shared and 'static let build = 121' in shared and '("2.5.3", "Build 121:' in shared
+print('v2.5.3 source contracts passed: head start off by default, saved value reset once, version')
