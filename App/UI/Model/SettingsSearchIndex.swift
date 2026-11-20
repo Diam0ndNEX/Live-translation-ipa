@@ -29,6 +29,7 @@ enum SettingsSearchIndex {
         SettingsSearchEntry(label: "Eager early translation", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Event-driven OCR", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Fast OCR", page: .experimental, pageTitle: "Experimental features"),
+        SettingsSearchEntry(label: "Finish the caption being translated", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Incremental translation recovery", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Independent capture heartbeat", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Legacy confirmed own lane", page: .experimental, pageTitle: "Experimental features"),

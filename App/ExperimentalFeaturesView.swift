@@ -45,6 +45,7 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("quietRewarm") private var quietRewarm = true
     @AppStorage("legacyConfirmedOwnLane") private var legacyConfirmedOwnLane = true
     @AppStorage("legacyEagerSpeculation") private var legacyEagerSpeculation = true
+    @AppStorage("finishRunningCaption") private var finishRunningCaption = true
     @AppStorage("independentCaptureHeartbeat") private var independentCaptureHeartbeat = false
 
     // Previous opt-in Smart pipeline controls are experimental, not core defaults.
@@ -165,6 +166,10 @@ struct ExperimentalFeaturesView: View {
                     explanation: "Legacy only. On (default, new in 2.5.1): a new caption that appears while the previous one is still being translated or waits to be shown gets its early translation queued; it starts the moment the model is free. Confirmed captions always go first. Off: such a caption waits until it is confirmed, as in 2.5.0. Same text and wording. Unverified effect.",
                     enabled: $legacyEagerSpeculation)
                 ExperimentalOption(
+                    title: "Finish the caption being translated",
+                    explanation: "Legacy only. On (default, new in 2.5.2): when a new caption is confirmed while the previous one is already being translated, the previous one is finished and shown first, then the new one starts. The new one had to wait for that translation anyway, so this should cost it no time and show captions that were thrown away before. Off: the previous caption is dropped, as in 2.5.1. Same text and wording. Unverified effect.",
+                    enabled: $finishRunningCaption)
+                ExperimentalOption(
                     title: "Independent capture heartbeat",
                     explanation: "All modes. Off (default): ScreenLingo decides capture has stopped after 5 seconds without a message, and the capture extension only sends its keep-alive while screen frames arrive. On: the extension also sends a small keep-alive from a timer, but only when 1.5 seconds have passed without any other message, so with normal frames nothing extra is sent. Meant for a false \"stopped\" while the screen-recording icon is still on. Does not change reading, confirmation or translation. Unverified effect.",
                     enabled: $independentCaptureHeartbeat)
@@ -225,7 +230,7 @@ struct ExperimentalFeaturesView: View {
                 "adaptiveConfirmation", "confirmationDeadline", "continuousRotation",
                 "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy",
                 "backgroundAvailabilityRefresh", "legacyConfirmedOwnLane", "independentCaptureHeartbeat",
-                "deferArmedSpeculation", "legacyEagerSpeculation",
+                "deferArmedSpeculation", "legacyEagerSpeculation", "finishRunningCaption",
                 "warmAtCaptureStart", "reportStoredSessionTotals", "confirmationReadReasons", "modelLengthBuckets",
                 "trustedCaptionBand", "legacyHeadStart", "quietRewarm"
             ])

@@ -6,7 +6,9 @@ import Foundation
 extension TranslationHotPathAB {
     /// 2.5.1 switches: (setting key, pinned key, report label). Default ON; OFF gives the 2.5.0 behaviour.
     static let v251Switches: [(setting: String, pinned: String, report: String)] = [
-        ("legacyEagerSpeculation", "legacyEagerSpeculationPinned", "eagerSpeculationAB")
+        ("legacyEagerSpeculation", "legacyEagerSpeculationPinned", "eagerSpeculationAB"),
+        // 2.5.2
+        ("finishRunningCaption", "finishRunningCaptionPinned", "finishRunningAB")
     ]
     /// Legacy only. A first reading that arrives while the previous confirmed caption is still being translated or
     /// waits to be shown is no longer dropped: its early translation is queued and starts the moment the model is
@@ -14,8 +16,14 @@ extension TranslationHotPathAB {
     static var legacyEagerSpeculation: Bool {
         (UserDefaults.standard.object(forKey: "legacyEagerSpeculationPinned") as? Bool) ?? true
     }
+    /// 2.5.2, Legacy only: a confirmed caption whose translation is already running is finished and shown when a
+    /// newer caption is confirmed, instead of being thrown away. See `ConfirmedHandoffPolicy`.
+    static var finishRunningCaption: Bool {
+        (UserDefaults.standard.object(forKey: "finishRunningCaptionPinned") as? Bool) ?? true
+    }
     static let v251ReportLabels: [(key: String, label: String)] = [
-        ("eagerSpeculationAB", "eager early translation")
+        ("eagerSpeculationAB", "eager early translation"),
+        ("finishRunningAB", "finish running caption")
     ]
 }
 
@@ -58,5 +66,22 @@ enum EagerSpeculationPolicy {
     static func mayQueueBehindConfirmed(enabled: Bool, busy: Bool, confirmedRunning: Bool,
                                         confirmedQueued: Bool) -> Bool {
         enabled && busy && confirmedRunning && !confirmedQueued
+    }
+}
+
+/// 2.5.2: the Legacy drain runs one model call at a time, and a confirmed call is never cancelled (only early calls
+/// are). So when caption B is confirmed while caption A's own call runs, B cannot start before that call returns.
+/// Before 2.5.2, A was thrown away 0.45 to 0.9 s after it was confirmed (in the 2.5.0 runs 31 to 341 times per
+/// session, "confirmed continuity loss") although its translation was about to arrive. Now B waits in the existing
+/// one-slot handoff while A's call runs, A is shown, and B is replayed when the drain is free.
+enum ConfirmedHandoffPolicy {
+    /// Upper bound for the hold. The replay of a held caption must happen within 1.2 s of its arrival
+    /// (`handleContent` drops older replays), so the deadline stays below that.
+    static let maximumHold = 1.0
+
+    /// No hold when a confirmed caption is still queued: then the running call belongs to an older caption, and
+    /// holding would make the newer caption wait for one more call.
+    static func holdWhileOwnCallRuns(enabled: Bool, busy: Bool, confirmedRunning: Bool, captionQueued: Bool) -> Double {
+        enabled && busy && confirmedRunning && !captionQueued ? maximumHold : 0
     }
 }
