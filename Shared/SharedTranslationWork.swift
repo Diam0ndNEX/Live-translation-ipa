@@ -175,6 +175,8 @@ enum TranslationHotPathAB {
         for item in v250Switches + v251Switches {
             defaults.set((defaults.object(forKey: item.setting) as? Bool) ?? true, forKey: item.pinned)
         }
+        // 2.5.3: the Legacy head start defaults to OFF (see LegacyV251Defaults.headStartOffByDefault).
+        LegacyV251Defaults.pinHeadStartDefault(defaults)
     }
 
     static var reuseStandaloneLowLatencyPlan: Bool {

@@ -51,9 +51,25 @@ enum LegacyV251Defaults {
                               "incrementalBatchRecovery", "subtitleAwareChangeDetection", "independentCaptureHeartbeat"]
 
     static func applyOnce(_ defaults: UserDefaults) {
-        guard defaults.object(forKey: appliedKey) as? Bool != true else { return }
-        for key in changedKeys { defaults.removeObject(forKey: key) }
-        defaults.set(true, forKey: appliedKey)
+        if defaults.object(forKey: appliedKey) as? Bool != true {
+            for key in changedKeys { defaults.removeObject(forKey: key) }
+            defaults.set(true, forKey: appliedKey)
+        }
+        if defaults.object(forKey: v253AppliedKey) as? Bool != true {
+            defaults.removeObject(forKey: "legacyHeadStart")
+            defaults.set(true, forKey: v253AppliedKey)
+        }
+    }
+
+    /// 2.5.3: the Legacy head start was judged right 1 of 167 times on the 2.5.2 device run (0 to 5 right in every
+    /// 2.5.0 run) and never started a translation, while each quick read cost about 38 ms of capture time. It now
+    /// defaults to OFF; the toggle still turns it on.
+    static let v253AppliedKey = "legacyV253DefaultsApplied"
+    static let headStartOffByDefault = true
+
+    static func pinHeadStartDefault(_ defaults: UserDefaults) {
+        guard headStartOffByDefault, defaults.object(forKey: "legacyHeadStart") == nil else { return }
+        defaults.set(false, forKey: "legacyHeadStartPinned")
     }
 }
 

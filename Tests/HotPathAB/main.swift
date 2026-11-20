@@ -177,13 +177,15 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
                         TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey] { standard.removeObject(forKey: key) }
             precondition(TranslationHotPathAB.label == "L1_F1")
             // 2.5.0: the new switches default to on, never change mid-run, and can be turned off for the next session.
-            precondition(TranslationHotPathAB.trustedCaptionBand && TranslationHotPathAB.legacyHeadStart &&
+            // 2.5.3: the head start defaults to off once a session has been pinned.
+            precondition(!TranslationHotPathAB.legacyHeadStart, "2.5.3: head start off by default")
+            precondition(TranslationHotPathAB.trustedCaptionBand &&
                          TranslationHotPathAB.warmAtCaptureStart && TranslationHotPathAB.quietRewarm &&
                          TranslationHotPathAB.reportStoredSessionTotals, "2.5.0 switches default to on")
             standard.set(false, forKey: "trustedCaptionBand")
             precondition(TranslationHotPathAB.trustedCaptionBand, "a switch does not apply mid-run")
             TranslationHotPathAB.pinSettings()
-            precondition(!TranslationHotPathAB.trustedCaptionBand && TranslationHotPathAB.legacyHeadStart,
+            precondition(!TranslationHotPathAB.trustedCaptionBand && !TranslationHotPathAB.legacyHeadStart,
                          "one switch can be turned off without touching the others")
             standard.removeObject(forKey: "trustedCaptionBand")
             for item in TranslationHotPathAB.v250Switches { standard.removeObject(forKey: item.pinned) }

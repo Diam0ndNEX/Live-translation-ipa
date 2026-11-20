@@ -41,7 +41,7 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("confirmationReadReasons") private var confirmationReadReasons = true
     @AppStorage("modelLengthBuckets") private var modelLengthBuckets = true
     @AppStorage("trustedCaptionBand") private var trustedCaptionBand = true
-    @AppStorage("legacyHeadStart") private var legacyHeadStart = true
+    @AppStorage("legacyHeadStart") private var legacyHeadStart = false
     @AppStorage("quietRewarm") private var quietRewarm = true
     @AppStorage("legacyConfirmedOwnLane") private var legacyConfirmedOwnLane = true
     @AppStorage("legacyEagerSpeculation") private var legacyEagerSpeculation = true
@@ -198,7 +198,7 @@ struct ExperimentalFeaturesView: View {
                     enabled: $trustedCaptionBand)
                 ExperimentalOption(
                     title: "Legacy head start",
-                    explanation: "Legacy only. CHANGES WHAT IS READ WHEN. On (default): a quick first read of a new caption may start its translation while the normal read is still running. The normal read still decides what is shown. It is used only while the quick read keeps matching the confirmed text, and stops by itself when it does not. Off: the translation starts after the normal read, as in 2.4.0. Turn off if Legacy gets slower. UNVERIFIED effect.",
+                    explanation: "Legacy only. CHANGES WHAT IS READ WHEN. Off by default since 2.5.3: in the device runs the quick read almost never matched the normal one and never started a translation. On: a quick first read of a new caption may start its translation while the normal read is still running. The normal read still decides what is shown. It is used only while the quick read keeps matching the confirmed text, and stops by itself when it does not. Off: the translation starts after the normal read, as in 2.4.0. Turn off if Legacy gets slower. UNVERIFIED effect.",
                     enabled: $legacyHeadStart)
                 ExperimentalOption(
                     title: "Re-warm after a quiet stretch",
