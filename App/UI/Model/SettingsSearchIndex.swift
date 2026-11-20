@@ -26,6 +26,7 @@ enum SettingsSearchIndex {
         SettingsSearchEntry(label: "Confidence-aware OCR confirmation", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Continuous rotation recalibration", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Direct PiP pixel-buffer rendering", page: .experimental, pageTitle: "Experimental features"),
+        SettingsSearchEntry(label: "Eager early translation", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Event-driven OCR", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Fast OCR", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Incremental translation recovery", page: .experimental, pageTitle: "Experimental features"),

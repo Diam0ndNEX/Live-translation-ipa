@@ -27,10 +27,10 @@ archive = read("App/DiagnosticArchive.swift")
 memory = read_source("TranslationMemoryStore")
 workflow = read(".github/workflows/build.yml")
 
-assert 'static let version = "2.5.0"' in shared
-assert "static let build = 118" in shared
-assert project.count('"2.5.0"') == 3
-assert project.count('"118"') == 3
+assert 'static let version = "2.5.1"' in shared
+assert "static let build = 119" in shared
+assert project.count('"2.5.1"') == 3
+assert project.count('"119"') == 3
 
 assert "SCREENLINGO_REFERENCE_CAPTURE_CADENCE" in capture
 assert "SubtitleAcquisitionPolicy.allowsEarlyVisualWake" in capture
@@ -64,7 +64,7 @@ assert "legacyAdaptiveSavedSkips" in engine
 assert "legacyLowConfidenceSkips" in engine
 assert "legacyBusySpeculationSkips" in engine
 assert "legacyDuplicateSpeculationSkips" in engine
-assert "guard !busy, queued == nil" in engine
+assert "guard queueBehind || (!busy && queued == nil) else" in engine  # 2.5.1: eager early translation may wait behind confirmed work
 assert "if presentQueuedFromRAMIfComplete() { return }" in engine
 assert "SpeculativeSessionOwner" in engine
 

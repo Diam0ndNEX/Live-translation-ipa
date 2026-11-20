@@ -13,8 +13,12 @@ enum PixelConfirmation {
     /// Grid per OCR line: columns across the line box, rows down it.
     static let columns = 64
     static let rows = 6
-    /// At most this many lines (subtitles are 1-3 lines); more lines -> OCR.
-    static let maximumLines = 4
+    /// At most this many lines; more lines -> OCR. 2.5.1: 8 (was 4). "More than 4 lines" was the most common
+    /// reason a 2.5.0 caption needed a second OCR read (about 150 ms each) in the device runs.
+    static let maximumLines = 8
+    /// 2.5.1: lost or gained ink points tolerated, at most. Without a cap the allowance grew with every extra
+    /// line, so a small change in a long caption could pass. Captions of up to about 4 lines are unaffected.
+    static let maximumAllowance = 6
     /// A grid point is "ink" when it differs this much from the box median.
     static let inkContrast = 60
     /// An ink point is lost when its luminance moves more than this.
@@ -55,7 +59,7 @@ enum PixelConfirmation {
     /// tolerated; new or removed glyphs are not.
     static func matches(_ original: Fingerprint, _ current: [UInt8]) -> Bool {
         guard current.count == original.luma.count else { return false }
-        let allowance = max(1, original.inkCount / 50)
+        let allowance = max(1, min(maximumAllowance, original.inkCount / 50))
         var lost = 0, gained = 0
         for index in current.indices {
             let now = Int(current[index])

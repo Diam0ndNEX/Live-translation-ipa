@@ -44,7 +44,9 @@ for name in ['process', 'drain', 'cachedCaption']:
 legacy_speculate = function(engine, 'speculate')
 for invariant in [
     'guard speculationAllowed else { return }',
-    'guard !busy, queued == nil else',
+    # 2.5.1 (changed with the code): one newest early translation may wait behind a running confirmed job.
+    'guard queueBehind || (!busy && queued == nil) else',
+    'EagerSpeculationPolicy.mayQueueBehindConfirmed(',
     'lastSpecText = joined',
     'specQueued = blocks',
     'startDrain()'
@@ -137,10 +139,11 @@ diagnostics = read_source('Diagnostics')
 archive = read_source('DiagnosticArchive')
 shared = read_source('Shared')
 # 2.5.0 (changed with the code): the Hybrid pin of 2.4.0 is removed with the mode. The deferral stays, Legacy only.
+# 2.5.1 (changed with the code): the deferral defaults to OFF, so every first reading starts its early translation.
 for setting, pinned, accessor, arm in (('deferArmedSpeculation', 'armedDeferPinnedKey', 'deferArmedSpeculation', 'armedDeferAB'),):
-    assert f'= "{setting}"' in work and f'?? true, forKey: {pinned})' in work, setting + ' is pinned when a session starts'
-    assert f'(UserDefaults.standard.object(forKey: {pinned}) as? Bool) ?? true' in work, setting + ' defaults to on'
-    assert f'@AppStorage("{setting}") private var {setting} = true' in experimental and experimental.count(f'"{setting}"') >= 2, setting + ' has a toggle and resets'
+    assert f'= "{setting}"' in work and f'?? false, forKey: {pinned})' in work, setting + ' is pinned when a session starts'
+    assert f'(UserDefaults.standard.object(forKey: {pinned}) as? Bool) ?? false' in work, setting + ' defaults to off'
+    assert f'@AppStorage("{setting}") private var {setting} = false' in experimental and experimental.count(f'"{setting}"') >= 2, setting + ' has a toggle and resets'
     assert f'if TranslationHotPathAB.{accessor} {{ settings["{arm}"] = "on" }}' in diagnostics
     assert archive.count(f'"{arm}"') == 3, arm + ': export allowlist, cohort keys and the report column'
 assert not (root / 'Shared/TranslationSystem+BackendPin.swift').exists() and not (root / 'Shared/TranslationSystem+HybridPolicy.swift').exists()
@@ -186,10 +189,10 @@ for field in ('pixelArmed', 'focusRediscoveries', 'confirmReads', 'confirmPixelR
     declaration = re.search(r'var ' + field + r': (Bool|Int|Double)\? = nil', shared)
     assert declaration, field + ' must be an optional number or flag (no text) so older builds ignore it'
 assert 'privacy: "metadataOnly"' in diagnostics and 'textCapture: false' in diagnostics
-assert 'static let version = "2.5.0"' in shared and 'static let build = 118' in shared
-assert read('project.yml').count('"2.5.0"') == 3 and read('project.yml').count('"118"') == 3
-assert '("2.4.0", "Build 117:' in shared and '("2.3.9", "Build 116:' in shared
-print('v2.4.0 source contracts passed: deferral (default on, Legacy only), unchanged OCR and confirmation evidence, forced re-read, direct model call, metadata-only diagnostics, version')
+assert 'static let version = "2.5.1"' in shared and 'static let build = 119' in shared
+assert read('project.yml').count('"2.5.1"') == 3 and read('project.yml').count('"119"') == 3
+assert '("2.4.0", "Build 117:' in shared and '("2.3.9", "Build 116:' in shared and '("2.5.0", "Build 118:' in shared
+print('v2.4.0 source contracts passed: deferral (default off since 2.5.1, Legacy only), unchanged OCR and confirmation evidence, forced re-read, direct model call, metadata-only diagnostics, version')
 
 # ---- 2.5.0: two modes, items A to F, quiet re-warm. Source contracts only; nothing here is a device result. ----
 ui = read_source('TranslateScreen')
@@ -258,3 +261,34 @@ assert 'legacyHeadStart: (TranslationHotPathAB.legacyHeadStart && activeTranslat
 # Confirmation evidence and OCR settings of the normal read are the 2.4.0 ones (asserted above); version and changelog.
 assert '("2.5.0", "Build 118:' in shared
 print('v2.5.0 source contracts passed: two modes, migration notice, pack question, old reports readable, items A to F and quiet re-warm switchable (default on), metadata-only diagnostics, version')
+
+# ---- 2.5.1: Legacy speed and a self-healing link. Source contracts only; nothing here is a device result. ----
+v251 = read('Shared/TranslationSystem+V251.swift')
+eager = read('App/Engine/TranslatorEngine+EagerSpeculation.swift')
+loop = read_source('LoopbackServer')
+# Eager early translation: a switch (default on, pinned, toggle, reset, report label), Legacy only, confirmed first.
+assert '("legacyEagerSpeculation", "legacyEagerSpeculationPinned", "eagerSpeculationAB")' in v251
+assert 'for item in v250Switches + v251Switches {' in work
+assert '@AppStorage("legacyEagerSpeculation") private var legacyEagerSpeculation = true' in experimental and experimental.count('"legacyEagerSpeculation"') == 2
+assert archive.count('"eagerSpeculationAB"') == 2 and 'v251ReportLabels' in archive
+assert 'enabled && busy && confirmedRunning && !confirmedQueued' in v251, 'never queued while confirmed work waits'
+assert 'if !confirmed { speculateBehindActiveCaption(p, texts: candidateTexts) }' in function(engine, 'handleContent')
+for token in ('activeTranslationSystem == .legacy', 'p.stable == false', 'SpeculationPolicy.credible(', 'allowsCredibleOpportunity(',
+              'TranslationHotPathAB.deferArmedSpeculation', 'speculate(texts)'):
+    assert token in eager, token
+assert 'activeCandidateID' not in eager and 'activeCandidateConfirmed' not in eager, 'it never replaces the active caption'
+# Own lane on by default; the two changed defaults reach saved settings once.
+assert '(UserDefaults.standard.object(forKey: legacyOwnLanePinnedKey) as? Bool) ?? true' in work
+assert 'LegacyV251Defaults.applyOnce(defaults)' in work and 'static let changedKeys = ["deferArmedSpeculation", "legacyConfirmedOwnLane"]' in v251
+# Head start judged by words; same correction as the normal read; the normal read is unchanged.
+assert capture.count('HeadStartText.matches(') == 3 and 'waiting == key' not in capture.replace('was `waiting == key`', '')
+assert 'created.usesLanguageCorrection = correction' in capture and '!headStartHeld(cfg)' in capture
+# Pixel check: more lines, capped tolerance; evidence constants unchanged (asserted above).
+assert 'static let maximumLines = 8' in confirm and 'max(1, min(maximumAllowance, original.inkCount / 50))' in confirm
+# Link: a dead peer is dropped, the listener restarts after silence, the capture replaces a failed connection.
+assert 'else { self.dropPeer(connection) }' in loop and 'func restart()' in loop
+assert 'server.restart()' in engine
+assert 'watchLink(c)' in capture and 'noteSendResult(failed: error != nil, on: connection)' in capture
+assert 'guard let current = conn, current === old else { return }' in capture
+assert 'static let version = "2.5.1"' in shared and 'static let build = 119' in shared and '("2.5.1", "Build 119:' in shared
+print('v2.5.1 source contracts passed: eager early translation (switch, Legacy only, confirmed first), own lane and no deferral by default, head start by words, 8-line pixel check, self-healing link, version')

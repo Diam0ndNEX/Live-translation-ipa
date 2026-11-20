@@ -34,7 +34,7 @@ struct ExperimentalFeaturesView: View {
     // 2.2.3 (L5), default ON since 2.4.0. Pinned at session start like the other A/B variants.
     @AppStorage("backgroundAvailabilityRefresh") private var backgroundAvailabilityRefresh = true
     // 2.4.0: default ON; off gives the 2.3.9 behaviour.
-    @AppStorage("deferArmedSpeculation") private var deferArmedSpeculation = true
+    @AppStorage("deferArmedSpeculation") private var deferArmedSpeculation = false
     // 2.5.0 (items A to F and the quiet re-warm): all default ON; off gives the 2.4.0 behaviour.
     @AppStorage("warmAtCaptureStart") private var warmAtCaptureStart = true
     @AppStorage("reportStoredSessionTotals") private var reportStoredSessionTotals = true
@@ -43,7 +43,8 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("trustedCaptionBand") private var trustedCaptionBand = true
     @AppStorage("legacyHeadStart") private var legacyHeadStart = true
     @AppStorage("quietRewarm") private var quietRewarm = true
-    @AppStorage("legacyConfirmedOwnLane") private var legacyConfirmedOwnLane = false
+    @AppStorage("legacyConfirmedOwnLane") private var legacyConfirmedOwnLane = true
+    @AppStorage("legacyEagerSpeculation") private var legacyEagerSpeculation = true
     @AppStorage("independentCaptureHeartbeat") private var independentCaptureHeartbeat = false
 
     // Previous opt-in Smart pipeline controls are experimental, not core defaults.
@@ -153,12 +154,16 @@ struct ExperimentalFeaturesView: View {
                     enabled: $backgroundAvailabilityRefresh)
                 ExperimentalOption(
                     title: "Wait for confirmation before early Apple Default work",
-                    explanation: "Legacy only. On (default): when a new caption can be confirmed on the next frame, no early translation is started for it; the confirmed caption starts the translation. Off: an early translation is started for every first reading, as in 2.3.9. Same model and same text either way. Unverified effect.",
+                    explanation: "Legacy only. Off (default since 2.5.1): an early translation is started for every first reading, as in 2.3.9. On: when a new caption can be confirmed on the next frame, no early translation is started for it; the confirmed caption starts the translation, as in 2.4.0 and 2.5.0. Same model and same text either way. Unverified effect.",
                     enabled: $deferArmedSpeculation)
                 ExperimentalOption(
                     title: "Legacy confirmed own lane",
-                    explanation: "Legacy mode, iOS 26 and later. Off (default): when a caption is confirmed while a different early translation is still running, the confirmed one waits for the early one to stop. On: it starts right away on its own session, so two Apple Default calls can run at once and may slow each other. Same text. Unverified effect.",
+                    explanation: "Legacy mode, iOS 26 and later. On (default since 2.5.1): when a caption is confirmed while a different early translation is still running, it starts right away on its own session, so two Apple Default calls can run at once and may slow each other. Off: the confirmed one waits for the early one to stop, as before 2.5.1. Same text. Unverified effect.",
                     enabled: $legacyConfirmedOwnLane)
+                ExperimentalOption(
+                    title: "Eager early translation",
+                    explanation: "Legacy only. On (default, new in 2.5.1): a new caption that appears while the previous one is still being translated or waits to be shown gets its early translation queued; it starts the moment the model is free. Confirmed captions always go first. Off: such a caption waits until it is confirmed, as in 2.5.0. Same text and wording. Unverified effect.",
+                    enabled: $legacyEagerSpeculation)
                 ExperimentalOption(
                     title: "Independent capture heartbeat",
                     explanation: "All modes. Off (default): ScreenLingo decides capture has stopped after 5 seconds without a message, and the capture extension only sends its keep-alive while screen frames arrive. On: the extension also sends a small keep-alive from a timer, but only when 1.5 seconds have passed without any other message, so with normal frames nothing extra is sent. Meant for a false \"stopped\" while the screen-recording icon is still on. Does not change reading, confirmation or translation. Unverified effect.",
@@ -220,7 +225,7 @@ struct ExperimentalFeaturesView: View {
                 "adaptiveConfirmation", "confirmationDeadline", "continuousRotation",
                 "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy",
                 "backgroundAvailabilityRefresh", "legacyConfirmedOwnLane", "independentCaptureHeartbeat",
-                "deferArmedSpeculation",
+                "deferArmedSpeculation", "legacyEagerSpeculation",
                 "warmAtCaptureStart", "reportStoredSessionTotals", "confirmationReadReasons", "modelLengthBuckets",
                 "trustedCaptionBand", "legacyHeadStart", "quietRewarm"
             ])

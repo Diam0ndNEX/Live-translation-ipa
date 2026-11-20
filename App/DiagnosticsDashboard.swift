@@ -263,7 +263,8 @@ struct DiagnosticsBody: View {
                   (TranslationHotPathAB.modelLengthBuckets, "length buckets"),
                   (TranslationHotPathAB.trustedCaptionBand, "trusted caption band"),
                   (TranslationHotPathAB.legacyHeadStart, "Legacy head start"),
-                  (TranslationHotPathAB.quietRewarm, "quiet re-warm")].filter { $0.0 }.map { $0.1 }
+                  (TranslationHotPathAB.quietRewarm, "quiet re-warm"),
+                  (TranslationHotPathAB.legacyEagerSpeculation, "eager early translation")].filter { $0.0 }.map { $0.1 }
         return on.isEmpty ? "Test switches on: none." : "Test switches on: " + on.joined(separator: ", ") + "."
     }
 

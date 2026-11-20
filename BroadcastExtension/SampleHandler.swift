@@ -9,7 +9,7 @@ import os.signpost
 
 class SampleHandler: RPBroadcastSampleHandler {
     var conn: NWConnection?
-    private let recognitionLock = NSLock()
+    let recognitionLock = NSLock()
     // Send completions run on the connection queue; guard the counters.
     private let sendStatsLock = NSLock()
     private var largePacketCount = 0
@@ -145,6 +145,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     override func broadcastStarted(withSetupInfo setupInfo: [String: NSObject]?) {
         let c = NWConnection(host: NWEndpoint.Host("127.0.0.1"),
                              port: NWEndpoint.Port(rawValue: Loopback.port)!, using: .udp)
+        watchLink(c) // 2.5.1: a failed link is replaced (SampleHandler+Reconnect.swift)
         c.start(queue: .global(qos: .userInitiated))
         conn = c
         heartbeatLock.lock(); heartbeatConn = c; heartbeatLock.unlock()
@@ -385,19 +386,22 @@ class SampleHandler: RPBroadcastSampleHandler {
         // 2.5.0 (item F): Legacy only. A fast read of the same image may start the translation while the normal
         // read below is still running. It never confirms or shows anything; the normal read and the pixel check
         // decide that exactly as before. See `HeadStartGovernor` for when it is used.
+        // 2.5.1: a Fair thermal state no longer turns it off (all 2.5.0 device runs were Fair most of the time);
+        // Serious, Critical, Low Power Mode and the user's cooling settings still do.
         if cfg.legacyHeadStart == true, !focusEnabled, cfg.fastOCR != true, boost != 2, candidateCount == 0,
-           frameLikelyNewText, !framePressure, freeMB() > 20, headStart.shouldRunPrePass() {
+           frameLikelyNewText, !headStartHeld(cfg), freeMB() > 20, headStart.shouldRunPrePass() {
             let began = CFAbsoluteTimeGetCurrent()
             if let fast = fastPass(img, cfg, y0, y1) {
                 headStartPrePassMs = (CFAbsoluteTimeGetCurrent() - began) * 1000
                 headStartPrePasses += 1
                 let key = fast.map(\.t).joined(separator: "\n")
-                if let waiting = headStartKey, waiting != key {
+                // 2.5.1: same words in the same order count as the same caption (HeadStartText).
+                if let waiting = headStartKey, !HeadStartText.matches(waiting, key) {
                     // The text of the last fast pass was replaced before it was confirmed.
                     headStart.record(right: false); headStartMissed += 1
                     headStartKey = nil
                 }
-                if !key.isEmpty, key != sentKey, headStartKey == nil {
+                if !key.isEmpty, !HeadStartText.matches(key, sentKey), headStartKey == nil {
                     headStartKey = key
                     if headStart.maySend {
                         headStartSent += 1
@@ -561,7 +565,7 @@ class SampleHandler: RPBroadcastSampleHandler {
     /// 2.5.0 (item F): a caption was confirmed (by a read or by the pixel check). Was the fast pass right about it?
     private func judgeHeadStart(confirmed key: String) {
         guard let waiting = headStartKey else { return }
-        let right = waiting == key
+        let right = HeadStartText.matches(waiting, key) // 2.5.1: was `waiting == key`, line breaks included
         headStart.record(right: right)
         if right { headStartConfirmed += 1 } else { headStartMissed += 1 }
         headStartKey = nil
@@ -642,6 +646,7 @@ class SampleHandler: RPBroadcastSampleHandler {
             if error != nil, let self {
                 self.sendStatsLock.lock(); self.sendErrorCount += 1; self.sendStatsLock.unlock()
             }
+            if let connection, !closeConnection { self?.noteSendResult(failed: error != nil, on: connection) }
             if closeConnection { connection?.cancel() }
         })
     }

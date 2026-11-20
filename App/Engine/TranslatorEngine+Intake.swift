@@ -181,6 +181,9 @@ extension TranslatorEngine {
                 if diag.enabled { diag.s.deferredEarlyCandidates += 1 }
                 diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
                     stage: "stability", reason: "deferred_early_candidate")
+                // 2.5.1: the active confirmed caption stays in charge, but this first reading may still prepare its
+                // translation behind it (TranslatorEngine+EagerSpeculation.swift). Before, it was simply dropped.
+                if !confirmed { speculateBehindActiveCaption(p, texts: candidateTexts) }
                 return
             }
             if let previous = activeCandidateID {
@@ -357,7 +360,12 @@ extension TranslatorEngine {
         guard speculationAllowed else { return }
         // Confirmed translations own the model. A changing subtitle should not
         // multiply low-priority speculative work while a confirmed job is busy.
-        guard !busy, queued == nil else {
+        // 2.5.1: one early translation (the newest) may wait for a running confirmed job when no other confirmed
+        // caption is queued. The drain takes confirmed work first, so it can never delay one.
+        let queueBehind = EagerSpeculationPolicy.mayQueueBehindConfirmed(
+            enabled: TranslationHotPathAB.legacyEagerSpeculation && activeTranslationSystem == .legacy,
+            busy: busy, confirmedRunning: activeQueueOwner == .confirmed, confirmedQueued: queued != nil)
+        guard queueBehind || (!busy && queued == nil) else {
             if diag.enabled {
                 diag.s.specSkipped += 1
                 diag.s.legacyBusySpeculationSkips += 1
@@ -380,6 +388,7 @@ extension TranslatorEngine {
         }
         lastSpecText = joined
         specQueued = blocks
+        if queueBehind { diag.noteModelState("legacy_eager_speculation_queued") }
         startDrain()
     }
 

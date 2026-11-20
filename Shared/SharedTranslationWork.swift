@@ -165,13 +165,14 @@ enum TranslationHotPathAB {
 
     /// Called when a session starts: the settings become the values the hot path reads.
     static func pinSettings(_ defaults: UserDefaults = .standard) {
+        LegacyV251Defaults.applyOnce(defaults)
         defaults.set((defaults.object(forKey: planSettingKey) as? Bool) ?? true, forKey: planPinnedKey)
         defaults.set((defaults.object(forKey: unitsSettingKey) as? Bool) ?? true, forKey: unitsPinnedKey)
         defaults.set((defaults.object(forKey: availabilityRefreshSettingKey) as? Bool) ?? true, forKey: availabilityRefreshPinnedKey)
-        defaults.set((defaults.object(forKey: legacyOwnLaneSettingKey) as? Bool) ?? false, forKey: legacyOwnLanePinnedKey)
+        defaults.set((defaults.object(forKey: legacyOwnLaneSettingKey) as? Bool) ?? true, forKey: legacyOwnLanePinnedKey)
         defaults.set((defaults.object(forKey: independentHeartbeatSettingKey) as? Bool) ?? false, forKey: independentHeartbeatPinnedKey)
-        defaults.set((defaults.object(forKey: armedDeferSettingKey) as? Bool) ?? true, forKey: armedDeferPinnedKey)
-        for item in v250Switches {
+        defaults.set((defaults.object(forKey: armedDeferSettingKey) as? Bool) ?? false, forKey: armedDeferPinnedKey)
+        for item in v250Switches + v251Switches {
             defaults.set((defaults.object(forKey: item.setting) as? Bool) ?? true, forKey: item.pinned)
         }
     }
@@ -193,9 +194,9 @@ enum TranslationHotPathAB {
     }
 
     /// 2.2.3 (L2): a Legacy confirmed caption starts without waiting for a cancelled, different-text speculative
-    /// call to finish unwinding. iOS 26 direct sessions only. Default OFF.
+    /// call to finish unwinding. iOS 26 direct sessions only. Default ON since 2.5.1 (OFF before).
     static var legacyConfirmedOwnLane: Bool {
-        (UserDefaults.standard.object(forKey: legacyOwnLanePinnedKey) as? Bool) ?? false
+        (UserDefaults.standard.object(forKey: legacyOwnLanePinnedKey) as? Bool) ?? true
     }
     /// 2.3.2: the extension sends a keep-alive from a timer when its frame callback is quiet. Default OFF.
     static var independentHeartbeat: Bool {
@@ -213,8 +214,9 @@ enum TranslationHotPathAB {
     }
 
     /// 2.4.0: no Apple Default call is started for a first sighting whose pixel check is armed; the confirmed caption
-    /// starts it one frame later. Legacy only since 2.5.0. Default ON.
+    /// starts it one frame later. Legacy only since 2.5.0. Default OFF since 2.5.1 (ON in 2.4.0 and 2.5.0): every
+    /// first reading starts its early translation again.
     static var deferArmedSpeculation: Bool {
-        (UserDefaults.standard.object(forKey: armedDeferPinnedKey) as? Bool) ?? true
+        (UserDefaults.standard.object(forKey: armedDeferPinnedKey) as? Bool) ?? false
     }
 }
