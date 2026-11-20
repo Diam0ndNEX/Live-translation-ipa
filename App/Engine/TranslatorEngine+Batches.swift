@@ -148,7 +148,10 @@ extension TranslatorEngine {
         let reqs = texts.enumerated().map { TranslationSession.Request(sourceText: $0.element, clientIdentifier: String($0.offset)) }
         do {
             let result: [String]?
-            if partial != nil && texts.count > 1 {
+            // 2.5.2: Legacy live calls always stream; Apple documents translations(from:) as returning later.
+            let stream = (partial != nil && texts.count > 1) ||
+                (!warmup && activeTranslationSystem == .legacy && TranslationHotPathAB.streamLegacyCalls)
+            if stream {
                 // Never present partial subtitles. Store only completed units
                 // in exact-context volatile memory. A failed batch stays failed.
                 var collected: [Int: String] = [:]

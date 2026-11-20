@@ -46,6 +46,8 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("legacyConfirmedOwnLane") private var legacyConfirmedOwnLane = true
     @AppStorage("legacyEagerSpeculation") private var legacyEagerSpeculation = true
     @AppStorage("finishRunningCaption") private var finishRunningCaption = true
+    @AppStorage("ocrDuplicateFilter") private var ocrDuplicateFilter = true
+    @AppStorage("streamLegacyCalls") private var streamLegacyCalls = true
     @AppStorage("independentCaptureHeartbeat") private var independentCaptureHeartbeat = false
 
     // Previous opt-in Smart pipeline controls are experimental, not core defaults.
@@ -170,6 +172,14 @@ struct ExperimentalFeaturesView: View {
                     explanation: "Legacy only. On (default, new in 2.5.2): when a new caption is confirmed while the previous one is already being translated, the previous one is finished and shown first, then the new one starts. The new one had to wait for that translation anyway, so this should cost it no time and show captions that were thrown away before. Off: the previous caption is dropped, as in 2.5.1. Same text and wording. Unverified effect.",
                     enabled: $finishRunningCaption)
                 ExperimentalOption(
+                    title: "Drop duplicate OCR lines",
+                    explanation: "Both modes. CHANGES WHAT IS READ. On (default, new in 2.5.2): on iOS 27 the text reader can return a line twice, once whole and again in pieces. A line is dropped only when a wider line on the same row covers it and already contains its text, so captions are not doubled and need fewer extra reads. Off: every line is kept, as in 2.5.1. Turn off if words go missing. Unverified effect.",
+                    enabled: $ocrDuplicateFilter)
+                ExperimentalOption(
+                    title: "Streamed Legacy translation calls",
+                    explanation: "Legacy only. On (default, new in 2.5.2): every live translation uses Apple's streaming batch call, which Apple documents as returning sooner than the all-at-once call. Same text, same model. Off: single-sentence captions use the all-at-once call, as in 2.5.1. Unverified effect.",
+                    enabled: $streamLegacyCalls)
+                ExperimentalOption(
                     title: "Independent capture heartbeat",
                     explanation: "All modes. Off (default): ScreenLingo decides capture has stopped after 5 seconds without a message, and the capture extension only sends its keep-alive while screen frames arrive. On: the extension also sends a small keep-alive from a timer, but only when 1.5 seconds have passed without any other message, so with normal frames nothing extra is sent. Meant for a false \"stopped\" while the screen-recording icon is still on. Does not change reading, confirmation or translation. Unverified effect.",
                     enabled: $independentCaptureHeartbeat)
@@ -231,6 +241,7 @@ struct ExperimentalFeaturesView: View {
                 "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy",
                 "backgroundAvailabilityRefresh", "legacyConfirmedOwnLane", "independentCaptureHeartbeat",
                 "deferArmedSpeculation", "legacyEagerSpeculation", "finishRunningCaption",
+                "ocrDuplicateFilter", "streamLegacyCalls",
                 "warmAtCaptureStart", "reportStoredSessionTotals", "confirmationReadReasons", "modelLengthBuckets",
                 "trustedCaptionBand", "legacyHeadStart", "quietRewarm"
             ])

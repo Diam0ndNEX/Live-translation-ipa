@@ -1256,6 +1256,22 @@ do {
 }
 print("v2.0.0 pixel-verified confirmation checks passed")
 
+// 2.5.2: iOS 27 duplicate OCR lines
+do {
+    let whole = OCRLine(t: "Eu não sei de nada", x: 0.5, y: 0.1, h: 0.04, w: 0.5)
+    let left = OCRLine(t: "Eu não sei", x: 0.37, y: 0.1, h: 0.04, w: 0.24)
+    let right = OCRLine(t: "de nada", x: 0.65, y: 0.1, h: 0.04, w: 0.18)
+    let below = OCRLine(t: "Eu não sei", x: 0.37, y: 0.04, h: 0.04, w: 0.24)
+    let kept = OCRDuplicateFilter.filter([left, whole, right])
+    check(kept.count == 1 && kept[0].t == whole.t, "Pieces inside a whole line on the same row are dropped")
+    check(OCRDuplicateFilter.filter([whole, below]).count == 2, "The same words on another row are kept")
+    check(OCRDuplicateFilter.filter([whole, whole]).count == 1, "An exact duplicate is kept once")
+    let other = OCRLine(t: "Vamos embora", x: 0.37, y: 0.1, h: 0.04, w: 0.24)
+    check(OCRDuplicateFilter.filter([whole, other]).count == 2, "Different text on the same row is kept")
+    check(OCRDuplicateFilter.filter([whole]).count == 1 && OCRDuplicateFilter.filter([]).isEmpty, "Small inputs are unchanged")
+}
+print("v2.5.2 duplicate OCR line checks passed")
+
 // 2.2.1 E13: one-character CJK captions
 do {
     for word in ["猫", "あ", "ア", "한", "ｱ"] { check(CJKText.isSingleCJKWord(word), "A single \(word) is a CJK word") }

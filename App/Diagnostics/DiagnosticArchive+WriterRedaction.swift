@@ -75,7 +75,7 @@ extension DiagnosticExportWriter {
             // 2.5.0
             "captureWarmAB", "storedTotalsAB", "readReasonsAB", "lengthBucketAB", "trustedBandAB", "headStartAB", "quietRewarmAB",
             // 2.5.1
-            "eagerSpeculationAB", "finishRunningAB",
+            "eagerSpeculationAB", "finishRunningAB", "duplicateLinesAB", "streamCallsAB",
             // 2.2.1 (D4, E12)
             "idleMinutes", "sessionLimit", "autoOpenPiP", "winSize", "textSize", "pipFont", "theme", "showOriginal",
             "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding",

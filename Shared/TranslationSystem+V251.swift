@@ -8,7 +8,9 @@ extension TranslationHotPathAB {
     static let v251Switches: [(setting: String, pinned: String, report: String)] = [
         ("legacyEagerSpeculation", "legacyEagerSpeculationPinned", "eagerSpeculationAB"),
         // 2.5.2
-        ("finishRunningCaption", "finishRunningCaptionPinned", "finishRunningAB")
+        ("finishRunningCaption", "finishRunningCaptionPinned", "finishRunningAB"),
+        ("ocrDuplicateFilter", "ocrDuplicateFilterPinned", "duplicateLinesAB"),
+        ("streamLegacyCalls", "streamLegacyCallsPinned", "streamCallsAB")
     ]
     /// Legacy only. A first reading that arrives while the previous confirmed caption is still being translated or
     /// waits to be shown is no longer dropped: its early translation is queued and starts the moment the model is
@@ -21,9 +23,20 @@ extension TranslationHotPathAB {
     static var finishRunningCaption: Bool {
         (UserDefaults.standard.object(forKey: "finishRunningCaptionPinned") as? Bool) ?? true
     }
+    /// 2.5.2, both modes, CHANGES WHAT IS READ: duplicate OCR lines of iOS 27 are dropped (`OCRDuplicateFilter`).
+    static var ocrDuplicateFilter: Bool {
+        (UserDefaults.standard.object(forKey: "ocrDuplicateFilterPinned") as? Bool) ?? true
+    }
+    /// 2.5.2, Legacy only: every live model call uses `translate(batch:)`, which Apple documents as returning sooner
+    /// than `translations(from:)`. Same requests, same model, same order of results.
+    static var streamLegacyCalls: Bool {
+        (UserDefaults.standard.object(forKey: "streamLegacyCallsPinned") as? Bool) ?? true
+    }
     static let v251ReportLabels: [(key: String, label: String)] = [
         ("eagerSpeculationAB", "eager early translation"),
-        ("finishRunningAB", "finish running caption")
+        ("finishRunningAB", "finish running caption"),
+        ("duplicateLinesAB", "duplicate OCR lines dropped"),
+        ("streamCallsAB", "streamed Legacy calls")
     ]
 }
 

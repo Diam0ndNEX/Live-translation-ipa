@@ -195,7 +195,8 @@ extension TranslatorEngine {
                            trustedCaptionBand: (TranslationHotPathAB.trustedCaptionBand && activeTranslationSystem != .legacy) ? true : nil,
                            legacyHeadStart: (TranslationHotPathAB.legacyHeadStart && activeTranslationSystem == .legacy &&
                                              speculationAllowed && flag("translateAhead", true)) ? true : nil,
-                           extraReadReasons: TranslationHotPathAB.confirmationReadReasons ? true : nil))
+                           extraReadReasons: TranslationHotPathAB.confirmationReadReasons ? true : nil,
+                           dropDuplicateLines: TranslationHotPathAB.ocrDuplicateFilter ? true : nil))
     }
 
     /// Invalidate suspended work before changing language, capture state, or settings.

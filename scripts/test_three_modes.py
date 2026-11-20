@@ -302,4 +302,14 @@ assert 'now.timeIntervalSince(receivedAt) < 1.2' in handle, 'a held caption is r
 assert '@AppStorage("finishRunningCaption") private var finishRunningCaption = true' in experimental and experimental.count('"finishRunningCaption"') == 2
 assert archive.count('"finishRunningAB"') == 2
 assert 'static let version = "2.5.2"' in shared and 'static let build = 120' in shared and '("2.5.2", "Build 120:' in shared
+dup = read('Shared/OCRDuplicateFilter.swift')
+assert 'enum OCRDuplicateFilter' in dup and 'abs(outer.y - inner.y) <= max(outer.h, inner.h) * 0.5' in dup and 'a.contains(b)' in dup
+assert capture.count('if cfg.dropDuplicateLines == true { lines = OCRDuplicateFilter.filter(lines) }') == 2, 'normal and quick read'
+assert 'var dropDuplicateLines: Bool? = nil' in shared and 'dropDuplicateLines: TranslationHotPathAB.ocrDuplicateFilter ? true : nil' in engine
+assert 'OCRLine' not in v251.replace('OCRLine` ', ''), 'TranslationSystem parts are compiled without Shared.swift in CI test programs'
+batches = read_source('TranslatorEngine')
+assert '(!warmup && activeTranslationSystem == .legacy && TranslationHotPathAB.streamLegacyCalls)' in batches and 'if stream {' in batches
+for setting, arm in (('ocrDuplicateFilter', 'duplicateLinesAB'), ('streamLegacyCalls', 'streamCallsAB')):
+    assert f'@AppStorage("{setting}") private var {setting} = true' in experimental and experimental.count(f'"{setting}"') == 2, setting
+    assert archive.count(f'"{arm}"') == 2 and f'("{setting}", "{setting}Pinned", "{arm}")' in v251, arm
 print('v2.5.2 source contracts passed: finish the running caption (switch, Legacy only, own call only, hold below the replay limit), version')
