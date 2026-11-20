@@ -189,6 +189,35 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             for item in TranslationHotPathAB.v250Switches { standard.removeObject(forKey: item.pinned) }
             for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey] { standard.removeObject(forKey: key) }
             precondition(TranslationHotPathAB.trustedCaptionBand && TranslationHotPathAB.label == "L1_F1")
+
+            // 2.5.1: new Legacy defaults, the one-time reset of saved values, and the pure policies.
+            for key in [LegacyV251Defaults.appliedKey, "legacyConfirmedOwnLanePinned", "deferArmedSpeculationPinned",
+                        "legacyEagerSpeculationPinned"] { standard.removeObject(forKey: key) }
+            precondition(TranslationHotPathAB.legacyEagerSpeculation && TranslationHotPathAB.legacyConfirmedOwnLane &&
+                         !TranslationHotPathAB.deferArmedSpeculation, "2.5.1 Legacy defaults")
+            standard.set(true, forKey: "deferArmedSpeculation"); standard.set(false, forKey: "legacyConfirmedOwnLane")
+            TranslationHotPathAB.pinSettings()
+            precondition(!TranslationHotPathAB.deferArmedSpeculation && TranslationHotPathAB.legacyConfirmedOwnLane,
+                         "values saved before 2.5.1 are reset once to the new defaults")
+            standard.set(true, forKey: "deferArmedSpeculation")
+            TranslationHotPathAB.pinSettings()
+            precondition(TranslationHotPathAB.deferArmedSpeculation, "after the reset the toggle works again")
+            for key in ["deferArmedSpeculation", "legacyConfirmedOwnLane", LegacyV251Defaults.appliedKey,
+                        "legacyConfirmedOwnLanePinned", "deferArmedSpeculationPinned"] { standard.removeObject(forKey: key) }
+            for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches { standard.removeObject(forKey: item.pinned) }
+            for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey,
+                        TranslationHotPathAB.availabilityRefreshPinnedKey, TranslationHotPathAB.independentHeartbeatPinnedKey] {
+                standard.removeObject(forKey: key)
+            }
+            precondition(HeadStartText.matches("Eu não sei\nde nada", "Eu não sei de nada"), "line breaks do not matter")
+            precondition(!HeadStartText.matches("Eu nao sei de nada", "Eu não sei de nada"), "a different letter is a miss")
+            precondition(!HeadStartText.matches("", ""), "empty never matches")
+            precondition(EagerSpeculationPolicy.mayQueueBehindConfirmed(enabled: true, busy: true, confirmedRunning: true, confirmedQueued: false))
+            precondition(!EagerSpeculationPolicy.mayQueueBehindConfirmed(enabled: true, busy: true, confirmedRunning: true, confirmedQueued: true),
+                         "never while a confirmed caption waits")
+            precondition(!EagerSpeculationPolicy.mayQueueBehindConfirmed(enabled: true, busy: true, confirmedRunning: false, confirmedQueued: false),
+                         "never behind another early translation")
+            precondition(!EagerSpeculationPolicy.mayQueueBehindConfirmed(enabled: false, busy: true, confirmedRunning: true, confirmedQueued: false))
         }
         #endif
 

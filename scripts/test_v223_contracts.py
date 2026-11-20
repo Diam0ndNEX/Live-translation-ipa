@@ -71,9 +71,9 @@ assert "Hybrid" not in index
 assert '"hybridBackoffAB"' not in archive and '"hybridGuardAB"' not in archive
 assert 'hybridBackoffAB' not in diagnostics and 'hybridGuardAB' not in diagnostics
 
-# L2: Legacy confirmed-own-lane arm, default OFF, iOS 26 only, epoch-guarded drain.
-assert '(UserDefaults.standard.object(forKey: legacyOwnLanePinnedKey) as? Bool) ?? false' in work
-assert '@AppStorage("legacyConfirmedOwnLane") private var legacyConfirmedOwnLane = false' in experimental
+# L2: Legacy confirmed-own-lane arm, default ON since 2.5.1 (OFF before), iOS 26 only, epoch-guarded drain.
+assert '(UserDefaults.standard.object(forKey: legacyOwnLanePinnedKey) as? Bool) ?? true' in work
+assert '@AppStorage("legacyConfirmedOwnLane") private var legacyConfirmedOwnLane = true' in experimental
 assert 'label: "Legacy confirmed own lane"' in index
 detach = engine[engine.index("func detachCancelledSpeculationIfEnabled"):engine.index("func presentQueuedFromRAMIfComplete")]
 for token in ("TranslationHotPathAB.legacyConfirmedOwnLane", "activeTranslationSystem == .legacy", "activeQueueOwner == .speculative", "#available(iOS 26.0, *)", "drainEpoch += 1"):
@@ -92,8 +92,8 @@ assert "maximumTotalBytes: Int = Int.max" in store and "maximumUnpinnedRuns: Int
 assert "100 MB" not in read_source("TestRunViews")
 
 # Version 2.2.3 build 106 in the places CI checks.
-assert 'static let version = "2.5.0"' in shared and "static let build = 118" in shared
-assert project.count('"2.5.0"') == 3 and project.count('"118"') == 3
+assert 'static let version = "2.5.1"' in shared and "static let build = 119" in shared
+assert project.count('"2.5.1"') == 3 and project.count('"119"') == 3
 assert '("2.2.3", "Build 106:' in shared
 assert '("2.2.2", "Build 105:' in shared, "older changelog entries stay"
 print("v2.2.3 source contracts passed: L5 switch (default off, pinned), unchanged request path and TTL, toggle, Fast OCR switch, version")
