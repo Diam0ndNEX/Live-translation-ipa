@@ -189,8 +189,8 @@ for field in ('pixelArmed', 'focusRediscoveries', 'confirmReads', 'confirmPixelR
     declaration = re.search(r'var ' + field + r': (Bool|Int|Double)\? = nil', shared)
     assert declaration, field + ' must be an optional number or flag (no text) so older builds ignore it'
 assert 'privacy: "metadataOnly"' in diagnostics and 'textCapture: false' in diagnostics
-assert 'static let version = "2.5.1"' in shared and 'static let build = 119' in shared
-assert read('project.yml').count('"2.5.1"') == 3 and read('project.yml').count('"119"') == 3
+assert 'static let version = "2.5.2"' in shared and 'static let build = 120' in shared
+assert read('project.yml').count('"2.5.2"') == 3 and read('project.yml').count('"120"') == 3
 assert '("2.4.0", "Build 117:' in shared and '("2.3.9", "Build 116:' in shared and '("2.5.0", "Build 118:' in shared
 print('v2.4.0 source contracts passed: deferral (default off since 2.5.1, Legacy only), unchanged OCR and confirmation evidence, forced re-read, direct model call, metadata-only diagnostics, version')
 
@@ -290,5 +290,16 @@ assert 'else { self.dropPeer(connection) }' in loop and 'func restart()' in loop
 assert 'server.restart()' in engine
 assert 'watchLink(c)' in capture and 'noteSendResult(failed: error != nil, on: connection)' in capture
 assert 'guard let current = conn, current === old else { return }' in capture
-assert 'static let version = "2.5.1"' in shared and 'static let build = 119' in shared and '("2.5.1", "Build 119:' in shared
+assert '("2.5.1", "Build 119:' in shared
 print('v2.5.1 source contracts passed: eager early translation (switch, Legacy only, confirmed first), own lane and no deferral by default, head start by words, 8-line pixel check, self-healing link, version')
+
+# ---- 2.5.2: a running confirmed Legacy caption is finished instead of dropped. Source contracts only. ----
+assert '("finishRunningCaption", "finishRunningCaptionPinned", "finishRunningAB")' in v251
+assert 'enabled && busy && confirmedRunning && !captionQueued ? maximumHold : 0' in v251 and 'static let maximumHold = 1.0' in v251
+handle = function(engine, 'handleContent')
+assert 'ConfirmedHandoffPolicy.holdWhileOwnCallRuns(' in handle and 'enabled: TranslationHotPathAB.finishRunningCaption && activeTranslationSystem == .legacy' in handle
+assert 'now.timeIntervalSince(receivedAt) < 1.2' in handle, 'a held caption is replayed within 1.2 s or dropped; the hold stays below that'
+assert '@AppStorage("finishRunningCaption") private var finishRunningCaption = true' in experimental and experimental.count('"finishRunningCaption"') == 2
+assert archive.count('"finishRunningAB"') == 2
+assert 'static let version = "2.5.2"' in shared and 'static let build = 120' in shared and '("2.5.2", "Build 120:' in shared
+print('v2.5.2 source contracts passed: finish the running caption (switch, Legacy only, own call only, hold below the replay limit), version')
