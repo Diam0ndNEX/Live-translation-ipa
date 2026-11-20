@@ -29,6 +29,8 @@ L2_UNDO = {
          "                    currentSpeculativeText = nil\n"),
     ],
     'process': [
+        # 2.5.2 (owner request): incremental translation recovery defaults to on. Only the default value changed.
+        ('(display || flag("incrementalBatchRecovery", true))', '(display || flag("incrementalBatchRecovery", false))'),
         ("            // 2.2.3 (L2): a detached speculative call must not erase the newer confirmed call's in-flight set.\n            if modelUnitKeysInFlight == Set(items.map { $0.key }) {\n                modelUnitKeysInFlight.removeAll()\n                modelContextInFlight = nil\n            }\n",
          "            modelUnitKeysInFlight.removeAll()\n            modelContextInFlight = nil\n"),
     ],
@@ -279,7 +281,7 @@ for token in ('activeTranslationSystem == .legacy', 'p.stable == false', 'Specul
 assert 'activeCandidateID' not in eager and 'activeCandidateConfirmed' not in eager, 'it never replaces the active caption'
 # Own lane on by default; the two changed defaults reach saved settings once.
 assert '(UserDefaults.standard.object(forKey: legacyOwnLanePinnedKey) as? Bool) ?? true' in work
-assert 'LegacyV251Defaults.applyOnce(defaults)' in work and 'static let changedKeys = ["deferArmedSpeculation", "legacyConfirmedOwnLane"]' in v251
+assert 'LegacyV251Defaults.applyOnce(defaults)' in work and 'static let changedKeys = ["deferArmedSpeculation", "legacyConfirmedOwnLane",\n                              "incrementalBatchRecovery", "subtitleAwareChangeDetection", "independentCaptureHeartbeat"]' in v251
 # Head start judged by words; same correction as the normal read; the normal read is unchanged.
 assert capture.count('HeadStartText.matches(') == 3 and 'waiting == key' not in capture.replace('was `waiting == key`', '')
 assert 'created.usesLanguageCorrection = correction' in capture and '!headStartHeld(cfg)' in capture

@@ -45,8 +45,10 @@ extension TranslationHotPathAB {
 enum LegacyV251Defaults {
     static let appliedKey = "legacyV251DefaultsApplied"
     /// Settings whose default changed in 2.5.1 (old default in brackets): deferArmedSpeculation (on),
-    /// legacyConfirmedOwnLane (off).
-    static let changedKeys = ["deferArmedSpeculation", "legacyConfirmedOwnLane"]
+    /// legacyConfirmedOwnLane (off). 2.5.2: incrementalBatchRecovery, subtitleAwareChangeDetection and
+    /// independentCaptureHeartbeat (all off before).
+    static let changedKeys = ["deferArmedSpeculation", "legacyConfirmedOwnLane",
+                              "incrementalBatchRecovery", "subtitleAwareChangeDetection", "independentCaptureHeartbeat"]
 
     static func applyOnce(_ defaults: UserDefaults) {
         guard defaults.object(forKey: appliedKey) as? Bool != true else { return }

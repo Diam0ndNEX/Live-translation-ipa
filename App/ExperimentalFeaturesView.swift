@@ -19,13 +19,13 @@ private struct ExperimentalOption: View {
 
 struct ExperimentalFeaturesView: View {
     @EngineHandle private var engine
-    @AppStorage("incrementalBatchRecovery") private var incrementalBatchRecovery = false
+    @AppStorage("incrementalBatchRecovery") private var incrementalBatchRecovery = true
     @AppStorage("directPiPBuffer") private var directPiPBuffer = false
     @AppStorage("pixelConfirmation") private var pixelConfirmation = true
     @AppStorage("eventDrivenOCR") private var eventDrivenOCR = true
     @AppStorage("fastOCR") private var fastOCR = false
     @AppStorage("legacySharedSession") private var legacySharedSession = true
-    @AppStorage("subtitleAwareChangeDetection") private var subtitleAwareChangeDetection = false
+    @AppStorage("subtitleAwareChangeDetection") private var subtitleAwareChangeDetection = true
     @AppStorage("preserveRelatedMovieGroups") private var preserveRelatedMovieGroups = false
     // 2.2.1 (D13): run-time A/B variants. They are copied when a session starts, never changed mid-run.
     @AppStorage("hotPathReuseLowLatencyPlan") private var hotPathReuseLowLatencyPlan = true
@@ -48,7 +48,7 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("finishRunningCaption") private var finishRunningCaption = true
     @AppStorage("ocrDuplicateFilter") private var ocrDuplicateFilter = true
     @AppStorage("streamLegacyCalls") private var streamLegacyCalls = true
-    @AppStorage("independentCaptureHeartbeat") private var independentCaptureHeartbeat = false
+    @AppStorage("independentCaptureHeartbeat") private var independentCaptureHeartbeat = true
 
     // Previous opt-in Smart pipeline controls are experimental, not core defaults.
     @AppStorage("adaptiveConfirmation") private var adaptiveConfirmation = false
@@ -181,7 +181,7 @@ struct ExperimentalFeaturesView: View {
                     enabled: $streamLegacyCalls)
                 ExperimentalOption(
                     title: "Independent capture heartbeat",
-                    explanation: "All modes. Off (default): ScreenLingo decides capture has stopped after 5 seconds without a message, and the capture extension only sends its keep-alive while screen frames arrive. On: the extension also sends a small keep-alive from a timer, but only when 1.5 seconds have passed without any other message, so with normal frames nothing extra is sent. Meant for a false \"stopped\" while the screen-recording icon is still on. Does not change reading, confirmation or translation. Unverified effect.",
+                    explanation: "All modes. Off: ScreenLingo decides capture has stopped after 5 seconds without a message, and the capture extension only sends its keep-alive while screen frames arrive. On (default since 2.5.2): the extension also sends a small keep-alive from a timer, but only when 1.5 seconds have passed without any other message, so with normal frames nothing extra is sent. Meant for a false \"stopped\" while the screen-recording icon is still on. Does not change reading, confirmation or translation. Unverified effect.",
                     enabled: $independentCaptureHeartbeat)
             } header: { Text("A/B test variants") } footer: {
                 Text("For comparing builds on the same video. A change applies from the next session, never during one. Each run's report names the variant it used.")

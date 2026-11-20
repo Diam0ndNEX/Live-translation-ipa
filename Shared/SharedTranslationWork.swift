@@ -170,7 +170,7 @@ enum TranslationHotPathAB {
         defaults.set((defaults.object(forKey: unitsSettingKey) as? Bool) ?? true, forKey: unitsPinnedKey)
         defaults.set((defaults.object(forKey: availabilityRefreshSettingKey) as? Bool) ?? true, forKey: availabilityRefreshPinnedKey)
         defaults.set((defaults.object(forKey: legacyOwnLaneSettingKey) as? Bool) ?? true, forKey: legacyOwnLanePinnedKey)
-        defaults.set((defaults.object(forKey: independentHeartbeatSettingKey) as? Bool) ?? false, forKey: independentHeartbeatPinnedKey)
+        defaults.set((defaults.object(forKey: independentHeartbeatSettingKey) as? Bool) ?? true, forKey: independentHeartbeatPinnedKey)
         defaults.set((defaults.object(forKey: armedDeferSettingKey) as? Bool) ?? false, forKey: armedDeferPinnedKey)
         for item in v250Switches + v251Switches {
             defaults.set((defaults.object(forKey: item.setting) as? Bool) ?? true, forKey: item.pinned)
@@ -200,7 +200,7 @@ enum TranslationHotPathAB {
     }
     /// 2.3.2: the extension sends a keep-alive from a timer when its frame callback is quiet. Default OFF.
     static var independentHeartbeat: Bool {
-        (UserDefaults.standard.object(forKey: independentHeartbeatPinnedKey) as? Bool) ?? false
+        (UserDefaults.standard.object(forKey: independentHeartbeatPinnedKey) as? Bool) ?? true
     }
     /// 2.2.3 (L5): refresh a cached language-availability check in the background. Default ON since 2.4.0.
     static var refreshAvailabilityInBackground: Bool {

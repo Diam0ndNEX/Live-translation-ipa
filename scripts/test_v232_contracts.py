@@ -88,10 +88,10 @@ shared_cfg = read_source("Shared")
 ext = read_source("SampleHandler")
 experimental = read_source("ExperimentalFeaturesView")
 assert "var independentHeartbeat: Bool? = nil" in shared_cfg, "optional field: older apps and extensions ignore it"
-assert "(UserDefaults.standard.object(forKey: independentHeartbeatPinnedKey) as? Bool) ?? false" in work
-assert "defaults.set((defaults.object(forKey: independentHeartbeatSettingKey) as? Bool) ?? false, forKey: independentHeartbeatPinnedKey)" in work, "pinned at session start, default off"
+assert "(UserDefaults.standard.object(forKey: independentHeartbeatPinnedKey) as? Bool) ?? true" in work  # default on since 2.5.2
+assert "defaults.set((defaults.object(forKey: independentHeartbeatSettingKey) as? Bool) ?? true, forKey: independentHeartbeatPinnedKey)" in work, "pinned at session start, default on since 2.5.2"
 assert "independentHeartbeat: TranslationHotPathAB.independentHeartbeat ? true : nil" in engine
-assert '@AppStorage("independentCaptureHeartbeat") private var independentCaptureHeartbeat = false' in experimental
+assert '@AppStorage("independentCaptureHeartbeat") private var independentCaptureHeartbeat = true' in experimental
 assert '"legacyConfirmedOwnLane", "independentCaptureHeartbeat"' in experimental, "reset section lists it"
 assert 'settings["heartbeatAB"] = "on"' in diag and archive.count('"heartbeatAB"') >= 3
 hb = body(ext, "private func sendHeartbeatIfQuiet()", "// MARK: Frames")
