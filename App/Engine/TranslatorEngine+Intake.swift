@@ -140,8 +140,14 @@ extension TranslatorEngine {
             activePresented: activeCandidatePresented,
             previousBlocks: latestBlocks,
             incomingBlocks: candidateTexts)
-        let handoffDelay = SubtitlePerformancePolicy.confirmedHandoffDelay(
-            age: now.timeIntervalSince(activeCandidateConfirmedAt))
+        // 2.5.2: while the active caption's own Apple Default call is running, the newer caption waits for it
+        // anyway (a confirmed call is never stopped early), so the running caption is kept and shown instead of
+        // being thrown away (ConfirmedHandoffPolicy). The newer one is replayed the moment the drain is free.
+        let handoffDelay = max(SubtitlePerformancePolicy.confirmedHandoffDelay(
+            age: now.timeIntervalSince(activeCandidateConfirmedAt)),
+            ConfirmedHandoffPolicy.holdWhileOwnCallRuns(
+                enabled: TranslationHotPathAB.finishRunningCaption && activeTranslationSystem == .legacy,
+                busy: busy, confirmedRunning: activeQueueOwner == .confirmed, captionQueued: queued != nil))
         if !replayed, handoffDelay > 0, flag("protectConfirmedPresentation", true),
            flag("steadyCaptions", true), p.candidateID != nil,
            activeCandidateText != candidateText,

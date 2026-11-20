@@ -255,7 +255,7 @@ extension TranslatorEngine {
                            detail: "Uncached units submitted to on-device translation")
             }
             let streamPartials = installed && workMode.allowsReuse &&
-                (display || flag("incrementalBatchRecovery", false))
+                (display || flag("incrementalBatchRecovery", true))
             var completedParts: [Int: String] = [:]
             var partialHandler: (@MainActor (Int, String) -> Void)?
             if streamPartials {

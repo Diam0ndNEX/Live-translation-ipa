@@ -218,6 +218,14 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             precondition(!EagerSpeculationPolicy.mayQueueBehindConfirmed(enabled: true, busy: true, confirmedRunning: false, confirmedQueued: false),
                          "never behind another early translation")
             precondition(!EagerSpeculationPolicy.mayQueueBehindConfirmed(enabled: false, busy: true, confirmedRunning: true, confirmedQueued: false))
+            // 2.5.2
+            precondition(TranslationHotPathAB.finishRunningCaption, "2.5.2 switch defaults to on")
+            precondition(ConfirmedHandoffPolicy.holdWhileOwnCallRuns(enabled: true, busy: true, confirmedRunning: true, captionQueued: false) == ConfirmedHandoffPolicy.maximumHold)
+            precondition(ConfirmedHandoffPolicy.maximumHold < 1.2, "a held caption must be replayed before the 1.2 s replay limit")
+            precondition(ConfirmedHandoffPolicy.holdWhileOwnCallRuns(enabled: true, busy: true, confirmedRunning: true, captionQueued: true) == 0,
+                         "no hold when the running call is an older caption's")
+            precondition(ConfirmedHandoffPolicy.holdWhileOwnCallRuns(enabled: true, busy: true, confirmedRunning: false, captionQueued: false) == 0)
+            precondition(ConfirmedHandoffPolicy.holdWhileOwnCallRuns(enabled: false, busy: true, confirmedRunning: true, captionQueued: false) == 0)
         }
         #endif
 

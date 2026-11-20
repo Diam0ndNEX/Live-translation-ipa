@@ -98,9 +98,11 @@ assert "ExperimentalFeaturesView()" in sources["SmartPipelineSettings.swift"]
 assert "PipelineSimulatorView()" in sources["SettingsCategories.swift"]
 assert 'NavigationLink { CaptionAppearanceSettings() }' not in home
 
-for key in ("incrementalBatchRecovery",
-            "directPiPBuffer", "subtitleAwareChangeDetection", "preserveRelatedMovieGroups"):
+for key in ("directPiPBuffer", "preserveRelatedMovieGroups"):
     assert f'"{key}": false' in engine, f"New experiment {key} must remain off by default"
+# 2.5.2 (changed with the code, owner request): these two are on by default now.
+for key in ("incrementalBatchRecovery", "subtitleAwareChangeDetection"):
+    assert f'"{key}": true' in engine, f"{key} is on by default since 2.5.2"
 assert 'Picker("Translation system"' in sources['SettingsCategories.swift']
 assert "available: skipUnchanged" in extra
 assert "available: mode == TranslateMode.movie.rawValue" not in extra

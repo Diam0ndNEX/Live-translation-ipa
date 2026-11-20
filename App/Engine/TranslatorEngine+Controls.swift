@@ -170,7 +170,7 @@ extension TranslatorEngine {
                            maxEdge: maxEdge, interval: interval, paused: paused || manualMode,
                            stability: int("stability", 2), rot: effectiveRot, rev: rotRev,
                            boost: int("boost", 1), skipUnchanged: flag("skipUnchanged", true),
-                           subtitleAwareChangeDetection: flag("subtitleAwareChangeDetection", false),
+                           subtitleAwareChangeDetection: flag("subtitleAwareChangeDetection", true),
                            speculate: speculationAllowed && flag("translateAhead", true), confidence: num("ocrConfidence", 0.3),
                            correction: flag("ocrCorrection", true), idleBackoff: flag("idleBackoff", true),
                            movieMode: flag("rapidTextTracking", true),
@@ -195,7 +195,8 @@ extension TranslatorEngine {
                            trustedCaptionBand: (TranslationHotPathAB.trustedCaptionBand && activeTranslationSystem != .legacy) ? true : nil,
                            legacyHeadStart: (TranslationHotPathAB.legacyHeadStart && activeTranslationSystem == .legacy &&
                                              speculationAllowed && flag("translateAhead", true)) ? true : nil,
-                           extraReadReasons: TranslationHotPathAB.confirmationReadReasons ? true : nil))
+                           extraReadReasons: TranslationHotPathAB.confirmationReadReasons ? true : nil,
+                           dropDuplicateLines: TranslationHotPathAB.ocrDuplicateFilter ? true : nil))
     }
 
     /// Invalidate suspended work before changing language, capture state, or settings.

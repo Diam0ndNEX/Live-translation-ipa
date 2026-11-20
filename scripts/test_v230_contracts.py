@@ -61,11 +61,12 @@ assert 'armsOn' in archive and '("legacyOwnLaneAB", "Legacy own lane")' in archi
 # 2.4.0 (deliberate change): the background language check now defaults to ON, so the count went from 5 to 4.
 work = read_source("SharedTranslationWork")
 # 2.5.0 (deliberate change): the two Hybrid switches are removed with the mode, so the count went from 4 to 2.
-assert work.count("?? false, forKey:") == 2, "Legacy own lane and the 2.3.2 heartbeat switch default to off"
+# 2.5.1 and 2.5.2 (deliberate changes): own lane and the heartbeat default to ON; the armed deferral to OFF. Count 1.
+assert work.count("?? false, forKey:") == 1, "only the armed deferral defaults to off"
 
 # Version 2.3.0 build 107 in the places CI checks; older changelog entries stay.
-assert 'static let version = "2.5.1"' in shared and "static let build = 119" in shared
-assert project.count('"2.5.1"') == 3 and project.count('"119"') == 3
+assert 'static let version = "2.5.2"' in shared and "static let build = 120" in shared
+assert project.count('"2.5.2"') == 3 and project.count('"120"') == 3
 assert '("2.3.0", "Build 107:' in shared and '("2.2.3", "Build 106:' in shared
 print("v2.3.0 source contracts passed: per-caption Legacy labels, confirmed_service_ms, oldest-first context drop, "
       "supersession measurement, switches column, defaults unchanged, version")

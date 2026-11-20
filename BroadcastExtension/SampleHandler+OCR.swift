@@ -104,6 +104,8 @@ extension SampleHandler {
             guard y < 0.96 else { return nil }
             return OCRLine(t: c.string, x: Double(b.midX), y: y, h: Double(b.height) * span, w: Double(b.width), confidence: Double(c.confidence))
         }
+        // 2.5.2: iOS 27 can return a line twice (whole and in pieces); see OCRDuplicateFilter.
+        if cfg.dropDuplicateLines == true { lines = OCRDuplicateFilter.filter(lines) }
         lines.sort { $0.y != $1.y ? $0.y > $1.y : $0.x < $1.x }
         return lines
     }
@@ -152,6 +154,8 @@ extension SampleHandler {
             lines.append(OCRLine(t: text, x: Double(box.midX), y: y, h: Double(box.height) * span,
                                  w: Double(box.width), confidence: Double(candidate.confidence)))
         }
+        // 2.5.2: iOS 27 can return a line twice (whole and in pieces); see OCRDuplicateFilter.
+        if cfg.dropDuplicateLines == true { lines = OCRDuplicateFilter.filter(lines) }
         lines.sort { $0.y != $1.y ? $0.y > $1.y : $0.x < $1.x }
         return lines
     }

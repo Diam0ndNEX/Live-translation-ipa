@@ -27,10 +27,10 @@ archive = read("App/DiagnosticArchive.swift")
 memory = read_source("TranslationMemoryStore")
 workflow = read(".github/workflows/build.yml")
 
-assert 'static let version = "2.5.1"' in shared
-assert "static let build = 119" in shared
-assert project.count('"2.5.1"') == 3
-assert project.count('"119"') == 3
+assert 'static let version = "2.5.2"' in shared
+assert "static let build = 120" in shared
+assert project.count('"2.5.2"') == 3
+assert project.count('"120"') == 3
 
 assert "SCREENLINGO_REFERENCE_CAPTURE_CADENCE" in capture
 assert "SubtitleAcquisitionPolicy.allowsEarlyVisualWake" in capture

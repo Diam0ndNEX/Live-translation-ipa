@@ -264,7 +264,10 @@ struct DiagnosticsBody: View {
                   (TranslationHotPathAB.trustedCaptionBand, "trusted caption band"),
                   (TranslationHotPathAB.legacyHeadStart, "Legacy head start"),
                   (TranslationHotPathAB.quietRewarm, "quiet re-warm"),
-                  (TranslationHotPathAB.legacyEagerSpeculation, "eager early translation")].filter { $0.0 }.map { $0.1 }
+                  (TranslationHotPathAB.legacyEagerSpeculation, "eager early translation"),
+                  (TranslationHotPathAB.finishRunningCaption, "finish running caption"),
+                  (TranslationHotPathAB.ocrDuplicateFilter, "duplicate OCR lines dropped"),
+                  (TranslationHotPathAB.streamLegacyCalls, "streamed Legacy calls")].filter { $0.0 }.map { $0.1 }
         return on.isEmpty ? "Test switches on: none." : "Test switches on: " + on.joined(separator: ", ") + "."
     }
 
