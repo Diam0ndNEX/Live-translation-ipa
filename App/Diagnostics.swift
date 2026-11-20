@@ -286,7 +286,8 @@ final class Diagnostics: ObservableObject {
         // 2.4.0: default ON. Written only when ON, like the others, so a run saved before 2.4.0 reads as off.
         if TranslationHotPathAB.deferArmedSpeculation { settings["armedDeferAB"] = "on" }
         // 2.5.0: items A to F and the quiet re-warm, all default ON, written only when ON.
-        for item in TranslationHotPathAB.v250Switches
+        // 2.5.1: the same for the 2.5.1 switches.
+        for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches
             where (UserDefaults.standard.object(forKey: item.pinned) as? Bool) ?? true {
             settings[item.report] = "on"
         }

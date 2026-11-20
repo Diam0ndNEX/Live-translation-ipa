@@ -22,6 +22,8 @@ struct DiagnosticPerformanceComparison {
         "hotPathAB", "availabilityRefreshAB", "legacyOwnLaneAB", "heartbeatAB", "armedDeferAB",
         // 2.5.0: the switches that change timing or what is read. A run saved before 2.5.0 has none of them (off).
         "captureWarmAB", "trustedBandAB", "headStartAB", "quietRewarmAB",
+        // 2.5.1: a run saved before 2.5.1 has none of them (off).
+        "eagerSpeculationAB",
         "detailedCollection", "performanceTier",
         "focusedCaptionOCR", "strictCaptionIdentity", "cjkSingleCharacters", "liveWarmupLegacy"
     ]

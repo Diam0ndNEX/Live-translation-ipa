@@ -272,7 +272,8 @@ extension Diagnostics {
             "legacy_confirmed_after_switch", "legacy_confirmed_no_switch", "legacy_shared_session_used", "speculative_lease_conflict",
             "legacy_queued_speculation_superseded", // 2.2.1 (E10): was emitted by the engine but dropped here
             "legacy_confirmed_own_lane", "legacy_detached_speculation_released", // 2.2.3 (L2)
-            "legacy_confirmed_overlap_ms" // 2.4.0
+            "legacy_confirmed_overlap_ms", // 2.4.0
+            "legacy_eager_speculation_queued" // 2.5.1
         ]
         guard allowed.contains(reason) else { return }
         if modeActiveSystem == "legacy", let candidate {

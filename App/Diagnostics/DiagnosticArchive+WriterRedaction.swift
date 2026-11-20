@@ -38,7 +38,8 @@ extension DiagnosticExportWriter {
                 "legacy_speculation_saved_memory_backoff", "legacy_speculation_low_yield_backoff",
                 // found by guard C2 in 2.2.1: emitted by the engine, accepted by Diagnostics, dropped here
                 "legacy_shared_session_used", "speculative_lease_conflict",
-                "legacy_confirmed_own_lane", "legacy_detached_speculation_released", "legacy_confirmed_overlap_ms"
+                "legacy_confirmed_own_lane", "legacy_detached_speculation_released", "legacy_confirmed_overlap_ms",
+                "legacy_eager_speculation_queued" // 2.5.1
             ]).union(stageCodes)
         let safeEvents = snapshot.events.suffix(6000).map { event in
             StructuredDiagnosticEvent(id: event.id, timestamp: event.timestamp,
@@ -73,6 +74,8 @@ extension DiagnosticExportWriter {
             "hotPathAB", "availabilityRefreshAB", "legacyOwnLaneAB", "heartbeatAB", "armedDeferAB", "detailSuspended",
             // 2.5.0
             "captureWarmAB", "storedTotalsAB", "readReasonsAB", "lengthBucketAB", "trustedBandAB", "headStartAB", "quietRewarmAB",
+            // 2.5.1
+            "eagerSpeculationAB",
             // 2.2.1 (D4, E12)
             "idleMinutes", "sessionLimit", "autoOpenPiP", "winSize", "textSize", "pipFont", "theme", "showOriginal",
             "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding",
