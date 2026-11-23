@@ -108,7 +108,9 @@ extension TranslatorEngine {
                                       stage: "frame_arrival", reason: "accepted")
         }
         extractingConfirmedPacket = p.stable != false
-        let candidateTexts = extractTexts(p.lines, count: p.stable != false && !replayed)
+        let extractedTexts = extractTexts(p.lines, count: p.stable != false && !replayed)
+        // 2.5.5: the blocks of one subtitle are translated together (Legacy, switch captionJoin).
+        let candidateTexts = captionJoinedTexts(extractedTexts, count: p.stable != false && !replayed)
         guard !candidateTexts.isEmpty else {
             if diag.detailedCollection {
                 diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,

@@ -132,7 +132,7 @@ struct DiagnosticIntervalBucket: Codable {
         "warmupPredicted", "coldModelBatches", "adaptiveSpeculationSkipped",
             "legacyAdaptiveLowYieldSkips", "legacyAdaptiveSavedSkips",
             "legacyLowConfidenceSkips", "legacyBusySpeculationSkips",
-            "legacyDuplicateSpeculationSkips",
+            "legacyDuplicateSpeculationSkips", "captionMultiBlock", "captionJoined",
         "specPreemptionRequested", "specMatchingConfirmation",
         "specRetainedUnits", "completedConfirmedUnitsRetained", "temporaryMemoryHits",
         "uncachedUnits", "bypassedLookups", "temporaryMemoryMisses",

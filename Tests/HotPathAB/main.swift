@@ -213,6 +213,27 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             precondition(CaptionLineSelection.indices(lineTexts: ["abc", "def"], candidate: "xyz", normalize: normalize) == [0, 1],
                          "2.5.4: when no line matches every line is kept")
 
+            // 2.5.5: the switch defaults to on and turns off alone; the text blocks of one subtitle are joined.
+            TranslationHotPathAB.pinSettings()
+            precondition(TranslationHotPathAB.captionJoin, "2.5.5 switch defaults to on")
+            standard.set(false, forKey: "captionJoin")
+            precondition(TranslationHotPathAB.captionJoin, "the 2.5.5 switch does not apply mid-run")
+            TranslationHotPathAB.pinSettings()
+            precondition(!TranslationHotPathAB.captionJoin && TranslationHotPathAB.pixelManyLines, "the 2.5.5 switch turns off alone")
+            standard.removeObject(forKey: "captionJoin")
+            for item in TranslationHotPathAB.v255Switches { standard.removeObject(forKey: item.pinned) }
+            for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey] { standard.removeObject(forKey: key) }
+            precondition(CaptionJoin.joined(["[E como ele", "vai fazer isso?]"]) == ["[E como ele vai fazer isso?]"],
+                         "2.5.5: a subtitle drawn in two places is one text")
+            precondition(CaptionJoin.joined(["Percy:", "Satanás??!!O próprio Diabo tá falando sério??!!!"]) == ["Percy: Satanás??!!O próprio Diabo tá falando sério??!!!"],
+                         "2.5.5: a speaker name joins its sentence")
+            precondition(CaptionJoin.joined(["one block"]) == ["one block"], "2.5.5: one block stays")
+            precondition(CaptionJoin.joined(["多个", "字幕"]) == ["多个字幕"], "2.5.5: CJK blocks join without a space")
+            precondition(CaptionJoin.joined(["pre-", "fix"]) == ["pre-fix"], "2.5.5: a trailing hyphen joins without a space")
+            precondition(CaptionJoin.joined(["  ", "alone"]) == ["  ", "alone"], "2.5.5: an empty block does not create a join")
+            let longA = String(repeating: "a", count: 150), longB = String(repeating: "b", count: 100)
+            precondition(CaptionJoin.joined([longA, longB]) == [longA, longB], "2.5.5: a long result is not joined")
+
             // 2.5.1: new Legacy defaults, the one-time reset of saved values, and the pure policies.
             for key in [LegacyV251Defaults.appliedKey, "legacyConfirmedOwnLanePinned", "deferArmedSpeculationPinned",
                         "legacyEagerSpeculationPinned"] { standard.removeObject(forKey: key) }
@@ -227,7 +248,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             precondition(TranslationHotPathAB.deferArmedSpeculation, "after the reset the toggle works again")
             for key in ["deferArmedSpeculation", "legacyConfirmedOwnLane", LegacyV251Defaults.appliedKey,
                         "legacyConfirmedOwnLanePinned", "deferArmedSpeculationPinned"] { standard.removeObject(forKey: key) }
-            for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches { standard.removeObject(forKey: item.pinned) }
+            for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches { standard.removeObject(forKey: item.pinned) }
             for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey,
                         TranslationHotPathAB.availabilityRefreshPinnedKey, TranslationHotPathAB.independentHeartbeatPinnedKey] {
                 standard.removeObject(forKey: key)

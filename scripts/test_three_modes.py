@@ -191,8 +191,8 @@ for field in ('pixelArmed', 'focusRediscoveries', 'confirmReads', 'confirmPixelR
     declaration = re.search(r'var ' + field + r': (Bool|Int|Double)\? = nil', shared)
     assert declaration, field + ' must be an optional number or flag (no text) so older builds ignore it'
 assert 'privacy: "metadataOnly"' in diagnostics and 'textCapture: false' in diagnostics
-assert 'static let version = "2.5.4"' in shared and 'static let build = 122' in shared
-assert read('project.yml').count('"2.5.4"') == 3 and read('project.yml').count('"122"') == 3
+assert 'static let version = "2.5.5"' in shared and 'static let build = 123' in shared
+assert read('project.yml').count('"2.5.5"') == 3 and read('project.yml').count('"123"') == 3
 assert '("2.4.0", "Build 117:' in shared and '("2.3.9", "Build 116:' in shared and '("2.5.0", "Build 118:' in shared
 print('v2.4.0 source contracts passed: deferral (default off since 2.5.1, Legacy only), unchanged OCR and confirmation evidence, forced re-read, direct model call, metadata-only diagnostics, version')
 
@@ -272,7 +272,7 @@ eager = read('App/Engine/TranslatorEngine+EagerSpeculation.swift')
 loop = read_source('LoopbackServer')
 # Eager early translation: a switch (default on, pinned, toggle, reset, report label), Legacy only, confirmed first.
 assert '("legacyEagerSpeculation", "legacyEagerSpeculationPinned", "eagerSpeculationAB")' in v251
-assert 'for item in v250Switches + v251Switches + v254Switches {' in work  # 2.5.4: changed with the code
+assert 'for item in v250Switches + v251Switches + v254Switches + v255Switches {' in work  # 2.5.5: changed with the code
 assert '@AppStorage("legacyEagerSpeculation") private var legacyEagerSpeculation = true' in experimental and experimental.count('"legacyEagerSpeculation"') == 2
 assert archive.count('"eagerSpeculationAB"') == 2 and 'v251ReportLabels' in archive
 assert 'enabled && busy && confirmedRunning && !confirmedQueued' in v251, 'never queued while confirmed work waits'
@@ -323,7 +323,7 @@ print('v2.5.2 source contracts passed: finish the running caption (switch, Legac
 # ---- 2.5.3: Legacy head start off by default (device data). ----
 assert 'LegacyV251Defaults.pinHeadStartDefault(defaults)' in work and 'defaults.set(false, forKey: "legacyHeadStartPinned")' in v251
 assert 'defaults.removeObject(forKey: "legacyHeadStart")' in v251 and 'static let v253AppliedKey = "legacyV253DefaultsApplied"' in v251
-assert 'static let version = "2.5.4"' in shared and 'static let build = 122' in shared and '("2.5.3", "Build 121:' in shared
+assert 'static let version = "2.5.5"' in shared and 'static let build = 123' in shared and '("2.5.3", "Build 121:' in shared
 print('v2.5.3 source contracts passed: head start off by default, saved value reset once, version')
 
 # ---- 2.5.4: pixel check for up to 24 lines, early translation judged on caption lines, report rows. ----
@@ -346,6 +346,23 @@ assert 'if p.pixelArmed == true, TranslationHotPathAB.deferArmedSpeculation {' i
 eager254 = read_source('TranslatorEngine')
 assert 'func speculationJudgedLines(' in eager254 and 'guard TranslationHotPathAB.captionLineSpeculation, activeTranslationSystem == .legacy' in eager254
 assert 'Why a first reading got no early translation (2.5.4' in archive
-assert 'static let version = "2.5.4"' in shared and 'static let build = 122' in shared and '("2.5.4", "Build 122:' in shared
+assert 'static let version = "2.5.5"' in shared and 'static let build = 123' in shared and '("2.5.4", "Build 122:' in shared
 print('v2.5.4 source contracts passed: pixel check 24 lines (per-line tolerance), early translation judged on caption lines, switches, report rows, version')
 
+
+# ---- 2.5.5: the text blocks of one subtitle are translated together (Legacy). ----
+v255 = read('Shared/TranslationSystem+V255.swift')
+assert '("captionJoin", "captionJoinPinned", "captionJoinAB")' in v255 and 'static var captionJoin: Bool' in v255
+assert 'enum CaptionJoin' in v255 and 'static let maximumCharacters = 240' in v255
+assert 'OCRLine' not in v255, 'TranslationSystem parts are compiled without Shared.swift in CI test programs'
+join255 = read_source('TranslatorEngine')
+assert 'func captionJoinedTexts(' in join255 and 'guard TranslationHotPathAB.captionJoin, activeTranslationSystem == .legacy, texts.count > 1 else { return texts }' in join255
+intake255 = function(engine, 'handleContent')
+assert 'let extractedTexts = extractTexts(p.lines, count: p.stable != false && !replayed)' in intake255
+assert 'let candidateTexts = captionJoinedTexts(extractedTexts, count: p.stable != false && !replayed)' in intake255
+assert function(engine, 'extractTexts') == old_extract, 'extractTexts stays the e94542ce original: the join happens after it'
+assert '@AppStorage("captionJoin") private var captionJoin = true' in experimental and experimental.count('"captionJoin"') == 2
+assert archive.count('"captionJoinAB"') == 2 and 'v255ReportLabels' in archive
+assert 'captionMultiBlock' in archive and 'Text blocks per confirmed reading (2.5.5' in archive
+assert 'static let version = "2.5.5"' in shared and 'static let build = 123' in shared and '("2.5.5", "Build 123:' in shared
+print('v2.5.5 source contracts passed: subtitle text blocks joined, switch, counters, report rows, version')

@@ -50,6 +50,7 @@ enum SettingsSearchIndex {
         SettingsSearchEntry(label: "Reuse the Low Latency plan", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Streamed Legacy translation calls", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Subtitle-area change detection", page: .experimental, pageTitle: "Experimental features"),
+        SettingsSearchEntry(label: "Translate a subtitle's text blocks together", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Trusted caption band", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Wait for confirmation before early Apple Default work", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Warm up when capture starts", page: .experimental, pageTitle: "Experimental features"),

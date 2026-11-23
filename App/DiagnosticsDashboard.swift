@@ -269,7 +269,8 @@ struct DiagnosticsBody: View {
                   (TranslationHotPathAB.ocrDuplicateFilter, "duplicate OCR lines dropped"),
                   (TranslationHotPathAB.streamLegacyCalls, "streamed Legacy calls"),
                   (TranslationHotPathAB.pixelManyLines, "pixel check up to 24 lines"),
-                  (TranslationHotPathAB.captionLineSpeculation, "early translation judged on caption lines")].filter { $0.0 }.map { $0.1 }
+                  (TranslationHotPathAB.captionLineSpeculation, "early translation judged on caption lines"),
+                  (TranslationHotPathAB.captionJoin, "text blocks of a subtitle translated together")].filter { $0.0 }.map { $0.1 }
         return on.isEmpty ? "Test switches on: none." : "Test switches on: " + on.joined(separator: ", ") + "."
     }
 
