@@ -453,3 +453,15 @@ lowlat261 = read('App/Engine/ModeTranslationService+Stall.swift')
 assert 'static func awaitCall(' in lowlat261 and 'ModelCallRace.run(limit: abandonAfterSeconds)' in lowlat261 and 'guard TranslationHotPathAB.stallWatchdog else { return await call.value }' in lowlat261
 assert 'ModeTranslationService.awaitCall(call)' in read('App/ModeTranslationService.swift')
 print('v2.6.1 guard and Low Latency abandon contracts passed')
+
+# ---- 2.6.1: the changelog is a Swift array literal; every entry but the last needs a trailing comma (CI build 126 failed on this). ----
+_shared = read('Shared/Shared.swift').split('\n')
+_start = next(i for i, l in enumerate(_shared) if 'static let changelog' in l)
+_i = _start + 1
+while not _shared[_i].strip().startswith(']'):
+    _l = _shared[_i].rstrip()
+    if _l.strip().startswith('("'):
+        _last = _shared[_i + 1].strip().startswith(']')
+        assert _l.endswith('"),') or (_last and _l.endswith('")')), f'changelog line {_i + 1} needs a trailing comma'
+    _i += 1
+print('v2.6.1 changelog syntax contract passed')
