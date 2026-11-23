@@ -924,7 +924,37 @@ import CryptoKit
         _ = try await reopenedLoose.prepare(legacyURLs: [])
         let looseHealth = try await reopenedLoose.health()
         precondition(looseHealth.schemaVersion == 2 && looseHealth.totalEntries >= 4, "2.6.1: reopening keeps the schema version and every row")
-        print("SQLite migration, recovery, integrity checks, classification, revision barrier, clear/reopen and loose reuse passed")
+        // 2.6.3: warm-up reads the recent ready units of these rules and target; quarantine sends a unit back.
+        let careStore = TranslationMemoryStore(directory: root.appendingPathComponent("memory-care"))
+        _ = try await careStore.prepare(legacyURLs: [])
+        let careA = "v4|\(rules)|pt>en|0:|Pague 1500 dolares agora."
+        let careB = "v4|\(rules)|pt>en|0:|Bom dia para todos."
+        let careFrench = "v4|\(rules)|pt>fr|0:|Bom dia para todos."
+        let careOtherRules = "v4|\(String(repeating: "d", count: 64))|pt>en|0:|Boa noite para todos."
+        _ = try await careStore.save([careA: "Pay dollars now.", careB: "Good morning everyone.", careFrench: "Bonjour a tous.",
+                                      careOtherRules: "Good night everyone."], revision: 1)
+        let warm = await careStore.recentEntries(rules: rules, target: "en", limit: 10)
+        precondition(Set(warm.map { $0.0 }) == [careA, careB], "2.6.3: warm-up reads these rules and this target only")
+        precondition(warm.first { $0.0 == careB }?.1 == "Good morning everyone.", "2.6.3: warm-up gives the saved translation")
+        let warmOne = await careStore.recentEntries(rules: rules, target: "en", limit: 1)
+        precondition(warmOne.count == 1, "2.6.3: the limit holds")
+        let careChanged = await careStore.quarantine(requestedKey: careA)
+        precondition(careChanged == 1, "2.6.3: the exact row is quarantined")
+        let careAfterQuarantine = await careStore.lookup(key: careA, timeoutMilliseconds: 50)
+        precondition(careAfterQuarantine.value == nil, "2.6.3: a quarantined unit is not reused")
+        let warmAfter = await careStore.recentEntries(rules: rules, target: "en", limit: 10)
+        precondition(warmAfter.map { $0.0 } == [careB], "2.6.3: a quarantined unit is not warmed")
+        let careHealth = try await careStore.health()
+        precondition(careHealth.totalEntries == 4 && careHealth.schemaVersion == 2, "2.6.3: quarantine keeps the text and the schema")
+        await careStore.setLooseReuse(true)
+        let careVariant = "v4|\(rules)|pt>en|0:|bom dia, para todos!"
+        let looseChanged = await careStore.quarantine(requestedKey: careVariant)
+        precondition(looseChanged == 1, "2.6.3: a loose reuse quarantines the saved twin")
+        let careVariantLookup = await careStore.lookup(key: careVariant, timeoutMilliseconds: 50)
+        precondition(careVariantLookup.value == nil, "2.6.3: the twin is not reused after quarantine")
+        let careNone = await careStore.quarantine(requestedKey: "not a key")
+        precondition(careNone == 0, "2.6.3: an unknown key changes nothing")
+        print("SQLite migration, recovery, integrity checks, classification, revision barrier, clear/reopen loose reuse and memory care passed")
     }
 }
 

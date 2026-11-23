@@ -28,6 +28,7 @@ extension TranslatorEngine {
                 await self.memoryStore.setLooseReuse(TranslationHotPathAB.looseMemoryReuse)
                 self.applyMemoryHealth(health)
                 self.saveMemory(force: true)
+                await self.warmRAMFromMemory() // 2.6.3
                 await self.diag.migrateOldSessions()
                 // 2.6.1: fill the loose key of saved rows in small batches, off the live path.
                 if TranslationHotPathAB.looseMemoryReuse {

@@ -129,7 +129,7 @@ final class TranslatorEngine: ObservableObject {
             guard oldValue != targetCode else { return }
             UserDefaults.standard.set(targetCode, forKey: "target"); languageSelectionChanged(); directSession = nil; langStatus = [:]; availCache.removeAll()
             noteRecentPair()
-            Task { await refreshStatus(); await prewarm() }
+            Task { await refreshStatus(); await prewarm(); await warmRAMFromMemory() /* 2.6.3 */ }
         }
     }
     @Published var paused = false {
@@ -779,6 +779,7 @@ final class TranslatorEngine: ObservableObject {
     var captionSignals = CaptionSignals()
     var shownHistory: [[String]] = []
     var looseUnits = LooseUnitIndex() // 2.6.0: miss classification (measurement only)
+    var quarantinedKeys = Set<String>() // 2.6.3: units sent back for validation in this app run
     var specPacket: Packet?
     var currentSpeculativeText: String?
     var subtitleRegions = SubtitleRegions()
@@ -1166,6 +1167,7 @@ final class TranslatorEngine: ObservableObject {
         }
         if !isManualEntry {
             diag.recordPipeline(latency.last)
+            diag.noteSlowCaption(latency.last)
             if total > 0 { diag.recordLatency(ms: total) }
         }
         if history.first?.original != text {

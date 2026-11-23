@@ -1304,3 +1304,15 @@ do {
     check(TextIntel.isNoise("12", allowSingleCJK: true), "Numbers stay noise")
 }
 print("v2.2.1 single-character CJK checks passed")
+
+// 2.6.3: a quarantined unit's complete captions leave the RAM bank; others stay.
+do {
+    let ramBank = TranslationRAMBank()
+    ramBank.retainCaption(key: "c1", result: ExactCaptionResult(translated: "Pay dollars now", sentences: 1))
+    ramBank.retainCaption(key: "c2", result: ExactCaptionResult(translated: "Hello", sentences: 1))
+    ramBank.dropCaptions { $0.translated.contains("Pay dollars") }
+    check(ramBank.captions["c1"] == nil && ramBank.captions["c2"] != nil, "2.6.3: only matching captions are dropped")
+    ramBank.retainCaption(key: "c3", result: ExactCaptionResult(translated: "Again", sentences: 1))
+    check(ramBank.captions.count == 2, "2.6.3: the caption order stays consistent after a drop")
+}
+print("v2.6.3 RAM caption drop checks passed")

@@ -44,6 +44,7 @@ enum SettingsSearchIndex {
         SettingsSearchEntry(label: "Multiple nearby text groups", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Pixel check for up to 24 lines", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Pixel-verified confirmation", page: .experimental, pageTitle: "Experimental features"),
+        SettingsSearchEntry(label: "Preload memory and retranslate defective reuses", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Re-warm after a quiet stretch", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Recover when translation stops", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Refresh language check in background", page: .experimental, pageTitle: "Experimental features"),

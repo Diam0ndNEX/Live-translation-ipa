@@ -273,7 +273,8 @@ struct DiagnosticsBody: View {
                   (TranslationHotPathAB.captionJoin, "text blocks of a subtitle translated together"),
                   (TranslationHotPathAB.growthSettle, "growing subtitles settle before translation"),
                   (TranslationHotPathAB.stallWatchdog, "stall watchdog and recovery"),
-                  (TranslationHotPathAB.looseMemoryReuse, "memory reuses case, punctuation and spacing variants")].filter { $0.0 }.map { $0.1 }
+                  (TranslationHotPathAB.looseMemoryReuse, "memory reuses case, punctuation and spacing variants"),
+                  (TranslationHotPathAB.memoryCare, "saved translations preloaded, defective reuses retranslated")].filter { $0.0 }.map { $0.1 }
         return on.isEmpty ? "Test switches on: none." : "Test switches on: " + on.joined(separator: ", ") + "."
     }
 

@@ -165,6 +165,8 @@ struct Stats: Equatable {
     var qShown = 0, qReshownSame = 0, qRewritten = 0, qUnchanged = 0, qDigitsLost = 0, qLengthOutlier = 0, qRepeatedWord = 0, qFlaggedSaved = 0
     var missNew = 0, missNearMiss = 0, missRepeatedExact = 0
     var looseHits = 0
+    var memoryWarmed = 0 // 2.6.3
+    var memoryQuarantined = 0 // 2.6.3
     var slowTailEnqueues = 0
     var manualTranslations = 0
     var identicalFrameHolds = 0 // 2.2.1 (E9)
