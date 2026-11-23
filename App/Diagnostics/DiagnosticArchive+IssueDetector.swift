@@ -93,6 +93,8 @@ enum DiagnosticIssueDetector {
             add("enqueue_typical_latency", "suspected", enqueue.count,
                 "Typical OCR-to-PiP enqueue time is high, even if the slowest tail has improved.")
         }
+        // 2.6.0: findings computed from the other counters (stalls, growth, joins, memory, pixels, heat).
+        findings += assessSignals(session)
         return findings
     }
 }

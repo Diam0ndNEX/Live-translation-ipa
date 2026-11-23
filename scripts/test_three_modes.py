@@ -33,6 +33,9 @@ L2_UNDO = {
         ('(display || flag("incrementalBatchRecovery", true))', '(display || flag("incrementalBatchRecovery", false))'),
         ("            // 2.2.3 (L2): a detached speculative call must not erase the newer confirmed call's in-flight set.\n            if modelUnitKeysInFlight == Set(items.map { $0.key }) {\n                modelUnitKeysInFlight.removeAll()\n                modelContextInFlight = nil\n            }\n",
          "            modelUnitKeysInFlight.removeAll()\n            modelContextInFlight = nil\n"),
+        # 2.6.0 (measurement only): two counters for why a confirmed unit missed memory. Nothing is translated or reused differently.
+        ("                        if display { noteMissKind(s) }\n", ""),
+        ("                        if display { looseUnits.noteSeen(s) }\n", ""),
     ],
 }
 for name in ['process', 'drain', 'cachedCaption']:
@@ -405,3 +408,19 @@ assert '@AppStorage("stallWatchdog") private var stallWatchdog = true' in experi
 assert archive.count('"stallWatchdogAB"') == 2 and 'v260ReportLabels' in archive and 'Stalls (2.6.0' in archive
 assert 'static let version = "2.6.0"' in shared and 'static let build = 125' in shared and '("2.6.0", "Build 125:' in shared
 print('v2.6.0 source contracts passed: stall watchdog, switch, counters, report rows, version')
+
+# ---- 2.6.0: automatic quality signals and memory miss classification (measurement only). ----
+q260 = read('Shared/TranslationSystem+Quality.swift')
+assert 'enum CaptionFlag' in q260 and 'struct CaptionSignals' in q260 and 'OCRLine' not in q260 and 'TextSim' not in q260
+m260 = read('Shared/TranslationSystem+MissClass.swift')
+assert 'struct LooseUnitIndex' in m260 and 'OCRLine' not in m260 and 'TextSim' not in m260
+assert 'noteShownSignals(text, result)' in function(engine, 'show') and 'func noteShownSignals(' in read_source('TranslatorEngine')
+assert 'func noteMissKind(' in read_source('TranslatorEngine') and 'var looseUnits = LooseUnitIndex()' in read('App/TranslatorEngine.swift')
+store260 = read('App/Diagnostics/FlaggedCaptionStore.swift')
+assert 'static let maximumNotes = 200' in store260 and 'static let keepDays = 14.0' in store260
+assert 'guard FlaggedCaptionStore.includeInReports, !flag("privateSession", false) else { return }' in read_source('TranslatorEngine')
+assert '@AppStorage("flaggedCaptionText") private var flaggedCaptionText = true' in experimental
+assert 'Flagged captions (text)' in archive and 'flagged: flagged)' in archive and 'FlaggedCaptionStore.includeInReports' in read_source('Diagnostics')
+for name in ['qShown', 'qRewritten', 'missNearMiss', 'stallHangs']:
+    assert '"%s"' % name in archive, name
+print('v2.6.0 quality and miss-classification contracts passed')

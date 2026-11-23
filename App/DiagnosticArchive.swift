@@ -134,6 +134,8 @@ struct DiagnosticIntervalBucket: Codable {
             "legacyLowConfidenceSkips", "legacyBusySpeculationSkips",
             "legacyDuplicateSpeculationSkips", "captionMultiBlock", "captionJoined",
             "growthSteps", "growthHeld", "growthIntermediate", "growthReleased", "growthDropped", "growthSpecSkips",
+            "qShown", "qReshownSame", "qRewritten", "qUnchanged", "qDigitsLost", "qLengthOutlier", "qRepeatedWord", "qFlaggedSaved",
+            "missNew", "missNearMiss", "missRepeatedExact",
             "stallHangs", "stallLateReturns", "stallLaneResets", "stallSessionResets", "stallLinkResets", "stallUnhealthy", "stallRecovered",
         "specPreemptionRequested", "specMatchingConfirmation",
         "specRetainedUnits", "completedConfirmedUnitsRetained", "temporaryMemoryHits",
@@ -397,11 +399,11 @@ actor DiagnosticExportWriter {
 extension DiagnosticExportWriter {
     /// Writes one Markdown report for up to six sessions, each redacted first.
     func exportCombinedReport(_ snapshots: [DiagnosticSessionExport], version: String, build: Int,
-                              runs: [RunReportInfo] = []) throws -> URL {
+                              runs: [RunReportInfo] = [], flagged: [FlaggedCaptionNote] = []) throws -> URL {
         guard !snapshots.isEmpty else { throw CocoaError(.fileWriteUnknown) }
         let safe = snapshots.prefix(CombinedDiagnosticReport.maximumSessions).map { redact($0) }
         let now = Date()
-        let text = CombinedDiagnosticReport.markdown(Array(safe), version: version, build: build, generatedAt: now, runs: runs)
+        let text = CombinedDiagnosticReport.markdown(Array(safe), version: version, build: build, generatedAt: now, runs: runs, flagged: flagged)
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(CombinedDiagnosticReport.fileName(version: version, build: build, at: now))
         try Data(text.utf8).write(to: url, options: [.atomic, .completeFileProtectionUnlessOpen])

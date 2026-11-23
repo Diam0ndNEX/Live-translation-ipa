@@ -180,6 +180,7 @@ extension TranslatorEngine {
                     }
                     if let hit = resolvedHit {
                         touchCache(key)
+                        if display { looseUnits.noteSeen(s) }
                         outs.append(hit); translatedAny = true
                         if display {
                             if memoryTestMode == .temporaryMemory { diag.noteTemporaryReuse() }
@@ -212,6 +213,7 @@ extension TranslatorEngine {
                         }
                     } else {
                         outs.append(nil)
+                        if display { noteMissKind(s) }
                         if display && memoryTestMode == .temporaryMemory {
                             diag.recordMemory(.temporaryMiss, candidate: workCandidate, unitKey: key)
                         }

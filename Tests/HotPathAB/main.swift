@@ -332,6 +332,66 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             precondition(failing.outcome == "error", "2.6.0: a failing call fails, it is not a timeout")
             let gate = ResumeGate()
             precondition(gate.claim() && !gate.claim() && gate.isClaimed, "2.6.0: only one outcome gets through")
+            // Automatic quality signals work on the text alone.
+            var signals = CaptionSignals()
+            precondition(signals.observe(original: "Hello there my friend how are you", translated: "Ola meu amigo como vai voce", at: 0).isEmpty,
+                         "2.6.0: a normal caption has no flag")
+            precondition(signals.observe(original: "Hello there my friend how are you", translated: "Ola, meu amigo: como vai voce!", at: 3) == [.reshownSame],
+                         "2.6.0: the same sentence again (spacing, case and punctuation do not matter)")
+            precondition(signals.observe(original: "Hello there my friend how are you today", translated: "Ola meu amigo como vai voce hoje", at: 5) == [.rewrittenSoon],
+                         "2.6.0: the same sentence rewritten soon after")
+            var numbers = CaptionSignals()
+            precondition(numbers.observe(original: "Pay 1500 dollars now please", translated: "Pague dolares agora por favor", at: 0) == [.digitsLost],
+                         "2.6.0: a number that went missing")
+            precondition(numbers.observe(original: "Pay 1500 dollars now please", translated: "Pague 1500 dolares agora", at: 30).isEmpty,
+                         "2.6.0: a number that is kept is not flagged")
+            precondition(numbers.observe(original: "abcdefghij klm", translated: "abcdefghij klm", at: 60) == [.unchanged],
+                         "2.6.0: nothing was translated")
+            precondition(numbers.observe(original: "one two three four five", translated: "um um um dois tres", at: 90) == [.repeatedWord],
+                         "2.6.0: a word repeated three times")
+            var ratio = CaptionSignals()
+            for i in 0..<40 {
+                _ = ratio.observe(original: "alpha beta gamma delta \(i) epsilon", translated: "alfa beta gama delta \(i) epsilon", at: Double(i) * 10)
+            }
+            precondition(ratio.observe(original: "alpha beta gamma delta zeta", translated: String(repeating: "x", count: 400), at: 1_000) == [.lengthOutlier],
+                         "2.6.0: a length far from this run's usual ratio, learned from the run")
+            ratio.forgetShown()
+            precondition(ratio.recent.isEmpty, "2.6.0: a cleared screen forgets recent captions")
+            // Miss classification: near misses are found without any label, language or layout rule.
+            var loose = LooseUnitIndex()
+            precondition(loose.classifyMiss("Hello there.") == .new, "2.6.0: first sight")
+            precondition(loose.classifyMiss("hello  there!") == .nearMiss, "2.6.0: case, spacing and punctuation only")
+            precondition(loose.classifyMiss("hello  there!") == .repeatedExact, "2.6.0: the same unit again")
+            loose.noteSeen("Good morning")
+            precondition(loose.classifyMiss("GOOD MORNING?") == .nearMiss, "2.6.0: a memory hit counts as seen")
+            precondition(loose.classifyMiss("") == .new && loose.classifyMiss("...") == .new, "2.6.0: nothing to compare")
+            precondition(loose.classifyMiss("Good evening") == .new, "2.6.0: different words are not a near miss")
+            // The growth tracker recognises a revealed subtitle whatever it looks like: a label, a bracket, no
+            // punctuation, another script. One rule for all, no layout or punctuation exception.
+            let revealed = ["Maria: the quick brown fox jumps over the lazy dog",
+                            "the quick brown fox jumps over the lazy dog",
+                            "[music] the quick brown fox jumps over the lazy dog today",
+                            "NARRATOR - the quick brown fox jumps over the lazy dog",
+                            "素早い茶色の狐が怠け者の犬を飛び越える",
+                            "o rapido cachorro marrom pula sobre a raposa preguicosa"]
+            for sample in revealed {
+                var tracker = CaptionGrowthTracker()
+                let characters = Array(sample)
+                var steps = Array(stride(from: 6, to: characters.count, by: 3))
+                steps.append(characters.count)
+                for (index, count) in steps.enumerated() {
+                    let step = tracker.observe(String(characters[0..<count]), at: Double(index) * 0.2)
+                    precondition(step == (index == 0 ? .different : .extended), "2.6.0: a revealed subtitle is growth at every step")
+                }
+                precondition(tracker.observe(String(characters) + String(characters), at: 10) == .different,
+                             "2.6.0: after a long pause it is not growth")
+            }
+            var unrelated = CaptionGrowthTracker()
+            for (index, sample) in revealed.enumerated() {
+                precondition(unrelated.observe(sample, at: Double(index) * 0.2) == .different, "2.6.0: different captions are never growth")
+            }
+            precondition(CaptionSignals.key("Ola, MUNDO!") == "olamundo" && CaptionSignals.digitRuns("a 12 b 3 c 456") == ["12", "456"],
+                         "2.6.0: key and digit runs")
 
             // 2.5.1: new Legacy defaults, the one-time reset of saved values, and the pure policies.
             for key in [LegacyV251Defaults.appliedKey, "legacyConfirmedOwnLanePinned", "deferArmedSpeculationPinned",

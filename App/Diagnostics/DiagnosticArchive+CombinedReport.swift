@@ -181,7 +181,8 @@ enum CombinedDiagnosticReport {
     }
 
     static func markdown(_ sessions: [DiagnosticSessionExport], version: String, build: Int,
-                         generatedAt: Date, runs: [RunReportInfo] = []) -> String {
+                         generatedAt: Date, runs: [RunReportInfo] = [],
+                         flagged: [FlaggedCaptionNote] = []) -> String {
         let ordered = sessions.sorted { $0.startedAt < $1.startedAt }
         let selected = Array(ordered.prefix(maximumSessions))
         let labels = selected.indices.map { "S\($0 + 1)" }
@@ -190,7 +191,25 @@ enum CombinedDiagnosticReport {
         out.append("# ScreenLingo test report")
         out.append("")
         out.append("App \(version) build \(build) · generated \(generatedAt.ISO8601Format()) · \(selected.count) session(s)")
-        out.append("Boundary: first OCR sighting → PiP enqueue (not physical display). Metadata only: no subtitle, OCR or translated text.")
+        out.append("Boundary: first OCR sighting → PiP enqueue (not physical display). " + (flagged.isEmpty
+            ? "Metadata only: no subtitle, OCR or translated text."
+            : "Metadata only, except section 9: it includes the text of \(flagged.count) caption(s) that the app flagged by itself (setting: Include flagged captions' text in reports)."))
+        out.append("")
+        // 2.6.0: the verdict comes first, so the reader sees what looks wrong before any table.
+        out.append("## 0. Verdict and flags")
+        out.append("")
+        out.append("Computed by the app from the counters when this report was made; nothing was marked by hand. Flags are heuristics, never proof that a translation was wrong.")
+        for (i, session) in selected.enumerated() {
+            let ranked = DiagnosticIssueDetector.assess(session).sorted {
+                (DiagnosticIssueDetector.severityRank($0), $1.occurrences) < (DiagnosticIssueDetector.severityRank($1), $0.occurrences)
+            }
+            let stops = ranked.filter { DiagnosticIssueDetector.severityRank($0) == 0 }
+            out.append("")
+            out.append("**\(labels[i])**: \(stops.isEmpty ? "no stall or stop recorded" : "\(stops.count) stop-related flag(s)"); \(ranked.count) flag(s) in total (details in section 7).")
+            for finding in ranked.prefix(5) {
+                out.append("- [\(finding.classification)] \(finding.code) ×\(finding.occurrences)")
+            }
+        }
         out.append("")
         out.append("## 1. Sessions")
         out.append("")
@@ -356,6 +375,24 @@ enum CombinedDiagnosticReport {
             out.append("| \(labels[i]) | \(c["stallHangs", default: 0]) | \(c["stallLateReturns", default: 0]) | \(c["stallLaneResets", default: 0]) | \(c["stallSessionResets", default: 0]) | \(c["stallLinkResets", default: 0]) | \(c["stallUnhealthy", default: 0]) | \(c["stallRecovered", default: 0]) | \(ms(d["stallLengthMs"]?.p50))/\(ms(d["stallLengthMs"]?.p95)) |")
         }
         out.append("")
+        out.append("Automatic quality signals (2.6.0; whole-session counts of shown captions; proxies, not proof of a wrong translation):")
+        out.append("")
+        out.append("| | captions shown | same sentence shown again within 8 s | rewritten within 4 s | translation equals source | number missing | length outlier | word repeated 3 times | saved as text |")
+        out.append("|---|---|---|---|---|---|---|---|---|")
+        for (i, session) in selected.enumerated() {
+            let c = session.counters
+            out.append("| \(labels[i]) | \(c["qShown", default: 0]) | \(c["qReshownSame", default: 0]) | \(c["qRewritten", default: 0]) | \(c["qUnchanged", default: 0]) | \(c["qDigitsLost", default: 0]) | \(c["qLengthOutlier", default: 0]) | \(c["qRepeatedWord", default: 0]) | \(c["qFlaggedSaved", default: 0]) |")
+        }
+        out.append("")
+        out.append("Why confirmed units missed memory (2.6.0; measurement only, counted for this run):")
+        out.append("")
+        out.append("| | first time seen | differs only in case, punctuation or spacing from a unit seen earlier (a looser reuse could have saved a call) | same unit seen earlier but not in memory |")
+        out.append("|---|---|---|---|")
+        for (i, session) in selected.enumerated() {
+            let c = session.counters
+            out.append("| \(labels[i]) | \(c["missNew", default: 0]) | \(c["missNearMiss", default: 0]) | \(c["missRepeatedExact", default: 0]) |")
+        }
+        out.append("")
         out.append("Model call ms by characters translated (2.5.0; n, P50/P95):")
         out.append("")
         out.append("| | " + ModelLengthBucket.allCases.map { $0.label }.joined(separator: " | ") + " |")
@@ -444,6 +481,20 @@ enum CombinedDiagnosticReport {
             out.append("  - dropped: \(c["structured_events_dropped", default: 0]) structured events, \(c["id_map_resets", default: 0]) correlation-ID map resets, \(c["legacy_context_resets", default: 0]) Legacy context resets, \(c["subtitle_traces_dropped", default: 0]) subtitle traces.")
         }
         out.append("")
+        if !flagged.isEmpty {
+            out.append("")
+            out.append("## 9. Flagged captions (text)")
+            out.append("")
+            out.append("The app flagged these captions by itself from numbers (see the quality table); they are the only subtitle text in this report. \(flagged.count) note(s), newest last; the phone keeps at most 200 for 14 days. A flag is a reason to read the caption, not proof of a wrong translation.")
+            for (index, note) in flagged.sorted(by: { $0.date < $1.date }).prefix(60).enumerated() {
+                out.append("")
+                out.append("\(index + 1). \(note.date.ISO8601Format()) · \(note.version) · flags: \(note.flags.joined(separator: ", "))")
+                for pair in note.previous where pair.count == 2 {
+                    out.append("   - before: \(pair[0].replacingOccurrences(of: "\n", with: " ")) → \(pair[1].replacingOccurrences(of: "\n", with: " "))")
+                }
+                out.append("   - **shown:** \(note.original.replacingOccurrences(of: "\n", with: " ")) → \(note.translated.replacingOccurrences(of: "\n", with: " "))")
+            }
+        }
         return out.joined(separator: "\n")
     }
 }

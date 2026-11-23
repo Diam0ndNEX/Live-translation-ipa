@@ -775,6 +775,10 @@ final class TranslatorEngine: ObservableObject {
     var modelStall = ModelStallLimit()
     var stallLadder = StallLadder()
     var laneProgressAt = ProcessInfo.processInfo.systemUptime
+    // 2.6.0: automatic quality signals (TranslatorEngine+Quality.swift).
+    var captionSignals = CaptionSignals()
+    var shownHistory: [[String]] = []
+    var looseUnits = LooseUnitIndex() // 2.6.0: miss classification (measurement only)
     var specPacket: Packet?
     var currentSpeculativeText: String?
     var subtitleRegions = SubtitleRegions()
@@ -1125,6 +1129,7 @@ final class TranslatorEngine: ObservableObject {
         showing = true
         lastTextDate = Date()
         lastShowDate = Date()
+        noteShownSignals(text, result)
         let presented = Date()
         let packet = timing.packet
         let sent = packet?.ts ?? timing.queuedAt.timeIntervalSince1970

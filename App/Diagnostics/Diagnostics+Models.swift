@@ -162,6 +162,8 @@ struct Stats: Equatable {
     var legacyDuplicateSpeculationSkips = 0
     var captionMultiBlock = 0, captionJoined = 0
     var growthSteps = 0, growthHeld = 0, growthIntermediate = 0, growthReleased = 0, growthDropped = 0, growthSpecSkips = 0
+    var qShown = 0, qReshownSame = 0, qRewritten = 0, qUnchanged = 0, qDigitsLost = 0, qLengthOutlier = 0, qRepeatedWord = 0, qFlaggedSaved = 0
+    var missNew = 0, missNearMiss = 0, missRepeatedExact = 0
     var slowTailEnqueues = 0
     var manualTranslations = 0
     var identicalFrameHolds = 0 // 2.2.1 (E9)

@@ -349,6 +349,17 @@ final class Diagnostics: ObservableObject {
         counters["growthReleased"] = s.growthReleased
         counters["growthDropped"] = s.growthDropped
         counters["growthSpecSkips"] = s.growthSpecSkips
+        counters["qShown"] = s.qShown
+        counters["qReshownSame"] = s.qReshownSame
+        counters["qRewritten"] = s.qRewritten
+        counters["qUnchanged"] = s.qUnchanged
+        counters["qDigitsLost"] = s.qDigitsLost
+        counters["qLengthOutlier"] = s.qLengthOutlier
+        counters["qRepeatedWord"] = s.qRepeatedWord
+        counters["qFlaggedSaved"] = s.qFlaggedSaved
+        counters["missNew"] = s.missNew
+        counters["missNearMiss"] = s.missNearMiss
+        counters["missRepeatedExact"] = s.missRepeatedExact
         counters["emptyOCRPasses"] = s.emptyOCRPasses
         counters["runCheckpointCaptureMicros"] = checkpointCaptureMicros
         counters["captureRestarts"] = captureRestartCount

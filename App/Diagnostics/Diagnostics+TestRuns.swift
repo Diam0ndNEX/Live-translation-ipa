@@ -142,10 +142,15 @@ extension Diagnostics {
         guard !snapshots.isEmpty else { archiveStatus = "Select at least one saved run"; return }
         exportInProgress = true
         defer { exportInProgress = false }
+        // 2.6.0: captions the app flagged by itself during these runs (text), only while the setting is on.
+        let flagged = FlaggedCaptionStore.includeInReports
+            ? FlaggedCaptionStore.shared.notes(from: snapshots.map(\.startedAt).min() ?? Date(),
+                                               to: snapshots.map(\.endedAt).max() ?? Date())
+            : []
         do {
             let url = try await exportWriter.exportCombinedReport(snapshots,
                 version: AppVersion.version, build: AppVersion.build,
-                runs: testRuns.filter { ordered.contains($0.id) }.map(\.reportInfo))
+                runs: testRuns.filter { ordered.contains($0.id) }.map(\.reportInfo), flagged: flagged)
             Sharer.present([url])
             archiveStatus = "Test report ready"
         } catch {

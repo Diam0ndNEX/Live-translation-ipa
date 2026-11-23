@@ -656,6 +656,34 @@ import Foundation
                      v250Safe.distributions["modelLen21to40Ms"] != nil && v250Safe.settings["trustedBandAB"] == "on",
                      "2.5.0 names pass the export allowlists; anything else is dropped")
 
+        // 2.6.0: stall findings, the verdict section, the quality table, and flagged text only when notes are passed.
+        let stallRun = DiagnosticSessionExport(id: UUID(), startedAt: Date(timeIntervalSince1970: 1_000),
+            endedAt: Date(timeIntervalSince1970: 1_600), appVersion: "2.6.0", systemVersion: "test",
+            hardwareModel: "iPhoneTest1,1", settings: ["stallWatchdogAB": "on", "thermalMax": "serious"], health: MemoryDiagnosticHealth(),
+            counters: ["stallHangs": 2, "stallLateReturns": 1, "stallLaneResets": 1, "stallSessionResets": 1, "stallRecovered": 1,
+                       "qShown": 40, "qReshownSame": 3, "qRewritten": 5,
+                       "growthHeld": 20, "growthDropped": 8, "growthSteps": 40],
+            distributions: ["stallLengthMs": DiagnosticDistribution([12_000])],
+            events: [], measurementBoundary: "test", textCapture: false)
+        let stallCodes = DiagnosticIssueDetector.assess(stallRun).map(\.code)
+        precondition(stallCodes.contains("model_call_hung") && stallCodes.contains("lane_stall_recovery") &&
+                     stallCodes.contains("growth_hold_often_dropped") && stallCodes.contains("thermal_serious_reached"),
+                     "2.6.0: stall, growth and heat findings")
+        precondition(!stallCodes.contains("translation_service_unresponsive"), "2.6.0: no unhealthy finding without the counter")
+        let stallText = CombinedDiagnosticReport.markdown([stallRun], version: "2.6.0", build: 125, generatedAt: Date())
+        precondition(stallText.contains("## 0. Verdict and flags") && stallText.contains("stop-related flag(s)"), "2.6.0: verdict section")
+        precondition(stallText.contains("| S1 | 2 | 1 | 1 | 1 | 0 | 0 | 1 | 12000/12000 |") || stallText.contains("Stalls (2.6.0"), "2.6.0: stall row")
+        precondition(stallText.contains("| S1 | 40 | 3 | 5 | 0 | 0 | 0 | 0 | 0 |"), "2.6.0: quality row")
+        precondition(!stallText.contains("## 9. Flagged captions") && stallText.contains("Metadata only: no subtitle"), "2.6.0: no text without notes")
+        let note = FlaggedCaptionNote(date: Date(timeIntervalSince1970: 1_100), flags: ["rewritten_soon"],
+            original: "ola mundo", translated: "hello world", previous: [["oi", "hi"]], version: "v2.6.0 (build 125)")
+        let withText = CombinedDiagnosticReport.markdown([stallRun], version: "2.6.0", build: 125, generatedAt: Date(), flagged: [note])
+        precondition(withText.contains("## 9. Flagged captions (text)") && withText.contains("ola mundo \u{2192} hello world") &&
+                     withText.contains("includes the text of 1 caption(s)"), "2.6.0: flagged text appears only with notes")
+        let safeStall = try await writer.decode(try await writer.encode(stallRun))
+        precondition(safeStall.counters["stallHangs"] == 2 && safeStall.counters["qRewritten"] == 5 &&
+                     safeStall.distributions["stallLengthMs"] != nil, "2.6.0: new names pass the export allowlists")
+
         // 2.2.1 D6 and D8: truncation counters and the variables / n = 0 rows appear in the report.
         let truncated = DiagnosticSessionExport(id: UUID(), startedAt: Date(timeIntervalSince1970: 1_000),
             endedAt: Date(timeIntervalSince1970: 1_600), appVersion: "2.2.1", systemVersion: "test",

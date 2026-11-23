@@ -234,6 +234,7 @@ extension TranslatorEngine {
         confirmedHandoffDeadlineTask?.cancel()
         confirmedHandoffDeadlineTask = nil
         growthReset()
+        qualitySignalsReset()
         activeCandidateID = nil; activeCandidateText = ""
         movieTextFocus.reset()
         activeCandidateConfirmed = false; activeCandidatePresented = false
