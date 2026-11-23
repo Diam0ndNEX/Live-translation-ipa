@@ -684,6 +684,26 @@ import Foundation
         precondition(safeStall.counters["stallHangs"] == 2 && safeStall.counters["qRewritten"] == 5 &&
                      safeStall.distributions["stallLengthMs"] != nil, "2.6.0: new names pass the export allowlists")
 
+        // 2.6.2: automatic comparison with the session before it.
+        func regressionRun(_ start: Double, _ ms: Double, counters: [String: Int] = [:], model: String = "iPhoneTest1,1") -> DiagnosticSessionExport {
+            DiagnosticSessionExport(id: UUID(), startedAt: Date(timeIntervalSince1970: start), endedAt: Date(timeIntervalSince1970: start + 600),
+                appVersion: "2.6.2", systemVersion: "test", hardwareModel: model, settings: ["mode": "legacy"], health: MemoryDiagnosticHealth(),
+                counters: counters, distributions: ["enqueueLatencyMs": DiagnosticDistribution(Array(repeating: ms, count: 30))],
+                events: [], measurementBoundary: "test", textCapture: false)
+        }
+        let fastRun = regressionRun(1_000, 100), slowRun = regressionRun(2_000, 160, counters: ["stallHangs": 1])
+        let worse = RunRegression.compare(before: fastRun, after: slowRun)
+        precondition(worse.comparable && worse.flags.map(\.code).contains("slower_enqueueLatencyMs") && worse.flags.map(\.code).contains("more_stalls"),
+                     "2.6.2: a slower session with a stall is flagged")
+        let better = RunRegression.compare(before: slowRun, after: fastRun)
+        precondition(better.flags.isEmpty && better.improvements.count == 1, "2.6.2: a faster session is reported as better, not as a flag")
+        let same = RunRegression.compare(before: fastRun, after: regressionRun(3_000, 105))
+        precondition(same.comparable && same.flags.isEmpty && same.improvements.isEmpty, "2.6.2: +5% is below the limit")
+        let otherDevice = RunRegression.compare(before: fastRun, after: regressionRun(4_000, 300, model: "iPhoneOther"))
+        precondition(!otherDevice.comparable && otherDevice.flags.isEmpty, "2.6.2: another device is not compared")
+        let regressionText = CombinedDiagnosticReport.markdown([fastRun, slowRun], version: "2.6.2", build: 127, generatedAt: Date())
+        precondition(regressionText.contains("S2 vs S1: WORSE [slower_enqueueLatencyMs]") && regressionText.contains("[more_stalls]"), "2.6.2: report names the regression")
+
         // 2.2.1 D6 and D8: truncation counters and the variables / n = 0 rows appear in the report.
         let truncated = DiagnosticSessionExport(id: UUID(), startedAt: Date(timeIntervalSince1970: 1_000),
             endedAt: Date(timeIntervalSince1970: 1_600), appVersion: "2.2.1", systemVersion: "test",

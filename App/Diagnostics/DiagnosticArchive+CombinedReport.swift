@@ -210,6 +210,8 @@ enum CombinedDiagnosticReport {
                 out.append("- [\(finding.classification)] \(finding.code) ×\(finding.occurrences)")
             }
         }
+        // 2.6.2: what got worse or better against the previous comparable session, computed by the app.
+        out.append(contentsOf: RunRegression.lines(sessions: selected, labels: labels))
         out.append("")
         out.append("## 1. Sessions")
         out.append("")
