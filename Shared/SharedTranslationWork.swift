@@ -172,7 +172,7 @@ enum TranslationHotPathAB {
         defaults.set((defaults.object(forKey: legacyOwnLaneSettingKey) as? Bool) ?? true, forKey: legacyOwnLanePinnedKey)
         defaults.set((defaults.object(forKey: independentHeartbeatSettingKey) as? Bool) ?? true, forKey: independentHeartbeatPinnedKey)
         defaults.set((defaults.object(forKey: armedDeferSettingKey) as? Bool) ?? false, forKey: armedDeferPinnedKey)
-        for item in v250Switches + v251Switches + v254Switches + v255Switches + v256Switches + v260Switches {
+        for item in v250Switches + v251Switches + v254Switches + v255Switches + v256Switches + v260Switches + v261Switches {
             defaults.set((defaults.object(forKey: item.setting) as? Bool) ?? true, forKey: item.pinned)
         }
         // 2.5.3: the Legacy head start defaults to OFF (see LegacyV251Defaults.headStartOffByDefault).

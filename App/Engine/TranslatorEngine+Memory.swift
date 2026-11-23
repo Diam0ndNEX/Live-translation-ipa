@@ -25,9 +25,18 @@ extension TranslatorEngine {
             do {
                 let health = try await self.memoryStore.prepare(legacyURLs: legacy)
                 self.memoryReady = true
+                await self.memoryStore.setLooseReuse(TranslationHotPathAB.looseMemoryReuse)
                 self.applyMemoryHealth(health)
                 self.saveMemory(force: true)
                 await self.diag.migrateOldSessions()
+                // 2.6.1: fill the loose key of saved rows in small batches, off the live path.
+                if TranslationHotPathAB.looseMemoryReuse {
+                    for _ in 0..<200 {
+                        let filled = await self.memoryStore.backfillLooseKeys()
+                        if filled == 0 { break }
+                        try? await Task.sleep(nanoseconds: 250_000_000)
+                    }
+                }
             } catch {
                 self.memoryFailure = "Memory unavailable; fresh translation remains available"
                 self.diag.log("Memory initialization failed; preserved data requires recovery")

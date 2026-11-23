@@ -134,6 +134,7 @@ extension Diagnostics {
             "qLengthOutlier": s.qLengthOutlier,
             "qRepeatedWord": s.qRepeatedWord,
             "qFlaggedSaved": s.qFlaggedSaved,
+            "looseHits": s.looseHits,
             "missNew": s.missNew,
             "missNearMiss": s.missNearMiss,
             "missRepeatedExact": s.missRepeatedExact,

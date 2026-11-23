@@ -265,7 +265,7 @@ enum CombinedDiagnosticReport {
                           ("heartbeatAB", "independent capture heartbeat"), ("armedDeferAB", "deferred early start")]
                 .filter { s[$0.0] == "on" }.map { $0.1 }
             // 2.5.0: items A to F and the quiet re-warm (default on; a run saved before 2.5.0 has none).
-            let v250On = (TranslationHotPathAB.v250ReportLabels + TranslationHotPathAB.v251ReportLabels + TranslationHotPathAB.v254ReportLabels + TranslationHotPathAB.v255ReportLabels + TranslationHotPathAB.v256ReportLabels + TranslationHotPathAB.v260ReportLabels)
+            let v250On = (TranslationHotPathAB.v250ReportLabels + TranslationHotPathAB.v251ReportLabels + TranslationHotPathAB.v254ReportLabels + TranslationHotPathAB.v255ReportLabels + TranslationHotPathAB.v256ReportLabels + TranslationHotPathAB.v260ReportLabels + TranslationHotPathAB.v261ReportLabels)
                 .filter { s[$0.key] == "on" }.map { $0.label }
             let armsText = (armsOn + v250On).isEmpty ? "none" : (armsOn + v250On).joined(separator: ", ")
             out.append("| \(labels[i]) | \(s["hotPathAB"] ?? "?") | \(s["detailedCollection"] ?? "?")\(s["detailSuspended"] == "true" ? " (suspended: thermal)" : "") | \(s["thermalStart"] ?? "?")/\(s["thermalEnd"] ?? "?")/\(s["thermalMax"] ?? "?") | \(s["focusedCaptionOCR"] ?? "?")/\(s["strictCaptionIdentity"] ?? "?") | \(session.counters["identicalFrameHolds", default: 0]) | \(session.counters["manualTranslations", default: 0]) | \(ms(session.distributions["memoryLookupWaitMs"]?.p50))/\(ms(session.distributions["memoryLookupWaitMs"]?.p95)) | \(ms(session.distributions["memoryHealthMs"]?.p50))/\(ms(session.distributions["memoryHealthMs"]?.p95)) | \(memoryTimeoutShare(session)) | \(armsText) |")
@@ -386,11 +386,11 @@ enum CombinedDiagnosticReport {
         out.append("")
         out.append("Why confirmed units missed memory (2.6.0; measurement only, counted for this run):")
         out.append("")
-        out.append("| | first time seen | differs only in case, punctuation or spacing from a unit seen earlier (a looser reuse could have saved a call) | same unit seen earlier but not in memory |")
-        out.append("|---|---|---|---|")
+        out.append("| | first time seen | differs only in case, punctuation or spacing from a unit seen earlier (a looser reuse could have saved a call) | same unit seen earlier but not in memory | reused from a saved variant (2.6.1) |")
+        out.append("|---|---|---|---|---|")
         for (i, session) in selected.enumerated() {
             let c = session.counters
-            out.append("| \(labels[i]) | \(c["missNew", default: 0]) | \(c["missNearMiss", default: 0]) | \(c["missRepeatedExact", default: 0]) |")
+            out.append("| \(labels[i]) | \(c["missNew", default: 0]) | \(c["missNearMiss", default: 0]) | \(c["missRepeatedExact", default: 0]) | \(c["looseHits", default: 0]) |")
         }
         out.append("")
         out.append("Model call ms by characters translated (2.5.0; n, P50/P95):")
