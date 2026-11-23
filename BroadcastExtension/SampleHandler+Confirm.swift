@@ -13,9 +13,12 @@ extension SampleHandler {
         let boxes = lines.map { (x: $0.x, y: $0.y, w: $0.w ?? 0, h: $0.h) }
         // 2.5.0 (item C): the same three steps as before, one at a time, so the reason a check could not be
         // prepared is known. The check itself is unchanged.
-        guard let points = PixelConfirmation.samplePoints(lines: boxes) else {
+        // 2.5.4 (switch "pixelManyLines"): up to 24 lines, each judged with its own tolerance (PixelConfirmation).
+        let many = cfg.pixelManyLines == true
+        guard let points = PixelConfirmation.samplePoints(lines: boxes, allowMany: many) else {
             pendingPixelRead = nil
-            nextReadCause = lines.count > PixelConfirmation.maximumLines ? .notArmedLines : .notArmedFrame
+            nextReadCause = lines.count > (many ? PixelConfirmation.manyLinesMaximum : PixelConfirmation.maximumLines)
+                ? .notArmedLines : .notArmedFrame
             return
         }
         guard let luma = sampleLuma(pb, orientation: orientation, rot: cfg.rot ?? 0, points: points) else {

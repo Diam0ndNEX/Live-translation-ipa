@@ -65,8 +65,8 @@ work = read_source("SharedTranslationWork")
 assert work.count("?? false, forKey:") == 1, "only the armed deferral defaults to off"
 
 # Version 2.3.0 build 107 in the places CI checks; older changelog entries stay.
-assert 'static let version = "2.5.3"' in shared and "static let build = 121" in shared
-assert project.count('"2.5.3"') == 3 and project.count('"121"') == 3
+assert 'static let version = "2.5.4"' in shared and "static let build = 122" in shared
+assert project.count('"2.5.4"') == 3 and project.count('"122"') == 3
 assert '("2.3.0", "Build 107:' in shared and '("2.2.3", "Build 106:' in shared
 print("v2.3.0 source contracts passed: per-caption Legacy labels, confirmed_service_ms, oldest-first context drop, "
       "supersession measurement, switches column, defaults unchanged, version")

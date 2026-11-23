@@ -192,6 +192,27 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey] { standard.removeObject(forKey: key) }
             precondition(TranslationHotPathAB.trustedCaptionBand && TranslationHotPathAB.label == "L1_F1")
 
+            // 2.5.4: both new switches default to on, apply from the next session, and turn off one at a time.
+            TranslationHotPathAB.pinSettings()
+            precondition(TranslationHotPathAB.pixelManyLines && TranslationHotPathAB.captionLineSpeculation,
+                         "2.5.4 switches default to on")
+            standard.set(false, forKey: "pixelManyLines")
+            precondition(TranslationHotPathAB.pixelManyLines, "a 2.5.4 switch does not apply mid-run")
+            TranslationHotPathAB.pinSettings()
+            precondition(!TranslationHotPathAB.pixelManyLines && TranslationHotPathAB.captionLineSpeculation,
+                         "one 2.5.4 switch can be turned off alone")
+            standard.removeObject(forKey: "pixelManyLines")
+            for item in TranslationHotPathAB.v254Switches { standard.removeObject(forKey: item.pinned) }
+            for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey] { standard.removeObject(forKey: key) }
+            precondition(TranslationHotPathAB.pixelManyLines && TranslationHotPathAB.label == "L1_F1")
+            let normalize: (String) -> String = { String($0.lowercased().filter { $0.isLetter || $0.isNumber }) }
+            let wanted = normalize("Eu não sei de nada")
+            precondition(CaptionLineSelection.indices(lineTexts: ["Eu não sei", "de nada", "MENU 12"], candidate: wanted,
+                                                      normalize: normalize) == [0, 1],
+                         "2.5.4: a line that is not part of the caption is not judged")
+            precondition(CaptionLineSelection.indices(lineTexts: ["abc", "def"], candidate: "xyz", normalize: normalize) == [0, 1],
+                         "2.5.4: when no line matches every line is kept")
+
             // 2.5.1: new Legacy defaults, the one-time reset of saved values, and the pure policies.
             for key in [LegacyV251Defaults.appliedKey, "legacyConfirmedOwnLanePinned", "deferArmedSpeculationPinned",
                         "legacyEagerSpeculationPinned"] { standard.removeObject(forKey: key) }
@@ -206,7 +227,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             precondition(TranslationHotPathAB.deferArmedSpeculation, "after the reset the toggle works again")
             for key in ["deferArmedSpeculation", "legacyConfirmedOwnLane", LegacyV251Defaults.appliedKey,
                         "legacyConfirmedOwnLanePinned", "deferArmedSpeculationPinned"] { standard.removeObject(forKey: key) }
-            for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches { standard.removeObject(forKey: item.pinned) }
+            for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches { standard.removeObject(forKey: item.pinned) }
             for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey,
                         TranslationHotPathAB.availabilityRefreshPinnedKey, TranslationHotPathAB.independentHeartbeatPinnedKey] {
                 standard.removeObject(forKey: key)
