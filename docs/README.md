@@ -9,7 +9,8 @@ Older documents are records of what was true when they were written. They name b
 - structure-migration-plan.md: which scripts depend on which files, and the order for moving and splitting existing files
 
 ## Current line (start here)
-- v2.5.6-specification.md: newest specification (growing subtitles settle before translation, learned from the text alone; effect unverified)
+- v2.6.0-specification.md: newest specification (recovery from stalls, automatic findings and quality signals, memory miss classification; effects unverified)
+- v2.5.6-specification.md: specification (growing subtitles settle before translation, learned from the text alone; effect unverified)
 - v2.5.5-specification.md: newest specification (the text blocks of one subtitle are translated together; found by reading code, effect on wording unverified)
 - v2.5.4-specification.md: newest specification (Legacy waits less for confirmation: pixel check for up to 24 lines, early translation judged on caption lines, report skip reasons; what is unverified, device test)
 - v2.5.3-specification.md: newest specification (Legacy head start off by default, from device data)

@@ -33,6 +33,9 @@ L2_UNDO = {
         ('(display || flag("incrementalBatchRecovery", true))', '(display || flag("incrementalBatchRecovery", false))'),
         ("            // 2.2.3 (L2): a detached speculative call must not erase the newer confirmed call's in-flight set.\n            if modelUnitKeysInFlight == Set(items.map { $0.key }) {\n                modelUnitKeysInFlight.removeAll()\n                modelContextInFlight = nil\n            }\n",
          "            modelUnitKeysInFlight.removeAll()\n            modelContextInFlight = nil\n"),
+        # 2.6.0 (measurement only): two counters for why a confirmed unit missed memory. Nothing is translated or reused differently.
+        ("                        if display { noteMissKind(s) }\n", ""),
+        ("                        if display { looseUnits.noteSeen(s) }\n", ""),
     ],
 }
 for name in ['process', 'drain', 'cachedCaption']:
@@ -191,8 +194,8 @@ for field in ('pixelArmed', 'focusRediscoveries', 'confirmReads', 'confirmPixelR
     declaration = re.search(r'var ' + field + r': (Bool|Int|Double)\? = nil', shared)
     assert declaration, field + ' must be an optional number or flag (no text) so older builds ignore it'
 assert 'privacy: "metadataOnly"' in diagnostics and 'textCapture: false' in diagnostics
-assert 'static let version = "2.5.6"' in shared and 'static let build = 124' in shared
-assert read('project.yml').count('"2.5.6"') == 3 and read('project.yml').count('"124"') == 3
+assert 'static let version = "2.6.0"' in shared and 'static let build = 125' in shared
+assert read('project.yml').count('"2.6.0"') == 3 and read('project.yml').count('"125"') == 3
 assert '("2.4.0", "Build 117:' in shared and '("2.3.9", "Build 116:' in shared and '("2.5.0", "Build 118:' in shared
 print('v2.4.0 source contracts passed: deferral (default off since 2.5.1, Legacy only), unchanged OCR and confirmation evidence, forced re-read, direct model call, metadata-only diagnostics, version')
 
@@ -272,7 +275,7 @@ eager = read('App/Engine/TranslatorEngine+EagerSpeculation.swift')
 loop = read_source('LoopbackServer')
 # Eager early translation: a switch (default on, pinned, toggle, reset, report label), Legacy only, confirmed first.
 assert '("legacyEagerSpeculation", "legacyEagerSpeculationPinned", "eagerSpeculationAB")' in v251
-assert 'for item in v250Switches + v251Switches + v254Switches + v255Switches + v256Switches {' in work  # 2.5.6: changed with the code
+assert 'for item in v250Switches + v251Switches + v254Switches + v255Switches + v256Switches + v260Switches {' in work  # 2.6.0: changed with the code
 assert '@AppStorage("legacyEagerSpeculation") private var legacyEagerSpeculation = true' in experimental and experimental.count('"legacyEagerSpeculation"') == 2
 assert archive.count('"eagerSpeculationAB"') == 2 and 'v251ReportLabels' in archive
 assert 'enabled && busy && confirmedRunning && !confirmedQueued' in v251, 'never queued while confirmed work waits'
@@ -323,7 +326,7 @@ print('v2.5.2 source contracts passed: finish the running caption (switch, Legac
 # ---- 2.5.3: Legacy head start off by default (device data). ----
 assert 'LegacyV251Defaults.pinHeadStartDefault(defaults)' in work and 'defaults.set(false, forKey: "legacyHeadStartPinned")' in v251
 assert 'defaults.removeObject(forKey: "legacyHeadStart")' in v251 and 'static let v253AppliedKey = "legacyV253DefaultsApplied"' in v251
-assert 'static let version = "2.5.6"' in shared and 'static let build = 124' in shared and '("2.5.3", "Build 121:' in shared
+assert 'static let version = "2.6.0"' in shared and 'static let build = 125' in shared and '("2.5.3", "Build 121:' in shared
 print('v2.5.3 source contracts passed: head start off by default, saved value reset once, version')
 
 # ---- 2.5.4: pixel check for up to 24 lines, early translation judged on caption lines, report rows. ----
@@ -346,7 +349,7 @@ assert 'if p.pixelArmed == true, TranslationHotPathAB.deferArmedSpeculation {' i
 eager254 = read_source('TranslatorEngine')
 assert 'func speculationJudgedLines(' in eager254 and 'guard TranslationHotPathAB.captionLineSpeculation, activeTranslationSystem == .legacy' in eager254
 assert 'Why a first reading got no early translation (2.5.4' in archive
-assert 'static let version = "2.5.6"' in shared and 'static let build = 124' in shared and '("2.5.4", "Build 122:' in shared
+assert 'static let version = "2.6.0"' in shared and 'static let build = 125' in shared and '("2.5.4", "Build 122:' in shared
 print('v2.5.4 source contracts passed: pixel check 24 lines (per-line tolerance), early translation judged on caption lines, switches, report rows, version')
 
 
@@ -364,7 +367,7 @@ assert function(engine, 'extractTexts') == old_extract, 'extractTexts stays the 
 assert '@AppStorage("captionJoin") private var captionJoin = true' in experimental and experimental.count('"captionJoin"') == 2
 assert archive.count('"captionJoinAB"') == 2 and 'v255ReportLabels' in archive
 assert 'captionMultiBlock' in archive and 'Text blocks per confirmed reading (2.5.5' in archive
-assert 'static let version = "2.5.6"' in shared and 'static let build = 124' in shared and '("2.5.5", "Build 123:' in shared
+assert 'static let version = "2.6.0"' in shared and 'static let build = 125' in shared and '("2.5.5", "Build 123:' in shared
 print('v2.5.5 source contracts passed: subtitle text blocks joined, switch, counters, report rows, version')
 
 # ---- 2.5.6: a growing subtitle settles before it is translated (Legacy). ----
@@ -383,5 +386,41 @@ assert intake256.index('rejectsDisplayedFragment') < intake256.index('holdGrowin
 assert 'growthReset()' in engine and 'var captionGrowth = CaptionGrowthTracker()' in read('App/TranslatorEngine.swift')
 assert '@AppStorage("growthSettle") private var growthSettle = true' in experimental and experimental.count('"growthSettle"') == 2
 assert archive.count('"growthSettleAB"') == 2 and 'v256ReportLabels' in archive and 'Growing subtitles (2.5.6' in archive
-assert 'static let version = "2.5.6"' in shared and 'static let build = 124' in shared and '("2.5.6", "Build 124:' in shared
+assert 'static let version = "2.6.0"' in shared and 'static let build = 125' in shared and '("2.5.6", "Build 124:' in shared
 print('v2.5.6 source contracts passed: growing subtitles settle, switch, counters, report rows, version')
+
+# ---- 2.6.0: translation recovers when it stops. ----
+v260 = read('Shared/TranslationSystem+V260.swift')
+assert '("stallWatchdog", "stallWatchdogPinned", "stallWatchdogAB")' in v260
+assert 'struct ModelStallLimit' in v260 and 'enum ModelCallRace' in v260 and 'struct StallLadder' in v260 and 'final class ResumeGate' in v260
+assert 'OCRLine' not in v260 and 'TextSim' not in v260, 'TranslationSystem parts are compiled without Shared.swift in CI test programs'
+assert 'static let floorSeconds = 6.0' in v260 and 'static let ceilingSeconds = 30.0' in v260
+stall260 = read_source('TranslatorEngine')
+assert 'func stallWatchdogTick()' in stall260 and 'func abandonLane()' in stall260 and 'func dropModelSessions()' in stall260
+assert 'guard TranslationHotPathAB.stallWatchdog, !paused, !frozen, captureAlive else {' in stall260
+assert 'stallWatchdogTick()' in function(read_source('TranslatorEngine'), 'tick')
+batches260 = read('App/Engine/TranslatorEngine+Batches.swift')
+assert 'func performModelCall() async throws -> [String]? {' in batches260
+assert 'try await ModelCallRace.run(limit: limit' in batches260 and 'if TranslationHotPathAB.stallWatchdog, !warmup {' in batches260
+assert 'try await session.translations(from: reqs)' in batches260 and 'session.translate(batch: reqs)' in batches260
+assert 'var modelStall = ModelStallLimit()' in read('App/TranslatorEngine.swift') and 'var stallLadder = StallLadder()' in read('App/TranslatorEngine.swift')
+assert '@AppStorage("stallWatchdog") private var stallWatchdog = true' in experimental and experimental.count('"stallWatchdog"') == 2
+assert archive.count('"stallWatchdogAB"') == 2 and 'v260ReportLabels' in archive and 'Stalls (2.6.0' in archive
+assert 'static let version = "2.6.0"' in shared and 'static let build = 125' in shared and '("2.6.0", "Build 125:' in shared
+print('v2.6.0 source contracts passed: stall watchdog, switch, counters, report rows, version')
+
+# ---- 2.6.0: automatic quality signals and memory miss classification (measurement only). ----
+q260 = read('Shared/TranslationSystem+Quality.swift')
+assert 'enum CaptionFlag' in q260 and 'struct CaptionSignals' in q260 and 'OCRLine' not in q260 and 'TextSim' not in q260
+m260 = read('Shared/TranslationSystem+MissClass.swift')
+assert 'struct LooseUnitIndex' in m260 and 'OCRLine' not in m260 and 'TextSim' not in m260
+assert 'noteShownSignals(text, result)' in function(engine, 'show') and 'func noteShownSignals(' in read_source('TranslatorEngine')
+assert 'func noteMissKind(' in read_source('TranslatorEngine') and 'var looseUnits = LooseUnitIndex()' in read('App/TranslatorEngine.swift')
+store260 = read('App/Diagnostics/FlaggedCaptionStore.swift')
+assert 'static let maximumNotes = 200' in store260 and 'static let keepDays = 14.0' in store260
+assert 'guard FlaggedCaptionStore.includeInReports, !flag("privateSession", false) else { return }' in read_source('TranslatorEngine')
+assert '@AppStorage("flaggedCaptionText") private var flaggedCaptionText = true' in experimental
+assert 'Flagged captions (text)' in archive and 'flagged: flagged)' in archive and 'FlaggedCaptionStore.includeInReports' in read_source('Diagnostics')
+for name in ['qShown', 'qRewritten', 'missNearMiss', 'stallHangs']:
+    assert '"%s"' % name in archive, name
+print('v2.6.0 quality and miss-classification contracts passed')

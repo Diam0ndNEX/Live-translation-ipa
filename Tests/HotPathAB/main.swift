@@ -242,7 +242,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             TranslationHotPathAB.pinSettings()
             precondition(!TranslationHotPathAB.growthSettle && TranslationHotPathAB.captionJoin, "the 2.5.6 switch turns off alone")
             standard.removeObject(forKey: "growthSettle")
-            for item in TranslationHotPathAB.v256Switches { standard.removeObject(forKey: item.pinned) }
+            for item in TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches { standard.removeObject(forKey: item.pinned) }
             for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey] { standard.removeObject(forKey: key) }
             var growth = CaptionGrowthTracker()
             precondition(growth.observe("ola tudo", at: 0) == .different, "2.5.6: the first reading is not growth")
@@ -265,6 +265,134 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             precondition(slow.quietPeriod == CaptionGrowthTracker.maximumQuiet && fast.quietPeriod == CaptionGrowthTracker.minimumQuiet,
                          "2.5.6: the wait adapts to the pace of the video within its limits")
 
+            // 2.6.0: stall recovery. The switch defaults to on and turns off alone.
+            TranslationHotPathAB.pinSettings()
+            precondition(TranslationHotPathAB.stallWatchdog, "2.6.0 switch defaults to on")
+            standard.set(false, forKey: "stallWatchdog")
+            precondition(TranslationHotPathAB.stallWatchdog, "the 2.6.0 switch does not apply mid-run")
+            TranslationHotPathAB.pinSettings()
+            precondition(!TranslationHotPathAB.stallWatchdog && TranslationHotPathAB.captionJoin, "the 2.6.0 switch turns off alone")
+            standard.removeObject(forKey: "stallWatchdog")
+            for item in TranslationHotPathAB.v260Switches { standard.removeObject(forKey: item.pinned) }
+            // The call limit is learned: cold, fast device, slow device, and the fixed ceiling.
+            var limit = ModelStallLimit()
+            precondition(limit.limitSeconds == ModelStallLimit.coldSeconds, "2.6.0: before any call the limit is the cold one")
+            for _ in 0..<10 { limit.record(seconds: 0.5) }
+            precondition(limit.limitSeconds == ModelStallLimit.floorSeconds, "2.6.0: a fast device keeps the floor")
+            var slowDevice = ModelStallLimit()
+            for _ in 0..<10 { slowDevice.record(seconds: 2) }
+            precondition(abs(slowDevice.limitSeconds - 12) < 0.001, "2.6.0: the limit is a multiple of the slow end")
+            var verySlow = ModelStallLimit()
+            for _ in 0..<10 { verySlow.record(seconds: 10) }
+            precondition(verySlow.limitSeconds == ModelStallLimit.ceilingSeconds, "2.6.0: the limit never exceeds the ceiling")
+            limit.widen(afterLateReturn: 9)
+            precondition(limit.p95 == 9, "2.6.0: a late return widens the limit")
+            // The recovery ladder: one step at a time, in order, only after the threshold, restarting after progress.
+            var ladder = StallLadder()
+            precondition(ladder.evaluate(now: 100, waiting: 3, limit: 6) == nil, "2.6.0: a short wait is not a stall")
+            precondition(ladder.evaluate(now: 100, waiting: 9.5, limit: 6) == .laneReset, "2.6.0: first step")
+            precondition(ladder.evaluate(now: 105, waiting: 14.5, limit: 6) == nil, "2.6.0: one step per interval")
+            precondition(ladder.evaluate(now: 110.1, waiting: 19.6, limit: 6) == .sessionReset, "2.6.0: second step")
+            precondition(ladder.evaluate(now: 121, waiting: 30.5, limit: 6) == .linkReset, "2.6.0: third step")
+            precondition(ladder.evaluate(now: 132, waiting: 41.5, limit: 6) == .unhealthy, "2.6.0: last step")
+            precondition(ladder.evaluate(now: 150, waiting: 59.5, limit: 6) == nil, "2.6.0: unhealthy retries slowly")
+            precondition(ladder.evaluate(now: 193, waiting: 102, limit: 6) == .laneReset, "2.6.0: the ladder starts over after the slow retry")
+            let length = ladder.progress(now: 200)
+            precondition(length != nil && length! > 100, "2.6.0: progress reports how long the stall lasted")
+            precondition(ladder.evaluate(now: 201, waiting: 9.5, limit: 6) == .laneReset, "2.6.0: after progress the ladder starts at the first step")
+            var slowLimit = StallLadder()
+            precondition(slowLimit.evaluate(now: 50, waiting: 12, limit: 15) == nil && slowLimit.evaluate(now: 51, waiting: 18.5, limit: 15) == .laneReset,
+                         "2.6.0: a stall is never declared before the model call limit has passed")
+            // The race: a call that returns, a call that never returns (ignores cancellation), a late return.
+            final class Box: @unchecked Sendable { var outcome = ""; var late = 0.0 }
+            func race(limit: Double, _ work: @escaping () async throws -> Int, box: Box) {
+                let done = DispatchSemaphore(value: 0)
+                Task {
+                    let r = try? await ModelCallRace.run(limit: limit, onLateReturn: { box.late = $0 }, work)
+                    switch r {
+                    case .some(.value(let v)): box.outcome = "value \(v)"
+                    case .some(.timedOut): box.outcome = "timedOut"
+                    case .none: box.outcome = "error"
+                    }
+                    done.signal()
+                }
+                done.wait()
+            }
+            let fast = Box()
+            race(limit: 2, { 42 }, box: fast)
+            precondition(fast.outcome == "value 42", "2.6.0: a call that returns gives its value")
+            let hung = Box()
+            race(limit: 0.2, { await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }; return 1 }, box: hung)
+            precondition(hung.outcome == "timedOut", "2.6.0: a call that never returns is abandoned at the limit")
+            let slowCall = Box()
+            race(limit: 0.1, { try await Task.sleep(nanoseconds: 400_000_000); return 7 }, box: slowCall)
+            precondition(slowCall.outcome == "timedOut", "2.6.0: a call slower than the limit is abandoned")
+            let failing = Box()
+            race(limit: 2, { () async throws -> Int in throw CancellationError() }, box: failing)
+            precondition(failing.outcome == "error", "2.6.0: a failing call fails, it is not a timeout")
+            let gate = ResumeGate()
+            precondition(gate.claim() && !gate.claim() && gate.isClaimed, "2.6.0: only one outcome gets through")
+            // Automatic quality signals work on the text alone.
+            var signals = CaptionSignals()
+            precondition(signals.observe(original: "Hello there my friend how are you", translated: "Ola meu amigo como vai voce", at: 0).isEmpty,
+                         "2.6.0: a normal caption has no flag")
+            precondition(signals.observe(original: "Hello there my friend how are you", translated: "Ola, meu amigo: como vai voce!", at: 3) == [.reshownSame],
+                         "2.6.0: the same sentence again (spacing, case and punctuation do not matter)")
+            precondition(signals.observe(original: "Hello there my friend how are you today", translated: "Ola meu amigo como vai voce hoje", at: 5) == [.rewrittenSoon],
+                         "2.6.0: the same sentence rewritten soon after")
+            var numbers = CaptionSignals()
+            precondition(numbers.observe(original: "Pay 1500 dollars now please", translated: "Pague dolares agora por favor", at: 0) == [.digitsLost],
+                         "2.6.0: a number that went missing")
+            precondition(numbers.observe(original: "Pay 1500 dollars now please", translated: "Pague 1500 dolares agora", at: 30).isEmpty,
+                         "2.6.0: a number that is kept is not flagged")
+            precondition(numbers.observe(original: "abcdefghij klm", translated: "abcdefghij klm", at: 60) == [.unchanged],
+                         "2.6.0: nothing was translated")
+            precondition(numbers.observe(original: "one two three four five", translated: "um um um dois tres", at: 90) == [.repeatedWord],
+                         "2.6.0: a word repeated three times")
+            var ratio = CaptionSignals()
+            for i in 0..<40 {
+                _ = ratio.observe(original: "alpha beta gamma delta \(i) epsilon", translated: "alfa beta gama delta \(i) epsilon", at: Double(i) * 10)
+            }
+            precondition(ratio.observe(original: "alpha beta gamma delta zeta", translated: String(repeating: "x", count: 400), at: 1_000) == [.lengthOutlier],
+                         "2.6.0: a length far from this run's usual ratio, learned from the run")
+            ratio.forgetShown()
+            precondition(ratio.recent.isEmpty, "2.6.0: a cleared screen forgets recent captions")
+            // Miss classification: near misses are found without any label, language or layout rule.
+            var loose = LooseUnitIndex()
+            precondition(loose.classifyMiss("Hello there.") == .new, "2.6.0: first sight")
+            precondition(loose.classifyMiss("hello  there!") == .nearMiss, "2.6.0: case, spacing and punctuation only")
+            precondition(loose.classifyMiss("hello  there!") == .repeatedExact, "2.6.0: the same unit again")
+            loose.noteSeen("Good morning")
+            precondition(loose.classifyMiss("GOOD MORNING?") == .nearMiss, "2.6.0: a memory hit counts as seen")
+            precondition(loose.classifyMiss("") == .new && loose.classifyMiss("...") == .new, "2.6.0: nothing to compare")
+            precondition(loose.classifyMiss("Good evening") == .new, "2.6.0: different words are not a near miss")
+            // The growth tracker recognises a revealed subtitle whatever it looks like: a label, a bracket, no
+            // punctuation, another script. One rule for all, no layout or punctuation exception.
+            let revealed = ["Maria: the quick brown fox jumps over the lazy dog",
+                            "the quick brown fox jumps over the lazy dog",
+                            "[music] the quick brown fox jumps over the lazy dog today",
+                            "NARRATOR - the quick brown fox jumps over the lazy dog",
+                            "素早い茶色の狐が怠け者の犬を飛び越える",
+                            "o rapido cachorro marrom pula sobre a raposa preguicosa"]
+            for sample in revealed {
+                var tracker = CaptionGrowthTracker()
+                let characters = Array(sample)
+                var steps = Array(stride(from: 6, to: characters.count, by: 3))
+                steps.append(characters.count)
+                for (index, count) in steps.enumerated() {
+                    let step = tracker.observe(String(characters[0..<count]), at: Double(index) * 0.2)
+                    precondition(step == (index == 0 ? .different : .extended), "2.6.0: a revealed subtitle is growth at every step")
+                }
+                precondition(tracker.observe(String(characters) + String(characters), at: 10) == .different,
+                             "2.6.0: after a long pause it is not growth")
+            }
+            var unrelated = CaptionGrowthTracker()
+            for (index, sample) in revealed.enumerated() {
+                precondition(unrelated.observe(sample, at: Double(index) * 0.2) == .different, "2.6.0: different captions are never growth")
+            }
+            precondition(CaptionSignals.key("Ola, MUNDO!") == "olamundo" && CaptionSignals.digitRuns("a 12 b 3 c 456") == ["12", "456"],
+                         "2.6.0: key and digit runs")
+
             // 2.5.1: new Legacy defaults, the one-time reset of saved values, and the pure policies.
             for key in [LegacyV251Defaults.appliedKey, "legacyConfirmedOwnLanePinned", "deferArmedSpeculationPinned",
                         "legacyEagerSpeculationPinned"] { standard.removeObject(forKey: key) }
@@ -279,7 +407,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             precondition(TranslationHotPathAB.deferArmedSpeculation, "after the reset the toggle works again")
             for key in ["deferArmedSpeculation", "legacyConfirmedOwnLane", LegacyV251Defaults.appliedKey,
                         "legacyConfirmedOwnLanePinned", "deferArmedSpeculationPinned"] { standard.removeObject(forKey: key) }
-            for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches + TranslationHotPathAB.v256Switches { standard.removeObject(forKey: item.pinned) }
+            for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches + TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches { standard.removeObject(forKey: item.pinned) }
             for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey,
                         TranslationHotPathAB.availabilityRefreshPinnedKey, TranslationHotPathAB.independentHeartbeatPinnedKey] {
                 standard.removeObject(forKey: key)

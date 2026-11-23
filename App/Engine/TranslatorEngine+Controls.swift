@@ -17,6 +17,7 @@ extension TranslatorEngine {
             initialWarmupProgress = "Initial warm-up deferred by power or temperature conditions"
         }
         captureReadiness.tick(at: ProcessInfo.processInfo.systemUptime)
+        stallWatchdogTick()
         publishCaptureStatus()
         let alive = Date().timeIntervalSince(lastPacketDate) < 5
         let thermalState = ProcessInfo.processInfo.thermalState
@@ -233,6 +234,7 @@ extension TranslatorEngine {
         confirmedHandoffDeadlineTask?.cancel()
         confirmedHandoffDeadlineTask = nil
         growthReset()
+        qualitySignalsReset()
         activeCandidateID = nil; activeCandidateText = ""
         movieTextFocus.reset()
         activeCandidateConfirmed = false; activeCandidatePresented = false

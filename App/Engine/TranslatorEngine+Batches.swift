@@ -151,6 +151,8 @@ extension TranslatorEngine {
             // 2.5.2: Legacy live calls always stream; Apple documents translations(from:) as returning later.
             let stream = (partial != nil && texts.count > 1) ||
                 (!warmup && activeTranslationSystem == .legacy && TranslationHotPathAB.streamLegacyCalls)
+            // 2.6.0: one model call, so that it can be given a time limit (stallWatchdog) without changing it.
+            func performModelCall() async throws -> [String]? {
             if stream {
                 // Never present partial subtitles. Store only completed units
                 // in exact-context volatile memory. A failed batch stays failed.
@@ -164,12 +166,33 @@ extension TranslatorEngine {
                     collected[index] = value
                     partial?(index, value)
                 }
-                result = collected.count == texts.count ?
+                return collected.count == texts.count ?
                     (0..<texts.count).compactMap { collected[$0] } : nil
             } else {
                 let res = try await session.translations(from: reqs)
-                result = PipelineSafety.orderedTranslations(
+                return PipelineSafety.orderedTranslations(
                     res.map { ($0.clientIdentifier, $0.targetText) }, count: texts.count)
+            }
+            }
+            if TranslationHotPathAB.stallWatchdog, !warmup {
+                // 2.6.0: a call that does not return within the learned limit is abandoned, so that the lane
+                // and the capture keep working. The abandoned call may still finish later; its result is dropped.
+                noteModelCallStarted()
+                let limit = modelCallLimitSeconds
+                let outcome = try await ModelCallRace.run(limit: limit, onLateReturn: { [weak self] seconds in
+                    Task { @MainActor in self?.noteModelCallLateReturn(seconds: seconds) }
+                }, performModelCall)
+                switch outcome {
+                case .value(let value):
+                    result = value
+                    if value != nil { noteModelCallReturned(seconds: ProcessInfo.processInfo.systemUptime - began) }
+                    else { laneProgressAt = ProcessInfo.processInfo.systemUptime }
+                case .timedOut:
+                    noteModelCallHung(after: limit)
+                    result = nil
+                }
+            } else {
+                result = try await performModelCall()
             }
             record(result == nil ? "model_batch_failed" : "model_batch_completed",
                 durationMs: (ProcessInfo.processInfo.systemUptime - began) * 1000)
