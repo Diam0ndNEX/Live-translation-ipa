@@ -484,7 +484,7 @@ assert 'func recentEntries(rules: String, target: String, limit: Int)' in care_s
 assert 'ALTER TABLE' not in care_store and 'user_version' not in care_store, 'memory care never changes the schema'
 care = read('App/Engine/TranslatorEngine+MemoryCare.swift')
 assert 'func warmRAMFromMemory()' in care and 'func quarantineDefectiveReuse(' in care
-assert 'await self.warmRAMFromMemory()' in read('App/Engine/TranslatorEngine+Memory.swift')
+assert 'await self.warmRAMFromMemory()' in read('App/Engine/TranslatorEngine+Memory.swift') and 'await warmRAMFromMemory() /* 2.6.3 */' in read_source('TranslatorEngine')
 assert 'quarantineDefectiveReuse(flags: flags, result: result)' in read('App/Engine/TranslatorEngine+Quality.swift')
 assert 'diag.noteSlowCaption(latency.last)' in read_source('TranslatorEngine')
 assert 'SlowCaptions.counterNames' in archive and '"memoryWarmed", "memoryQuarantined"' in archive

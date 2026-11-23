@@ -129,7 +129,7 @@ final class TranslatorEngine: ObservableObject {
             guard oldValue != targetCode else { return }
             UserDefaults.standard.set(targetCode, forKey: "target"); languageSelectionChanged(); directSession = nil; langStatus = [:]; availCache.removeAll()
             noteRecentPair()
-            Task { await refreshStatus(); await prewarm() }
+            Task { await refreshStatus(); await prewarm(); await warmRAMFromMemory() /* 2.6.3 */ }
         }
     }
     @Published var paused = false {
