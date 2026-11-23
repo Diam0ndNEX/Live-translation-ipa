@@ -318,9 +318,9 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
                 }
                 done.wait()
             }
-            let fast = Box()
-            race(limit: 2, { 42 }, box: fast)
-            precondition(fast.outcome == "value 42", "2.6.0: a call that returns gives its value")
+            let prompt = Box()
+            race(limit: 2, { 42 }, box: prompt)
+            precondition(prompt.outcome == "value 42", "2.6.0: a call that returns gives its value")
             let hung = Box()
             race(limit: 0.2, { await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }; return 1 }, box: hung)
             precondition(hung.outcome == "timedOut", "2.6.0: a call that never returns is abandoned at the limit")
