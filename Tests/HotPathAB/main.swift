@@ -307,7 +307,8 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             final class Box: @unchecked Sendable { var outcome = ""; var late = 0.0 }
             func race(limit: Double, _ work: @escaping () async throws -> Int, box: Box) {
                 let done = DispatchSemaphore(value: 0)
-                Task {
+                // Detached: the test thread blocks below, so the race must not need the main actor.
+                Task.detached {
                     let r = try? await ModelCallRace.run(limit: limit, onLateReturn: { box.late = $0 }, work)
                     switch r {
                     case .some(.value(let v)): box.outcome = "value \(v)"
@@ -316,7 +317,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
                     }
                     done.signal()
                 }
-                done.wait()
+                precondition(done.wait(timeout: .now() + 10) == .success, "2.6.0: the race test did not finish in 10 s")
             }
             let prompt = Box()
             race(limit: 2, { 42 }, box: prompt)
