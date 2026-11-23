@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "2.6.2"
-    static let build = 127
+    static let version = "2.6.3"
+    static let build = 128
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("2.6.3", "Build 128: Saved translations are loaded into RAM when memory opens, so repeated sentences are found faster. A reused translation with a clear defect is translated afresh next time. Reports list the slowest captions with the stage that made them slow. Nothing was compiled or run before CI."),
         ("2.6.2", "Build 127: Reports now compare each session with the one before it and say what got worse or better. Faster build checks. Nothing was compiled or run before this build."),
         ("2.6.1", "Build 126: Memory reuses saved translations that differ only in case, punctuation or spacing. Nothing was compiled or run before the GitHub Actions build, and the effect on the wording is UNVERIFIED. In 2.6.0 the report counts how often a unit missed memory although a variant of it was known. When a sentence is not saved exactly but a saved sentence has the same letters and numbers, its saved translation is now used with the closing punctuation of the new sentence. Short sentences, other rules, other context and sentences with two different saved translations are never matched. The memory file gets one new column that is filled in small batches; nothing existing is changed or removed. New switch Memory reuses case, punctuation and spacing variants (default on)."),
         ("2.6.0", "Build 125: Translation recovers when it stops. Nothing was compiled or run before the GitHub Actions build, and every effect is UNVERIFIED until a stall is caught in a report. Reported problem: after a while the app stops translating and needs a capture restart or an app restart. Code reading found that a translation call had no time limit and that the translation lane stays busy until the call returns. A call that does not return within a time learned from your device (at least 6 seconds) is now abandoned and retried on a new session, and if captions wait while nothing moves the lane, the sessions and the local capture link are reset one step at a time. Every stall and recovery is counted in the report. New switch Recover when translation stops (default on)."),

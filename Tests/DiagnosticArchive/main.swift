@@ -704,6 +704,33 @@ import Foundation
         let regressionText = CombinedDiagnosticReport.markdown([fastRun, slowRun], version: "2.6.2", build: 127, generatedAt: Date())
         precondition(regressionText.contains("S2 vs S1: WORSE [slower_enqueueLatencyMs]") && regressionText.contains("[more_stalls]"), "2.6.2: report names the regression")
 
+        // 2.6.3: slowest captions kept in order, exported as counters, read back, cause named, table shown.
+        var slowList: [[Double]] = []
+        for total in [900.0, 1_500, 1_300, 2_000, 1_800, 1_250, 1_400, 1_700, 1_600, 300] {
+            SlowCaptions.insert(&slowList, [total, 50, 100, 10, 20, total - 400, 30, 5])
+        }
+        precondition(slowList.count == SlowCaptions.keep && slowList.first?.first == 2_000 && slowList.last?.first == 1_250,
+                     "2.6.3: the slowest captions are kept, slowest first")
+        let slowCounters = SlowCaptions.counters(slowList)
+        precondition(slowCounters["slow1_total"] == 2_000 && slowCounters["slow1_translation"] == 1_600 && slowCounters.count == 64,
+                     "2.6.3: counters per rank and stage")
+        precondition(SlowCaptions.rows(slowCounters).count == 8 && SlowCaptions.dominant(SlowCaptions.rows(slowCounters)[0]) == 5,
+                     "2.6.3: rows read back; translation dominates")
+        precondition(SlowCaptions.cause(slowCounters)?.stage == "translation", "2.6.3: the cause is named")
+        precondition(SlowCaptions.cause(SlowCaptions.counters(Array(slowList.prefix(3)))) == nil, "2.6.3: too few captions to name a cause")
+        let slowRunExport = DiagnosticSessionExport(id: UUID(), startedAt: Date(timeIntervalSince1970: 1_000),
+            endedAt: Date(timeIntervalSince1970: 1_600), appVersion: "2.6.3", systemVersion: "test", hardwareModel: "iPhoneTest1,1",
+            settings: [:], health: MemoryDiagnosticHealth(), counters: slowCounters.merging(["memoryQuarantined": 2, "memoryWarmed": 40]) { a, _ in a },
+            distributions: [:], events: [], measurementBoundary: "test", textCapture: false)
+        let slowCodes = DiagnosticIssueDetector.assess(slowRunExport).map(\.code)
+        precondition(slowCodes.contains("slow_captions_mostly_translation") && slowCodes.contains("memory_quarantined"), "2.6.3: findings")
+        let slowText = CombinedDiagnosticReport.markdown([slowRunExport], version: "2.6.3", build: 128, generatedAt: Date())
+        precondition(slowText.contains("Slowest captions (2.6.3") && slowText.contains("| S1 | 1 | 2000 | 50 | 100 | 10 | 20 | 1600* | 30 | 5 |"),
+                     "2.6.3: the slowest-caption table")
+        let slowSafe = try await writer.decode(try await writer.encode(slowRunExport))
+        precondition(slowSafe.counters["slow8_render"] == 5 && slowSafe.counters["memoryQuarantined"] == 2 && slowSafe.counters["memoryWarmed"] == 40,
+                     "2.6.3: the new counters pass the export allowlists")
+
         // 2.2.1 D6 and D8: truncation counters and the variables / n = 0 rows appear in the report.
         let truncated = DiagnosticSessionExport(id: UUID(), startedAt: Date(timeIntervalSince1970: 1_000),
             endedAt: Date(timeIntervalSince1970: 1_600), appVersion: "2.2.1", systemVersion: "test",

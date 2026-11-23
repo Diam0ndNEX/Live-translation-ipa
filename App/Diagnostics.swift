@@ -16,6 +16,7 @@ final class Diagnostics: ObservableObject {
     @Published var translate: [Sample] = []
     @Published var latency: [Sample] = []
     @Published var pipeline: [PipelineMeasurement] = []
+    var slowestCaptions: [[Double]] = [] // 2.6.3: see SlowCaptions
     @Published var transport: [Sample] = []
     @Published var fps: [Sample] = []
     @Published var lineCounts: [Sample] = []
@@ -287,7 +288,7 @@ final class Diagnostics: ObservableObject {
         if TranslationHotPathAB.deferArmedSpeculation { settings["armedDeferAB"] = "on" }
         // 2.5.0: items A to F and the quiet re-warm, all default ON, written only when ON.
         // 2.5.1: the same for the 2.5.1 switches.
-        for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches + TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches + TranslationHotPathAB.v261Switches
+        for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches + TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches + TranslationHotPathAB.v261Switches + TranslationHotPathAB.v263Switches
             where (UserDefaults.standard.object(forKey: item.pinned) as? Bool) ?? true {
             settings[item.report] = "on"
         }
@@ -359,6 +360,9 @@ final class Diagnostics: ObservableObject {
         counters["qFlaggedSaved"] = s.qFlaggedSaved
         counters["missNew"] = s.missNew
         counters["looseHits"] = s.looseHits
+        counters["memoryWarmed"] = s.memoryWarmed
+        counters["memoryQuarantined"] = s.memoryQuarantined
+        counters.merge(SlowCaptions.counters(slowestCaptions)) { _, new in new }
         counters["missNearMiss"] = s.missNearMiss
         counters["missRepeatedExact"] = s.missRepeatedExact
         counters["emptyOCRPasses"] = s.emptyOCRPasses
@@ -450,7 +454,7 @@ final class Diagnostics: ObservableObject {
         // 2.2.1 (E8): numbers gathered before capture connected (compose, tests) must not count in the run.
         // The warm-up trace is kept; only the totals and the latency series start from zero.
         s = Stats()
-        pipeline = []
+        pipeline = []; slowestCaptions = []
         translate = []; latency = []; transport = []
         structuredEventsDropped = 0; idMapResets = 0; legacyContextResets = 0; subtitleTracesDropped = 0
         thermalStartLevel = ProcessInfo.processInfo.thermalState.rawValue
@@ -619,7 +623,7 @@ final class Diagnostics: ObservableObject {
         lastFrames = 0; lastFrameTime = Date(); tickN = 0
         lastPacketAt = nil; lastDeviceSampleAt = nil
         s = Stats()
-        pipeline = []
+        pipeline = []; slowestCaptions = []
         ocr = []; translate = []; latency = []; transport = []; fps = []; lineCounts = []
         extMem = []; appMem = []; thermal = []; battery = []; cacheRate = []
         events = []; spans = []; sourceUsage = SourceLanguageUsage(); clearSpeakers()

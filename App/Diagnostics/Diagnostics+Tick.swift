@@ -135,6 +135,8 @@ extension Diagnostics {
             "qRepeatedWord": s.qRepeatedWord,
             "qFlaggedSaved": s.qFlaggedSaved,
             "looseHits": s.looseHits,
+            "memoryWarmed": s.memoryWarmed,
+            "memoryQuarantined": s.memoryQuarantined,
             "missNew": s.missNew,
             "missNearMiss": s.missNearMiss,
             "missRepeatedExact": s.missRepeatedExact,

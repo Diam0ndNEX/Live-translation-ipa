@@ -9,7 +9,8 @@ Older documents are records of what was true when they were written. They name b
 - structure-migration-plan.md: which scripts depend on which files, and the order for moving and splitting existing files
 
 ## Current line (start here)
-- v2.6.2-specification.md: newest specification (automatic comparison between sessions, faster CI; effects unverified)
+- v2.6.3-specification.md: newest specification (memory warm-up and quarantine, slowest captions; effects unverified)
+- v2.6.2-specification.md: previous specification (automatic comparison between sessions, faster CI; effects unverified)
 - v2.6.1-specification.md: previous specification (loose memory reuse, session guard, Low Latency abandon; effects unverified)
 - v2.6.0-specification.md: previous specification (recovery from stalls, automatic findings and quality signals, memory miss classification; effects unverified)
 - v2.5.6-specification.md: specification (growing subtitles settle before translation, learned from the text alone; effect unverified)

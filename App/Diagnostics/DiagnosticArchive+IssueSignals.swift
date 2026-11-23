@@ -39,6 +39,16 @@ extension DiagnosticIssueDetector {
                 "A guard turned off the growing-subtitle wait for the rest of this run because at least \(SwitchGuard.growthMinimumHeld) readings were held and \(Int(SwitchGuard.growthDroppedShare * 100))% or more of them were dropped. The saved setting was not changed. Later parts of this run are 2.5.5 behaviour for growing subtitles.")
         }
 
+        // Slow captions (2.6.3): which stage made them slow.
+        if let cause = SlowCaptions.cause(c) {
+            add("slow_captions_mostly_" + cause.stage.replacingOccurrences(of: " ", with: "_").lowercased(), "observed", cause.captions,
+                "\(cause.captions) of the \(cause.total) slowest captions (at least \(Int(SlowCaptions.causeMinimumMs)) ms) spent most time in \(cause.stage). See the table \"Slowest captions\".")
+        }
+        if n("memoryQuarantined") > 0 {
+            add("memory_quarantined", "observed", n("memoryQuarantined"),
+                "\(n("memoryQuarantined")) saved translation(s) had a clear defect when reused (a lost number, a repeated word, or the source returned unchanged) and were sent back for a fresh translation. The text stays saved.")
+        }
+
         // Growing subtitles (2.5.6).
         if n("growthHeld") >= 10 && percent(n("growthDropped"), n("growthHeld")) >= 25 {
             add("growth_hold_often_dropped", "suspected", n("growthDropped"),

@@ -12,6 +12,7 @@ extension TranslatorEngine {
             if shownHistory.count > 3 { shownHistory.removeFirst(shownHistory.count - 3) }
         }
         guard !flags.isEmpty else { return }
+        quarantineDefectiveReuse(flags: flags, result: result) // 2.6.3
         if diag.enabled {
             for flag in flags {
                 switch flag {

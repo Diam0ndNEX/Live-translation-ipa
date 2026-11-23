@@ -242,7 +242,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             TranslationHotPathAB.pinSettings()
             precondition(!TranslationHotPathAB.growthSettle && TranslationHotPathAB.captionJoin, "the 2.5.6 switch turns off alone")
             standard.removeObject(forKey: "growthSettle")
-            for item in TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches + TranslationHotPathAB.v261Switches { standard.removeObject(forKey: item.pinned) }
+            for item in TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches + TranslationHotPathAB.v261Switches + TranslationHotPathAB.v263Switches { standard.removeObject(forKey: item.pinned) }
             for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey] { standard.removeObject(forKey: key) }
             var growth = CaptionGrowthTracker()
             precondition(growth.observe("ola tudo", at: 0) == .different, "2.5.6: the first reading is not growth")
@@ -376,13 +376,30 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             TranslationHotPathAB.pinSettings()
             precondition(!TranslationHotPathAB.looseMemoryReuse && TranslationHotPathAB.stallWatchdog, "the 2.6.1 switch turns off alone")
             standard.removeObject(forKey: "looseMemoryReuse")
-            for item in TranslationHotPathAB.v261Switches { standard.removeObject(forKey: item.pinned) }
+            for item in TranslationHotPathAB.v261Switches + TranslationHotPathAB.v263Switches { standard.removeObject(forKey: item.pinned) }
             precondition(LooseReuse.key("Olá, MEU  amigo!") == "ol\u{00E1}meuamigo", "2.6.1: the loose key keeps letters and numbers only")
             precondition(LooseReuse.key("Ola\u{0301}") == LooseReuse.key("Ol\u{00E1}"), "2.6.1: canonical forms give one loose key")
             precondition(LooseReuse.terminal("Hello there?! ") == "?!" && LooseReuse.terminal("Hello") == "", "2.6.1: closing punctuation")
             precondition(LooseReuse.adapt(storedSource: "Hello there.", storedTranslation: "Ola.", requestedSource: "hello there!") == "Ola!", "2.6.1: punctuation follows the new source")
             precondition(LooseReuse.adapt(storedSource: "Hello there?!", storedTranslation: "Ola?!", requestedSource: "hello there") == "Ola", "2.6.1: no closing punctuation in the new source")
             precondition(LooseReuse.adapt(storedSource: "Hello there.", storedTranslation: "Ola.", requestedSource: "HELLO THERE.") == "Ola.", "2.6.1: same punctuation keeps the saved text")
+            // 2.6.3: memory care policy and its switch.
+            TranslationHotPathAB.pinSettings()
+            precondition(TranslationHotPathAB.memoryCare, "2.6.3 switch defaults to on")
+            standard.set(false, forKey: "memoryCare")
+            TranslationHotPathAB.pinSettings()
+            precondition(!TranslationHotPathAB.memoryCare && TranslationHotPathAB.looseMemoryReuse, "2.6.3: the switch turns off alone")
+            standard.removeObject(forKey: "memoryCare")
+            for item in TranslationHotPathAB.v263Switches { standard.removeObject(forKey: item.pinned) }
+            let careKey = "v4|" + String(repeating: "a", count: 64) + "|pt>en|3:a=b|Pague 1500 agora|ja"
+            precondition(MemoryCare.unitSource(careKey) == "Pague 1500 agora|ja", "2.6.3: the source text is the last field, even with a bar inside")
+            precondition(MemoryCare.target(careKey) == "en" && MemoryCare.unitSource("v2|pt>en|0:|Oi") == "Oi", "2.6.3: target and old key form")
+            precondition(MemoryCare.unitSource("nonsense") == nil, "2.6.3: not a unit key")
+            precondition(MemoryCare.defects(source: "Pague 1500 dolares", translation: "Pay dollars") == [.digitsLost], "2.6.3: a lost number")
+            precondition(MemoryCare.defects(source: "Pague 1500 dolares", translation: "Pay 1500 dollars").isEmpty, "2.6.3: a kept number is fine")
+            precondition(MemoryCare.defects(source: "Maria Fernanda", translation: "Maria Fernanda").isEmpty, "2.6.3: a name may stay unchanged")
+            precondition(MemoryCare.defects(source: "isso nao foi traduzido", translation: "Isso nao foi traduzido!") == [.unchanged], "2.6.3: a sentence returned unchanged")
+            precondition(MemoryCare.defects(source: "nao nao", translation: "no no no no") == [.repeatedWord], "2.6.3: a repeated word")
             // 2.6.1: a guard turns a switch off for the session only, and pinning at session start clears it.
             precondition(!SwitchGuard.growthShouldTrip(held: 11, dropped: 11), "2.6.1: too few held readings to judge")
             precondition(!SwitchGuard.growthShouldTrip(held: 20, dropped: 11), "2.6.1: 55% dropped is below the limit")
@@ -435,7 +452,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             precondition(TranslationHotPathAB.deferArmedSpeculation, "after the reset the toggle works again")
             for key in ["deferArmedSpeculation", "legacyConfirmedOwnLane", LegacyV251Defaults.appliedKey,
                         "legacyConfirmedOwnLanePinned", "deferArmedSpeculationPinned"] { standard.removeObject(forKey: key) }
-            for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches + TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches + TranslationHotPathAB.v261Switches { standard.removeObject(forKey: item.pinned) }
+            for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches + TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches + TranslationHotPathAB.v261Switches + TranslationHotPathAB.v263Switches { standard.removeObject(forKey: item.pinned) }
             for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey,
                         TranslationHotPathAB.availabilityRefreshPinnedKey, TranslationHotPathAB.independentHeartbeatPinnedKey] {
                 standard.removeObject(forKey: key)

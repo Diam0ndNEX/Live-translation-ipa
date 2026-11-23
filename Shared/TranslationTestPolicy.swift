@@ -42,6 +42,13 @@ final class TranslationRAMBank {
         captions[key] = result
         if captionOrder.count > 64 { captions.removeValue(forKey: captionOrder.removeFirst()) }
     }
+    /// 2.6.3: forgets complete captions whose translation matches (a defective unit inside them was quarantined).
+    func dropCaptions(where shouldDrop: (ExactCaptionResult) -> Bool) {
+        let gone = captions.filter { shouldDrop($0.value) }.map(\.key)
+        guard !gone.isEmpty else { return }
+        for key in gone { captions.removeValue(forKey: key) }
+        captionOrder.removeAll { captions[$0] == nil }
+    }
     func clear() {
         values.removeAll(); specKeys.removeAll(); savedKeys.removeAll(); confirmedKeys.removeAll()
         speculativeOrigins.removeAll(); use.removeAll(); captions.removeAll(); captionOrder.removeAll()

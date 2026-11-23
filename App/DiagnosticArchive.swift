@@ -117,7 +117,9 @@ struct DiagnosticIntervalBucket: Codable {
     var enqueueP95Ms: Double? = nil
     var modelBatchMedianMs: Double? = nil
 
-    static let allowedCounters: Set<String> = [
+    /// 2.6.3: the slowest-caption counters are generated (SlowCaptions.counterNames).
+    static let allowedCounters: Set<String> = baseAllowedCounters.union(SlowCaptions.counterNames)
+    static let baseAllowedCounters: Set<String> = [
         "captureFrames", "capturePasses", "ocrPackets", "candidateConfirmed",
         "candidateEnqueued", "candidateSuperseded", "candidateCancelled",
         "candidateFirstSeen", "speculativeRequests", "speculativeDiscarded",
@@ -135,7 +137,7 @@ struct DiagnosticIntervalBucket: Codable {
             "legacyDuplicateSpeculationSkips", "captionMultiBlock", "captionJoined",
             "growthSteps", "growthHeld", "growthIntermediate", "growthReleased", "growthDropped", "growthSpecSkips",
             "qShown", "qReshownSame", "qRewritten", "qUnchanged", "qDigitsLost", "qLengthOutlier", "qRepeatedWord", "qFlaggedSaved",
-            "missNew", "missNearMiss", "missRepeatedExact", "looseHits",
+            "missNew", "missNearMiss", "missRepeatedExact", "looseHits", "memoryWarmed", "memoryQuarantined",
             "guardTrips",
             "stallHangs", "stallLateReturns", "stallLaneResets", "stallSessionResets", "stallLinkResets", "stallUnhealthy", "stallRecovered",
         "specPreemptionRequested", "specMatchingConfirmation",
