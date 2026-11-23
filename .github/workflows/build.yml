@@ -2,8 +2,6 @@ name: Build ScreenLingo IPA
 on:
   push:
     branches: ["claude/**", codex/screenlingo-v1.9.9-recovery-evidence]
-  pull_request:
-    branches: ["claude/**", codex/screenlingo-v1.9.9-recovery-evidence]
   workflow_dispatch:
     inputs:
       interface_preview:
@@ -17,16 +15,13 @@ concurrency:
 permissions:
   contents: read
 jobs:
-  checks:
-    runs-on: macos-latest
-    timeout-minutes: 20
+  python-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: "26.6"
       - name: Enforce nominal/fair full-performance parity
         run: python3 scripts/test_thermal_parity.py
       - name: Verify v1.9.9 recovery and OCR regression contract
@@ -45,28 +40,10 @@ jobs:
         run: python3 scripts/test_v232_contracts.py
       - name: Diagnostic allowlist guards (2.2.1 C2, C3)
         run: python3 scripts/test_diag_allowlists.py
-      - name: Library history rules and debounced save (2.2.1 E1, E15)
+      - name: Three-mode source contracts and comparison
         run: |
-          swiftc -parse-as-library Shared/HistoryPolicy.swift Tests/HistoryPolicy/main.swift -o /tmp/history-policy-tests
-          /tmp/history-policy-tests
-      - name: Check pipeline regressions
-        run: |
-          swiftc Shared/*.swift $(bash scripts/swift_sources.sh TextIntelligence CaptionAssembly MemoryWriter PipelineSimulation) Tests/main.swift -o /tmp/pipeline-tests
-          /tmp/pipeline-tests
-      - name: Verify mode coordinator and source contract (Legacy and Low Latency)
-        run: |
-          swiftc -parse-as-library Shared/SharedTranslationWork.swift $(bash scripts/swift_sources.sh TranslationSystem) Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/ThreeModes/main.swift -o /tmp/three-mode-tests
-          /tmp/three-mode-tests
           python3 scripts/test_three_modes.py
           python3 scripts/test_compare_three_modes.py
-      - name: Verify deterministic Low Latency and Legacy timed A/B matrix
-        run: |
-          swiftc -parse-as-library Shared/SharedTranslationWork.swift $(bash scripts/swift_sources.sh TranslationSystem) Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/HotPathAB/main.swift -o /tmp/screenlingo-v196-timed-tests
-          /tmp/screenlingo-v196-timed-tests
-      - name: Compile the confirmed-probe reference variant
-        run: |
-          swiftc -parse-as-library -D SCREENLINGO_REFERENCE_CONFIRMED_PROBE Shared/SharedTranslationWork.swift $(bash scripts/swift_sources.sh TranslationSystem) Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/HotPathAB/main.swift -o /tmp/screenlingo-reference-probe-tests
-          /tmp/screenlingo-reference-probe-tests
       - name: Verify mode diagnostics live routing
         run: python3 scripts/test_mode_diagnostics_ui.py
       - name: Verify performance acceptance gate
@@ -81,6 +58,37 @@ jobs:
         run: python3 scripts/test_structure_docs.py
       - name: Settings search index is current
         run: python3 scripts/make_settings_index.py --check
+
+  checks:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.6"
+      - name: Library history rules and debounced save (2.2.1 E1, E15)
+        run: |
+          swiftc -parse-as-library Shared/HistoryPolicy.swift Tests/HistoryPolicy/main.swift -o /tmp/history-policy-tests
+          /tmp/history-policy-tests
+      - name: Check pipeline regressions
+        run: |
+          swiftc Shared/*.swift $(bash scripts/swift_sources.sh TextIntelligence CaptionAssembly MemoryWriter PipelineSimulation) Tests/main.swift -o /tmp/pipeline-tests
+          /tmp/pipeline-tests
+      - name: Verify mode coordinator and source contract (Legacy and Low Latency)
+        run: |
+          swiftc -parse-as-library Shared/SharedTranslationWork.swift $(bash scripts/swift_sources.sh TranslationSystem) Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/ThreeModes/main.swift -o /tmp/three-mode-tests
+          /tmp/three-mode-tests
+      - name: Verify deterministic Low Latency and Legacy timed A/B matrix
+        run: |
+          swiftc -parse-as-library Shared/SharedTranslationWork.swift $(bash scripts/swift_sources.sh TranslationSystem) Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/HotPathAB/main.swift -o /tmp/screenlingo-v196-timed-tests
+          /tmp/screenlingo-v196-timed-tests
+      - name: Compile the confirmed-probe reference variant
+        run: |
+          swiftc -parse-as-library -D SCREENLINGO_REFERENCE_CONFIRMED_PROBE Shared/SharedTranslationWork.swift $(bash scripts/swift_sources.sh TranslationSystem) Shared/CaptionFocus.swift Shared/CaptureReadiness.swift Shared/TranslationActivity.swift Tests/HotPathAB/main.swift -o /tmp/screenlingo-reference-probe-tests
+          /tmp/screenlingo-reference-probe-tests
       - name: Navigation router and narrow-observation tests
         run: |
           swiftc -parse-as-library $(bash scripts/swift_sources.sh AppRouter ObjectSlice) Tests/Navigation/main.swift -o /tmp/navigation-tests
@@ -112,7 +120,12 @@ jobs:
           . .venv/bin/activate
           pip install pillow
           python scripts/make_icon.py App/Assets.xcassets
-      - run: brew install xcodegen && xcodegen generate
+      - name: Install XcodeGen
+        env:
+          HOMEBREW_NO_AUTO_UPDATE: "1"
+          HOMEBREW_NO_INSTALL_CLEANUP: "1"
+          HOMEBREW_NO_ENV_HINTS: "1"
+        run: brew install xcodegen && xcodegen generate
       - name: Build
         run: |
           set -euo pipefail

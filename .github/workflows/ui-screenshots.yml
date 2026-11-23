@@ -1,16 +1,8 @@
 name: UI screenshots
 # ScreenLingo 2.1.0 spec §13.8: fixture screenshots and contact sheets on the iPhone simulator.
+# 2.6.2: manual only. Two macOS jobs per push delayed every build; run it from the Actions tab when the UI changes.
 on:
   workflow_dispatch:
-  push:
-    branches: ["claude/**"]
-    paths:
-      - "App/UI/**"
-      - "scripts/ui_screenshots.sh"
-      - "scripts/make_contact_sheet.py"
-      - ".github/workflows/ui-screenshots.yml"
-  pull_request:
-    paths: ["App/UI/**"]
 concurrency:
   group: ui-screenshots-${{ github.ref }}
   cancel-in-progress: true
