@@ -12,9 +12,11 @@ extension TranslatorEngine {
         if p.pixelArmed == true, TranslationHotPathAB.deferArmedSpeculation { return }
         let minimum = flag("coolMode", false) ?
             max(0.95, num("speculationConfidence", 0.85)) : num("speculationConfidence", 0.85)
+        // 2.5.4: judged on the lines that make up the text to translate (see speculationJudgedLines).
+        let judgedLines = speculationJudgedLines(p, candidateTexts: texts)
         guard !flag("selectiveSpeculation", true) ||
-            SpeculationPolicy.credible(lines: p.lines, threshold: minimum) else { return }
-        let strong = SpeculationPolicy.credible(lines: p.lines, threshold: max(0.95, minimum))
+            SpeculationPolicy.credible(lines: judgedLines, threshold: minimum) else { return }
+        let strong = SpeculationPolicy.credible(lines: judgedLines, threshold: max(0.95, minimum))
         guard ram.speculationWindow.allowsCredibleOpportunity(
             enabled: flag("adaptiveSpeculation", true), strongCandidate: strong) else { return }
         specPacket = p

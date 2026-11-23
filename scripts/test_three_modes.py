@@ -191,8 +191,8 @@ for field in ('pixelArmed', 'focusRediscoveries', 'confirmReads', 'confirmPixelR
     declaration = re.search(r'var ' + field + r': (Bool|Int|Double)\? = nil', shared)
     assert declaration, field + ' must be an optional number or flag (no text) so older builds ignore it'
 assert 'privacy: "metadataOnly"' in diagnostics and 'textCapture: false' in diagnostics
-assert 'static let version = "2.5.3"' in shared and 'static let build = 121' in shared
-assert read('project.yml').count('"2.5.3"') == 3 and read('project.yml').count('"121"') == 3
+assert 'static let version = "2.5.4"' in shared and 'static let build = 122' in shared
+assert read('project.yml').count('"2.5.4"') == 3 and read('project.yml').count('"122"') == 3
 assert '("2.4.0", "Build 117:' in shared and '("2.3.9", "Build 116:' in shared and '("2.5.0", "Build 118:' in shared
 print('v2.4.0 source contracts passed: deferral (default off since 2.5.1, Legacy only), unchanged OCR and confirmation evidence, forced re-read, direct model call, metadata-only diagnostics, version')
 
@@ -272,7 +272,7 @@ eager = read('App/Engine/TranslatorEngine+EagerSpeculation.swift')
 loop = read_source('LoopbackServer')
 # Eager early translation: a switch (default on, pinned, toggle, reset, report label), Legacy only, confirmed first.
 assert '("legacyEagerSpeculation", "legacyEagerSpeculationPinned", "eagerSpeculationAB")' in v251
-assert 'for item in v250Switches + v251Switches {' in work
+assert 'for item in v250Switches + v251Switches + v254Switches {' in work  # 2.5.4: changed with the code
 assert '@AppStorage("legacyEagerSpeculation") private var legacyEagerSpeculation = true' in experimental and experimental.count('"legacyEagerSpeculation"') == 2
 assert archive.count('"eagerSpeculationAB"') == 2 and 'v251ReportLabels' in archive
 assert 'enabled && busy && confirmedRunning && !confirmedQueued' in v251, 'never queued while confirmed work waits'
@@ -323,5 +323,29 @@ print('v2.5.2 source contracts passed: finish the running caption (switch, Legac
 # ---- 2.5.3: Legacy head start off by default (device data). ----
 assert 'LegacyV251Defaults.pinHeadStartDefault(defaults)' in work and 'defaults.set(false, forKey: "legacyHeadStartPinned")' in v251
 assert 'defaults.removeObject(forKey: "legacyHeadStart")' in v251 and 'static let v253AppliedKey = "legacyV253DefaultsApplied"' in v251
-assert 'static let version = "2.5.3"' in shared and 'static let build = 121' in shared and '("2.5.3", "Build 121:' in shared
+assert 'static let version = "2.5.4"' in shared and 'static let build = 122' in shared and '("2.5.3", "Build 121:' in shared
 print('v2.5.3 source contracts passed: head start off by default, saved value reset once, version')
+
+# ---- 2.5.4: pixel check for up to 24 lines, early translation judged on caption lines, report rows. ----
+v254 = read('Shared/TranslationSystem+V254.swift')
+assert 'static let maximumLines = 8' in confirm and 'static let manyLinesMaximum = 24' in confirm
+assert 'allowMany ? manyLinesMaximum : maximumLines' in confirm and 'private static func matchesPerLine(' in confirm
+assert 'if original.luma.count > maximumLines * perLine, original.luma.count % perLine == 0 {' in confirm
+assert 'max(1, min(maximumAllowance, original.inkCount / 50))' in confirm, 'up to 8 lines the rule is unchanged'
+assert 'PixelConfirmation.samplePoints(lines: boxes, allowMany: many)' in capture and 'let many = cfg.pixelManyLines == true' in capture
+assert 'var pixelManyLines: Bool? = nil' in shared and 'pixelManyLines: TranslationHotPathAB.pixelManyLines ? true : nil' in engine
+for setting, arm in (('pixelManyLines', 'manyLinesAB'), ('captionLineSpeculation', 'captionLinesAB')):
+    assert f'@AppStorage("{setting}") private var {setting} = true' in experimental and experimental.count(f'"{setting}"') == 2, setting
+    assert archive.count(f'"{arm}"') == 2 and f'("{setting}", "{setting}Pinned", "{arm}")' in v254, arm
+assert 'v254ReportLabels' in archive and 'enum CaptionLineSelection' in v254
+assert 'OCRLine' not in v254, 'TranslationSystem parts are compiled without Shared.swift in CI test programs'
+intake = function(engine, 'handleContent')
+assert 'let judgedLines = speculationJudgedLines(p, candidateTexts: candidateTexts)' in intake
+assert intake.count('lines: judgedLines') == 2 and 'SpeculationPolicy.credible(lines: p.lines' not in intake
+assert 'if p.pixelArmed == true, TranslationHotPathAB.deferArmedSpeculation {' in intake, 'deferral unchanged'
+eager254 = read_source('TranslatorEngine')
+assert 'func speculationJudgedLines(' in eager254 and 'guard TranslationHotPathAB.captionLineSpeculation, activeTranslationSystem == .legacy' in eager254
+assert 'Why a first reading got no early translation (2.5.4' in archive
+assert 'static let version = "2.5.4"' in shared and 'static let build = 122' in shared and '("2.5.4", "Build 122:' in shared
+print('v2.5.4 source contracts passed: pixel check 24 lines (per-line tolerance), early translation judged on caption lines, switches, report rows, version')
+

@@ -252,8 +252,10 @@ extension TranslatorEngine {
             if speculationAllowed && flag("translateAhead", true) {
                 let minimumSpecConfidence = flag("coolMode", false) ?
                     max(0.95, num("speculationConfidence", 0.85)) : num("speculationConfidence", 0.85)
+                // 2.5.4: judged on the lines that make up the text to translate (see speculationJudgedLines).
+                let judgedLines = speculationJudgedLines(p, candidateTexts: candidateTexts)
                 let credible = !flag("selectiveSpeculation", true) ||
-                    SpeculationPolicy.credible(lines: p.lines, threshold: minimumSpecConfidence)
+                    SpeculationPolicy.credible(lines: judgedLines, threshold: minimumSpecConfidence)
                 #if SCREENLINGO_REFERENCE_LEGACY_ADMISSION
                 let admittedByHistory = ram.speculationWindow.allowsOpportunity(
                     enabled: flag("adaptiveSpeculation", true))
@@ -269,7 +271,7 @@ extension TranslatorEngine {
                     return
                 }
                 let highConfidence = SpeculationPolicy.credible(
-                    lines: p.lines, threshold: max(0.95, minimumSpecConfidence))
+                    lines: judgedLines, threshold: max(0.95, minimumSpecConfidence))
                 let admittedByHistory = ram.speculationWindow.allowsCredibleOpportunity(
                     enabled: flag("adaptiveSpeculation", true), strongCandidate: highConfidence)
                 #endif

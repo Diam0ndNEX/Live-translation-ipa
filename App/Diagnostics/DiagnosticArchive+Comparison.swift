@@ -24,6 +24,8 @@ struct DiagnosticPerformanceComparison {
         "captureWarmAB", "trustedBandAB", "headStartAB", "quietRewarmAB",
         // 2.5.1: a run saved before 2.5.1 has none of them (off).
         "eagerSpeculationAB", "finishRunningAB", "duplicateLinesAB", "streamCallsAB",
+        // 2.5.4: a run saved before 2.5.4 has none of them (off).
+        "manyLinesAB", "captionLinesAB",
         "detailedCollection", "performanceTier",
         "focusedCaptionOCR", "strictCaptionIdentity", "cjkSingleCharacters", "liveWarmupLegacy"
     ]

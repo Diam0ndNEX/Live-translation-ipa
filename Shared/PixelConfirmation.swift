@@ -16,6 +16,10 @@ enum PixelConfirmation {
     /// At most this many lines; more lines -> OCR. 2.5.1: 8 (was 4). "More than 4 lines" was the most common
     /// reason a 2.5.0 caption needed a second OCR read (about 150 ms each) in the device runs.
     static let maximumLines = 8
+    /// 2.5.4 (switch "pixelManyLines"): up to this many lines when the caller allows it. The device runs show a
+    /// read with more than the line limit was the top reason for a second OCR read (about 170 ms): the check
+    /// fingerprints every line read from the whole area, so unrelated text on the screen switched it off.
+    static let manyLinesMaximum = 24
     /// 2.5.1: lost or gained ink points tolerated, at most. Without a cap the allowance grew with every extra
     /// line, so a small change in a long caption could pass. 2.5.3: 16 (was 6). With 6, ordinary 1 to 3 line
     /// captions were checked more strictly than in 2.5.0 and rejected more often (67 pixel rejections in 11 min on
@@ -62,6 +66,12 @@ enum PixelConfirmation {
     /// tolerated; new or removed glyphs are not.
     static func matches(_ original: Fingerprint, _ current: [UInt8]) -> Bool {
         guard current.count == original.luma.count else { return false }
+        // 2.5.4: more than the classic eight lines. Every line is judged with its own tolerance, so a changed
+        // line cannot hide among unchanged ones. Up to eight lines the rule below is unchanged.
+        let perLine = columns * rows
+        if original.luma.count > maximumLines * perLine, original.luma.count % perLine == 0 {
+            return matchesPerLine(original, current, lineSize: perLine)
+        }
         let allowance = max(1, min(maximumAllowance, original.inkCount / 50))
         var lost = 0, gained = 0
         for index in current.indices {
@@ -82,11 +92,43 @@ enum PixelConfirmation {
         return true
     }
 
+    /// 2.5.4: the same rules as `matches`, applied to each line's own slice of the sample grid. A line's tolerance
+    /// follows its own ink (at least 1, at most `maximumAllowance`), so the check is never looser for a line than
+    /// the classic rule is for a caption of that line alone.
+    private static func matchesPerLine(_ original: Fingerprint, _ current: [UInt8], lineSize: Int) -> Bool {
+        var start = 0
+        while start < current.count {
+            let end = start + lineSize
+            var ink = 0
+            for index in start..<end where original.ink[index] { ink += 1 }
+            let allowance = max(1, min(maximumAllowance, ink / 50))
+            var lost = 0, gained = 0
+            for index in start..<end {
+                let now = Int(current[index])
+                if original.ink[index] {
+                    if abs(now - Int(original.luma[index])) > inkTolerance {
+                        lost += 1
+                        if lost > allowance { return false }
+                    }
+                } else {
+                    let polarity = original.inkBright ? now - original.median : original.median - now
+                    if polarity >= inkContrast {
+                        gained += 1
+                        if gained > allowance { return false }
+                    }
+                }
+            }
+            start = end
+        }
+        return true
+    }
+
     /// Normalized sample points (x right, y up, 0...1 of the oriented image)
     /// for line boxes given as centre x/y, width and height. Boxes are padded
     /// slightly so strokes on the edge are included.
-    static func samplePoints(lines: [(x: Double, y: Double, w: Double, h: Double)]) -> [(x: Double, y: Double)]? {
-        guard !lines.isEmpty, lines.count <= maximumLines else { return nil }
+    static func samplePoints(lines: [(x: Double, y: Double, w: Double, h: Double)],
+                             allowMany: Bool = false) -> [(x: Double, y: Double)]? {
+        guard !lines.isEmpty, lines.count <= (allowMany ? manyLinesMaximum : maximumLines) else { return nil }
         var points: [(x: Double, y: Double)] = []
         points.reserveCapacity(lines.count * columns * rows)
         for line in lines {

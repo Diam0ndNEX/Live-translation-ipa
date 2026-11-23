@@ -196,7 +196,8 @@ extension TranslatorEngine {
                            legacyHeadStart: (TranslationHotPathAB.legacyHeadStart && activeTranslationSystem == .legacy &&
                                              speculationAllowed && flag("translateAhead", true)) ? true : nil,
                            extraReadReasons: TranslationHotPathAB.confirmationReadReasons ? true : nil,
-                           dropDuplicateLines: TranslationHotPathAB.ocrDuplicateFilter ? true : nil))
+                           dropDuplicateLines: TranslationHotPathAB.ocrDuplicateFilter ? true : nil,
+                           pixelManyLines: TranslationHotPathAB.pixelManyLines ? true : nil))
     }
 
     /// Invalidate suspended work before changing language, capture state, or settings.

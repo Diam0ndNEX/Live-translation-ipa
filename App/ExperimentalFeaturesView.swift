@@ -48,6 +48,8 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("finishRunningCaption") private var finishRunningCaption = true
     @AppStorage("ocrDuplicateFilter") private var ocrDuplicateFilter = true
     @AppStorage("streamLegacyCalls") private var streamLegacyCalls = false
+    @AppStorage("pixelManyLines") private var pixelManyLines = true
+    @AppStorage("captionLineSpeculation") private var captionLineSpeculation = true
     @AppStorage("independentCaptureHeartbeat") private var independentCaptureHeartbeat = true
 
     // Previous opt-in Smart pipeline controls are experimental, not core defaults.
@@ -180,6 +182,14 @@ struct ExperimentalFeaturesView: View {
                     explanation: "Legacy only. Off by default since 2.5.3 (no gain in the 2.5.2 device run). On: every live translation uses Apple's streaming batch call, which Apple documents as returning sooner than the all-at-once call. Same text, same model. Off: single-sentence captions use the all-at-once call, as in 2.4.0. Unverified effect.",
                     enabled: $streamLegacyCalls)
                 ExperimentalOption(
+                    title: "Pixel check for up to 24 lines",
+                    explanation: "Both modes. On (default, new in 2.5.4): the check that confirms a caption from unchanged pixels, without a second OCR read (about 170 ms), covers up to 24 lines instead of 8, and judges each line with its own tolerance. Before, text elsewhere on the screen could switch the check off for a short caption. A changed line still sends the caption to a normal second read. Same text read and translated. Off: 8 lines, as in 2.5.3. Unverified effect.",
+                    enabled: $pixelManyLines)
+                ExperimentalOption(
+                    title: "Early translation judged on caption lines",
+                    explanation: "Legacy only. On (default, new in 2.5.4): whether a first reading may start its early translation is decided from the lines that make up the text to translate, not from every line on the screen, so a menu or logo with low confidence no longer blocks it. The confidence limit itself is unchanged. Same model, same wording; an early result is still used only when the confirmed text matches. Off: every line counts, as in 2.5.3. Unverified effect.",
+                    enabled: $captionLineSpeculation)
+                ExperimentalOption(
                     title: "Independent capture heartbeat",
                     explanation: "All modes. Off: ScreenLingo decides capture has stopped after 5 seconds without a message, and the capture extension only sends its keep-alive while screen frames arrive. On (default since 2.5.2): the extension also sends a small keep-alive from a timer, but only when 1.5 seconds have passed without any other message, so with normal frames nothing extra is sent. Meant for a false \"stopped\" while the screen-recording icon is still on. Does not change reading, confirmation or translation. Unverified effect.",
                     enabled: $independentCaptureHeartbeat)
@@ -241,7 +251,7 @@ struct ExperimentalFeaturesView: View {
                 "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy",
                 "backgroundAvailabilityRefresh", "legacyConfirmedOwnLane", "independentCaptureHeartbeat",
                 "deferArmedSpeculation", "legacyEagerSpeculation", "finishRunningCaption",
-                "ocrDuplicateFilter", "streamLegacyCalls",
+                "ocrDuplicateFilter", "streamLegacyCalls", "pixelManyLines", "captionLineSpeculation",
                 "warmAtCaptureStart", "reportStoredSessionTotals", "confirmationReadReasons", "modelLengthBuckets",
                 "trustedCaptionBand", "legacyHeadStart", "quietRewarm"
             ])

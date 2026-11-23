@@ -1236,6 +1236,25 @@ do {
     check(PixelConfirmation.samplePoints(lines: eight)?.count == 8 * PixelConfirmation.columns * PixelConfirmation.rows, "Eight lines are fingerprinted")
     let nine = Array(repeating: (x: 0.5, y: 0.2, w: 0.6, h: 0.05), count: 9)
     check(PixelConfirmation.samplePoints(lines: nine) == nil, "More than eight lines -> OCR")
+    // 2.5.4: with the many-lines switch up to 24 lines are fingerprinted, each judged with its own tolerance.
+    let twentyFour = Array(repeating: (x: 0.5, y: 0.2, w: 0.6, h: 0.05), count: 24)
+    let twentyFive = Array(repeating: (x: 0.5, y: 0.2, w: 0.6, h: 0.05), count: 25)
+    check(PixelConfirmation.samplePoints(lines: twentyFour, allowMany: true)?.count == 24 * PixelConfirmation.columns * PixelConfirmation.rows, "Twenty-four lines are fingerprinted when allowed")
+    check(PixelConfirmation.samplePoints(lines: nine, allowMany: true) != nil, "Nine lines are fingerprinted when allowed")
+    check(PixelConfirmation.samplePoints(lines: twentyFive, allowMany: true) == nil, "More than 24 lines -> OCR")
+    let lineSize = PixelConfirmation.columns * PixelConfirmation.rows
+    var tenLines = [UInt8](repeating: 110, count: 10 * lineSize)
+    for index in tenLines.indices where index % 4 == 0 { tenLines[index] = 235 }
+    if let tenPrint = PixelConfirmation.fingerprint(tenLines) {
+        check(PixelConfirmation.matches(tenPrint, tenLines), "Ten identical lines confirm")
+        var oneEach = tenLines
+        for line in 0..<10 { oneEach[line * lineSize] = 110 }
+        check(PixelConfirmation.matches(tenPrint, oneEach), "One lost stroke in each of ten lines is tolerated")
+        var oneLineChanged = tenLines
+        var flipped = 0
+        for index in stride(from: 0, to: lineSize, by: 4) where flipped < 3 { oneLineChanged[index] = 110; flipped += 1 }
+        check(!PixelConfirmation.matches(tenPrint, oneLineChanged), "Three lost strokes in one of ten lines do not confirm")
+    } else { check(false, "Ten lines of text have a fingerprint") }
     // 2.5.1: the tolerance no longer grows without limit with the amount of ink.
     var wide = [UInt8](repeating: 120, count: 3000)
     for index in stride(from: 0, to: 3000, by: 3) { wide[index] = 240 }

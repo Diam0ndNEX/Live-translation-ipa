@@ -92,8 +92,8 @@ assert "maximumTotalBytes: Int = Int.max" in store and "maximumUnpinnedRuns: Int
 assert "100 MB" not in read_source("TestRunViews")
 
 # Version 2.2.3 build 106 in the places CI checks.
-assert 'static let version = "2.5.3"' in shared and "static let build = 121" in shared
-assert project.count('"2.5.3"') == 3 and project.count('"121"') == 3
+assert 'static let version = "2.5.4"' in shared and "static let build = 122" in shared
+assert project.count('"2.5.4"') == 3 and project.count('"122"') == 3
 assert '("2.2.3", "Build 106:' in shared
 assert '("2.2.2", "Build 105:' in shared, "older changelog entries stay"
 print("v2.2.3 source contracts passed: L5 switch (default off, pinned), unchanged request path and TTL, toggle, Fast OCR switch, version")
