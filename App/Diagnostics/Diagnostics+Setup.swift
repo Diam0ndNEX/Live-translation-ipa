@@ -274,7 +274,9 @@ extension Diagnostics {
             "legacy_queued_speculation_superseded", // 2.2.1 (E10): was emitted by the engine but dropped here
             "legacy_confirmed_own_lane", "legacy_detached_speculation_released", // 2.2.3 (L2)
             "legacy_confirmed_overlap_ms", // 2.4.0
-            "legacy_eager_speculation_queued" // 2.5.1
+            "legacy_eager_speculation_queued", // 2.5.1
+            "model_call_hung", "model_call_late_return", "stall_lane_reset", "stall_session_reset", // 2.6.0
+            "stall_link_reset", "stall_unhealthy", "stall_recovered"
         ]
         guard allowed.contains(reason) else { return }
         if modeActiveSystem == "legacy", let candidate {
@@ -288,7 +290,8 @@ extension Diagnostics {
             if reason == "speculative_model_completed" { legacyModeEvent(candidate, reason: "speculative_service_ms", duration: durationMs) }
         }
         if ["model_batch_completed", "confirmed_model_completed", "speculative_model_completed", "speculative_stop_released", "legacy_detached_speculation_released",
-            "legacy_confirmed_after_switch", "legacy_confirmed_no_switch", "legacy_confirmed_overlap_ms"].contains(reason),
+            "legacy_confirmed_after_switch", "legacy_confirmed_no_switch", "legacy_confirmed_overlap_ms",
+            "model_call_hung", "model_call_late_return", "stall_recovered"].contains(reason),
            let durationMs, durationMs.isFinite, durationMs >= 0 {
             modelTimingSamples[reason, default: []].append(durationMs)
             if modelTimingSamples[reason, default: []].count > 1200 {

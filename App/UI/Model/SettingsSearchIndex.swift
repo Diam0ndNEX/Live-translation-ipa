@@ -43,6 +43,7 @@ enum SettingsSearchIndex {
         SettingsSearchEntry(label: "Pixel check for up to 24 lines", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Pixel-verified confirmation", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Re-warm after a quiet stretch", page: .experimental, pageTitle: "Experimental features"),
+        SettingsSearchEntry(label: "Recover when translation stops", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Refresh language check in background", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Report: keep totals of saved runs", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Report: model time by caption length", page: .experimental, pageTitle: "Experimental features"),

@@ -246,7 +246,7 @@ enum CombinedDiagnosticReport {
                           ("heartbeatAB", "independent capture heartbeat"), ("armedDeferAB", "deferred early start")]
                 .filter { s[$0.0] == "on" }.map { $0.1 }
             // 2.5.0: items A to F and the quiet re-warm (default on; a run saved before 2.5.0 has none).
-            let v250On = (TranslationHotPathAB.v250ReportLabels + TranslationHotPathAB.v251ReportLabels + TranslationHotPathAB.v254ReportLabels + TranslationHotPathAB.v255ReportLabels + TranslationHotPathAB.v256ReportLabels)
+            let v250On = (TranslationHotPathAB.v250ReportLabels + TranslationHotPathAB.v251ReportLabels + TranslationHotPathAB.v254ReportLabels + TranslationHotPathAB.v255ReportLabels + TranslationHotPathAB.v256ReportLabels + TranslationHotPathAB.v260ReportLabels)
                 .filter { s[$0.key] == "on" }.map { $0.label }
             let armsText = (armsOn + v250On).isEmpty ? "none" : (armsOn + v250On).joined(separator: ", ")
             out.append("| \(labels[i]) | \(s["hotPathAB"] ?? "?") | \(s["detailedCollection"] ?? "?")\(s["detailSuspended"] == "true" ? " (suspended: thermal)" : "") | \(s["thermalStart"] ?? "?")/\(s["thermalEnd"] ?? "?")/\(s["thermalMax"] ?? "?") | \(s["focusedCaptionOCR"] ?? "?")/\(s["strictCaptionIdentity"] ?? "?") | \(session.counters["identicalFrameHolds", default: 0]) | \(session.counters["manualTranslations", default: 0]) | \(ms(session.distributions["memoryLookupWaitMs"]?.p50))/\(ms(session.distributions["memoryLookupWaitMs"]?.p95)) | \(ms(session.distributions["memoryHealthMs"]?.p50))/\(ms(session.distributions["memoryHealthMs"]?.p95)) | \(memoryTimeoutShare(session)) | \(armsText) |")
@@ -344,6 +344,16 @@ enum CombinedDiagnosticReport {
         for (i, session) in selected.enumerated() {
             let c = session.counters
             out.append("| \(labels[i]) | \(c["growthSteps", default: 0]) | \(c["growthHeld", default: 0]) | \(c["growthIntermediate", default: 0]) | \(c["growthReleased", default: 0]) | \(c["growthDropped", default: 0]) | \(c["growthSpecSkips", default: 0]) |")
+        }
+        out.append("")
+        out.append("Stalls (2.6.0; whole-session counts, length in ms P50/P95 of stalls that ended):")
+        out.append("")
+        out.append("| | model calls abandoned (no answer in time) | returned later | lane resets | session resets | link resets | gave up (unhealthy) | stalls that ended | stall length |")
+        out.append("|---|---|---|---|---|---|---|---|---|")
+        for (i, session) in selected.enumerated() {
+            let c = session.counters
+            let d = session.distributions
+            out.append("| \(labels[i]) | \(c["stallHangs", default: 0]) | \(c["stallLateReturns", default: 0]) | \(c["stallLaneResets", default: 0]) | \(c["stallSessionResets", default: 0]) | \(c["stallLinkResets", default: 0]) | \(c["stallUnhealthy", default: 0]) | \(c["stallRecovered", default: 0]) | \(ms(d["stallLengthMs"]?.p50))/\(ms(d["stallLengthMs"]?.p95)) |")
         }
         out.append("")
         out.append("Model call ms by characters translated (2.5.0; n, P50/P95):")

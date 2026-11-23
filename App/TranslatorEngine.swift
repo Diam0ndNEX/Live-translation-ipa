@@ -771,6 +771,10 @@ final class TranslatorEngine: ObservableObject {
     var growthHeldReceivedAt = Date.distantPast
     var growthHeldSince: Date?
     var growthTask: Task<Void, Never>?
+    // 2.6.0: stall recovery (TranslatorEngine+Stall.swift).
+    var modelStall = ModelStallLimit()
+    var stallLadder = StallLadder()
+    var laneProgressAt = ProcessInfo.processInfo.systemUptime
     var specPacket: Packet?
     var currentSpeculativeText: String?
     var subtitleRegions = SubtitleRegions()
