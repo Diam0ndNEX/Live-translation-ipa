@@ -35,6 +35,7 @@ extension DiagnosticExportWriter {
                 "legacy_idle_deferred", "app_interface_visible", "external_capture_period", "app_started", "capture_config_changed",
                 "capture_idle", "capture_live", "capture_paused", "capture_frozen",
                 "legacy_queued_speculation_superseded", "legacy_speculation_low_confidence",
+                "growing_caption_held", "legacy_speculation_growing",
                 "legacy_speculation_saved_memory_backoff", "legacy_speculation_low_yield_backoff",
                 // found by guard C2 in 2.2.1: emitted by the engine, accepted by Diagnostics, dropped here
                 "legacy_shared_session_used", "speculative_lease_conflict",
@@ -77,7 +78,7 @@ extension DiagnosticExportWriter {
             // 2.5.1
             "eagerSpeculationAB", "finishRunningAB", "duplicateLinesAB", "streamCallsAB",
             // 2.5.4
-            "manyLinesAB", "captionLinesAB", "captionJoinAB",
+            "manyLinesAB", "captionLinesAB", "captionJoinAB", "growthSettleAB",
             // 2.2.1 (D4, E12)
             "idleMinutes", "sessionLimit", "autoOpenPiP", "winSize", "textSize", "pipFont", "theme", "showOriginal",
             "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding",

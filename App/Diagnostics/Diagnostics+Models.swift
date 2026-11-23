@@ -161,6 +161,7 @@ struct Stats: Equatable {
     var legacyLowConfidenceSkips = 0, legacyBusySpeculationSkips = 0
     var legacyDuplicateSpeculationSkips = 0
     var captionMultiBlock = 0, captionJoined = 0
+    var growthSteps = 0, growthHeld = 0, growthIntermediate = 0, growthReleased = 0, growthDropped = 0, growthSpecSkips = 0
     var slowTailEnqueues = 0
     var manualTranslations = 0
     var identicalFrameHolds = 0 // 2.2.1 (E9)

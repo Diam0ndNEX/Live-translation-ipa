@@ -765,6 +765,12 @@ final class TranslatorEngine: ObservableObject {
     var deferredConfirmedPacket: Packet?
     var confirmedHandoffDeadlineTask: Task<Void, Never>?
     var deferredConfirmedReceivedAt = Date.distantPast
+    // 2.5.6: growing-subtitle hold (TranslatorEngine+Growth.swift).
+    var captionGrowth = CaptionGrowthTracker()
+    var growthHeldPacket: Packet?
+    var growthHeldReceivedAt = Date.distantPast
+    var growthHeldSince: Date?
+    var growthTask: Task<Void, Never>?
     var specPacket: Packet?
     var currentSpeculativeText: String?
     var subtitleRegions = SubtitleRegions()

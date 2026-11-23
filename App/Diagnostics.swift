@@ -287,7 +287,7 @@ final class Diagnostics: ObservableObject {
         if TranslationHotPathAB.deferArmedSpeculation { settings["armedDeferAB"] = "on" }
         // 2.5.0: items A to F and the quiet re-warm, all default ON, written only when ON.
         // 2.5.1: the same for the 2.5.1 switches.
-        for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches
+        for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches + TranslationHotPathAB.v256Switches
             where (UserDefaults.standard.object(forKey: item.pinned) as? Bool) ?? true {
             settings[item.report] = "on"
         }
@@ -343,6 +343,12 @@ final class Diagnostics: ObservableObject {
         counters["legacyDuplicateSpeculationSkips"] = s.legacyDuplicateSpeculationSkips
         counters["captionMultiBlock"] = s.captionMultiBlock
         counters["captionJoined"] = s.captionJoined
+        counters["growthSteps"] = s.growthSteps
+        counters["growthHeld"] = s.growthHeld
+        counters["growthIntermediate"] = s.growthIntermediate
+        counters["growthReleased"] = s.growthReleased
+        counters["growthDropped"] = s.growthDropped
+        counters["growthSpecSkips"] = s.growthSpecSkips
         counters["emptyOCRPasses"] = s.emptyOCRPasses
         counters["runCheckpointCaptureMicros"] = checkpointCaptureMicros
         counters["captureRestarts"] = captureRestartCount

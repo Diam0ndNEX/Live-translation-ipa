@@ -122,7 +122,8 @@ extension Diagnostics {
             "changing_group_preferred", "dominant_group", "queue_replaced",
             "confirmed", "speculative", "ready", "enqueued", "cancelled",
             // 2.2.1 (E10): why Legacy declined a speculation (the engine already emitted these; the allowlist dropped them)
-            "legacy_speculation_low_confidence", "legacy_speculation_saved_memory_backoff", "legacy_speculation_low_yield_backoff"
+            "legacy_speculation_low_confidence", "legacy_speculation_saved_memory_backoff", "legacy_speculation_low_yield_backoff",
+            "growing_caption_held", "legacy_speculation_growing"
         ]
         guard allowedStages.contains(stage), allowedReasons.contains(reason) else { return }
         let token = beginRecorder(); defer { endRecorder(token) }

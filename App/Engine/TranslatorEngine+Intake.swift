@@ -137,6 +137,10 @@ extension TranslatorEngine {
             }
             return
         }
+        // 2.5.6: a subtitle that is still growing waits until it stops, then only its last state is handled
+        // (Legacy, switch growthSettle). A held reading is replayed once, so the replay skips this step.
+        if !replayed, p.stable != false,
+           holdGrowingCaption(p, text: candidateText, receivedAt: receivedAt, now: now) { return }
         let equivalentActiveCaption = SubtitleAcquisitionPolicy.isSameUnpresentedCaption(
             activeConfirmed: activeCandidateConfirmed,
             activePresented: activeCandidatePresented,
@@ -249,6 +253,14 @@ extension TranslatorEngine {
             if p.pixelArmed == true, TranslationHotPathAB.deferArmedSpeculation {
                 if diag.enabled { diag.s.specSkipped += 1 }
                 if let candidate = p.candidateID { diag.legacyModeEvent(candidate, reason: "speculation_deferred_armed") }
+                return
+            }
+            // 2.5.6: a first reading that only adds text to the last confirmed one is still growing; the last
+            // state is translated after the wait, so no translation is started for the steps in between.
+            if isGrowingFirstReading(candidateText, now: now) {
+                if diag.enabled { diag.s.specSkipped += 1; diag.s.growthSpecSkips += 1 }
+                diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
+                    stage: "stability", reason: "legacy_speculation_growing")
                 return
             }
             if speculationAllowed && flag("translateAhead", true) {
