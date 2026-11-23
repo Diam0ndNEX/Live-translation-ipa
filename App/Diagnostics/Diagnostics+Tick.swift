@@ -118,6 +118,8 @@ extension Diagnostics {
             "legacyLowConfidenceSkips": s.legacyLowConfidenceSkips,
             "legacyBusySpeculationSkips": s.legacyBusySpeculationSkips,
             "legacyDuplicateSpeculationSkips": s.legacyDuplicateSpeculationSkips,
+            "captionMultiBlock": s.captionMultiBlock,
+            "captionJoined": s.captionJoined,
             "slowTailEnqueues": s.slowTailEnqueues,
             "manualTranslations": s.manualTranslations,
             "identicalFrameHolds": s.identicalFrameHolds,

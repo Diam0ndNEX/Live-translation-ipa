@@ -246,7 +246,7 @@ enum CombinedDiagnosticReport {
                           ("heartbeatAB", "independent capture heartbeat"), ("armedDeferAB", "deferred early start")]
                 .filter { s[$0.0] == "on" }.map { $0.1 }
             // 2.5.0: items A to F and the quiet re-warm (default on; a run saved before 2.5.0 has none).
-            let v250On = (TranslationHotPathAB.v250ReportLabels + TranslationHotPathAB.v251ReportLabels + TranslationHotPathAB.v254ReportLabels)
+            let v250On = (TranslationHotPathAB.v250ReportLabels + TranslationHotPathAB.v251ReportLabels + TranslationHotPathAB.v254ReportLabels + TranslationHotPathAB.v255ReportLabels)
                 .filter { s[$0.key] == "on" }.map { $0.label }
             let armsText = (armsOn + v250On).isEmpty ? "none" : (armsOn + v250On).joined(separator: ", ")
             out.append("| \(labels[i]) | \(s["hotPathAB"] ?? "?") | \(s["detailedCollection"] ?? "?")\(s["detailSuspended"] == "true" ? " (suspended: thermal)" : "") | \(s["thermalStart"] ?? "?")/\(s["thermalEnd"] ?? "?")/\(s["thermalMax"] ?? "?") | \(s["focusedCaptionOCR"] ?? "?")/\(s["strictCaptionIdentity"] ?? "?") | \(session.counters["identicalFrameHolds", default: 0]) | \(session.counters["manualTranslations", default: 0]) | \(ms(session.distributions["memoryLookupWaitMs"]?.p50))/\(ms(session.distributions["memoryLookupWaitMs"]?.p95)) | \(ms(session.distributions["memoryHealthMs"]?.p50))/\(ms(session.distributions["memoryHealthMs"]?.p95)) | \(memoryTimeoutShare(session)) | \(armsText) |")
@@ -326,6 +326,15 @@ enum CombinedDiagnosticReport {
         for (i, session) in selected.enumerated() {
             let c = session.counters
             out.append("| \(labels[i]) | \(c["legacyLowConfidenceSkips", default: 0]) | \(c["legacyAdaptiveLowYieldSkips", default: 0]) | \(c["legacyAdaptiveSavedSkips", default: 0]) | \(c["legacyBusySpeculationSkips", default: 0]) | \(c["legacyDuplicateSpeculationSkips", default: 0]) | \(c["earlyDeferred", default: 0]) |")
+        }
+        out.append("")
+        out.append("Text blocks per confirmed reading (2.5.5; whole-session counts):")
+        out.append("")
+        out.append("| | readings with several text blocks | joined into one text |")
+        out.append("|---|---|---|")
+        for (i, session) in selected.enumerated() {
+            let c = session.counters
+            out.append("| \(labels[i]) | \(c["captionMultiBlock", default: 0]) | \(c["captionJoined", default: 0]) |")
         }
         out.append("")
         out.append("Model call ms by characters translated (2.5.0; n, P50/P95):")
