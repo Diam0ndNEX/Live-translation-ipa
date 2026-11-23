@@ -138,6 +138,7 @@ extension Diagnostics {
             "missNew": s.missNew,
             "missNearMiss": s.missNearMiss,
             "missRepeatedExact": s.missRepeatedExact,
+            "guardTrips": eventTotals["switch_guard_tripped", default: 0],
             "stallHangs": eventTotals["model_call_hung", default: 0],
             "stallLateReturns": eventTotals["model_call_late_return", default: 0],
             "stallLaneResets": eventTotals["stall_lane_reset", default: 0],

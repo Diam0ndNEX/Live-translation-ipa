@@ -14,7 +14,7 @@ extension TranslationHotPathAB {
     /// with more text at the end (a subtitle that is typed or faded in), it waits until the text has stopped
     /// growing, then only the last state is translated. Nothing waits when the text is not growing.
     static var growthSettle: Bool {
-        (UserDefaults.standard.object(forKey: "growthSettlePinned") as? Bool) ?? true
+        !sessionOff.contains("growthSettle") && ((UserDefaults.standard.object(forKey: "growthSettlePinned") as? Bool) ?? true)
     }
     static let v256ReportLabels: [(key: String, label: String)] = [
         ("growthSettleAB", "growing subtitles settle before translation")

@@ -21,6 +21,24 @@ extension TranslationHotPathAB {
     ]
 }
 
+extension TranslationHotPathAB {
+    /// Switches that a guard turned off for the rest of this session. Never saved: the next session starts clean
+    /// (pinSettings clears it) and the setting the owner chose is not changed.
+    static var sessionOff: Set<String> = []
+}
+
+/// Guards judge a switch from numbers the session measures about itself. Fixed limits, stated in the report.
+enum SwitchGuard {
+    static let growthMinimumHeld = 12
+    static let growthDroppedShare = 0.6
+
+    /// Growing-subtitle wait: most held readings were dropped because the screen had already moved on, so the wait
+    /// delays captions that are then never shown at all.
+    static func growthShouldTrip(held: Int, dropped: Int) -> Bool {
+        held >= growthMinimumHeld && Double(dropped) >= growthDroppedShare * Double(held)
+    }
+}
+
 enum LooseReuse {
     /// A shorter unit is too ambiguous to match without its punctuation or case.
     static let minimumCharacters = 8

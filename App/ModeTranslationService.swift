@@ -232,7 +232,7 @@ final class ModeTranslationService {
             self.activity.advance(activityID, to: .cancelling)
             report("model_timeout", nil)
         }
-        let outcome = await withTaskCancellationHandler(operation: { await call.value }, onCancel: {
+        let outcome = await withTaskCancellationHandler(operation: { await ModeTranslationService.awaitCall(call) }, onCancel: {
             Task { @MainActor in
                 guard lane.ticket == ticket, lane.busy else { return }
                 lane.invalidated = true; lane.sharedDefaultLease.requestCancellation(); session.cancel()

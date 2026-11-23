@@ -165,6 +165,7 @@ enum TranslationHotPathAB {
 
     /// Called when a session starts: the settings become the values the hot path reads.
     static func pinSettings(_ defaults: UserDefaults = .standard) {
+        sessionOff.removeAll() // 2.6.1: a guard only lasts for the session in which it tripped
         LegacyV251Defaults.applyOnce(defaults)
         defaults.set((defaults.object(forKey: planSettingKey) as? Bool) ?? true, forKey: planPinnedKey)
         defaults.set((defaults.object(forKey: unitsSettingKey) as? Bool) ?? true, forKey: unitsPinnedKey)

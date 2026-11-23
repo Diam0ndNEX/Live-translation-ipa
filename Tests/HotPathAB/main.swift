@@ -381,6 +381,17 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             precondition(LooseReuse.adapt(storedSource: "Hello there.", storedTranslation: "Ola.", requestedSource: "hello there!") == "Ola!", "2.6.1: punctuation follows the new source")
             precondition(LooseReuse.adapt(storedSource: "Hello there?!", storedTranslation: "Ola?!", requestedSource: "hello there") == "Ola", "2.6.1: no closing punctuation in the new source")
             precondition(LooseReuse.adapt(storedSource: "Hello there.", storedTranslation: "Ola.", requestedSource: "HELLO THERE.") == "Ola.", "2.6.1: same punctuation keeps the saved text")
+            // 2.6.1: a guard turns a switch off for the session only, and pinning at session start clears it.
+            precondition(!SwitchGuard.growthShouldTrip(held: 11, dropped: 11), "2.6.1: too few held readings to judge")
+            precondition(!SwitchGuard.growthShouldTrip(held: 20, dropped: 11), "2.6.1: 55% dropped is below the limit")
+            precondition(SwitchGuard.growthShouldTrip(held: 20, dropped: 12), "2.6.1: 60% dropped trips the guard")
+            TranslationHotPathAB.pinSettings()
+            precondition(TranslationHotPathAB.growthSettle, "2.6.1: the switch is on before the guard trips")
+            TranslationHotPathAB.sessionOff.insert("growthSettle")
+            precondition(!TranslationHotPathAB.growthSettle && TranslationHotPathAB.captionJoin, "2.6.1: the guard turns off that switch only")
+            precondition((standard.object(forKey: "growthSettlePinned") as? Bool) == true, "2.6.1: the pinned setting is not changed")
+            TranslationHotPathAB.pinSettings()
+            precondition(TranslationHotPathAB.growthSettle && TranslationHotPathAB.sessionOff.isEmpty, "2.6.1: a new session starts clean")
             // The growth tracker recognises a revealed subtitle whatever it looks like: a label, a bracket, no
             // punctuation, another script. One rule for all, no layout or punctuation exception.
             let revealed = ["Maria: the quick brown fox jumps over the lazy dog",

@@ -442,3 +442,14 @@ assert '@AppStorage("looseMemoryReuse") private var looseMemoryReuse = true' in 
 assert archive.count('"looseMemoryReuseAB"') == 2 and 'v261ReportLabels' in archive and '"looseHits"' in archive
 assert 'static let version = "2.6.1"' in shared and 'static let build = 126' in shared and '("2.6.1", "Build 126:' in shared
 print('v2.6.1 source contracts passed: loose memory reuse, schema, switch, counters, version')
+
+# ---- 2.6.1: guard for the growing-subtitle wait; abandon for a Low Latency call that ignores cancel. ----
+assert 'enum SwitchGuard' in v261 and 'static var sessionOff: Set<String> = []' in v261
+assert '!sessionOff.contains("growthSettle")' in read('Shared/TranslationSystem+V256.swift')
+assert 'sessionOff.removeAll()' in read('Shared/SharedTranslationWork.swift')
+assert 'func evaluateSwitchGuards()' in read_source('TranslatorEngine') and 'evaluateSwitchGuards()' in function(read_source('TranslatorEngine'), 'tick')
+assert '"switch_guard_tripped"' in read('App/Diagnostics/Diagnostics+Setup.swift') and '"guardTrips"' in archive
+lowlat261 = read('App/Engine/ModeTranslationService+Stall.swift')
+assert 'static func awaitCall(' in lowlat261 and 'ModelCallRace.run(limit: abandonAfterSeconds)' in lowlat261 and 'guard TranslationHotPathAB.stallWatchdog else { return await call.value }' in lowlat261
+assert 'ModeTranslationService.awaitCall(call)' in read('App/ModeTranslationService.swift')
+print('v2.6.1 guard and Low Latency abandon contracts passed')

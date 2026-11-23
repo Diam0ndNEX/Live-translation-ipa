@@ -34,6 +34,11 @@ extension DiagnosticIssueDetector {
                 "The capture was restarted during the run. Check the stall rows and the transport gaps around those moments.")
         }
 
+        if n("guardTrips") > 0 {
+            add("switch_guard_tripped", "observed", n("guardTrips"),
+                "A guard turned off the growing-subtitle wait for the rest of this run because at least \(SwitchGuard.growthMinimumHeld) readings were held and \(Int(SwitchGuard.growthDroppedShare * 100))% or more of them were dropped. The saved setting was not changed. Later parts of this run are 2.5.5 behaviour for growing subtitles.")
+        }
+
         // Growing subtitles (2.5.6).
         if n("growthHeld") >= 10 && percent(n("growthDropped"), n("growthHeld")) >= 25 {
             add("growth_hold_often_dropped", "suspected", n("growthDropped"),

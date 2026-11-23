@@ -136,6 +136,7 @@ struct DiagnosticIntervalBucket: Codable {
             "growthSteps", "growthHeld", "growthIntermediate", "growthReleased", "growthDropped", "growthSpecSkips",
             "qShown", "qReshownSame", "qRewritten", "qUnchanged", "qDigitsLost", "qLengthOutlier", "qRepeatedWord", "qFlaggedSaved",
             "missNew", "missNearMiss", "missRepeatedExact", "looseHits",
+            "guardTrips",
             "stallHangs", "stallLateReturns", "stallLaneResets", "stallSessionResets", "stallLinkResets", "stallUnhealthy", "stallRecovered",
         "specPreemptionRequested", "specMatchingConfirmation",
         "specRetainedUnits", "completedConfirmedUnitsRetained", "temporaryMemoryHits",
