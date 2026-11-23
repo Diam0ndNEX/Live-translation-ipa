@@ -10,7 +10,7 @@ Status: rewritten for 2.3.9 (build 116), re-read against the code for 2.4.0 (bui
 | App/Diagnostics.swift | 700 | 9 |
 | BroadcastExtension/SampleHandler.swift | 650 | 5 |
 | App/TranslationMemoryStore.swift | 450 | 9 |
-| App/DiagnosticArchive.swift | 400 | 9 |
+| App/DiagnosticArchive.swift | 400 | 10 |
 | App/DiagnosticsDashboard.swift | 350 | 5 |
 | App/SettingsViews.swift | 300 | 2 |
 | App/ModeTranslationService.swift | 300 | 3 |
