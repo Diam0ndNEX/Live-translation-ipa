@@ -305,7 +305,8 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
                          "2.6.0: a stall is never declared before the model call limit has passed")
             // The race: a call that returns, a call that never returns (ignores cancellation), a late return.
             final class Box: @unchecked Sendable { var outcome = ""; var late = 0.0 }
-            func race(limit: Double, _ work: @escaping () async throws -> Int, box: Box) {
+            // @Sendable: a closure written here would otherwise run on the main actor, which the test thread blocks below.
+            func race(limit: Double, _ work: @escaping @Sendable () async throws -> Int, box: Box) {
                 let done = DispatchSemaphore(value: 0)
                 // Detached: the test thread blocks below, so the race must not need the main actor.
                 Task.detached {
@@ -321,16 +322,16 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             }
             let prompt = Box()
             race(limit: 2, { 42 }, box: prompt)
-            precondition(prompt.outcome == "value 42", "2.6.0: a call that returns gives its value")
+            precondition(prompt.outcome == "value 42", "2.6.0: a call that returns gives its value, got \(prompt.outcome)")
             let hung = Box()
             race(limit: 0.2, { await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }; return 1 }, box: hung)
-            precondition(hung.outcome == "timedOut", "2.6.0: a call that never returns is abandoned at the limit")
+            precondition(hung.outcome == "timedOut", "2.6.0: a call that never returns is abandoned at the limit, got \(hung.outcome)")
             let slowCall = Box()
             race(limit: 0.1, { try await Task.sleep(nanoseconds: 400_000_000); return 7 }, box: slowCall)
-            precondition(slowCall.outcome == "timedOut", "2.6.0: a call slower than the limit is abandoned")
+            precondition(slowCall.outcome == "timedOut", "2.6.0: a call slower than the limit is abandoned, got \(slowCall.outcome)")
             let failing = Box()
             race(limit: 2, { () async throws -> Int in throw CancellationError() }, box: failing)
-            precondition(failing.outcome == "error", "2.6.0: a failing call fails, it is not a timeout")
+            precondition(failing.outcome == "error", "2.6.0: a failing call fails, it is not a timeout, got \(failing.outcome)")
             let gate = ResumeGate()
             precondition(gate.claim() && !gate.claim() && gate.isClaimed, "2.6.0: only one outcome gets through")
             // Automatic quality signals work on the text alone.
