@@ -270,7 +270,8 @@ struct DiagnosticsBody: View {
                   (TranslationHotPathAB.streamLegacyCalls, "streamed Legacy calls"),
                   (TranslationHotPathAB.pixelManyLines, "pixel check up to 24 lines"),
                   (TranslationHotPathAB.captionLineSpeculation, "early translation judged on caption lines"),
-                  (TranslationHotPathAB.captionJoin, "text blocks of a subtitle translated together")].filter { $0.0 }.map { $0.1 }
+                  (TranslationHotPathAB.captionJoin, "text blocks of a subtitle translated together"),
+                  (TranslationHotPathAB.growthSettle, "growing subtitles settle before translation")].filter { $0.0 }.map { $0.1 }
         return on.isEmpty ? "Test switches on: none." : "Test switches on: " + on.joined(separator: ", ") + "."
     }
 

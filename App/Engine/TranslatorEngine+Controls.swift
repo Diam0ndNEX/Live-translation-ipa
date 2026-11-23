@@ -232,6 +232,7 @@ extension TranslatorEngine {
         deferredConfirmedPacket = nil
         confirmedHandoffDeadlineTask?.cancel()
         confirmedHandoffDeadlineTask = nil
+        growthReset()
         activeCandidateID = nil; activeCandidateText = ""
         movieTextFocus.reset()
         activeCandidateConfirmed = false; activeCandidatePresented = false

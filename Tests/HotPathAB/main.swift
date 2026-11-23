@@ -234,6 +234,37 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             let longA = String(repeating: "a", count: 150), longB = String(repeating: "b", count: 100)
             precondition(CaptionJoin.joined([longA, longB]) == [longA, longB], "2.5.5: a long result is not joined")
 
+            // 2.5.6: the growth switch defaults to on and turns off alone; growth is recognised from the text only.
+            TranslationHotPathAB.pinSettings()
+            precondition(TranslationHotPathAB.growthSettle, "2.5.6 switch defaults to on")
+            standard.set(false, forKey: "growthSettle")
+            precondition(TranslationHotPathAB.growthSettle, "the 2.5.6 switch does not apply mid-run")
+            TranslationHotPathAB.pinSettings()
+            precondition(!TranslationHotPathAB.growthSettle && TranslationHotPathAB.captionJoin, "the 2.5.6 switch turns off alone")
+            standard.removeObject(forKey: "growthSettle")
+            for item in TranslationHotPathAB.v256Switches { standard.removeObject(forKey: item.pinned) }
+            for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey] { standard.removeObject(forKey: key) }
+            var growth = CaptionGrowthTracker()
+            precondition(growth.observe("ola tudo", at: 0) == .different, "2.5.6: the first reading is not growth")
+            precondition(growth.observe("ola tudo bem", at: 0.3) == .extended, "2.5.6: more text at the end is growth")
+            precondition(growth.observe("ola tudo bem", at: 0.4) == .same, "2.5.6: a repeat is not growth")
+            precondition(growth.observe("ola tudo bem com voce", at: 0.7) == .extended, "2.5.6: growth continues")
+            precondition(abs(growth.quietPeriod - 0.481) < 0.001, "2.5.6: the quiet period follows the observed pace")
+            precondition(abs(growth.wait(elapsed: 0) - 0.481) < 0.001 && abs(growth.wait(elapsed: 0.85) - 0.05) < 0.001,
+                         "2.5.6: the wait is capped by the total hold")
+            precondition(growth.observe("adeus amigo", at: 1.0) == .different, "2.5.6: another caption is not growth")
+            precondition(growth.wouldExtend("adeus amigo meu", at: 1.2) && !growth.wouldExtend("adeus amigo meu", at: 4.0),
+                         "2.5.6: an old reading is not the previous caption")
+            precondition(!CaptionGrowthTracker.extends("abc de", "xyz"), "2.5.6: very short text is not tracked")
+            var slow = CaptionGrowthTracker(), fast = CaptionGrowthTracker()
+            _ = slow.observe("abcd efgh", at: 0); _ = fast.observe("abcd efgh", at: 0)
+            for step in 1...7 {
+                _ = slow.observe("abcd efgh" + String(repeating: "x", count: step), at: Double(step) * 1.4)
+                _ = fast.observe("abcd efgh" + String(repeating: "x", count: step), at: Double(step) * 0.12)
+            }
+            precondition(slow.quietPeriod == CaptionGrowthTracker.maximumQuiet && fast.quietPeriod == CaptionGrowthTracker.minimumQuiet,
+                         "2.5.6: the wait adapts to the pace of the video within its limits")
+
             // 2.5.1: new Legacy defaults, the one-time reset of saved values, and the pure policies.
             for key in [LegacyV251Defaults.appliedKey, "legacyConfirmedOwnLanePinned", "deferArmedSpeculationPinned",
                         "legacyEagerSpeculationPinned"] { standard.removeObject(forKey: key) }
@@ -248,7 +279,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             precondition(TranslationHotPathAB.deferArmedSpeculation, "after the reset the toggle works again")
             for key in ["deferArmedSpeculation", "legacyConfirmedOwnLane", LegacyV251Defaults.appliedKey,
                         "legacyConfirmedOwnLanePinned", "deferArmedSpeculationPinned"] { standard.removeObject(forKey: key) }
-            for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches { standard.removeObject(forKey: item.pinned) }
+            for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches + TranslationHotPathAB.v256Switches { standard.removeObject(forKey: item.pinned) }
             for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey,
                         TranslationHotPathAB.availabilityRefreshPinnedKey, TranslationHotPathAB.independentHeartbeatPinnedKey] {
                 standard.removeObject(forKey: key)

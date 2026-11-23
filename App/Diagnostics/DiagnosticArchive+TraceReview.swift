@@ -40,6 +40,7 @@ enum DiagnosticTraceReview {
         "thermal_nominal", "thermal_fair", "thermal_serious", "thermal_critical", "detail_suspended_thermal", "pip_auto_open_skipped_not_active", "pip_start_unsupported", "pip_start_not_possible", "pip_start_not_hosted", "pip_start_failed", "pip_audio_session_failed",
         "confirmed", "speculative", "ready", "enqueued", "cancelled",
         "legacy_queued_speculation_superseded", "legacy_speculation_low_confidence",
+        "growing_caption_held", "legacy_speculation_growing",
         "legacy_eager_speculation_queued", // 2.5.1
         "legacy_speculation_saved_memory_backoff", "legacy_speculation_low_yield_backoff",
         // found by guard C2 in 2.2.1: recorded by Diagnostics but missing from the trace review

@@ -51,6 +51,7 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("pixelManyLines") private var pixelManyLines = true
     @AppStorage("captionLineSpeculation") private var captionLineSpeculation = true
     @AppStorage("captionJoin") private var captionJoin = true
+    @AppStorage("growthSettle") private var growthSettle = true
     @AppStorage("independentCaptureHeartbeat") private var independentCaptureHeartbeat = true
 
     // Previous opt-in Smart pipeline controls are experimental, not core defaults.
@@ -195,6 +196,10 @@ struct ExperimentalFeaturesView: View {
                     explanation: "Legacy only. On (default, new in 2.5.5): when the screen shows one subtitle in several pieces (a speaker name above the sentence, a bracketed line drawn in two places, a sentence with a large gap between its lines), the pieces are joined and translated as one text, so each piece has the context of the others. Before, every piece was translated alone, which could break the word order. CHANGES WHAT IS SENT TO THE TRANSLATOR, so the wording can differ from 2.5.4 for such subtitles. A text longer than 240 characters is not joined. Off: pieces are translated one by one, as in 2.5.4. Unverified effect.",
                     enabled: $captionJoin)
                 ExperimentalOption(
+                    title: "Growing subtitles settle before translation",
+                    explanation: "Legacy only. On (default, new in 2.5.6): when a subtitle is typed or faded in, so that each reading is the previous one with more text at the end, ScreenLingo waits until the text stops growing (a short, learned wait, at most 0.9 s in total) and translates only the last state, instead of translating and showing every step. Nothing waits when the text is not growing. CHANGES WHEN A CAPTION IS SHOWN: a growing subtitle appears a little later but is translated and shown once. Off: every step is translated, as in 2.5.5. Unverified effect.",
+                    enabled: $growthSettle)
+                ExperimentalOption(
                     title: "Independent capture heartbeat",
                     explanation: "All modes. Off: ScreenLingo decides capture has stopped after 5 seconds without a message, and the capture extension only sends its keep-alive while screen frames arrive. On (default since 2.5.2): the extension also sends a small keep-alive from a timer, but only when 1.5 seconds have passed without any other message, so with normal frames nothing extra is sent. Meant for a false \"stopped\" while the screen-recording icon is still on. Does not change reading, confirmation or translation. Unverified effect.",
                     enabled: $independentCaptureHeartbeat)
@@ -256,7 +261,7 @@ struct ExperimentalFeaturesView: View {
                 "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy",
                 "backgroundAvailabilityRefresh", "legacyConfirmedOwnLane", "independentCaptureHeartbeat",
                 "deferArmedSpeculation", "legacyEagerSpeculation", "finishRunningCaption",
-                "ocrDuplicateFilter", "streamLegacyCalls", "pixelManyLines", "captionLineSpeculation", "captionJoin",
+                "ocrDuplicateFilter", "streamLegacyCalls", "pixelManyLines", "captionLineSpeculation", "captionJoin", "growthSettle",
                 "warmAtCaptureStart", "reportStoredSessionTotals", "confirmationReadReasons", "modelLengthBuckets",
                 "trustedCaptionBand", "legacyHeadStart", "quietRewarm"
             ])
