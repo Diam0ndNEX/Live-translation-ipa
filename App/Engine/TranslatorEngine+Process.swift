@@ -166,6 +166,9 @@ extension TranslatorEngine {
                             switch lookup.outcome {
                             case "timeout": outcome = .timeout
                             case "normalized_hit": outcome = .normalizedHit
+                            case "loose_hit":
+                                outcome = .normalizedHit
+                                if diag.enabled { diag.s.looseHits += 1 }
                             case "incompatible", "conflict": outcome = .compatibilityRejected
                             case "database_error", "unavailable": outcome = .databaseUnavailable
                             default: outcome = diskHit ? (lookup.origin == "legacy" ? .legacyHit : .persistentHit) : .miss

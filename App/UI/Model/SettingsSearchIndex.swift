@@ -40,6 +40,7 @@ enum SettingsSearchIndex {
         SettingsSearchEntry(label: "Legacy head start", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Legacy shared session", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Legacy warm-up during capture", page: .experimental, pageTitle: "Experimental features"),
+        SettingsSearchEntry(label: "Memory reuses case, punctuation and spacing variants", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Multiple nearby text groups", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Pixel check for up to 24 lines", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Pixel-verified confirmation", page: .experimental, pageTitle: "Experimental features"),

@@ -33,6 +33,8 @@ actor TranslationMemoryStore {
     var db: OpaquePointer?
     private var lookupStatements: [String: OpaquePointer] = [:]
     var active = false
+    /// 2.6.1: set by the engine from the pinned switch; only then may a loose match answer a lookup.
+    var looseReuse = false
     var latestRevision = -1
     var status = MemoryStoreHealth()
     #if MEMORY_FAULT_TESTING
@@ -175,6 +177,8 @@ actor TranslationMemoryStore {
             guard version == 0 || version == 1 || version == Int64(Self.schemaVersion) else { throw MemoryStoreError.unsupportedSchema }
             if version == 0 { try createSchema() }
             else if version == 1 { try upgradeSchemaV2() }
+            // 2.6.1: additive and idempotent; the schema version stays 2 and no row is touched.
+            try ensureLooseKeyColumn()
             status.integrity = try verifyIntegrity()
             let previousMigrationState = try metadata("migration_status")
             status.migrationStatus = "discovering"
@@ -256,6 +260,38 @@ actor TranslationMemoryStore {
         }
     }
 
+    /// 2.6.1: the loose key (letters and numbers only) of a saved source text, for reuse that ignores case,
+    /// punctuation and spacing. Added to existing stores without changing a row; filled in small batches.
+    func ensureLooseKeyColumn() throws {
+        let info = try statement("PRAGMA table_info(memory_entries)")
+        var present = false
+        while sqlite3_step(info) == SQLITE_ROW { if text(info, 1) == "loose_key" { present = true } }
+        sqlite3_finalize(info)
+        if !present { try execute("ALTER TABLE memory_entries ADD COLUMN loose_key TEXT") }
+        try execute("CREATE INDEX IF NOT EXISTS memory_loose ON memory_entries(source_language,target_language,loose_key)")
+    }
+
+    func setLooseReuse(_ enabled: Bool) { looseReuse = enabled }
+
+    /// Fills `loose_key` for old rows, at most `limit` per call. Returns how many rows were filled (0 = done).
+    func backfillLooseKeys(limit: Int = 300) -> Int {
+        guard active else { return 0 }
+        do {
+            let query = try statement("SELECT id,source_text FROM memory_entries WHERE loose_key IS NULL AND validation_state='ready' LIMIT ?", [.integer(Int64(limit))])
+            var rows: [(Int64, String)] = []
+            while sqlite3_step(query) == SQLITE_ROW { rows.append((sqlite3_column_int64(query, 0), text(query, 1))) }
+            sqlite3_finalize(query)
+            guard !rows.isEmpty else { return 0 }
+            try transaction {
+                for (id, source) in rows {
+                    // An empty key is stored for text without letters or numbers, so the row is not read again.
+                    try execute("UPDATE memory_entries SET loose_key=? WHERE id=?", [.text(LooseReuse.key(source)), .integer(id)])
+                }
+            }
+            return rows.count
+        } catch { return 0 }
+    }
+
     /// Non-destructive upgrade for devices that installed Memory 2.0 in v1.4.0 or v1.4.1.
     /// The old rows, their IDs and the existing recovery copies remain untouched.
     private func upgradeSchemaV2() throws {
@@ -330,6 +366,8 @@ actor TranslationMemoryStore {
                    reusable ? .text("apple.translation") : .null,
                    .text(reusable ? "ready" : "needs_validation"), .text(confirmed ? "persisted" : "needs_validation"), .real(now), .real(now)])
         let id = sqlite3_last_insert_rowid(db)
+        // 2.6.1: a failure here never fails the save (a restored older snapshot may not have the column yet).
+        if reusable, let parts { try? execute("UPDATE memory_entries SET loose_key=? WHERE id=?", [.text(LooseReuse.key(parts.sourceText)), .integer(id)]) }
         try execute("INSERT OR IGNORE INTO memory_conflicts(entry_id,alternative_id,created_at) SELECT id,?,? FROM memory_entries WHERE canonical_key=? AND id<>?", [.integer(id), .real(now), .text(key), .integer(id)])
         return (id, true)
     }
@@ -400,7 +438,12 @@ actor TranslationMemoryStore {
             defer { finishLookup(query) }
             let first = sqlite3_step(query)
             if first == SQLITE_DONE {
-                return try lookupNormalized(key: key, started: started, deadline: deadline)
+                let normalizedResult = try lookupNormalized(key: key, started: started, deadline: deadline)
+                // 2.6.1: only when the exact and the normalized lookups found nothing (and the switch is on).
+                if looseReuse, normalizedResult.outcome == "miss" {
+                    return lookupLoose(key: key, started: started, deadline: deadline)
+                }
+                return normalizedResult
             }
             guard first == SQLITE_ROW else { throw MemoryStoreError.databaseOperation }
             let value = text(query, 1), imported = sqlite3_column_int(query, 2) != 0

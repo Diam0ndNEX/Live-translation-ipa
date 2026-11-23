@@ -276,7 +276,7 @@ extension Diagnostics {
             "legacy_confirmed_overlap_ms", // 2.4.0
             "legacy_eager_speculation_queued", // 2.5.1
             "model_call_hung", "model_call_late_return", "stall_lane_reset", "stall_session_reset", // 2.6.0
-            "stall_link_reset", "stall_unhealthy", "stall_recovered"
+            "stall_link_reset", "stall_unhealthy", "stall_recovered", "switch_guard_tripped"
         ]
         guard allowed.contains(reason) else { return }
         if modeActiveSystem == "legacy", let candidate {

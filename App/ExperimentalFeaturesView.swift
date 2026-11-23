@@ -53,6 +53,7 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("captionJoin") private var captionJoin = true
     @AppStorage("growthSettle") private var growthSettle = true
     @AppStorage("stallWatchdog") private var stallWatchdog = true
+    @AppStorage("looseMemoryReuse") private var looseMemoryReuse = true
     @AppStorage("flaggedCaptionText") private var flaggedCaptionText = true
     @AppStorage("independentCaptureHeartbeat") private var independentCaptureHeartbeat = true
 
@@ -206,6 +207,10 @@ struct ExperimentalFeaturesView: View {
                     explanation: "New in 2.6.0, default on. If a translation call does not return within a time learned from your device (at least 6 s), ScreenLingo gives up on it, starts a new translation session and retries, instead of waiting for it forever. If captions are waiting and nothing moves, it also resets the translation lane, then the sessions, then the local capture link, one step at a time. Every stall and recovery is counted in the report. Does not change any caption while translation works normally. Off: as in 2.5.6. Unverified: the stop was never caught in a report.",
                     enabled: $stallWatchdog)
                 ExperimentalOption(
+                    title: "Memory reuses case, punctuation and spacing variants",
+                    explanation: "New in 2.6.1, default on. When a sentence is not saved exactly but a saved sentence has the same letters and numbers (only upper or lower case, punctuation or spacing differ), its saved translation is reused, with the closing punctuation of the new sentence, instead of translating again. Sentences shorter than 8 letters and numbers, other rules or context, and sentences with two different saved translations are never matched. A reused translation is not saved again as a new exact entry. CHANGES WHAT IS SHOWN: a variant can get the saved wording of its twin. Off: only exact matches are reused, as in 2.6.0. Unverified effect; the report counts these reuses.",
+                    enabled: $looseMemoryReuse)
+                ExperimentalOption(
                     title: "Include flagged captions' text in reports",
                     explanation: "New in 2.6.0, default on. ScreenLingo checks every shown caption by itself (the same sentence shown again, the same sentence rewritten, a translation equal to the source, a number that went missing, an unusual length, a repeated word). A caption with such a flag is saved on this phone as text: at most 200, removed after 14 days, never saved in a private session. When you export a test report, the text of the flagged captions from those runs is added as the last section, so the wording can be judged. Nothing else in a report contains subtitle text. Off: nothing is saved and reports stay numbers only.",
                     enabled: $flaggedCaptionText)
@@ -271,7 +276,7 @@ struct ExperimentalFeaturesView: View {
                 "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy",
                 "backgroundAvailabilityRefresh", "legacyConfirmedOwnLane", "independentCaptureHeartbeat",
                 "deferArmedSpeculation", "legacyEagerSpeculation", "finishRunningCaption",
-                "ocrDuplicateFilter", "streamLegacyCalls", "pixelManyLines", "captionLineSpeculation", "captionJoin", "growthSettle", "stallWatchdog", "flaggedCaptionText",
+                "ocrDuplicateFilter", "streamLegacyCalls", "pixelManyLines", "captionLineSpeculation", "captionJoin", "growthSettle", "stallWatchdog", "looseMemoryReuse", "flaggedCaptionText",
                 "warmAtCaptureStart", "reportStoredSessionTotals", "confirmationReadReasons", "modelLengthBuckets",
                 "trustedCaptionBand", "legacyHeadStart", "quietRewarm"
             ])

@@ -18,6 +18,7 @@ extension TranslatorEngine {
         }
         captureReadiness.tick(at: ProcessInfo.processInfo.systemUptime)
         stallWatchdogTick()
+        evaluateSwitchGuards()
         publishCaptureStatus()
         let alive = Date().timeIntervalSince(lastPacketDate) < 5
         let thermalState = ProcessInfo.processInfo.thermalState

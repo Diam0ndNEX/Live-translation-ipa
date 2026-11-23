@@ -71,6 +71,46 @@ extension TranslationMemoryStore {
             ?? result(nil, "none", "miss")
     }
 
+    /// 2.6.1: a saved unit whose letters and numbers equal the requested unit's (only case, punctuation or spacing
+    /// differ). Same language pair, same rules and same context are required, a quarantined entry never counts,
+    /// and two different saved translations mean no reuse. The translation gets the closing punctuation of the
+    /// requested source. Any database problem is a miss: this path can only add hits.
+    func lookupLoose(key: String, started: Double, deadline: Double) -> MemoryLookupResult {
+        func result(_ value: String? = nil, _ origin: String = "none", _ outcome: String) -> MemoryLookupResult {
+            MemoryLookupResult(value: value, origin: origin, outcome: outcome,
+                durationMs: (ProcessInfo.processInfo.systemUptime - started) * 1000)
+        }
+        guard let requested = keyParts(key), let rules = requested.rules else { return result(nil, "none", "miss") }
+        let loose = LooseReuse.key(requested.sourceText)
+        guard loose.count >= LooseReuse.minimumCharacters else { return result(nil, "none", "miss") }
+        do {
+            let query = try lookupStatement("""
+                SELECT canonical_key,translated_text,validation_state,confirmation_state,source_text
+                FROM memory_entries
+                WHERE source_language=? AND target_language=? AND loose_key=?
+                LIMIT 8
+                """, [.text(requested.source), .text(requested.target), .text(loose)])
+            defer { finishLookup(query) }
+            var values: [String] = []
+            var scanned = 0
+            while true {
+                guard ProcessInfo.processInfo.systemUptime < deadline else { return result(nil, "none", "timeout") }
+                let state = sqlite3_step(query)
+                if state == SQLITE_DONE { break }
+                guard state == SQLITE_ROW else { return result(nil, "none", "miss") }
+                scanned += 1
+                if scanned == 8 { return result(nil, "none", "ambiguous") }
+                guard let parts = keyParts(text(query, 0)), parts.rules == rules, parts.context == requested.context,
+                      text(query, 2) == "ready", text(query, 3) == "persisted" else { continue }
+                let adapted = LooseReuse.adapt(storedSource: text(query, 4), storedTranslation: text(query, 1),
+                                               requestedSource: requested.sourceText)
+                if !values.contains(adapted) { values.append(adapted) }
+            }
+            if values.count == 1 { return result(values[0], "loose", "loose_hit") }
+            return result(nil, "none", values.isEmpty ? "miss" : "conflict")
+        } catch { return result(nil, "none", "miss") }
+    }
+
     /// Safely quarantine suspect entries for fresh translation. The original text
     /// remains persisted and inspectable; user history and settings are untouched.
     func quarantineEntries(ids: [Int64]) throws -> MemoryStoreHealth {

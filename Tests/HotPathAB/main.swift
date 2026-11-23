@@ -242,7 +242,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             TranslationHotPathAB.pinSettings()
             precondition(!TranslationHotPathAB.growthSettle && TranslationHotPathAB.captionJoin, "the 2.5.6 switch turns off alone")
             standard.removeObject(forKey: "growthSettle")
-            for item in TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches { standard.removeObject(forKey: item.pinned) }
+            for item in TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches + TranslationHotPathAB.v261Switches { standard.removeObject(forKey: item.pinned) }
             for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey] { standard.removeObject(forKey: key) }
             var growth = CaptionGrowthTracker()
             precondition(growth.observe("ola tudo", at: 0) == .different, "2.5.6: the first reading is not growth")
@@ -318,9 +318,9 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
                 }
                 done.wait()
             }
-            let fast = Box()
-            race(limit: 2, { 42 }, box: fast)
-            precondition(fast.outcome == "value 42", "2.6.0: a call that returns gives its value")
+            let prompt = Box()
+            race(limit: 2, { 42 }, box: prompt)
+            precondition(prompt.outcome == "value 42", "2.6.0: a call that returns gives its value")
             let hung = Box()
             race(limit: 0.2, { await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }; return 1 }, box: hung)
             precondition(hung.outcome == "timedOut", "2.6.0: a call that never returns is abandoned at the limit")
@@ -366,6 +366,32 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             precondition(loose.classifyMiss("GOOD MORNING?") == .nearMiss, "2.6.0: a memory hit counts as seen")
             precondition(loose.classifyMiss("") == .new && loose.classifyMiss("...") == .new, "2.6.0: nothing to compare")
             precondition(loose.classifyMiss("Good evening") == .new, "2.6.0: different words are not a near miss")
+            // 2.6.1: loose reuse policy and its switch.
+            TranslationHotPathAB.pinSettings()
+            precondition(TranslationHotPathAB.looseMemoryReuse, "2.6.1 switch defaults to on")
+            standard.set(false, forKey: "looseMemoryReuse")
+            precondition(TranslationHotPathAB.looseMemoryReuse, "the 2.6.1 switch does not apply mid-run")
+            TranslationHotPathAB.pinSettings()
+            precondition(!TranslationHotPathAB.looseMemoryReuse && TranslationHotPathAB.stallWatchdog, "the 2.6.1 switch turns off alone")
+            standard.removeObject(forKey: "looseMemoryReuse")
+            for item in TranslationHotPathAB.v261Switches { standard.removeObject(forKey: item.pinned) }
+            precondition(LooseReuse.key("Olá, MEU  amigo!") == "olameuamigo", "2.6.1: the loose key keeps letters and numbers only")
+            precondition(LooseReuse.key("Ola\u{0301}") == LooseReuse.key("Ol\u{00E1}"), "2.6.1: canonical forms give one loose key")
+            precondition(LooseReuse.terminal("Hello there?! ") == "?!" && LooseReuse.terminal("Hello") == "", "2.6.1: closing punctuation")
+            precondition(LooseReuse.adapt(storedSource: "Hello there.", storedTranslation: "Ola.", requestedSource: "hello there!") == "Ola!", "2.6.1: punctuation follows the new source")
+            precondition(LooseReuse.adapt(storedSource: "Hello there?!", storedTranslation: "Ola?!", requestedSource: "hello there") == "Ola", "2.6.1: no closing punctuation in the new source")
+            precondition(LooseReuse.adapt(storedSource: "Hello there.", storedTranslation: "Ola.", requestedSource: "HELLO THERE.") == "Ola.", "2.6.1: same punctuation keeps the saved text")
+            // 2.6.1: a guard turns a switch off for the session only, and pinning at session start clears it.
+            precondition(!SwitchGuard.growthShouldTrip(held: 11, dropped: 11), "2.6.1: too few held readings to judge")
+            precondition(!SwitchGuard.growthShouldTrip(held: 20, dropped: 11), "2.6.1: 55% dropped is below the limit")
+            precondition(SwitchGuard.growthShouldTrip(held: 20, dropped: 12), "2.6.1: 60% dropped trips the guard")
+            TranslationHotPathAB.pinSettings()
+            precondition(TranslationHotPathAB.growthSettle, "2.6.1: the switch is on before the guard trips")
+            TranslationHotPathAB.sessionOff.insert("growthSettle")
+            precondition(!TranslationHotPathAB.growthSettle && TranslationHotPathAB.captionJoin, "2.6.1: the guard turns off that switch only")
+            precondition((standard.object(forKey: "growthSettlePinned") as? Bool) == true, "2.6.1: the pinned setting is not changed")
+            TranslationHotPathAB.pinSettings()
+            precondition(TranslationHotPathAB.growthSettle && TranslationHotPathAB.sessionOff.isEmpty, "2.6.1: a new session starts clean")
             // The growth tracker recognises a revealed subtitle whatever it looks like: a label, a bracket, no
             // punctuation, another script. One rule for all, no layout or punctuation exception.
             let revealed = ["Maria: the quick brown fox jumps over the lazy dog",
@@ -407,7 +433,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             precondition(TranslationHotPathAB.deferArmedSpeculation, "after the reset the toggle works again")
             for key in ["deferArmedSpeculation", "legacyConfirmedOwnLane", LegacyV251Defaults.appliedKey,
                         "legacyConfirmedOwnLanePinned", "deferArmedSpeculationPinned"] { standard.removeObject(forKey: key) }
-            for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches + TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches { standard.removeObject(forKey: item.pinned) }
+            for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches + TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches + TranslationHotPathAB.v261Switches { standard.removeObject(forKey: item.pinned) }
             for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey,
                         TranslationHotPathAB.availabilityRefreshPinnedKey, TranslationHotPathAB.independentHeartbeatPinnedKey] {
                 standard.removeObject(forKey: key)

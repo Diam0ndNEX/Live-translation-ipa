@@ -873,7 +873,52 @@ import CryptoKit
         let purgedHealth = try await reopened.health()
         precondition(purgedHealth.lastVerifiedBackup == nil,
                      "Explicit purge must clear the recovery-backup indicator")
-        print("SQLite migration, recovery, integrity checks, classification, revision barrier and clear/reopen passed")
+        // 2.6.1: loose reuse. Additive column, exact lookups unchanged, a switch, and strict limits.
+        let looseDir = root.appendingPathComponent("loose-reuse")
+        let looseStore = TranslationMemoryStore(directory: looseDir)
+        _ = try await looseStore.prepare(legacyURLs: [])
+        let savedKey = "v4|\(rules)|pt>en|0:|Olá meu amigo, como vai você."
+        let secondKey = "v4|\(rules)|pt>en|0:|Bom dia a todos vocês."
+        _ = try await looseStore.save([savedKey: "Hello my friend, how are you.", secondKey: "Good morning everyone."], revision: 1)
+        let variantKey = "v4|\(rules)|pt>en|0:|olá  meu amigo como vai você!"
+        let off = await looseStore.lookup(key: variantKey, timeoutMilliseconds: 50)
+        precondition(off.value == nil && off.outcome == "miss", "2.6.1: with the switch off a variant is a miss")
+        await looseStore.setLooseReuse(true)
+        let on = await looseStore.lookup(key: variantKey, timeoutMilliseconds: 50)
+        precondition(on.value == "Hello my friend, how are you!" && on.outcome == "loose_hit" && on.origin == "loose",
+                     "2.6.1: a variant reuses the saved translation with its own closing punctuation")
+        let exact = await looseStore.lookup(key: savedKey, timeoutMilliseconds: 50)
+        precondition(exact.value == "Hello my friend, how are you." && exact.outcome == "hit", "2.6.1: the exact lookup is unchanged")
+        let otherRules = "v4|\(String(repeating: "c", count: 64))|pt>en|0:|olá meu amigo como vai você!"
+        precondition(await looseStore.lookup(key: otherRules, timeoutMilliseconds: 50).value == nil, "2.6.1: other rules never match")
+        let otherPair = "v4|\(rules)|pt>fr|0:|olá meu amigo como vai você!"
+        precondition(await looseStore.lookup(key: otherPair, timeoutMilliseconds: 50).value == nil, "2.6.1: another language pair never matches")
+        let otherContext = "v4|\(rules)|pt>en|3:abc|olá meu amigo como vai você!"
+        precondition(await looseStore.lookup(key: otherContext, timeoutMilliseconds: 50).value == nil, "2.6.1: another context never matches")
+        let numberDiffers = "v4|\(rules)|pt>en|0:|Bom dia a todos vocês 2."
+        precondition(await looseStore.lookup(key: numberDiffers, timeoutMilliseconds: 50).value == nil, "2.6.1: a different number is a different unit")
+        let shortSaved = "v4|\(rules)|pt>en|0:|Olá."
+        _ = try await looseStore.save([shortSaved: "Hello."], revision: 2)
+        precondition(await looseStore.lookup(key: "v4|\(rules)|pt>en|0:|olá!", timeoutMilliseconds: 50).value == nil,
+                     "2.6.1: a unit shorter than 8 letters and numbers is never matched loosely")
+        let rival = "v4|\(rules)|pt>en|0:|OLÁ MEU AMIGO COMO VAI VOCÊ"
+        _ = try await looseStore.save([rival: "Hi buddy, how are you"], revision: 3)
+        let conflict = await looseStore.lookup(key: variantKey, timeoutMilliseconds: 50)
+        precondition(conflict.value == nil && conflict.outcome == "conflict", "2.6.1: two different saved translations mean no reuse")
+        // An older store has rows without the key: the column is added without touching them and filled in batches.
+        try await looseStore.execute("UPDATE memory_entries SET loose_key=NULL")
+        precondition(await looseStore.lookup(key: "v4|\(rules)|pt>en|0:|bom dia a todos vocês", timeoutMilliseconds: 50).value == nil,
+                     "2.6.1: rows without a loose key are not matched")
+        var filled = 0
+        while true { let n = await looseStore.backfillLooseKeys(limit: 2); if n == 0 { break }; filled += n }
+        precondition(filled >= 3, "2.6.1: the backfill fills every ready row")
+        let afterBackfill = await looseStore.lookup(key: "v4|\(rules)|pt>en|0:|bom dia a todos vocês", timeoutMilliseconds: 50)
+        precondition(afterBackfill.value == "Good morning everyone" && afterBackfill.outcome == "loose_hit", "2.6.1: filled rows match")
+        let reopenedLoose = TranslationMemoryStore(directory: looseDir)
+        _ = try await reopenedLoose.prepare(legacyURLs: [])
+        let looseHealth = try await reopenedLoose.health()
+        precondition(looseHealth.schemaVersion == 2 && looseHealth.totalEntries >= 4, "2.6.1: reopening keeps the schema version and every row")
+        print("SQLite migration, recovery, integrity checks, classification, revision barrier, clear/reopen and loose reuse passed")
     }
 }
 

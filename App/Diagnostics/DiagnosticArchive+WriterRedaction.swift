@@ -36,7 +36,7 @@ extension DiagnosticExportWriter {
                 "capture_idle", "capture_live", "capture_paused", "capture_frozen",
                 "legacy_queued_speculation_superseded", "legacy_speculation_low_confidence",
                 "growing_caption_held", "legacy_speculation_growing",
-                "model_call_hung", "model_call_late_return", "stall_lane_reset", "stall_session_reset", "stall_link_reset", "stall_unhealthy", "stall_recovered",
+                "model_call_hung", "model_call_late_return", "stall_lane_reset", "stall_session_reset", "stall_link_reset", "stall_unhealthy", "stall_recovered", "switch_guard_tripped",
                 "legacy_speculation_saved_memory_backoff", "legacy_speculation_low_yield_backoff",
                 // found by guard C2 in 2.2.1: emitted by the engine, accepted by Diagnostics, dropped here
                 "legacy_shared_session_used", "speculative_lease_conflict",
@@ -79,7 +79,7 @@ extension DiagnosticExportWriter {
             // 2.5.1
             "eagerSpeculationAB", "finishRunningAB", "duplicateLinesAB", "streamCallsAB",
             // 2.5.4
-            "manyLinesAB", "captionLinesAB", "captionJoinAB", "growthSettleAB", "stallWatchdogAB",
+            "manyLinesAB", "captionLinesAB", "captionJoinAB", "growthSettleAB", "stallWatchdogAB", "looseMemoryReuseAB",
             // 2.2.1 (D4, E12)
             "idleMinutes", "sessionLimit", "autoOpenPiP", "winSize", "textSize", "pipFont", "theme", "showOriginal",
             "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding",
