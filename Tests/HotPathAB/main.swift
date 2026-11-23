@@ -377,7 +377,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             precondition(!TranslationHotPathAB.looseMemoryReuse && TranslationHotPathAB.stallWatchdog, "the 2.6.1 switch turns off alone")
             standard.removeObject(forKey: "looseMemoryReuse")
             for item in TranslationHotPathAB.v261Switches { standard.removeObject(forKey: item.pinned) }
-            precondition(LooseReuse.key("Olá, MEU  amigo!") == "olameuamigo", "2.6.1: the loose key keeps letters and numbers only")
+            precondition(LooseReuse.key("Olá, MEU  amigo!") == "ol\u{00E1}meuamigo", "2.6.1: the loose key keeps letters and numbers only")
             precondition(LooseReuse.key("Ola\u{0301}") == LooseReuse.key("Ol\u{00E1}"), "2.6.1: canonical forms give one loose key")
             precondition(LooseReuse.terminal("Hello there?! ") == "?!" && LooseReuse.terminal("Hello") == "", "2.6.1: closing punctuation")
             precondition(LooseReuse.adapt(storedSource: "Hello there.", storedTranslation: "Ola.", requestedSource: "hello there!") == "Ola!", "2.6.1: punctuation follows the new source")
