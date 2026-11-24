@@ -56,6 +56,8 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("looseMemoryReuse") private var looseMemoryReuse = true
     @AppStorage("memoryCare") private var memoryCare = true
     @AppStorage("stableDisplay") private var stableDisplay = true
+    @AppStorage("learnedEarlyStart") private var learnedEarlyStart = true
+    @AppStorage("quickHangLimit") private var quickHangLimit = true
     @AppStorage("flaggedCaptionText") private var flaggedCaptionText = true
     @AppStorage("independentCaptureHeartbeat") private var independentCaptureHeartbeat = true
 
@@ -221,6 +223,14 @@ struct ExperimentalFeaturesView: View {
                     explanation: "New in 2.6.4, default on. When a new caption is only another reading of the one on screen (it differs only in accents, upper or lower case, spacing or punctuation), the shown caption stays for up to 6 s instead of being drawn again. When the screen flips back to a caption shown in the last 8 s while the current one has been visible for less than 2 s, the current one stays. New text is always shown at once. Off: as in 2.6.3. Unverified effect; the report counts both.",
                     enabled: $stableDisplay)
                 ExperimentalOption(
+                    title: "Learn when to translate ahead",
+                    explanation: "New in 2.6.5, default on. A subtitle is translated ahead of its confirmation only when OCR is sure enough. Instead of one fixed limit, the app compares every first reading with the text that was confirmed for the same caption and lowers or raises the limit by itself. It starts more early translations when first readings are usually right, so the caption appears sooner. A wrong first reading only wastes one quiet translation. Off, the fixed limit from the translate-ahead setting is used.",
+                    enabled: $learnedEarlyStart)
+                ExperimentalOption(
+                    title: "Give up on hung translations sooner",
+                    explanation: "New in 2.6.5, default on. A translation call that never answers is given up on after about 3.5 s (four times the slow end of recent calls, never less than 3.5 s) instead of 6 s, so the next caption is not held up as long. A call that answers late widens the limit again by itself. Off, the 2.6.0 limit (6 s, six times the slow end) is used.",
+                    enabled: $quickHangLimit)
+                ExperimentalOption(
                     title: "Include flagged captions' text in reports",
                     explanation: "New in 2.6.0, default on. ScreenLingo checks every shown caption by itself (the same sentence shown again, the same sentence rewritten, a translation equal to the source, a number that went missing, an unusual length, a repeated word). A caption with such a flag is saved on this phone as text: at most 200, removed after 14 days, never saved in a private session. When you export a test report, the text of the flagged captions from those runs is added as the last section, so the wording can be judged. Nothing else in a report contains subtitle text. Off: nothing is saved and reports stay numbers only.",
                     enabled: $flaggedCaptionText)
@@ -286,7 +296,7 @@ struct ExperimentalFeaturesView: View {
                 "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy",
                 "backgroundAvailabilityRefresh", "legacyConfirmedOwnLane", "independentCaptureHeartbeat",
                 "deferArmedSpeculation", "legacyEagerSpeculation", "finishRunningCaption",
-                "ocrDuplicateFilter", "streamLegacyCalls", "pixelManyLines", "captionLineSpeculation", "captionJoin", "growthSettle", "stallWatchdog", "looseMemoryReuse", "memoryCare", "stableDisplay", "flaggedCaptionText",
+                "ocrDuplicateFilter", "streamLegacyCalls", "pixelManyLines", "captionLineSpeculation", "captionJoin", "growthSettle", "stallWatchdog", "looseMemoryReuse", "memoryCare", "stableDisplay", "learnedEarlyStart", "quickHangLimit", "flaggedCaptionText",
                 "warmAtCaptureStart", "reportStoredSessionTotals", "confirmationReadReasons", "modelLengthBuckets",
                 "trustedCaptionBand", "legacyHeadStart", "quietRewarm"
             ])

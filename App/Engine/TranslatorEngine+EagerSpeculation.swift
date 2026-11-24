@@ -10,8 +10,9 @@ extension TranslatorEngine {
         guard TranslationHotPathAB.legacyEagerSpeculation, activeTranslationSystem == .legacy,
               p.stable == false, !texts.isEmpty, speculationAllowed, flag("translateAhead", true) else { return }
         if p.pixelArmed == true, TranslationHotPathAB.deferArmedSpeculation { return }
-        let minimum = flag("coolMode", false) ?
+        let base = flag("coolMode", false) ?
             max(0.95, num("speculationConfidence", 0.85)) : num("speculationConfidence", 0.85)
+        let minimum = earlyStartConfidence(base: base) // 2.6.5 (learnedEarlyStart)
         // 2.5.4: judged on the lines that make up the text to translate (see speculationJudgedLines).
         let judgedLines = speculationJudgedLines(p, candidateTexts: texts)
         guard !flag("selectiveSpeculation", true) ||
@@ -19,6 +20,7 @@ extension TranslatorEngine {
         let strong = SpeculationPolicy.credible(lines: judgedLines, threshold: max(0.95, minimum))
         guard ram.speculationWindow.allowsCredibleOpportunity(
             enabled: flag("adaptiveSpeculation", true), strongCandidate: strong) else { return }
+        noteLearnedAdmission(judged: judgedLines, base: base, effective: minimum)
         specPacket = p
         speculate(texts)
     }

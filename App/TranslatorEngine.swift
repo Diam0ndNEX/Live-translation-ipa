@@ -781,6 +781,8 @@ final class TranslatorEngine: ObservableObject {
     var looseUnits = LooseUnitIndex() // 2.6.0: miss classification (measurement only)
     var quarantinedKeys = Set<String>() // 2.6.3: units sent back for validation in this app run
     var displayStability = DisplayStability() // 2.6.4
+    var specLearner = SpecConfidenceLearner() // 2.6.5
+    var firstReadings = FirstReadingBook() // 2.6.5
     var specPacket: Packet?
     var currentSpeculativeText: String?
     var subtitleRegions = SubtitleRegions()

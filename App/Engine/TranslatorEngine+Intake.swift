@@ -245,6 +245,7 @@ extension TranslatorEngine {
                 firstOCR: ProcessInfo.processInfo.systemUptime - max(0, Date().timeIntervalSince1970 - first),
                 confirmed: p.stable != false)
         }
+        noteFirstReading(p, texts: candidateTexts) // 2.6.5 (learnedEarlyStart): compared with the confirmed text later
         // First, unconfirmed sighting: translate quietly now so the result is ready the moment the text is confirmed.
         if p.stable == false {
             // 2.4.0: this read's pixel check is armed, so its confirmation follows one frame later. An Apple
@@ -264,8 +265,10 @@ extension TranslatorEngine {
                 return
             }
             if speculationAllowed && flag("translateAhead", true) {
-                let minimumSpecConfidence = flag("coolMode", false) ?
+                let baseSpecConfidence = flag("coolMode", false) ?
                     max(0.95, num("speculationConfidence", 0.85)) : num("speculationConfidence", 0.85)
+                // 2.6.5 (learnedEarlyStart): the limit follows how often first readings were the final text.
+                let minimumSpecConfidence = earlyStartConfidence(base: baseSpecConfidence)
                 // 2.5.4: judged on the lines that make up the text to translate (see speculationJudgedLines).
                 let judgedLines = speculationJudgedLines(p, candidateTexts: candidateTexts)
                 let credible = !flag("selectiveSpeculation", true) ||
@@ -313,11 +316,13 @@ extension TranslatorEngine {
                     }
                     return
                 }
+                noteLearnedAdmission(judged: judgedLines, base: baseSpecConfidence, effective: minimumSpecConfidence)
                 specPacket = p
                 speculate(candidateTexts)
             }
             return
         }
+        noteConfirmedAgainstFirst(p, texts: candidateTexts) // 2.6.5
         ocrCount += 1
         lastRaw = String(p.lines.map(\.t).joined(separator: " ").prefix(160))
 

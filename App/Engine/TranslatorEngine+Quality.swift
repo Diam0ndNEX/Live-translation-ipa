@@ -36,5 +36,6 @@ extension TranslatorEngine {
         captionSignals.forgetShown()
         shownHistory.removeAll()
         displayStability.forget() // 2.6.4: a cleared screen starts clean
+        firstReadings.forget() // 2.6.5
     }
 }
