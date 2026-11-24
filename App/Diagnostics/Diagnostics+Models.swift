@@ -167,6 +167,8 @@ struct Stats: Equatable {
     var looseHits = 0
     var memoryWarmed = 0 // 2.6.3
     var memoryQuarantined = 0 // 2.6.3
+    var displayHeldVariant = 0 // 2.6.4
+    var displayHeldFlip = 0 // 2.6.4
     var slowTailEnqueues = 0
     var manualTranslations = 0
     var identicalFrameHolds = 0 // 2.2.1 (E9)

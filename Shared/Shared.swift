@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "2.6.3"
-    static let build = 128
+    static let version = "2.6.4"
+    static let build = 129
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("2.6.4", "Build 129: The caption on screen stays steady when OCR reads the same line slightly differently or flips back for a moment. Preloaded memory no longer shows as a test-memory warning in reports."),
         ("2.6.3", "Build 128: Saved translations are loaded into RAM when memory opens, so repeated sentences are found faster. A reused translation with a clear defect is translated afresh next time. Reports list the slowest captions with the stage that made them slow. Nothing was compiled or run before CI."),
         ("2.6.2", "Build 127: Reports now compare each session with the one before it and say what got worse or better. Faster build checks. Nothing was compiled or run before this build."),
         ("2.6.1", "Build 126: Memory reuses saved translations that differ only in case, punctuation or spacing. Nothing was compiled or run before the GitHub Actions build, and the effect on the wording is UNVERIFIED. In 2.6.0 the report counts how often a unit missed memory although a variant of it was known. When a sentence is not saved exactly but a saved sentence has the same letters and numbers, its saved translation is now used with the closing punctuation of the new sentence. Short sentences, other rules, other context and sentences with two different saved translations are never matched. The memory file gets one new column that is filled in small batches; nothing existing is changed or removed. New switch Memory reuses case, punctuation and spacing variants (default on)."),

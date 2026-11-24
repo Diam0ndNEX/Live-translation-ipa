@@ -25,7 +25,7 @@ struct DiagnosticPerformanceComparison {
         // 2.5.1: a run saved before 2.5.1 has none of them (off).
         "eagerSpeculationAB", "finishRunningAB", "duplicateLinesAB", "streamCallsAB",
         // 2.5.4: a run saved before 2.5.4 has none of them (off).
-        "manyLinesAB", "captionLinesAB", "captionJoinAB", "growthSettleAB", "stallWatchdogAB", "looseMemoryReuseAB", "memoryCareAB",
+        "manyLinesAB", "captionLinesAB", "captionJoinAB", "growthSettleAB", "stallWatchdogAB", "looseMemoryReuseAB", "memoryCareAB", "stableDisplayAB",
         "detailedCollection", "performanceTier",
         "focusedCaptionOCR", "strictCaptionIdentity", "cjkSingleCharacters", "liveWarmupLegacy"
     ]

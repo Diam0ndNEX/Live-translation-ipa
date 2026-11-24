@@ -242,7 +242,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             TranslationHotPathAB.pinSettings()
             precondition(!TranslationHotPathAB.growthSettle && TranslationHotPathAB.captionJoin, "the 2.5.6 switch turns off alone")
             standard.removeObject(forKey: "growthSettle")
-            for item in TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches + TranslationHotPathAB.v261Switches + TranslationHotPathAB.v263Switches { standard.removeObject(forKey: item.pinned) }
+            for item in TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches + TranslationHotPathAB.v261Switches + TranslationHotPathAB.v263Switches + TranslationHotPathAB.v264Switches { standard.removeObject(forKey: item.pinned) }
             for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey] { standard.removeObject(forKey: key) }
             var growth = CaptionGrowthTracker()
             precondition(growth.observe("ola tudo", at: 0) == .different, "2.5.6: the first reading is not growth")
@@ -376,7 +376,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             TranslationHotPathAB.pinSettings()
             precondition(!TranslationHotPathAB.looseMemoryReuse && TranslationHotPathAB.stallWatchdog, "the 2.6.1 switch turns off alone")
             standard.removeObject(forKey: "looseMemoryReuse")
-            for item in TranslationHotPathAB.v261Switches + TranslationHotPathAB.v263Switches { standard.removeObject(forKey: item.pinned) }
+            for item in TranslationHotPathAB.v261Switches + TranslationHotPathAB.v263Switches + TranslationHotPathAB.v264Switches { standard.removeObject(forKey: item.pinned) }
             precondition(LooseReuse.key("Olá, MEU  amigo!") == "ol\u{00E1}meuamigo", "2.6.1: the loose key keeps letters and numbers only")
             precondition(LooseReuse.key("Ola\u{0301}") == LooseReuse.key("Ol\u{00E1}"), "2.6.1: canonical forms give one loose key")
             precondition(LooseReuse.terminal("Hello there?! ") == "?!" && LooseReuse.terminal("Hello") == "", "2.6.1: closing punctuation")
@@ -390,7 +390,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             TranslationHotPathAB.pinSettings()
             precondition(!TranslationHotPathAB.memoryCare && TranslationHotPathAB.looseMemoryReuse, "2.6.3: the switch turns off alone")
             standard.removeObject(forKey: "memoryCare")
-            for item in TranslationHotPathAB.v263Switches { standard.removeObject(forKey: item.pinned) }
+            for item in TranslationHotPathAB.v263Switches + TranslationHotPathAB.v264Switches { standard.removeObject(forKey: item.pinned) }
             let careKey = "v4|" + String(repeating: "a", count: 64) + "|pt>en|3:a=b|Pague 1500 agora|ja"
             precondition(MemoryCare.unitSource(careKey) == "Pague 1500 agora|ja", "2.6.3: the source text is the last field, even with a bar inside")
             precondition(MemoryCare.target(careKey) == "en" && MemoryCare.unitSource("v2|pt>en|0:|Oi") == "Oi", "2.6.3: target and old key form")
@@ -400,6 +400,28 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             precondition(MemoryCare.defects(source: "Maria Fernanda", translation: "Maria Fernanda").isEmpty, "2.6.3: a name may stay unchanged")
             precondition(MemoryCare.defects(source: "isso nao foi traduzido", translation: "Isso nao foi traduzido!") == [.unchanged], "2.6.3: a sentence returned unchanged")
             precondition(MemoryCare.defects(source: "nao nao", translation: "no no no no") == [.repeatedWord], "2.6.3: a repeated word")
+            // 2.6.4: display stability (another reading of the shown line, a flip back) and its switch.
+            TranslationHotPathAB.pinSettings()
+            precondition(TranslationHotPathAB.stableDisplay, "2.6.4 switch defaults to on")
+            standard.set(false, forKey: "stableDisplay")
+            TranslationHotPathAB.pinSettings()
+            precondition(!TranslationHotPathAB.stableDisplay && TranslationHotPathAB.memoryCare, "2.6.4: the switch turns off alone")
+            standard.removeObject(forKey: "stableDisplay")
+            for item in TranslationHotPathAB.v264Switches { standard.removeObject(forKey: item.pinned) }
+            var steady = DisplayStability()
+            let sisterLine = "..oque sobrou em um Local... vc me decepciona Irm\u{00E3}"
+            precondition(steady.decide(sisterLine, now: 0) == .show, "2.6.4: nothing shown yet")
+            steady.shown(sisterLine, now: 0)
+            precondition(steady.decide("oque sobrou em um Local... vc me decepciona Irm\u{0103}", now: 0.3) == .holdVariant, "2.6.4: another accent is another reading")
+            precondition(steady.decide("OQUE SOBROU EM UM LOCAL, VC ME DECEPCIONA IRMA", now: 5) == .holdVariant, "2.6.4: case and punctuation")
+            precondition(steady.decide("oque sobrou em um Local vc me decepciona Irma", now: 7) == .show, "2.6.4: after 6 s another reading may show")
+            precondition(steady.decide("Finalmente Eles Estao cara a Cara", now: 1) == .show, "2.6.4: new text is shown at once")
+            steady.shown("Goa aiky", now: 1)
+            precondition(steady.decide(sisterLine, now: 1.5) == .holdFlip, "2.6.4: a flip back within 2 s is held")
+            precondition(steady.decide(sisterLine, now: 3.2) == .show, "2.6.4: after 2 s the earlier caption may come back")
+            precondition(steady.decide("ok", now: 1.2) == .show, "2.6.4: very short text is not judged")
+            steady.forget()
+            precondition(steady.history.isEmpty && steady.decide(sisterLine, now: 2) == .show, "2.6.4: reset")
             // 2.6.1: a guard turns a switch off for the session only, and pinning at session start clears it.
             precondition(!SwitchGuard.growthShouldTrip(held: 11, dropped: 11), "2.6.1: too few held readings to judge")
             precondition(!SwitchGuard.growthShouldTrip(held: 20, dropped: 11), "2.6.1: 55% dropped is below the limit")
@@ -452,7 +474,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             precondition(TranslationHotPathAB.deferArmedSpeculation, "after the reset the toggle works again")
             for key in ["deferArmedSpeculation", "legacyConfirmedOwnLane", LegacyV251Defaults.appliedKey,
                         "legacyConfirmedOwnLanePinned", "deferArmedSpeculationPinned"] { standard.removeObject(forKey: key) }
-            for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches + TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches + TranslationHotPathAB.v261Switches + TranslationHotPathAB.v263Switches { standard.removeObject(forKey: item.pinned) }
+            for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches + TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches + TranslationHotPathAB.v261Switches + TranslationHotPathAB.v263Switches + TranslationHotPathAB.v264Switches { standard.removeObject(forKey: item.pinned) }
             for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey,
                         TranslationHotPathAB.availabilityRefreshPinnedKey, TranslationHotPathAB.independentHeartbeatPinnedKey] {
                 standard.removeObject(forKey: key)

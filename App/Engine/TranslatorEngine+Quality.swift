@@ -35,5 +35,6 @@ extension TranslatorEngine {
     func qualitySignalsReset() {
         captionSignals.forgetShown()
         shownHistory.removeAll()
+        displayStability.forget() // 2.6.4: a cleared screen starts clean
     }
 }

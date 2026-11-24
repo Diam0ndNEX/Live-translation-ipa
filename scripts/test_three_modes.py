@@ -196,8 +196,8 @@ for field in ('pixelArmed', 'focusRediscoveries', 'confirmReads', 'confirmPixelR
     declaration = re.search(r'var ' + field + r': (Bool|Int|Double)\? = nil', shared)
     assert declaration, field + ' must be an optional number or flag (no text) so older builds ignore it'
 assert 'privacy: "metadataOnly"' in diagnostics and 'textCapture: false' in diagnostics
-assert 'static let version = "2.6.3"' in shared and 'static let build = 128' in shared
-assert read('project.yml').count('"2.6.3"') == 3 and read('project.yml').count('"128"') == 3
+assert 'static let version = "2.6.4"' in shared and 'static let build = 129' in shared
+assert read('project.yml').count('"2.6.4"') == 3 and read('project.yml').count('"129"') == 3
 assert '("2.4.0", "Build 117:' in shared and '("2.3.9", "Build 116:' in shared and '("2.5.0", "Build 118:' in shared
 print('v2.4.0 source contracts passed: deferral (default off since 2.5.1, Legacy only), unchanged OCR and confirmation evidence, forced re-read, direct model call, metadata-only diagnostics, version')
 
@@ -277,7 +277,7 @@ eager = read('App/Engine/TranslatorEngine+EagerSpeculation.swift')
 loop = read_source('LoopbackServer')
 # Eager early translation: a switch (default on, pinned, toggle, reset, report label), Legacy only, confirmed first.
 assert '("legacyEagerSpeculation", "legacyEagerSpeculationPinned", "eagerSpeculationAB")' in v251
-assert 'for item in v250Switches + v251Switches + v254Switches + v255Switches + v256Switches + v260Switches + v261Switches + v263Switches {' in work  # 2.6.3: changed with the code
+assert 'for item in v250Switches + v251Switches + v254Switches + v255Switches + v256Switches + v260Switches + v261Switches + v263Switches + v264Switches {' in work  # 2.6.4: changed with the code
 assert '@AppStorage("legacyEagerSpeculation") private var legacyEagerSpeculation = true' in experimental and experimental.count('"legacyEagerSpeculation"') == 2
 assert archive.count('"eagerSpeculationAB"') == 2 and 'v251ReportLabels' in archive
 assert 'enabled && busy && confirmedRunning && !confirmedQueued' in v251, 'never queued while confirmed work waits'
@@ -328,7 +328,7 @@ print('v2.5.2 source contracts passed: finish the running caption (switch, Legac
 # ---- 2.5.3: Legacy head start off by default (device data). ----
 assert 'LegacyV251Defaults.pinHeadStartDefault(defaults)' in work and 'defaults.set(false, forKey: "legacyHeadStartPinned")' in v251
 assert 'defaults.removeObject(forKey: "legacyHeadStart")' in v251 and 'static let v253AppliedKey = "legacyV253DefaultsApplied"' in v251
-assert 'static let version = "2.6.3"' in shared and 'static let build = 128' in shared and '("2.5.3", "Build 121:' in shared
+assert 'static let version = "2.6.4"' in shared and 'static let build = 129' in shared and '("2.5.3", "Build 121:' in shared
 print('v2.5.3 source contracts passed: head start off by default, saved value reset once, version')
 
 # ---- 2.5.4: pixel check for up to 24 lines, early translation judged on caption lines, report rows. ----
@@ -351,7 +351,7 @@ assert 'if p.pixelArmed == true, TranslationHotPathAB.deferArmedSpeculation {' i
 eager254 = read_source('TranslatorEngine')
 assert 'func speculationJudgedLines(' in eager254 and 'guard TranslationHotPathAB.captionLineSpeculation, activeTranslationSystem == .legacy' in eager254
 assert 'Why a first reading got no early translation (2.5.4' in archive
-assert 'static let version = "2.6.3"' in shared and 'static let build = 128' in shared and '("2.5.4", "Build 122:' in shared
+assert 'static let version = "2.6.4"' in shared and 'static let build = 129' in shared and '("2.5.4", "Build 122:' in shared
 print('v2.5.4 source contracts passed: pixel check 24 lines (per-line tolerance), early translation judged on caption lines, switches, report rows, version')
 
 
@@ -369,7 +369,7 @@ assert function(engine, 'extractTexts') == old_extract, 'extractTexts stays the 
 assert '@AppStorage("captionJoin") private var captionJoin = true' in experimental and experimental.count('"captionJoin"') == 2
 assert archive.count('"captionJoinAB"') == 2 and 'v255ReportLabels' in archive
 assert 'captionMultiBlock' in archive and 'Text blocks per confirmed reading (2.5.5' in archive
-assert 'static let version = "2.6.3"' in shared and 'static let build = 128' in shared and '("2.5.5", "Build 123:' in shared
+assert 'static let version = "2.6.4"' in shared and 'static let build = 129' in shared and '("2.5.5", "Build 123:' in shared
 print('v2.5.5 source contracts passed: subtitle text blocks joined, switch, counters, report rows, version')
 
 # ---- 2.5.6: a growing subtitle settles before it is translated (Legacy). ----
@@ -388,7 +388,7 @@ assert intake256.index('rejectsDisplayedFragment') < intake256.index('holdGrowin
 assert 'growthReset()' in engine and 'var captionGrowth = CaptionGrowthTracker()' in read('App/TranslatorEngine.swift')
 assert '@AppStorage("growthSettle") private var growthSettle = true' in experimental and experimental.count('"growthSettle"') == 2
 assert archive.count('"growthSettleAB"') == 2 and 'v256ReportLabels' in archive and 'Growing subtitles (2.5.6' in archive
-assert 'static let version = "2.6.3"' in shared and 'static let build = 128' in shared and '("2.5.6", "Build 124:' in shared
+assert 'static let version = "2.6.4"' in shared and 'static let build = 129' in shared and '("2.5.6", "Build 124:' in shared
 print('v2.5.6 source contracts passed: growing subtitles settle, switch, counters, report rows, version')
 
 # ---- 2.6.0: translation recovers when it stops. ----
@@ -408,7 +408,7 @@ assert 'try await session.translations(from: reqs)' in batches260 and 'session.t
 assert 'var modelStall = ModelStallLimit()' in read('App/TranslatorEngine.swift') and 'var stallLadder = StallLadder()' in read('App/TranslatorEngine.swift')
 assert '@AppStorage("stallWatchdog") private var stallWatchdog = true' in experimental and experimental.count('"stallWatchdog"') == 2
 assert archive.count('"stallWatchdogAB"') == 2 and 'v260ReportLabels' in archive and 'Stalls (2.6.0' in archive
-assert 'static let version = "2.6.3"' in shared and 'static let build = 128' in shared and '("2.6.0", "Build 125:' in shared
+assert 'static let version = "2.6.4"' in shared and 'static let build = 129' in shared and '("2.6.0", "Build 125:' in shared
 print('v2.6.0 source contracts passed: stall watchdog, switch, counters, report rows, version')
 
 # ---- 2.6.0: automatic quality signals and memory miss classification (measurement only). ----
@@ -440,7 +440,7 @@ assert 'func backfillLooseKeys(limit: Int = 300) -> Int {' in store261 and 'try?
 assert 'setLooseReuse(TranslationHotPathAB.looseMemoryReuse)' in read_source('TranslatorEngine')
 assert '@AppStorage("looseMemoryReuse") private var looseMemoryReuse = true' in experimental and experimental.count('"looseMemoryReuse"') == 2
 assert archive.count('"looseMemoryReuseAB"') == 2 and 'v261ReportLabels' in archive and '"looseHits"' in archive
-assert 'static let version = "2.6.3"' in shared and 'static let build = 128' in shared and '("2.6.1", "Build 126:' in shared
+assert 'static let version = "2.6.4"' in shared and 'static let build = 129' in shared and '("2.6.1", "Build 126:' in shared
 print('v2.6.1 source contracts passed: loose memory reuse, schema, switch, counters, version')
 
 # ---- 2.6.1: guard for the growing-subtitle wait; abandon for a Low Latency call that ignores cancel. ----
@@ -489,5 +489,16 @@ assert 'quarantineDefectiveReuse(flags: flags, result: result)' in read('App/Eng
 assert 'diag.noteSlowCaption(latency.last)' in read_source('TranslatorEngine')
 assert 'SlowCaptions.counterNames' in archive and '"memoryWarmed", "memoryQuarantined"' in archive
 assert '@AppStorage("memoryCare") private var memoryCare = true' in experimental and experimental.count('"memoryCare"') == 2
-assert 'static let version = "2.6.3"' in shared and 'static let build = 128' in shared and '("2.6.3", "Build 128:' in shared
+assert 'static let version = "2.6.4"' in shared and 'static let build = 129' in shared and '("2.6.3", "Build 128:' in shared
 print('v2.6.3 contracts passed: memory care, slowest captions, switch, version')
+
+# ---- 2.6.4: display stability; preloaded RAM is not test memory. ----
+v264 = read('Shared/TranslationSystem+V264.swift')
+assert '("stableDisplay", "stableDisplayPinned", "stableDisplayAB")' in v264 and 'struct DisplayStability' in v264
+engine264 = read_source('TranslatorEngine')
+assert 'displayStability.decide(text, now: ProcessInfo.processInfo.systemUptime)' in engine264 and 'displayStability.shown(text' in engine264
+assert 'displayStability.forget()' in read('App/Engine/TranslatorEngine+Quality.swift')
+assert '"displayHeldVariant", "displayHeldFlip"' in archive and 'counters["memoryWarmed"] = ramWarmedEntries' in read('App/Diagnostics.swift')
+assert '@AppStorage("stableDisplay") private var stableDisplay = true' in experimental and experimental.count('"stableDisplay"') == 2
+assert 'static let version = "2.6.4"' in shared and 'static let build = 129' in shared and '("2.6.4", "Build 129:' in shared
+print('v2.6.4 contracts passed: display stability, preloaded RAM, switch, version')

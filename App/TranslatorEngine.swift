@@ -780,6 +780,7 @@ final class TranslatorEngine: ObservableObject {
     var shownHistory: [[String]] = []
     var looseUnits = LooseUnitIndex() // 2.6.0: miss classification (measurement only)
     var quarantinedKeys = Set<String>() // 2.6.3: units sent back for validation in this app run
+    var displayStability = DisplayStability() // 2.6.4
     var specPacket: Packet?
     var currentSpeculativeText: String?
     var subtitleRegions = SubtitleRegions()
@@ -1115,6 +1116,19 @@ final class TranslatorEngine: ObservableObject {
             replayDeferredConfirmedIfPossible()
             return true
         }
+        // 2.6.4 (switch stableDisplay): keep the shown caption when the new one is only another reading of it, or
+        // flips back to a caption shown moments ago. Handled like an identical frame: nothing is drawn again.
+        if TranslationHotPathAB.stableDisplay, showing, text != original, !(timing.packet?.candidateID?.hasPrefix("manual-") ?? (timing.packet == nil)) {
+            let decision = displayStability.decide(text, now: ProcessInfo.processInfo.systemUptime)
+            if decision != .show {
+                lastShowReusedFrame = true
+                if diag.enabled { if decision == .holdVariant { diag.s.displayHeldVariant += 1 } else { diag.s.displayHeldFlip += 1 } }
+                lastTextDate = Date()
+                if timing.packet?.candidateID == activeCandidateID { activeCandidatePresented = true }
+                replayDeferredConfirmedIfPossible()
+                return true
+            }
+        }
         let renderStart = Date()
         pip.style = proposedStyle
         guard pip.render(original: text, translated: result, showOriginal: showOriginal,
@@ -1131,6 +1145,7 @@ final class TranslatorEngine: ObservableObject {
         lastTextDate = Date()
         lastShowDate = Date()
         noteShownSignals(text, result)
+        displayStability.shown(text, now: ProcessInfo.processInfo.systemUptime) // 2.6.4
         let presented = Date()
         let packet = timing.packet
         let sent = packet?.ts ?? timing.queuedAt.timeIntervalSince1970

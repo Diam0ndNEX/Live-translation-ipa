@@ -17,6 +17,7 @@ final class Diagnostics: ObservableObject {
     @Published var latency: [Sample] = []
     @Published var pipeline: [PipelineMeasurement] = []
     var slowestCaptions: [[Double]] = [] // 2.6.3: see SlowCaptions
+    var ramWarmedEntries = 0 // 2.6.4: units preloaded into RAM in this app run (kept across runs)
     @Published var transport: [Sample] = []
     @Published var fps: [Sample] = []
     @Published var lineCounts: [Sample] = []
@@ -288,7 +289,7 @@ final class Diagnostics: ObservableObject {
         if TranslationHotPathAB.deferArmedSpeculation { settings["armedDeferAB"] = "on" }
         // 2.5.0: items A to F and the quiet re-warm, all default ON, written only when ON.
         // 2.5.1: the same for the 2.5.1 switches.
-        for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches + TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches + TranslationHotPathAB.v261Switches + TranslationHotPathAB.v263Switches
+        for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches + TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches + TranslationHotPathAB.v261Switches + TranslationHotPathAB.v263Switches + TranslationHotPathAB.v264Switches
             where (UserDefaults.standard.object(forKey: item.pinned) as? Bool) ?? true {
             settings[item.report] = "on"
         }
@@ -360,7 +361,9 @@ final class Diagnostics: ObservableObject {
         counters["qFlaggedSaved"] = s.qFlaggedSaved
         counters["missNew"] = s.missNew
         counters["looseHits"] = s.looseHits
-        counters["memoryWarmed"] = s.memoryWarmed
+        counters["memoryWarmed"] = ramWarmedEntries
+        counters["displayHeldVariant"] = s.displayHeldVariant
+        counters["displayHeldFlip"] = s.displayHeldFlip
         counters["memoryQuarantined"] = s.memoryQuarantined
         counters.merge(SlowCaptions.counters(slowestCaptions)) { _, new in new }
         counters["missNearMiss"] = s.missNearMiss
