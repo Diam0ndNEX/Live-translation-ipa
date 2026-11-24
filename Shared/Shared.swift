@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "2.6.4"
-    static let build = 129
+    static let version = "2.6.5"
+    static let build = 130
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("2.6.5", "Build 130: Lower and steadier delay. The app learns by itself when a first reading of a subtitle is reliable enough to start its translation early, so more captions are translated before they are confirmed. A translation call that never answers is given up on after about 3.5 s instead of 6 s. Reports show how often first readings were already the final text. Nothing was compiled or run before the GitHub Actions build, and the speed effect is UNVERIFIED until a report shows it."),
         ("2.6.4", "Build 129: The caption on screen stays steady when OCR reads the same line slightly differently or flips back for a moment. Preloaded memory no longer shows as a test-memory warning in reports."),
         ("2.6.3", "Build 128: Saved translations are loaded into RAM when memory opens, so repeated sentences are found faster. A reused translation with a clear defect is translated afresh next time. Reports list the slowest captions with the stage that made them slow. Nothing was compiled or run before CI."),
         ("2.6.2", "Build 127: Reports now compare each session with the one before it and say what got worse or better. Faster build checks. Nothing was compiled or run before this build."),

@@ -275,7 +275,9 @@ struct DiagnosticsBody: View {
                   (TranslationHotPathAB.stallWatchdog, "stall watchdog and recovery"),
                   (TranslationHotPathAB.looseMemoryReuse, "memory reuses case, punctuation and spacing variants"),
                   (TranslationHotPathAB.memoryCare, "saved translations preloaded, defective reuses retranslated"),
-                  (TranslationHotPathAB.stableDisplay, "stable display (no redraw for another reading or a flip back)")].filter { $0.0 }.map { $0.1 }
+                  (TranslationHotPathAB.stableDisplay, "stable display (no redraw for another reading or a flip back)"),
+                  (TranslationHotPathAB.learnedEarlyStart, "early translation confidence learned from this run"),
+                  (TranslationHotPathAB.quickHangLimit, "hung translation calls given up on after about 3.5 s")].filter { $0.0 }.map { $0.1 }
         return on.isEmpty ? "Test switches on: none." : "Test switches on: " + on.joined(separator: ", ") + "."
     }
 

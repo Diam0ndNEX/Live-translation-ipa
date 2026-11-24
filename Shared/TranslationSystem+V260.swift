@@ -52,8 +52,15 @@ struct ModelStallLimit {
         return sorted[max(0, index)]
     }
 
+    /// 2.6.5 (switch quickHangLimit): the sooner limit.
+    static let quickFloorSeconds = 3.5
+    static let quickMultiple = 4.0
+
     var limitSeconds: Double {
         guard let p95 else { return Self.coldSeconds }
+        if TranslationHotPathAB.quickHangLimit {
+            return min(Self.ceilingSeconds, max(Self.quickFloorSeconds, p95 * Self.quickMultiple))
+        }
         return min(Self.ceilingSeconds, max(Self.floorSeconds, p95 * Self.multiple))
     }
 }

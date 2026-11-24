@@ -169,6 +169,10 @@ struct Stats: Equatable {
     var memoryQuarantined = 0 // 2.6.3
     var displayHeldVariant = 0 // 2.6.4
     var displayHeldFlip = 0 // 2.6.4
+    var specLearnSamples = 0 // 2.6.5
+    var specLearnMatches = 0 // 2.6.5
+    var specLearnedMilli = 0 // 2.6.5 (latest learned limit x 1000)
+    var earlyStartByLearning = 0 // 2.6.5
     var slowTailEnqueues = 0
     var manualTranslations = 0
     var identicalFrameHolds = 0 // 2.2.1 (E9)

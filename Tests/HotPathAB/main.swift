@@ -242,7 +242,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             TranslationHotPathAB.pinSettings()
             precondition(!TranslationHotPathAB.growthSettle && TranslationHotPathAB.captionJoin, "the 2.5.6 switch turns off alone")
             standard.removeObject(forKey: "growthSettle")
-            for item in TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches + TranslationHotPathAB.v261Switches + TranslationHotPathAB.v263Switches + TranslationHotPathAB.v264Switches { standard.removeObject(forKey: item.pinned) }
+            for item in TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches + TranslationHotPathAB.v261Switches + TranslationHotPathAB.v263Switches + TranslationHotPathAB.v264Switches + TranslationHotPathAB.v265Switches { standard.removeObject(forKey: item.pinned) }
             for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey] { standard.removeObject(forKey: key) }
             var growth = CaptionGrowthTracker()
             precondition(growth.observe("ola tudo", at: 0) == .different, "2.5.6: the first reading is not growth")
@@ -275,6 +275,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             standard.removeObject(forKey: "stallWatchdog")
             for item in TranslationHotPathAB.v260Switches { standard.removeObject(forKey: item.pinned) }
             // The call limit is learned: cold, fast device, slow device, and the fixed ceiling.
+            standard.set(false, forKey: "quickHangLimitPinned") // 2.6.5: these checks are the 2.6.0 limit
             var limit = ModelStallLimit()
             precondition(limit.limitSeconds == ModelStallLimit.coldSeconds, "2.6.0: before any call the limit is the cold one")
             for _ in 0..<10 { limit.record(seconds: 0.5) }
@@ -287,6 +288,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             precondition(verySlow.limitSeconds == ModelStallLimit.ceilingSeconds, "2.6.0: the limit never exceeds the ceiling")
             limit.widen(afterLateReturn: 9)
             precondition(limit.p95 == 9, "2.6.0: a late return widens the limit")
+            standard.removeObject(forKey: "quickHangLimitPinned")
             // The recovery ladder: one step at a time, in order, only after the threshold, restarting after progress.
             var ladder = StallLadder()
             precondition(ladder.evaluate(now: 100, waiting: 3, limit: 6) == nil, "2.6.0: a short wait is not a stall")
@@ -376,7 +378,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             TranslationHotPathAB.pinSettings()
             precondition(!TranslationHotPathAB.looseMemoryReuse && TranslationHotPathAB.stallWatchdog, "the 2.6.1 switch turns off alone")
             standard.removeObject(forKey: "looseMemoryReuse")
-            for item in TranslationHotPathAB.v261Switches + TranslationHotPathAB.v263Switches + TranslationHotPathAB.v264Switches { standard.removeObject(forKey: item.pinned) }
+            for item in TranslationHotPathAB.v261Switches + TranslationHotPathAB.v263Switches + TranslationHotPathAB.v264Switches + TranslationHotPathAB.v265Switches { standard.removeObject(forKey: item.pinned) }
             precondition(LooseReuse.key("Olá, MEU  amigo!") == "ol\u{00E1}meuamigo", "2.6.1: the loose key keeps letters and numbers only")
             precondition(LooseReuse.key("Ola\u{0301}") == LooseReuse.key("Ol\u{00E1}"), "2.6.1: canonical forms give one loose key")
             precondition(LooseReuse.terminal("Hello there?! ") == "?!" && LooseReuse.terminal("Hello") == "", "2.6.1: closing punctuation")
@@ -390,7 +392,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             TranslationHotPathAB.pinSettings()
             precondition(!TranslationHotPathAB.memoryCare && TranslationHotPathAB.looseMemoryReuse, "2.6.3: the switch turns off alone")
             standard.removeObject(forKey: "memoryCare")
-            for item in TranslationHotPathAB.v263Switches + TranslationHotPathAB.v264Switches { standard.removeObject(forKey: item.pinned) }
+            for item in TranslationHotPathAB.v263Switches + TranslationHotPathAB.v264Switches + TranslationHotPathAB.v265Switches { standard.removeObject(forKey: item.pinned) }
             let careKey = "v4|" + String(repeating: "a", count: 64) + "|pt>en|3:a=b|Pague 1500 agora|ja"
             precondition(MemoryCare.unitSource(careKey) == "Pague 1500 agora|ja", "2.6.3: the source text is the last field, even with a bar inside")
             precondition(MemoryCare.target(careKey) == "en" && MemoryCare.unitSource("v2|pt>en|0:|Oi") == "Oi", "2.6.3: target and old key form")
@@ -418,6 +420,48 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             precondition(steady.decide("Finalmente Eles Estao cara a Cara", now: 1) == .show, "2.6.4: new text is shown at once")
             steady.shown("Goa aiky", now: 1)
             precondition(steady.decide(sisterLine, now: 1.5) == .holdFlip, "2.6.4: a flip back within 2 s is held")
+            // 2.6.5: the early start confidence is learned from first readings; the hang limit is sooner.
+            TranslationHotPathAB.pinSettings()
+            precondition(TranslationHotPathAB.learnedEarlyStart && TranslationHotPathAB.quickHangLimit, "2.6.5 switches default to on")
+            standard.set(false, forKey: "learnedEarlyStart")
+            TranslationHotPathAB.pinSettings()
+            precondition(!TranslationHotPathAB.learnedEarlyStart && TranslationHotPathAB.quickHangLimit && TranslationHotPathAB.stableDisplay, "2.6.5: the switch turns off alone")
+            standard.removeObject(forKey: "learnedEarlyStart")
+            for item in TranslationHotPathAB.v265Switches { standard.removeObject(forKey: item.pinned) }
+            var learner = SpecConfidenceLearner()
+            precondition(learner.threshold(fallback: 0.85) == 0.85, "2.6.5: nothing learned yet keeps the fixed limit")
+            for _ in 0..<20 { learner.record(confidence: 0.72, matched: true) }
+            precondition(learner.threshold(fallback: 0.85) == 0.85, "2.6.5: too few samples keep the fixed limit")
+            for _ in 0..<10 { learner.record(confidence: 0.95, matched: true) }
+            precondition(abs(learner.threshold(fallback: 0.85) - 0.55) < 0.001, "2.6.5: first readings that were all final lower the limit to the floor")
+            var mixed = SpecConfidenceLearner()
+            for _ in 0..<12 { mixed.record(confidence: 0.6, matched: false) }
+            for _ in 0..<12 { mixed.record(confidence: 0.9, matched: true) }
+            let learnedMixed = mixed.threshold(fallback: 0.85)
+            precondition(learnedMixed > 0.6 && learnedMixed <= 0.9, "2.6.5: wrong readings at low confidence keep the limit above them")
+            var hopeless = SpecConfidenceLearner()
+            for _ in 0..<30 { hopeless.record(confidence: 0.97, matched: false) }
+            precondition(hopeless.threshold(fallback: 0.85) == 0.85, "2.6.5: when nothing qualifies the fixed limit stays")
+            hopeless.forget()
+            precondition(hopeless.samples.isEmpty && hopeless.recordedTotal == 30, "2.6.5: forget clears the window, not the totals")
+            var book = FirstReadingBook()
+            book.noteFirst(candidate: "a", confidence: 0.7, identity: "oi mundo")
+            book.noteFirst(candidate: "a", confidence: 0.2, identity: "changed")
+            precondition(book.take(candidate: "a") == FirstReadingNote(confidence: 0.7, identity: "oi mundo"), "2.6.5: only the first reading of a caption is kept")
+            precondition(book.take(candidate: "a") == nil, "2.6.5: a note is taken once")
+            var evictedCount = 0
+            for n in 0..<(FirstReadingBook.capacity + 3) { evictedCount += book.noteFirst(candidate: "c\(n)", confidence: 0.5, identity: "x\(n)").count }
+            precondition(evictedCount == 3, "2.6.5: captions never confirmed fall out and are reported")
+            // The hang limit: the sooner one by default, the 2.6.0 one with the switch off.
+            var quick = ModelStallLimit()
+            for _ in 0..<10 { quick.record(seconds: 0.5) }
+            precondition(quick.limitSeconds == ModelStallLimit.quickFloorSeconds, "2.6.5: a fast device gets the sooner floor")
+            var quickSlow = ModelStallLimit()
+            for _ in 0..<10 { quickSlow.record(seconds: 2) }
+            precondition(abs(quickSlow.limitSeconds - 8) < 0.001, "2.6.5: four times the slow end")
+            standard.set(false, forKey: "quickHangLimitPinned")
+            precondition(quick.limitSeconds == ModelStallLimit.floorSeconds && abs(quickSlow.limitSeconds - 12) < 0.001, "2.6.5: switch off gives the 2.6.0 limit")
+            standard.removeObject(forKey: "quickHangLimitPinned")
             precondition(steady.decide(sisterLine, now: 3.2) == .show, "2.6.4: after 2 s the earlier caption may come back")
             precondition(steady.decide("ok", now: 1.2) == .show, "2.6.4: very short text is not judged")
             steady.forget()
@@ -474,7 +518,7 @@ private func syntheticCaption(mode: TranslationSystem, candidate: CandidateIdent
             precondition(TranslationHotPathAB.deferArmedSpeculation, "after the reset the toggle works again")
             for key in ["deferArmedSpeculation", "legacyConfirmedOwnLane", LegacyV251Defaults.appliedKey,
                         "legacyConfirmedOwnLanePinned", "deferArmedSpeculationPinned"] { standard.removeObject(forKey: key) }
-            for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches + TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches + TranslationHotPathAB.v261Switches + TranslationHotPathAB.v263Switches + TranslationHotPathAB.v264Switches { standard.removeObject(forKey: item.pinned) }
+            for item in TranslationHotPathAB.v250Switches + TranslationHotPathAB.v251Switches + TranslationHotPathAB.v254Switches + TranslationHotPathAB.v255Switches + TranslationHotPathAB.v256Switches + TranslationHotPathAB.v260Switches + TranslationHotPathAB.v261Switches + TranslationHotPathAB.v263Switches + TranslationHotPathAB.v264Switches + TranslationHotPathAB.v265Switches { standard.removeObject(forKey: item.pinned) }
             for key in [TranslationHotPathAB.planPinnedKey, TranslationHotPathAB.unitsPinnedKey,
                         TranslationHotPathAB.availabilityRefreshPinnedKey, TranslationHotPathAB.independentHeartbeatPinnedKey] {
                 standard.removeObject(forKey: key)
