@@ -55,6 +55,7 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("stallWatchdog") private var stallWatchdog = true
     @AppStorage("looseMemoryReuse") private var looseMemoryReuse = true
     @AppStorage("memoryCare") private var memoryCare = true
+    @AppStorage("stableDisplay") private var stableDisplay = true
     @AppStorage("flaggedCaptionText") private var flaggedCaptionText = true
     @AppStorage("independentCaptureHeartbeat") private var independentCaptureHeartbeat = true
 
@@ -216,6 +217,10 @@ struct ExperimentalFeaturesView: View {
                     explanation: "New in 2.6.3, default on. When memory opens, the most recently used saved sentences for your rules and target language are loaded into RAM, so a repeated sentence is found without reading the memory file. When a shown caption reused a saved translation that has a clear defect on its own (a number missing, a word repeated three times, or the source returned unchanged for a sentence of three or more words), that saved translation is sent back for validation and translated afresh next time. The text stays saved. Off: as in 2.6.2. Unverified effect; the report counts both.",
                     enabled: $memoryCare)
                 ExperimentalOption(
+                    title: "Keep the caption steady",
+                    explanation: "New in 2.6.4, default on. When a new caption is only another reading of the one on screen (it differs only in accents, upper or lower case, spacing or punctuation), the shown caption stays for up to 6 s instead of being drawn again. When the screen flips back to a caption shown in the last 8 s while the current one has been visible for less than 2 s, the current one stays. New text is always shown at once. Off: as in 2.6.3. Unverified effect; the report counts both.",
+                    enabled: $stableDisplay)
+                ExperimentalOption(
                     title: "Include flagged captions' text in reports",
                     explanation: "New in 2.6.0, default on. ScreenLingo checks every shown caption by itself (the same sentence shown again, the same sentence rewritten, a translation equal to the source, a number that went missing, an unusual length, a repeated word). A caption with such a flag is saved on this phone as text: at most 200, removed after 14 days, never saved in a private session. When you export a test report, the text of the flagged captions from those runs is added as the last section, so the wording can be judged. Nothing else in a report contains subtitle text. Off: nothing is saved and reports stay numbers only.",
                     enabled: $flaggedCaptionText)
@@ -281,7 +286,7 @@ struct ExperimentalFeaturesView: View {
                 "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy",
                 "backgroundAvailabilityRefresh", "legacyConfirmedOwnLane", "independentCaptureHeartbeat",
                 "deferArmedSpeculation", "legacyEagerSpeculation", "finishRunningCaption",
-                "ocrDuplicateFilter", "streamLegacyCalls", "pixelManyLines", "captionLineSpeculation", "captionJoin", "growthSettle", "stallWatchdog", "looseMemoryReuse", "memoryCare", "flaggedCaptionText",
+                "ocrDuplicateFilter", "streamLegacyCalls", "pixelManyLines", "captionLineSpeculation", "captionJoin", "growthSettle", "stallWatchdog", "looseMemoryReuse", "memoryCare", "stableDisplay", "flaggedCaptionText",
                 "warmAtCaptureStart", "reportStoredSessionTotals", "confirmationReadReasons", "modelLengthBuckets",
                 "trustedCaptionBand", "legacyHeadStart", "quietRewarm"
             ])

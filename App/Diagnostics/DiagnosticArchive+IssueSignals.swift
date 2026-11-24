@@ -44,6 +44,11 @@ extension DiagnosticIssueDetector {
             add("slow_captions_mostly_" + cause.stage.replacingOccurrences(of: " ", with: "_").lowercased(), "observed", cause.captions,
                 "\(cause.captions) of the \(cause.total) slowest captions (at least \(Int(SlowCaptions.causeMinimumMs)) ms) spent most time in \(cause.stage). See the table \"Slowest captions\".")
         }
+        let held = n("displayHeldVariant") + n("displayHeldFlip")
+        if held > 0 {
+            add("display_flicker_held", "observed", held,
+                "\(n("displayHeldVariant")) caption(s) differed from the shown one only in accents, case or punctuation (another OCR reading of the same line) and \(n("displayHeldFlip")) flipped back to a caption shown moments ago; the shown caption was kept instead of redrawing.")
+        }
         if n("memoryQuarantined") > 0 {
             add("memory_quarantined", "observed", n("memoryQuarantined"),
                 "\(n("memoryQuarantined")) saved translation(s) had a clear defect when reused (a lost number, a repeated word, or the source returned unchanged) and were sent back for a fresh translation. The text stays saved.")
@@ -70,7 +75,7 @@ extension DiagnosticIssueDetector {
         let lookups = hits + n("miss") + n("timeout") + n("compatibilityRejected") + n("databaseUnavailable")
         if lookups >= 50 && percent(hits, lookups) < 35 {
             add("low_memory_hit_rate", "suspected", n("miss"),
-                "Only \(percent(hits, lookups))% of \(lookups) lookups hit memory (threshold 35%). Normal for new content; low for content that repeats. The reason for each miss is not recorded yet, so the saving that better matching could give is unknown.")
+                "Only \(percent(hits, lookups))% of \(lookups) lookups hit memory (threshold 35%). Normal for new content; low for content that repeats. The table \"Why confirmed units missed memory\" says how many misses were new text.")
         }
 
         // Confirmation by pixels.

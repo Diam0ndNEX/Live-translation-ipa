@@ -36,6 +36,7 @@ enum SettingsSearchIndex {
         SettingsSearchEntry(label: "Include flagged captions' text in reports", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Incremental translation recovery", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Independent capture heartbeat", page: .experimental, pageTitle: "Experimental features"),
+        SettingsSearchEntry(label: "Keep the caption steady", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Legacy confirmed own lane", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Legacy head start", page: .experimental, pageTitle: "Experimental features"),
         SettingsSearchEntry(label: "Legacy shared session", page: .experimental, pageTitle: "Experimental features"),

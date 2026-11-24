@@ -222,10 +222,10 @@ enum CombinedDiagnosticReport {
             let pair = session.translationModes?.events.first.map { "\($0.source)>\($0.target)" } ??
                 "\(s["source"] ?? "?")>\(s["target"] ?? "?")"
             let minutes = max(0, session.endedAt.timeIntervalSince(session.startedAt)) / 60
-            let ram = Int(s["startingRAMEntries"] ?? "") ?? 0
+            let ram = Int(s["startingRAMEntries"] ?? "") ?? 0, preloaded = session.counters["memoryWarmed", default: 0]
             let switches = ["effectiveRapidTextTracking", "effectiveJoinAdjacentText", "effectiveActiveTextFocus"]
                 .map { s[$0] ?? "?" }.joined(separator: "/")
-            out.append("| \(labels[i]) | \(session.translationModes?.active ?? "unknown") | \(session.startedAt.ISO8601Format()) | \(String(format: "%.1f", minutes)) | \(session.hardwareModel ?? "?") | \(session.systemVersion) | \(pair) | \(s["mode"] ?? "?") | \(s["speed"] ?? "?") | \(s["translationTestMode"] ?? "?") | \(ram)\(ram > 0 ? " ⚠️" : "") | \(switches) | \(s["pixelConfirmation"] ?? "-")/\(s["eventDrivenOCR"] ?? "-")/\(s["fastOCR"] ?? "-") |")
+            out.append("| \(labels[i]) | \(session.translationModes?.active ?? "unknown") | \(session.startedAt.ISO8601Format()) | \(String(format: "%.1f", minutes)) | \(session.hardwareModel ?? "?") | \(session.systemVersion) | \(pair) | \(s["mode"] ?? "?") | \(s["speed"] ?? "?") | \(s["translationTestMode"] ?? "?") | \(ram)\(ram > preloaded ? " ⚠️" : (ram > 0 ? " (preloaded)" : "")) | \(switches) | \(s["pixelConfirmation"] ?? "-")/\(s["eventDrivenOCR"] ?? "-")/\(s["fastOCR"] ?? "-") |")
         }
         if !runs.isEmpty {
             // Run facts (v2.0.0 build 84): metadata only, matched to sessions by id.
@@ -251,7 +251,8 @@ enum CombinedDiagnosticReport {
                 out.append("- \(labels[i])–\(labels[j]): \(value.map { "\(Int(($0 * 100).rounded()))%" } ?? "–")")
             } }
         }
-        if selected.contains(where: { (Int($0.settings["startingRAMEntries"] ?? "") ?? 0) > 0 }) {
+        // 2.6.4: units preloaded from saved memory (memoryWarmed) are expected and are not test memory.
+        if selected.contains(where: { (Int($0.settings["startingRAMEntries"] ?? "") ?? 0) > $0.counters["memoryWarmed", default: 0] }) {
             out.append("")
             out.append("⚠️ A session started with test memory already filled; its reuse numbers are not comparable.")
         }
@@ -267,7 +268,7 @@ enum CombinedDiagnosticReport {
                           ("heartbeatAB", "independent capture heartbeat"), ("armedDeferAB", "deferred early start")]
                 .filter { s[$0.0] == "on" }.map { $0.1 }
             // 2.5.0: items A to F and the quiet re-warm (default on; a run saved before 2.5.0 has none).
-            let v250On = (TranslationHotPathAB.v250ReportLabels + TranslationHotPathAB.v251ReportLabels + TranslationHotPathAB.v254ReportLabels + TranslationHotPathAB.v255ReportLabels + TranslationHotPathAB.v256ReportLabels + TranslationHotPathAB.v260ReportLabels + TranslationHotPathAB.v261ReportLabels + TranslationHotPathAB.v263ReportLabels)
+            let v250On = (TranslationHotPathAB.v250ReportLabels + TranslationHotPathAB.v251ReportLabels + TranslationHotPathAB.v254ReportLabels + TranslationHotPathAB.v255ReportLabels + TranslationHotPathAB.v256ReportLabels + TranslationHotPathAB.v260ReportLabels + TranslationHotPathAB.v261ReportLabels + TranslationHotPathAB.v263ReportLabels + TranslationHotPathAB.v264ReportLabels)
                 .filter { s[$0.key] == "on" }.map { $0.label }
             let armsText = (armsOn + v250On).isEmpty ? "none" : (armsOn + v250On).joined(separator: ", ")
             out.append("| \(labels[i]) | \(s["hotPathAB"] ?? "?") | \(s["detailedCollection"] ?? "?")\(s["detailSuspended"] == "true" ? " (suspended: thermal)" : "") | \(s["thermalStart"] ?? "?")/\(s["thermalEnd"] ?? "?")/\(s["thermalMax"] ?? "?") | \(s["focusedCaptionOCR"] ?? "?")/\(s["strictCaptionIdentity"] ?? "?") | \(session.counters["identicalFrameHolds", default: 0]) | \(session.counters["manualTranslations", default: 0]) | \(ms(session.distributions["memoryLookupWaitMs"]?.p50))/\(ms(session.distributions["memoryLookupWaitMs"]?.p95)) | \(ms(session.distributions["memoryHealthMs"]?.p50))/\(ms(session.distributions["memoryHealthMs"]?.p95)) | \(memoryTimeoutShare(session)) | \(armsText) |")

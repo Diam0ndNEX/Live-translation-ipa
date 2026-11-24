@@ -23,6 +23,7 @@ extension TranslatorEngine {
             bank.use[key] = 0
             added += 1
         }
+        diag.ramWarmedEntries += added
         if diag.enabled { diag.s.memoryWarmed += added }
         if added > 0 { diag.log("Memory: \(added) saved units loaded into RAM") }
     }

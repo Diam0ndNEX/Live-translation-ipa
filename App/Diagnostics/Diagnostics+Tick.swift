@@ -137,6 +137,8 @@ extension Diagnostics {
             "looseHits": s.looseHits,
             "memoryWarmed": s.memoryWarmed,
             "memoryQuarantined": s.memoryQuarantined,
+            "displayHeldVariant": s.displayHeldVariant,
+            "displayHeldFlip": s.displayHeldFlip,
             "missNew": s.missNew,
             "missNearMiss": s.missNearMiss,
             "missRepeatedExact": s.missRepeatedExact,
