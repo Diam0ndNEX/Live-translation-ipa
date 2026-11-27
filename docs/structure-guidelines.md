@@ -1,8 +1,8 @@
 # ScreenLingo structure guidelines
 
-Status: rewritten for 2.3.9 (build 116), re-read against the code for 2.4.0 (build 117) and again for 2.5.0 (build 118, two modes) and 2.6.0 (build 125, re-read against the code: layout, rules and checklist still hold). Reviewed for: 2.6 (see section 9). The big files were split in 2.3.3 to 2.3.9 (see `docs/structure-migration-plan.md` for the log). Swift was never compiled in chat; the GitHub Actions run is the first test of any change. This file says where code, tests and docs go, and how to split safely.
+Status: rewritten for 2.3.9 (build 116), re-read against the code for 2.4.0 (build 117) and again for 2.5.0 (build 118, two modes) 2.6.0 (build 125, re-read against the code: layout, rules and checklist still hold) and 2.7.0 (build 131: re-read against the code; layout and checklist still hold, rule 7 added for iPad). Reviewed for: 2.7 (see section 9). The big files were split in 2.3.3 to 2.3.9 (see `docs/structure-migration-plan.md` for the log). Swift was never compiled in chat; the GitHub Actions run is the first test of any change. This file says where code, tests and docs go, and how to split safely.
 
-## 1. Current state (2.6.0)
+## 1. Current state (2.7.0)
 <!-- sizes:start -->
 | Main file | Lines (rounded to 50) | Part files |
 |---|---|---|
@@ -11,8 +11,8 @@ Status: rewritten for 2.3.9 (build 116), re-read against the code for 2.4.0 (bui
 | BroadcastExtension/SampleHandler.swift | 650 | 5 |
 | App/TranslationMemoryStore.swift | 450 | 10 |
 | App/DiagnosticArchive.swift | 400 | 11 |
+| App/SettingsViews.swift | 400 | 2 |
 | App/DiagnosticsDashboard.swift | 350 | 5 |
-| App/SettingsViews.swift | 300 | 2 |
 | App/ModeTranslationService.swift | 300 | 3 |
 | App/TestRunViews.swift | 250 | 2 |
 | Shared/TranslationSystem.swift | 200 | 13 |
@@ -41,6 +41,7 @@ Main files stay where they are (`App/TranslatorEngine.swift` ...); only parts li
 4. Pure logic with no UI or engine state goes in `Shared/` as a small policy file with a Swift test in `Tests/`.
 5. SwiftUI views go in `App/UI/<Screen>/`, `App/Settings/` or the screen folder. UI files keep a unique name; the UI lints match on names and on `/UI/`.
 6. Engine code that touches engine state goes in `extension TranslatorEngine` in its own file under `App/Engine/`.
+7. (2.7.0) Screens work on iPhone and iPad. Decide layout by `horizontalSizeClass` or measured width, never by device: regular width uses a split view (Library, Settings) or columns (Translate); the iPad is never orientation-locked (`OrientationLock`). Keyboard shortcuts go in `App/UI/Kit/KeyCommands.swift` (root) or next to the screen that owns them, and call the same method as the button. A view that shows engine values on a tab uses a slice or `@EngineFacts`, never `@EnvironmentObject` of the engine (every tab stays alive).
 
 ## 4. How to split a file safely (learned in 2.3.3 to 2.3.9)
 1. Move whole units: top-level types, or whole members of a class, actor or struct. Never cut inside a function. One concern per commit; text unchanged.

@@ -94,7 +94,7 @@ struct PrivacySettings: View {
                 Toggle("Show recognized speaker labels", isOn: $showSpeakers)
                 Hint("Only reads visible \"Name:\" labels. It does not identify voices or people without a label.")
                 Toggle("Include recognized text in diagnostic exports", isOn: $includeText)
-                Hint("Leave off unless a troubleshooting export needs the text. Reading and translating happen on your phone.")
+                Hint("Leave off unless a troubleshooting export needs the text. Reading and translating happen on this device.")
             } header: { Text("Personal content") }
             Section {
                 NavigationLink {

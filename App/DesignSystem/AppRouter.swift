@@ -42,6 +42,9 @@ final class AppRouter: ObservableObject {
     }
     @Published var sheet: AppSheet?
     @Published var libraryPath = NavigationPath()
+    /// 2.7.0: the Library item to show next (a Recent row on Translate). The iPad split view selects it; on iPhone
+    /// the same id is pushed onto `libraryPath`.
+    @Published var libraryFocus: UUID?
     /// The side the language sheet opens on (the word tapped in the pair title).
     @Published var languageSide: LanguageSide = .target
     private var pendingSheet: Task<Void, Never>?
@@ -93,4 +96,13 @@ final class AppRouter: ObservableObject {
     }
 
     func dismissSheet() { pendingSheet?.cancel(); sheet = nil }
+
+    /// 2.7.0: opens one saved translation in the Library tab.
+    func openLibraryItem(_ id: UUID) {
+        go(.library)
+        var path = NavigationPath()
+        path.append(id)
+        libraryPath = path
+        libraryFocus = id
+    }
 }

@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ResponsivenessSettings: View {
-    @EnvironmentObject private var engine: TranslatorEngine
+    @EngineHandle private var engine   // 2.7.0: calls only; it used to redraw on every engine change
     @EnvironmentObject private var feedback: FeedbackCenter
     @AppStorage("displayPolicy") private var policy = "immediate"
     @AppStorage("minDisplay") private var minimum = 0.0

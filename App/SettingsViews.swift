@@ -1,5 +1,6 @@
-// ScreenLingo – App – Settings (2.1.2: colour-tile rows in rounded groups, one hero summary, native pages)
+// ScreenLingo – App – Settings (2.1.2: colour-tile rows in rounded groups, one hero summary, native pages; 2.7.0 iPad split view)
 import SwiftUI
+import Combine
 
 extension View {
     /// Every settings page is a native grouped list with a large title; no header card (R9).
@@ -41,12 +42,48 @@ struct ResetSection: View {
 
 private struct PresetsLinkRow: View {
     @ObservedObject var store: PresetStore
+    /// 2.7.0: set on iPad, where the page opens in the detail column instead of being pushed.
+    var open: (() -> Void)? = nil
+    var selected = false
     var body: some View {
-        NavigationLink { PresetManagerView(store: store) } label: {
-            SettingsRow(title: "Scenes", value: store.active.map { store.isModified ? "\($0.name) · changed" : $0.name } ?? "\(store.all.count)",
-                        symbol: "square.stack.3d.up", tint: .indigo)
+        if let open {
+            Button(action: open) { label.settingsSelection(selected) }
+                .buttonStyle(PressableStyle())
+        } else {
+            NavigationLink { PresetManagerView(store: store) } label: { label }
+                .buttonStyle(PressableStyle())
         }
-        .buttonStyle(PressableStyle())
+    }
+    private var label: some View {
+        SettingsRow(title: "Scenes", value: store.active.map { store.isModified ? "\($0.name) · changed" : $0.name } ?? "\(store.all.count)",
+                    symbol: "square.stack.3d.up", tint: .indigo)
+    }
+}
+
+/// 2.7.0: the page shown in the iPad detail column.
+private struct SettingsDetail: Identifiable {
+    let id: String
+    let view: AnyView
+}
+
+/// 2.7.0: what the Settings summary shows. The screen used to observe the whole engine and redraw on every caption
+/// while capture ran, because every tab stays alive in the tab view.
+struct SettingsSummaryFacts: Equatable {
+    var source: String
+    var target: String
+    var system: String
+    var memoryCount: Int
+    @MainActor static func read(_ e: TranslatorEngine) -> SettingsSummaryFacts {
+        SettingsSummaryFacts(source: e.sourceCode, target: e.targetCode, system: e.pendingTranslationSystem.shortName,
+                             memoryCount: e.memoryCount)
+    }
+}
+
+extension View {
+    /// The selected row in the iPad Settings sidebar.
+    func settingsSelection(_ selected: Bool) -> some View {
+        background(selected ? Color.accentColor.opacity(0.16) : Color.clear,
+                   in: RoundedRectangle(cornerRadius: KitRadius.small, style: .continuous))
     }
 }
 
@@ -60,11 +97,17 @@ private struct SettingsEntry: Identifiable {
 
 /// One grouped list in five groups (§13.5.5). Search finds a row by its title or by plain words for what it holds.
 struct SettingsView: View {
-    @EnvironmentObject var engine: TranslatorEngine
+    @EngineHandle private var engine
+    @EngineFacts(SettingsSummaryFacts.read) private var summary
     @EnvironmentObject private var router: AppRouter
     @EnvironmentObject private var advanced: AdvancedMode
     @EnvironmentObject private var theme: ThemeStore
+    @Environment(\.horizontalSizeClass) private var sizeClass
     @State private var query = ""
+    @State private var detail: SettingsDetail?
+    /// Content style, speed and area live in UserDefaults; this redraws the summary when they change.
+    @State private var defaultsTick = 0
+    private var split: Bool { sizeClass == .regular }
     /// Read-only: each key keeps its one owner page (scripts/test_experimental_settings.py).
     private var areaTitle: String { (OCRArea(rawValue: UserDefaults.standard.string(forKey: "area") ?? "") ?? .smart).title }
 
@@ -73,7 +116,29 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        if split {
+            // 2.7.0, iPad: the list on the left, the page on the right. Each page gets its own stack, so links inside a
+            // page (Window > Style, Memory > ...) push in the right column.
+            NavigationSplitView {
+                list.navigationSplitViewColumnWidth(min: 320, ideal: 380, max: 460)
+            } detail: {
+                NavigationStack {
+                    if let detail {
+                        detail.view
+                    } else {
+                        ContentUnavailableView("Choose a setting", systemImage: "gearshape",
+                                               description: Text("Pick a page on the left. Search finds a single setting."))
+                    }
+                }
+                .id(detail?.id ?? "none")
+            }
+            .navigationSplitViewStyle(.balanced)
+        } else {
+            NavigationStack { list }
+        }
+    }
+
+    private var list: some View {
             ScrollView {
                 VStack(alignment: .leading, spacing: KitSpace.group) {
                     if query.isEmpty { hero }
@@ -101,31 +166,45 @@ struct SettingsView: View {
             .background(Color(.systemGroupedBackground))
             .searchable(text: $query, prompt: "Search settings")
             .navigationTitle("Settings")
+            .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)
+                .throttle(for: .seconds(1), scheduler: RunLoop.main, latest: true)) { _ in defaultsTick &+= 1 }
             #if SCREENLINGO_FIXTURES
             .navigationDestination(isPresented: .constant(UIFixture.current == .settingsCaption)) { CaptionAppearanceSettings() }
             .navigationDestination(isPresented: .constant(UIFixture.current == .settingsInterface)) { InterfaceSettings() }
             #endif
-        }
     }
 
     /// One row that opens a page. The press feedback comes from the style, not from a big button shape.
-    private func link<D: View>(_ title: String, _ symbol: String, _ tint: Color, value: String = "",
-                               destination: @autoclosure @escaping () -> D) -> some View {
-        NavigationLink { destination() } label: { SettingsRow(title: title, value: value, symbol: symbol, tint: tint) }
+    @ViewBuilder private func link<D: View>(_ title: String, _ symbol: String, _ tint: Color, value: String = "",
+                                            destination: @autoclosure @escaping () -> D) -> some View {
+        if split {
+            Button { show(title, destination()) } label: {
+                SettingsRow(title: title, value: value, symbol: symbol, tint: tint).settingsSelection(detail?.id == title)
+            }
             .buttonStyle(PressableStyle())
+        } else {
+            NavigationLink { destination() } label: { SettingsRow(title: title, value: value, symbol: symbol, tint: tint) }
+                .buttonStyle(PressableStyle())
+        }
+    }
+
+    /// iPad: shows a page in the detail column.
+    private func show<D: View>(_ id: String, _ page: D) {
+        detail = SettingsDetail(id: id, view: AnyView(page))
     }
 
     /// What is set up right now, at a glance. The one hero object on this screen.
     private var hero: some View {
         let defaults = UserDefaults.standard
+        let _ = defaultsTick
         let content = TranslateMode(rawValue: defaults.string(forKey: "mode") ?? "")?.title ?? TranslateMode.movie.title
         let speed = SpeedPreset(rawValue: defaults.string(forKey: "speed") ?? "")?.title ?? SpeedPreset.balanced.title
-        let source = engine.sourceCode == "auto" ? "Auto" : engine.sourceCode.uppercased()
+        let source = summary.source == "auto" ? "Auto" : summary.source.uppercased()
         return HStack(spacing: KitSpace.row) {
             IconTile(symbol: "character.bubble.fill", tint: .accentColor).scaleEffect(1.35).padding(KitSpace.unit)
             VStack(alignment: .leading, spacing: 2) {
-                Text("\(source) → \(engine.targetCode.uppercased())").font(.title3.weight(.semibold))
-                Text("\(engine.pendingTranslationSystem.shortName) · \(content) · \(speed)")
+                Text("\(source) → \(summary.target.uppercased())").font(.title3.weight(.semibold))
+                Text("\(summary.system) · \(content) · \(speed)")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
             Spacer(minLength: 0)
@@ -140,7 +219,7 @@ struct SettingsView: View {
         if !found.isEmpty {
             SettingsGroup(title: "Settings") {
                 ForEach(found.prefix(30)) { entry in
-                    NavigationLink(destination: page(entry.page)) {
+                    resultLink(entry) {
                         HStack(spacing: KitSpace.row) {
                             VStack(alignment: .leading, spacing: 2) {
                                 Text(entry.label).font(.body)
@@ -154,9 +233,19 @@ struct SettingsView: View {
                         .frame(minHeight: 48)
                         .contentShape(Rectangle())
                     }
-                    .buttonStyle(PressableStyle())
                 }
             }
+        }
+    }
+
+    /// A search result opens its page: pushed on iPhone, in the detail column on iPad.
+    @ViewBuilder private func resultLink<L: View>(_ entry: SettingsSearchEntry, @ViewBuilder label: () -> L) -> some View {
+        if split {
+            Button { show("search:" + entry.id, page(entry.page)) } label: { label().settingsSelection(detail?.id == "search:" + entry.id) }
+                .buttonStyle(PressableStyle())
+        } else {
+            NavigationLink(destination: page(entry.page)) { label() }
+                .buttonStyle(PressableStyle())
         }
     }
 
@@ -183,16 +272,17 @@ struct SettingsView: View {
     @ViewBuilder private var translation: some View {
         SettingsGroup(title: "Translation") {
             if shows("System", "legacy low latency mode translate ahead speculation model warm memory") {
-                link("System", "cpu", .blue, value: engine.pendingTranslationSystem.shortName, destination: TranslationSettings())
+                link("System", "cpu", .blue, value: summary.system, destination: TranslationSettings())
             }
             if shows("Language packs", "languages download offline pair source target") {
                 link("Language packs", "globe", .teal, destination: LanguageSheet(engine: engine, inSheet: false))
             }
             if shows("Scenes", "presets profiles saved configurations") {
-                PresetsLinkRow(store: engine.presets)
+                let openScenes: (() -> Void)? = split ? { show("Scenes", PresetManagerView(store: engine.presets)) } : nil
+                PresetsLinkRow(store: engine.presets, open: openScenes, selected: detail?.id == "Scenes")
             }
             if shows("Memory", "translation memory remembered cache database") {
-                link("Memory", "externaldrive", .purple, value: "\(engine.memoryCount.formatted()) remembered", destination: MemoryManagementView())
+                link("Memory", "externaldrive", .purple, value: "\(summary.memoryCount.formatted()) remembered", destination: MemoryManagementView())
             }
         }
     }

@@ -118,7 +118,7 @@ struct LanguageSheet: View {
                 } header: {
                     disclosureHeader("Not supported on this device (\(unsupported.count))", expanded: $showUnsupported, forced: !query.isEmpty)
                 } footer: {
-                    Text("Translation runs on your phone with Apple's language packs. iOS stores them and shares them with the Translate app.")
+                    Text("Translation runs on this device with Apple's language packs. iOS stores them and shares them with the Translate app.")
                 }
             }
         }

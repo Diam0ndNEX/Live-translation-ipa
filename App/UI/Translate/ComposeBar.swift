@@ -17,6 +17,7 @@ struct ComposeBar: View {
     @State private var ocrTask: Task<Void, Never>?
     @State private var ocrRequestID = UUID()
     @FocusState private var fieldFocused: Bool
+    @State private var dropTargeted = false
     @AppStorage("photoOCREdge") private var photoEdge = 2400
     @AppStorage("photoAutoTranslate") private var photoAutoTranslate = false
 
@@ -28,7 +29,7 @@ struct ComposeBar: View {
                 .lineLimit(1...5)
                 .focused($fieldFocused)
                 .submitLabel(.send)
-                .onSubmit(send)
+                .onSubmit { send() }
                 .padding(.horizontal, KitSpace.row)
                 .padding(.vertical, 10)
                 .frame(minHeight: 44)
@@ -42,19 +43,32 @@ struct ComposeBar: View {
                 Button { importing = true } label: { Image(systemName: "folder").frame(width: 44, height: 44) }
                     .accessibilityLabel("Translate a file")
             } else {
-                Button(action: send) {
+                Button { send() } label: {
                     Image(systemName: "arrow.up.circle.fill").font(.title).frame(width: 44, height: 44)
                 }
+                .keyboardShortcut(.return, modifiers: .command)   // 2.7.0: Command-Return on a hardware keyboard
                 .accessibilityLabel("Translate")
             }
         }
         .disabled(recognizing)
         .padding(.horizontal, KitSpace.tight)
         .padding(.vertical, KitSpace.unit)
+        .background(dropTargeted ? Color.accentColor.opacity(0.18) : Color.clear, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 28, style: .continuous))
         .padding(.horizontal, KitSpace.margin)
         .padding(.vertical, KitSpace.tight)
-        .onChange(of: input) { _, value in if value.count > 12000 { input = String(value.prefix(12000)) } }
+        // 2.7.0: drop a picture or text on the bar (iPad Split View, Slide Over, or from another app).
+        .onDrop(of: [.image, .plainText, .text], isTargeted: $dropTargeted) { handleDrop($0) }
+        .onChange(of: input) { old, value in
+            if value.count > 12000 { input = String(value.prefix(12000)); return }
+            // 2.7.0: the keyboard says Send, but a text field that grows downwards turns Return into a new line and
+            // never calls onSubmit. One typed line break now sends; pasted text keeps its line breaks.
+            func breaks(_ text: String) -> Int { text.filter { $0 == "\n" }.count }
+            if value.count == old.count + 1, breaks(value) == breaks(old) + 1 {
+                input = old
+                send(old)
+            }
+        }
         .onChange(of: photo) { _, value in
             guard let value else { return }
             ocrTask?.cancel()
@@ -95,12 +109,38 @@ struct ComposeBar: View {
         .onDisappear { ocrRequestID = UUID(); ocrTask?.cancel(); recognizing = false }
     }
 
-    private func send() {
-        guard !trimmed.isEmpty else { return }
+    /// `text` is passed when the call comes from a change of `input`, which must not be read again in the same update.
+    private func send(_ text: String? = nil) {
+        let value = text ?? input
+        guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         if !composing { engine.beginWorkspace(); composing = true }
-        engine.translateText(input)
+        engine.translateText(value)
         fieldFocused = false
         input = ""
+    }
+
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+        if provider.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+            provider.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                guard let data else { return }
+                Task { @MainActor in
+                    ocrTask?.cancel()
+                    let requestID = UUID()
+                    ocrRequestID = requestID
+                    ocrTask = Task { await readImage(data, requestID: requestID) }
+                }
+            }
+            return true
+        }
+        if provider.canLoadObject(ofClass: NSString.self) {
+            _ = provider.loadObject(ofClass: NSString.self) { object, _ in
+                guard let text = (object as? NSString).map({ String($0) }) else { return }
+                Task { @MainActor in input = String(text.prefix(12000)) }
+            }
+            return true
+        }
+        return false
     }
 
     @MainActor private func readImage(_ data: Data, requestID: UUID) async {
@@ -147,7 +187,7 @@ struct ComposeBar: View {
             guard !Task.isCancelled, ocrRequestID == requestID else { return }
             input = String(text.prefix(12000))
             if text.isEmpty { feedback.show("No readable text found. Try a sharper image.", severity: .warning) }
-            else if photoAutoTranslate { send() }
+            else if photoAutoTranslate { send(String(text.prefix(12000))) }
         } catch {
             if !Task.isCancelled && ocrRequestID == requestID {
                 let unreadable = (error as? CocoaError)?.code == .fileReadCorruptFile

@@ -117,7 +117,7 @@ struct HistoryStorageSettings: View {
                 }
                 .disabled(!saveHistory)
             } header: { Text("Library history") } footer: {
-                Text("Starred items are never removed by the limit above. Turning history off stops saving and stops loading it; what is already saved stays on this phone until you delete it below, and comes back if you turn history on again. Your Library is separate from remembered translations.")
+                Text("Starred items are never removed by the limit above. Turning history off stops saving and stops loading it; what is already saved stays on this device until you delete it below, and comes back if you turn history on again. Your Library is separate from remembered translations.")
             }
 
             Section {

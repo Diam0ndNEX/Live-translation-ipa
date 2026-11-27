@@ -1,4 +1,4 @@
-// ScreenLingo – App – Library tab (2.1.0, spec §13.5.3)
+// ScreenLingo – App – Library tab (2.1.0, spec §13.5.3; 2.7.0 list and detail side by side on iPad)
 // Two segments, Saved and Recent (people think of them separately). One "•••" menu for select, export, restore.
 import SwiftUI
 import UniformTypeIdentifiers
@@ -27,6 +27,7 @@ struct LibraryScreen: View {
     @State private var editMode = EditMode.inactive
     @State private var confirmDelete = false
     @State private var importing = false
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     init(engine: TranslatorEngine) {
         self.engine = engine
@@ -51,12 +52,74 @@ struct LibraryScreen: View {
         Dictionary(grouping: items, by: { Calendar.current.startOfDay(for: $0.date) })
             .map { (day: $0.key, items: $0.value) }.sorted { $0.day > $1.day }
     }
-    private var exportItems: [HistoryItem] { selection.isEmpty ? items : items.filter { selection.contains($0.id) } }
+    /// 2.7.0: export takes the checked rows only while selecting. On iPad a single row is selected just to read it,
+    /// and that must not shrink an export to one item.
+    private var exportItems: [HistoryItem] { selecting && !selection.isEmpty ? items.filter { selection.contains($0.id) } : items }
     private var selecting: Bool { editMode.isEditing }
 
     var body: some View {
+        Group {
+            if sizeClass == .regular { splitLayout } else { stackLayout }
+        }
+        .onAppear { takeFocus() }
+        .onChange(of: router.libraryFocus) { _, _ in takeFocus() }
+    }
+
+    /// iPhone and narrow iPad windows: one stack, rows push the detail.
+    private var stackLayout: some View {
         NavigationStack(path: $router.libraryPath) {
-            List(selection: $selection) {
+            libraryList(linking: true)
+                .modifier(ReadableColumn())
+                .navigationDestination(for: UUID.self) { id in
+                    if let item = history.first(where: { $0.id == id }) { LibraryDetail(engine: engine, item: item) }
+                }
+        }
+    }
+
+    /// 2.7.0, iPad: the list on the left, the selected translation on the right.
+    private var splitLayout: some View {
+        NavigationSplitView {
+            libraryList(linking: false)
+                .navigationSplitViewColumnWidth(min: 320, ideal: 380, max: 460)
+        } detail: {
+            NavigationStack { splitDetail }
+        }
+        .navigationSplitViewStyle(.balanced)
+    }
+
+    @ViewBuilder private var splitDetail: some View {
+        if !selecting, selection.count == 1, let id = selection.first, let item = history.first(where: { $0.id == id }) {
+            LibraryDetail(engine: engine, item: item).id(id)   // a new detail per item, so the note field never shows the previous one
+        } else if selecting {
+            ContentUnavailableView("\(selection.count) selected", systemImage: "checkmark.circle",
+                                   description: Text("Export or delete them with the buttons under the list."))
+        } else {
+            ContentUnavailableView("Choose a translation", systemImage: "text.book.closed",
+                                   description: Text("Pick one on the left to read it, add a note or share it."))
+        }
+    }
+
+    /// A Recent row on Translate asked for this item.
+    private func takeFocus() {
+        guard let id = router.libraryFocus else { return }
+        router.libraryFocus = nil
+        guard sizeClass == .regular else { return }   // the stack already has it on its path
+        query = ""
+        if let item = history.first(where: { $0.id == id }), !item.starred { segment = .recent }
+        editMode = .inactive
+        selection = [id]
+    }
+
+    @ViewBuilder private func row(_ item: HistoryItem, linking: Bool) -> some View {
+        if linking {
+            NavigationLink(value: item.id) { LibraryRow(item: item) }
+        } else {
+            LibraryRow(item: item)
+        }
+    }
+
+    private func libraryList(linking: Bool) -> some View {
+        List(selection: $selection) {
                 Section {
                     Picker("Show", selection: $segment) { ForEach(LibrarySegment.allCases) { Text($0.rawValue).tag($0) } }
                         .pickerStyle(.segmented)
@@ -77,7 +140,7 @@ struct LibraryScreen: View {
                 ForEach(groups, id: \.day) { group in
                     Section(Self.dayTitle(group.day)) {
                         ForEach(group.items) { item in
-                            NavigationLink(value: item.id) { LibraryRow(item: item) }
+                            row(item, linking: linking)
                                 .tag(item.id)
                                 .swipeActions(edge: .leading) {
                                     Button { engine.toggleStar(item.id) } label: {
@@ -88,19 +151,28 @@ struct LibraryScreen: View {
                                 .swipeActions {
                                     Button(role: .destructive) { delete([item.id]) } label: { Label("Delete", systemImage: "trash") }
                                 }
+                                // 2.7.0: long press (or right click on iPad) offers the same actions as the detail page.
+                                .contextMenu {
+                                    Button { engine.toggleStar(item.id) } label: {
+                                        Label(item.starred ? "Unsave" : "Save", systemImage: item.starred ? "star.slash" : "star")
+                                    }
+                                    Button {
+                                        UIPasteboard.general.string = item.translated
+                                        feedback.show("Copied", severity: .success)
+                                    } label: { Label("Copy translation", systemImage: "doc.on.doc") }
+                                    Button { engine.speak(item.translated) } label: { Label("Listen", systemImage: "speaker.wave.2") }
+                                    ShareLink(item: item.translated) { Label("Share", systemImage: "square.and.arrow.up") }
+                                    Button(role: .destructive) { delete([item.id]) } label: { Label("Delete", systemImage: "trash") }
+                                }
                         }
                     }
                 }
             }
             .kitPage()
             .listStyle(.insetGrouped)
-            .modifier(ReadableColumn())
             .searchable(text: $query, prompt: "Search translations and notes")
             .navigationTitle("Library")
             .navigationBarTitleDisplayMode(.large)
-            .navigationDestination(for: UUID.self) { id in
-                if let item = history.first(where: { $0.id == id }) { LibraryDetail(engine: engine, item: item) }
-            }
             .environment(\.editMode, $editMode)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -108,7 +180,7 @@ struct LibraryScreen: View {
                         Button("Done") { withAnimation { editMode = .inactive }; selection = [] }.bold()
                     } else {
                         Menu {
-                            Button { withAnimation { editMode = .active } } label: { Label("Select", systemImage: "checkmark.circle") }
+                            Button { withAnimation { selection = []; editMode = .active } } label: { Label("Select", systemImage: "checkmark.circle") }
                                 .disabled(items.isEmpty)
                             Section("Export") {
                                 Button { Sharer.shareFile(text: exportText, name: "screenlingo-history.txt") } label: { Label("Text", systemImage: "doc.plaintext") }
@@ -151,7 +223,6 @@ struct LibraryScreen: View {
                     feedback.show(ok ? "Library restored" : "This is not a valid ScreenLingo backup", severity: ok ? .success : .error)
                 } catch { feedback.show("Could not open the backup file", severity: .error) }
             }
-        }
     }
 
     static func dayTitle(_ day: Date) -> String {
@@ -182,6 +253,7 @@ struct LibraryScreen: View {
     }
 
     private func delete(_ ids: Set<UUID>) {
+        selection.subtract(ids)   // 2.7.0: the iPad detail must not keep showing a deleted item
         engine.deleteHistory(ids: ids)
         feedback.show("Deleted \(ids.count) translation\(ids.count == 1 ? "" : "s")", actionTitle: "Undo") { [engine] in
             engine.undoHistoryDeletion()

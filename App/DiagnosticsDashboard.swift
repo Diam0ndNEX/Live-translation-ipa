@@ -147,8 +147,10 @@ struct DiagnosticsBody: View {
                         .padding(.top, KitSpace.tight)
                         .padding(.bottom, KitSpace.group)
                 }
+                // 2.7.0: the column limit is on the content, not on the scroll view, so on iPad the page scrolls from
+                // anywhere and the charts get up to 980 pt.
+                .modifier(ReadableColumn(maxWidth: 980))
             }
-            .modifier(ReadableColumn())
             .ambientGlow()
             .background(Color(.systemGroupedBackground))
             .animation(KitMotion.spring, value: pageRaw)

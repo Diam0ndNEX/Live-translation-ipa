@@ -1,4 +1,4 @@
-// ScreenLingo – App – Translate: Focus mode (2.1.0, spec §13.5.1; replaces the Focus reader sheet)
+// ScreenLingo – App – Translate: Focus mode (2.1.0, spec §13.5.1; 2.7.0 keyboard keys and iPad line width)
 // Full-screen text. Controls hide after 3 s and come back on tap. Uses the existing reader keys.
 import SwiftUI
 
@@ -18,6 +18,7 @@ struct FocusMode: View {
     @State private var controlsVisible = true
     @State private var hideTask: Task<Void, Never>?
     @State private var showOptions = false
+    @Environment(\.horizontalSizeClass) private var sizeClass
 
     init(engine: TranslatorEngine) {
         self.engine = engine
@@ -50,7 +51,8 @@ struct FocusMode: View {
                     }
                 }
                 .multilineTextAlignment(centered ? .center : .leading)
-                .frame(maxWidth: width == "narrow" ? 560 : .infinity, alignment: centered ? .center : .leading)
+                // 2.7.0: "Full" stops at 900 pt on iPad; lines across a whole 13-inch screen are hard to follow.
+                .frame(maxWidth: width == "narrow" ? 560 : (sizeClass == .regular ? 900 : .infinity), alignment: centered ? .center : .leading)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, KitSpace.margin)
                 .padding(.vertical, 72)
@@ -69,6 +71,28 @@ struct FocusMode: View {
         .statusBarHidden(!controlsVisible)
         .modifier(AllowsLandscape())
         .accessibilityAction(named: "Show controls") { showControls() }
+        .background { shortcuts }
+    }
+
+    /// 2.7.0: hardware keyboard. Always in the view, so the keys also work while the controls are hidden.
+    private var shortcuts: some View {
+        ZStack {
+            Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
+            Button("Hold or release") { if hasText { engine.toggleFrozenOutput() } }.keyboardShortcut(.space, modifiers: [])
+            Button("Copy translation") {
+                guard hasText else { return }
+                UIPasteboard.general.string = output.value.translated
+                feedback.show("Copied", severity: .success)
+            }.keyboardShortcut("c", modifiers: [.command, .shift])
+            Button("Read aloud") { if hasText { engine.speak(output.value.translated) } }.keyboardShortcut("r", modifiers: [.command, .shift])
+            Button("Larger text") { size = min(56, size + 2) }.keyboardShortcut("+", modifiers: .command)
+            Button("Larger text") { size = min(56, size + 2) }.keyboardShortcut("=", modifiers: .command)
+            Button("Smaller text") { size = max(18, size - 2) }.keyboardShortcut("-", modifiers: .command)
+        }
+        .frame(width: 0, height: 0)
+        .opacity(0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     private var topBar: some View {

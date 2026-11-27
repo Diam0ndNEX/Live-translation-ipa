@@ -8,6 +8,7 @@ struct PressableStyle: ButtonStyle {
             .scaleEffect(configuration.isPressed ? 0.97 : 1)
             .opacity(configuration.isPressed ? 0.85 : 1)
             .animation(.spring(response: 0.25, dampingFraction: 0.7), value: configuration.isPressed)
+            .hoverEffect(.highlight)   // 2.7.0: iPad pointer and trackpad show what can be tapped
     }
 }
 

@@ -65,6 +65,17 @@ struct BroadcastPicker: UIViewRepresentable {
     }
 }
 
+// MARK: - Screen shape
+/// 2.7.0: width / height of the screen the app is on, in its current orientation (what the broadcast captures).
+enum ScreenShape {
+    @MainActor static var aspect: CGFloat {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        guard let size = scene?.screen.bounds.size, size.width > 0, size.height > 0 else { return 9 / 19.5 }
+        return min(2.4, max(0.4, size.width / size.height))
+    }
+}
+
 // MARK: - Sharing
 /// Shares through a real temporary file, presented straight from UIKit.
 /// (Handing the share sheet large raw text or a UIImage inside a SwiftUI sheet can hang on "Loading…".)

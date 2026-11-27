@@ -86,4 +86,6 @@ shoot_device() {
 
 [ "${QUICK:-0}" = 1 ] || shoot_device iphone-se "iPhone SE (3rd generation)|iPhone SE (2nd generation)|iPhone 16e"
 shoot_device iphone-16-pro "iPhone 16 Pro|iPhone 17 Pro|iPhone 15 Pro"
+# 2.7.0: an iPad, so the split views, the sidebar and the two-column Translate layout are seen too.
+[ "${QUICK:-0}" = 1 ] || shoot_device ipad-13 "iPad Pro 13-inch (M5)|iPad Pro 13-inch (M4)|iPad Air 13-inch (M3)|iPad Air 13-inch (M2)|iPad Pro (12.9-inch) (6th generation)"
 echo "Screenshots: $(find "$OUT" -name '*.png' | wc -l | tr -d ' ')"
