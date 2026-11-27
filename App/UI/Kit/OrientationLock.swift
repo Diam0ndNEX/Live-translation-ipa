@@ -1,4 +1,4 @@
-// ScreenLingo – App – Orientation (2.1.0, spec §13.6: landscape on Translate and Focus mode only)
+// ScreenLingo – App – Orientation (2.7.0: iPad turns freely; iPhone landscape on Translate and Focus mode only)
 import SwiftUI
 import UIKit
 
@@ -6,7 +6,10 @@ import UIKit
 /// ask for landscape. The capture extension is a separate target and is not affected.
 final class ScreenLingoAppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication, supportedInterfaceOrientationsFor window: UIWindow?) -> UIInterfaceOrientationMask {
-        OrientationLock.mask
+        // 2.7.0: an iPad is never locked. Locking it to portrait broke Split View, Stage Manager and windows,
+        // and a keyboard case keeps the iPad in landscape.
+        if MainActor.assumeIsolated({ OrientationLock.isPad }) { return .all }
+        return OrientationLock.mask
     }
 }
 
@@ -15,9 +18,12 @@ enum OrientationLock {
     /// Read by the app delegate. Portrait unless a screen that allows landscape is on screen.
     nonisolated(unsafe) static var mask: UIInterfaceOrientationMask = .portrait
     private static var holders = 0
+    /// Read once at launch; the idiom never changes while the app runs.
+    static let isPad: Bool = UIDevice.current.userInterfaceIdiom == .pad
 
     static func allowLandscape(_ allow: Bool) {
         holders = max(0, holders + (allow ? 1 : -1))
+        guard !isPad else { return }
         let next: UIInterfaceOrientationMask = holders > 0 ? .allButUpsideDown : .portrait
         guard next != mask else { return }
         mask = next
@@ -41,12 +47,14 @@ struct AllowsLandscape: ViewModifier {
     }
 }
 
-/// One readable column on wide screens (iPad, large phones in landscape): at most 640 pt, centred (§13.6).
+/// One readable column on wide screens (iPad, large phones in landscape): at most 640 pt by default, centred (§13.6).
+/// 2.7.0: pages with charts or two columns pass a wider limit.
 struct ReadableColumn: ViewModifier {
+    var maxWidth: CGFloat = 640
     @Environment(\.horizontalSizeClass) private var sizeClass
     func body(content: Content) -> some View {
         if sizeClass == .regular {
-            content.frame(maxWidth: 640).frame(maxWidth: .infinity)
+            content.frame(maxWidth: maxWidth).frame(maxWidth: .infinity)
         } else {
             content
         }

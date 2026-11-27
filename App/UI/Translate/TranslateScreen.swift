@@ -19,6 +19,7 @@ struct TranslateScreen: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var focus = false
+    @State private var width: CGFloat = 0
     @State private var composing = false
     // 2.5.0: the question before Start when Low Latency has no language pack, and the one-time notice for people
     // whose saved mode was Hybrid Recovery.
@@ -39,45 +40,59 @@ struct TranslateScreen: View {
         return slice.value
     }
 
+    /// 2.7.0: two columns when the screen is wide enough (iPad, large iPhones in landscape): the language pair, the
+    /// live caption and its controls on the left, preparation, mode, scenes and recent lines on the right.
+    private var wide: Bool { width >= (typeSize.isAccessibilitySize ? 1000 : 760) }
+    private var sideWidth: CGFloat { min(440, max(340, width * 0.36)) }
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: KitSpace.group) {
                     header
                     if setupState == "skipped" { finishSetupRow }
-                    pairTitle
-                    if composing {
-                        // 2.2.1 (U2): capture is paused while typing; say so instead of showing nothing about the session.
-                        if snap.phase == .typing { PhaseHeader(phase: snap.phase, mode: snap.modeName) }
-                        ComposeResult(engine: engine, translated: snap.translated, original: snap.original) { endCompose() }
-                    } else if snap.phase.isSession {
-                        sessionHero
+                    if wide {
+                        HStack(alignment: .top, spacing: KitSpace.group + KitSpace.tight) {
+                            VStack(alignment: .leading, spacing: KitSpace.group) {
+                                pairTitle
+                                heroBlock
+                                if snap.phase.isSession { controlTiles }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                            VStack(alignment: .leading, spacing: KitSpace.group) {
+                                readinessBlock
+                                controls
+                                ScenesStrip(store: engine.presets)
+                                testRow
+                                RecentList(lines: snap.recent, open: { router.openLibraryItem($0) }) { router.go(.library) }
+                            }
+                            .frame(width: sideWidth, alignment: .topLeading)
+                        }
                     } else {
-                        idleHero
+                        pairTitle
+                        heroBlock
+                        readinessBlock
+                        controls
+                        if snap.phase.isSession { controlTiles }
+                        ScenesStrip(store: engine.presets)
+                        testRow
+                        RecentList(lines: snap.recent, open: { router.openLibraryItem($0) }) { router.go(.library) }
                     }
-                    if !composing { ReadinessCard(prep: snap.prep, phase: snap.phase) }
-                    // 2.2.2: at accessibility text sizes the compose bar sits in the page instead of over it. Pinned at the
-                    // bottom it, plus the tab bar, covered Start capture and the live caption on small phones.
-                    if typeSize.isAccessibilitySize {
-                        ComposeBar(engine: engine, composing: $composing).padding(.horizontal, -KitSpace.margin)
-                    }
-                    controls
-                    if snap.phase.isSession { controlTiles }
-                    ScenesStrip(store: engine.presets)
-                    testRow
-                    RecentList(lines: snap.recent) { router.go(.library) }
                 }
                 .padding(.horizontal, KitSpace.margin)
                 .padding(.top, KitSpace.tight)
                 .padding(.bottom, KitSpace.group)
-                .modifier(ReadableColumn())
+                .modifier(ReadableColumn(maxWidth: wide ? 1240 : 640))
                 .animation(KitMotion.state(reduceMotion), value: snap.phase)
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .scrollBounceBehavior(.basedOnSize)
             .ambientGlow()
             .background(Color(.systemGroupedBackground))
             .safeAreaInset(edge: .bottom) {
-                if !typeSize.isAccessibilitySize { ComposeBar(engine: engine, composing: $composing) }
+                if !typeSize.isAccessibilitySize {
+                    ComposeBar(engine: engine, composing: $composing).frame(maxWidth: wide ? 760 : .infinity)
+                }
             }
             .navigationTitle("Translate")
             .navigationBarTitleDisplayMode(.inline)
@@ -107,6 +122,29 @@ struct TranslateScreen: View {
                 if case .attention = new, old != new { UINotificationFeedbackGenerator().notificationOccurred(.warning) }
                 if new == .live, old == .starting { UINotificationFeedbackGenerator().notificationOccurred(.success) }
             }
+        }
+    }
+
+    /// The typed result, the live session or the Start button: the one big object of the screen.
+    @ViewBuilder private var heroBlock: some View {
+        if composing {
+            // 2.2.1 (U2): capture is paused while typing; say so instead of showing nothing about the session.
+            if snap.phase == .typing { PhaseHeader(phase: snap.phase, mode: snap.modeName) }
+            ComposeResult(engine: engine, translated: snap.translated, original: snap.original) { endCompose() }
+        } else if snap.phase.isSession {
+            sessionHero
+        } else {
+            idleHero
+        }
+    }
+
+    /// Preparation status, then (at accessibility text sizes) the compose bar in the page.
+    @ViewBuilder private var readinessBlock: some View {
+        if !composing { ReadinessCard(prep: snap.prep, phase: snap.phase) }
+        // 2.2.2: at accessibility text sizes the compose bar sits in the page instead of over it. Pinned at the
+        // bottom it, plus the tab bar, covered Start capture and the live caption on small phones.
+        if typeSize.isAccessibilitySize {
+            ComposeBar(engine: engine, composing: $composing).padding(.horizontal, -KitSpace.margin)
         }
     }
 
@@ -446,8 +484,11 @@ struct TranslateScreen: View {
 }
 
 // MARK: - Recent
+/// 2.7.0: a row opens that translation in the Library (it used to do nothing), and the time no longer ticks
+/// every second.
 private struct RecentList: View {
     let lines: [RecentLine]
+    var open: (UUID) -> Void
     var openLibrary: () -> Void
 
     var body: some View {
@@ -460,17 +501,28 @@ private struct RecentList: View {
                 }
                 ForEach(lines) { line in
                     Divider()
-                    HStack(alignment: .firstTextBaseline) {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(line.translated).font(.body).lineLimit(2)
-                            Text(line.original).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                    Button { open(line.id) } label: {
+                        HStack(alignment: .firstTextBaseline) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(line.translated).font(.body).foregroundStyle(.primary).lineLimit(2)
+                                Text(line.original).font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(line.date.formatted(.relative(presentation: .named, unitsStyle: .abbreviated)))
+                                .font(.footnote).foregroundStyle(.secondary)
+                                .monospacedDigit()
                         }
-                        Spacer(minLength: KitSpace.tight)
-                        Text(line.date, style: .relative).font(.footnote).foregroundStyle(.secondary)
-                            .monospacedDigit()
+                        .padding(.vertical, KitSpace.tight)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.vertical, KitSpace.tight)
+                    .buttonStyle(PressableStyle())
+                    .contextMenu {
+                        Button { UIPasteboard.general.string = line.translated } label: { Label("Copy translation", systemImage: "doc.on.doc") }
+                        Button { UIPasteboard.general.string = line.original } label: { Label("Copy original", systemImage: "doc.on.doc") }
+                        Button { open(line.id) } label: { Label("Open in Library", systemImage: "books.vertical") }
+                    }
                     .accessibilityElement(children: .combine)
+                    .accessibilityHint("Opens it in the Library")
                 }
             }
             .kitSurface()

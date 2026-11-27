@@ -58,8 +58,12 @@ struct NoticeHost: View {
     var body: some View {
         ZStack {
             if let n = center.current {
-                Banner(text: n.text, severity: n.severity, actionTitle: n.actionTitle, action: n.action)
+                // 2.7.0: an action (Undo) closes its notice. The notice used to stay up to 6 s, so Undo could be
+                // tapped twice and undo twice.
+                Banner(text: n.text, severity: n.severity, actionTitle: n.actionTitle,
+                       action: n.action.map { run -> () -> Void in { center.dismiss(); run() } })
                     .background(.thickMaterial, in: RoundedRectangle(cornerRadius: KitRadius.small, style: .continuous))
+                    .frame(maxWidth: 560)   // 2.7.0: not a full-width strip on iPad
                     .padding(.horizontal, KitSpace.gap).padding(.top, KitSpace.tight)
                     .transition(reduceMotion ? .opacity : .move(edge: .top).combined(with: .opacity))
                     .onTapGesture { center.dismiss() }

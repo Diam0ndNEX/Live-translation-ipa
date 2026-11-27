@@ -232,7 +232,7 @@ struct ExperimentalFeaturesView: View {
                     enabled: $quickHangLimit)
                 ExperimentalOption(
                     title: "Include flagged captions' text in reports",
-                    explanation: "New in 2.6.0, default on. ScreenLingo checks every shown caption by itself (the same sentence shown again, the same sentence rewritten, a translation equal to the source, a number that went missing, an unusual length, a repeated word). A caption with such a flag is saved on this phone as text: at most 200, removed after 14 days, never saved in a private session. When you export a test report, the text of the flagged captions from those runs is added as the last section, so the wording can be judged. Nothing else in a report contains subtitle text. Off: nothing is saved and reports stay numbers only.",
+                    explanation: "New in 2.6.0, default on. ScreenLingo checks every shown caption by itself (the same sentence shown again, the same sentence rewritten, a translation equal to the source, a number that went missing, an unusual length, a repeated word). A caption with such a flag is saved on this device as text: at most 200, removed after 14 days, never saved in a private session. When you export a test report, the text of the flagged captions from those runs is added as the last section, so the wording can be judged. Nothing else in a report contains subtitle text. Off: nothing is saved and reports stay numbers only.",
                     enabled: $flaggedCaptionText)
                 ExperimentalOption(
                     title: "Independent capture heartbeat",

@@ -1,4 +1,4 @@
-// ScreenLingo – App – Root (2.1.0)
+// ScreenLingo – App – Root (2.1.0; 2.7.0 sidebar-adaptable tabs and keyboard shortcuts)
 import SwiftUI
 import Combine
 import Translation
@@ -103,13 +103,17 @@ private struct RootContent: View {
     }
 
     var body: some View {
+        // 2.7.0: the iOS 18 Tab API with the sidebar-adaptable style. iPhone keeps the tab bar; iPad gets the floating
+        // tab bar that turns into a sidebar.
         TabView(selection: $router.tab) {
-            TranslateScreen(engine: model.engine).tabItem { Label(AppTab.translate.title, systemImage: AppTab.translate.symbol) }.tag(AppTab.translate)
-            LibraryScreen(engine: model.engine).tabItem { Label(AppTab.library.title, systemImage: AppTab.library.symbol) }.tag(AppTab.library)
-            DiagnosticsView().tabItem { Label(AppTab.diagnostics.title, systemImage: AppTab.diagnostics.symbol) }.tag(AppTab.diagnostics)
-            SettingsView().tabItem { Label(AppTab.settings.title, systemImage: AppTab.settings.symbol) }.tag(AppTab.settings)
+            Tab(AppTab.translate.title, systemImage: AppTab.translate.symbol, value: AppTab.translate) { TranslateScreen(engine: model.engine) }
+            Tab(AppTab.library.title, systemImage: AppTab.library.symbol, value: AppTab.library) { LibraryScreen(engine: model.engine) }
+            Tab(AppTab.diagnostics.title, systemImage: AppTab.diagnostics.symbol, value: AppTab.diagnostics) { DiagnosticsView() }
+            Tab(AppTab.settings.title, systemImage: AppTab.settings.symbol, value: AppTab.settings) { SettingsView() }
         }
+        .tabViewStyle(.sidebarAdaptable)
         .modifier(TabBarMinimize())
+        .background { KeyCommands(engine: model.engine, router: model.router, feedback: model.feedback) }
         .tint(theme.tint)
         .preferredColorScheme(theme.appearance.scheme)
         .overlay(alignment: .top) { NoticeHost(center: model.feedback) }
@@ -152,9 +156,10 @@ private struct SheetHost: View {
         case .more: TuneSheet(engine: engine)
         case .status: SessionSheet(engine: engine)
         case .test: TestSheet(engine: engine)
-        case .reader: FocusMode(engine: engine)
-        case .captureArea: AreaSheet()
-        case .testRuns: TestRunsScreen(diag: engine.diag)
+        // 2.7.0: on iPad these three open as large pages instead of a small form sheet (no change on iPhone).
+        case .reader: FocusMode(engine: engine).presentationSizing(.page)
+        case .captureArea: AreaSheet().presentationSizing(.page)
+        case .testRuns: TestRunsScreen(diag: engine.diag).presentationSizing(.page)
         case .languages: LanguageSheet(engine: engine)
         }
     }

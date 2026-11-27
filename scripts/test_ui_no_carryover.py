@@ -29,12 +29,13 @@ for p, t in files.items():
 
 # U2 / 2.1.0 §13.3: four typed tabs (Translate, Library, Diagnostics, Settings); Languages is a sheet; Activity stays gone
 root_src = read_source("ScreenTranslatorApp")
-tags = re.findall(r"\.tag\(AppTab\.\w+\)", root_src)
+# 2.7.0: the root uses the iOS 18 Tab API (`Tab(..., value: AppTab.x)`); a `.tag(AppTab.x)` still counts.
+tags = re.findall(r"\.tag\(AppTab\.\w+\)|value: AppTab\.\w+\)", root_src)
 if len(tags) != 4:
     fail("U2", f"root TabView must have exactly 4 typed tabs, found {len(tags)}")
-if ".tag(AppTab.languages)" in root_src:
+if ".tag(AppTab.languages)" in root_src or "value: AppTab.languages)" in root_src:
     fail("§13.3", "Languages is a tab again; it must be a sheet")
-if ".tag(AppTab.diagnostics)" not in root_src:
+if ".tag(AppTab.diagnostics)" not in root_src and "value: AppTab.diagnostics)" not in root_src:
     fail("U2", "Diagnostics is not a top-level tab")
 if "case .diagnostics: DiagnosticsView()" in root_src:
     fail("U2", "Diagnostics is presented as a sheet again")

@@ -93,7 +93,8 @@ nav = [
 ]
 for page in nav:
     assert f"destination: {page}" in home, f"Settings route missing: {page}"
-assert 'PresetsLinkRow(store: engine.presets)' in home
+# 2.7.0: the row also takes the iPad detail-column action, so match the call's start.
+assert 'PresetsLinkRow(store: engine.presets' in home
 assert "ExperimentalFeaturesView()" in sources["SmartPipelineSettings.swift"]
 assert "PipelineSimulatorView()" in sources["SettingsCategories.swift"]
 assert 'NavigationLink { CaptionAppearanceSettings() }' not in home

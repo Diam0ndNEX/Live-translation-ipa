@@ -34,11 +34,14 @@ struct AreaEditor: View {
         NavigationStack {
             page {
                 GeometryReader { geo in
-                    let height = geo.size.height
-                    let width = min(geo.size.width, height * 9 / 19.5)
+                    // 2.7.0: the picture has the shape of this screen as it is held now (an iPad is about 3:4, or 4:3
+                    // in landscape), not a fixed phone shape. The band is still counted from the bottom.
+                    let aspect = ScreenShape.aspect
+                    let height = min(geo.size.height, geo.size.width / aspect)
+                    let width = height * aspect
                     canvas(width: width, height: height)
                         .frame(width: width, height: height)
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
                 // 2.2.2: at accessibility sizes the page scrolls and the picture keeps a usable height. The picture used
                 // to shrink to a sliver and the example caption ran into the title.

@@ -43,7 +43,9 @@ struct SessionSheet: View {
                 Section("This session") {
                     LabeledContent("Translations", value: "\(facts.translations)")
                     LabeledContent("Characters", value: "\(facts.characters)")
+                    // 2.7.0: only during a session. Turned on while idle, the next session started paused with no sign why.
                     Toggle("Pause translating", isOn: Binding(get: { facts.paused }, set: { engine.paused = $0 }))
+                        .disabled(!facts.phase.isSession && !facts.paused)
                     Button(facts.pipActive ? "Close floating window" : "Show floating window") {
                         facts.pipActive ? engine.pip.stop() : engine.startPiP()
                     }
@@ -56,7 +58,7 @@ struct SessionSheet: View {
                     Picker("Pause after", selection: $limit) {
                         Text("Never").tag(0); Text("15 minutes").tag(15); Text("30 minutes").tag(30); Text("1 hour").tag(60)
                     }
-                    Button("Restart session timer") { engine.resetSession() }
+                    Button("Restart session timer") { engine.resetSession() }.disabled(!facts.phase.isSession)
                 }
                 Section("If something is wrong") {
                     Button("Test the language pair") { engine.runTest() }

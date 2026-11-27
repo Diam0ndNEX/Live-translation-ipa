@@ -89,7 +89,8 @@ assert "if engine.manualMode { engine.endWorkspace() }" in app, "U2: typing mode
 assert "onChange(of: snap.manual)" in translate
 
 # U3: onboarding starts capture only; the floating window has its own button.
-assert "StartButton(live: broadcastDone) { engine.captureRequested() }" in onboarding
+# 2.7.0: the button takes its real size (54 pt) instead of a scale effect; the call is unchanged.
+assert "StartButton(live: broadcastDone, size: 54) { engine.captureRequested() }" in onboarding
 assert 'Button("Open the floating window")' in onboarding and ".disabled(!broadcastDone)" in onboarding
 assert "It opens with the broadcast" not in onboarding
 assert not re.search(r"captureRequested\(\)\s*\n\s*if !engine\.pipActive \{ engine\.startPiP\(\) \}", onboarding)

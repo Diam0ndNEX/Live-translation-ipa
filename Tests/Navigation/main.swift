@@ -70,6 +70,13 @@ struct NavigationTests {
         try? await Task.sleep(for: .milliseconds(700))
         check(router.sheet == nil, "go() cancels a pending sheet")
 
+        // 2.7.0: a Recent row opens its item in the Library (iPhone path and iPad selection request).
+        let item = UUID()
+        router.present(.status)
+        router.openLibraryItem(item)
+        check(router.tab == .library && router.sheet == nil, "openLibraryItem selects Library and closes the sheet")
+        check(router.libraryPath.count == 1 && router.libraryFocus == item, "openLibraryItem pushes the item and asks the split view to select it")
+
         // Narrow observation: a slice publishes only when its own value changes.
         let source = Counter()
         let slice = ObjectSlice(source) { $0.value }

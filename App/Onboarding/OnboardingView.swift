@@ -31,7 +31,7 @@ struct OnboardingView: View {
         NavigationStack {
             List {
                 Section {
-                    Text("Three quick checks. Each one turns green when it has actually happened on your phone.")
+                    Text("Three quick checks. Each one turns green when it has actually happened on this device.")
                         .font(.body)
                         .foregroundStyle(.secondary)
                         .listRowBackground(Color.clear)
@@ -55,8 +55,9 @@ struct OnboardingView: View {
                         HStack(spacing: KitSpace.row) {
                             // Capture only (2.2.1, U3). iOS may refuse to open the floating window while the capture sheet
                             // is coming up, so step 3 has its own button.
-                            StartButton(live: broadcastDone) { engine.captureRequested() }
-                            .scaleEffect(0.6)
+                            // 2.7.0: a real 54 pt button. It was an 88 pt one scaled to 0.6 in a 106 pt box, so its
+                            // layout spilled over the row.
+                            StartButton(live: broadcastDone, size: 54) { engine.captureRequested() }
                             .frame(width: 106, height: 106)
                             Text(capture.value.status.title).font(.subheadline).foregroundStyle(.secondary)
                         }
@@ -105,9 +106,9 @@ struct OnboardingView: View {
         switch p.packState {
         case .ready: return "Works offline."
         case .autoDetect: return "Auto-detect needs no download up front."
-        case .checking: return "Checking which packs are on this phone…"
+        case .checking: return "Checking which packs are on this device…"
         case .needsDownload: return p.downloadMessage.isEmpty ? "This language needs a one-time download." : p.downloadMessage
-        case .unsupported: return "This pair isn't supported on this phone. Choose another language."
+        case .unsupported: return "This pair isn't supported on this device. Choose another language."
         }
     }
 }
