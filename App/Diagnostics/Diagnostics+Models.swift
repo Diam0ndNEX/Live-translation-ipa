@@ -173,6 +173,13 @@ struct Stats: Equatable {
     var specLearnMatches = 0 // 2.6.5
     var specLearnedMilli = 0 // 2.6.5 (latest learned limit x 1000)
     var earlyStartByLearning = 0 // 2.6.5
+    var ownWindowSharedSeconds = 0 // 2.8.0: capture ran beside ScreenLingo's window
+    var ownWindowPausedSeconds = 0 // 2.8.0: capture paused for ScreenLingo's own screen
+    var captureReadStuck = 0 // 2.8.0: episodes of an OCR read running over 5 s
+    var captureReadStuckMaxMs = 0 // 2.8.0
+    var translationHeld = 0 // 2.8.0: translations not drawn again (same meaning)
+    var growthSentenceReleases = 0 // 2.8.0
+    var specTargetMilli = 0 // 2.8.0: share of first readings required to be final x 1000
     var slowTailEnqueues = 0
     var manualTranslations = 0
     var identicalFrameHolds = 0 // 2.2.1 (E9)

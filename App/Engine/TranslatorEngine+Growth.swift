@@ -5,7 +5,9 @@ extension TranslatorEngine {
     /// more text at the end is held, latest wins, until the text has been unchanged for the learned quiet period
     /// (never longer than CaptionGrowthTracker.maximumTotal), and then handled once, as a replay. A different
     /// caption drops a held state: the screen has moved on. Returns true when the packet was held.
-    func holdGrowingCaption(_ p: Packet, text: String, receivedAt: Date, now: Date) -> Bool {
+    /// 2.8.0 (switch growthPunctuationRelease): `raw` is the reading with its punctuation. A reading that grew and now
+    /// ends a sentence is used at once, and the total wait is at most 0.6 s (was 0.9 s).
+    func holdGrowingCaption(_ p: Packet, text: String, raw: String? = nil, receivedAt: Date, now: Date) -> Bool {
         guard TranslationHotPathAB.growthSettle, activeTranslationSystem == .legacy else { return false }
         switch captionGrowth.observe(text, at: now.timeIntervalSince1970) {
         case .different:
@@ -17,6 +19,11 @@ extension TranslatorEngine {
         case .same:
             return growthHeldPacket != nil
         case .extended:
+            if TranslationHotPathAB.growthPunctuationRelease, let raw, GrowthRelease.endsSentence(raw) {
+                if growthHeldPacket != nil { discardHeldGrowth() } // this complete reading replaces the held one
+                if diag.enabled { diag.s.growthSteps += 1; diag.s.growthSentenceReleases += 1 }
+                return false
+            }
             if diag.enabled {
                 diag.s.growthSteps += 1
                 if growthHeldPacket == nil { diag.s.growthHeld += 1 } else { diag.s.growthIntermediate += 1 }
@@ -25,7 +32,9 @@ extension TranslatorEngine {
             growthHeldReceivedAt = receivedAt
             let since = growthHeldSince ?? now
             growthHeldSince = since
-            let wait = captionGrowth.wait(elapsed: now.timeIntervalSince(since))
+            let elapsed = now.timeIntervalSince(since)
+            let planned = captionGrowth.wait(elapsed: elapsed)
+            let wait = TranslationHotPathAB.growthPunctuationRelease ? GrowthRelease.wait(planned, elapsed: elapsed) : planned
             growthTask?.cancel()
             growthTask = Task { [weak self] in
                 try? await Task.sleep(for: .seconds(wait))

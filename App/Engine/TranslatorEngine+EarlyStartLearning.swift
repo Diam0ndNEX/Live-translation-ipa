@@ -9,8 +9,16 @@ extension TranslatorEngine {
     func earlyStartConfidence(base: Double) -> Double {
         guard TranslationHotPathAB.learnedEarlyStart, activeTranslationSystem == .legacy,
               !flag("coolMode", false) else { return base }
-        let learned = specLearner.threshold(fallback: base)
-        if diag.enabled { diag.s.specLearnedMilli = Int((learned * 1000).rounded()) }
+        // 2.8.0 (switch costAwareEarlyStart): when a wasted early call is cheap on this device (median model call at
+        // most 0.15 s), 70 % of first readings being the final text is enough; otherwise 80 %. Off: 90 % as in 2.6.5.
+        let rate = TranslationHotPathAB.costAwareEarlyStart
+            ? CostAwareEarlyStart.requiredMatchRate(medianModelSeconds: modelStall.median)
+            : SpecConfidenceLearner.requiredMatchRate
+        let learned = specLearner.threshold(fallback: base, requiredMatchRate: rate)
+        if diag.enabled {
+            diag.s.specLearnedMilli = Int((learned * 1000).rounded())
+            diag.s.specTargetMilli = Int((rate * 1000).rounded())
+        }
         return learned
     }
 

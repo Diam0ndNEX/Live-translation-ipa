@@ -2,11 +2,12 @@
 import Foundation
 
 enum AppVersion {
-    static let version = "2.7.2"
-    static let build = 133
+    static let version = "2.8.0"
+    static let build = 134
     static var full: String { "v\(version) (build \(build))" }
     // Newest first. Add a line here each time you bump the version.
     static let changelog: [(String, String)] = [
+        ("2.8.0", "Build 134: Translation keeps going on iPad beside ScreenLingo, a subtitle is shown once, growing subtitles and new text wait less. Four new switches in Experimental features, all on by default. Keep translating beside ScreenLingo: in Split View, Stage Manager or Slide Over the capture no longer stops while ScreenLingo is visible; it reads the rest of the screen and skips the text in ScreenLingo window, and pauses only when ScreenLingo fills almost the whole screen. A capture whose text reading has been stuck for 5 s now says so. Keep the translation steady: another reading of the shown subtitle is still translated, but not drawn again when its translation says the same; a changed number or negation or a clearly longer reading is always shown. Use a growing subtitle at its sentence end: a subtitle that ends a sentence is used at once, and the wait is at most 0.6 s (was 0.9 s). Translate ahead more when it is cheap: hidden early translations start when 70 percent of first readings were final on a fast device, 80 percent otherwise (was 90). The report has a new table for all four. Nothing was compiled or run before the GitHub Actions build; every effect is UNVERIFIED until a device test. No speed claims."),
         ("2.7.2", "Build 133: CI check fixed for builds on main. New repository README: what the app does, the two modes, how to install, Diagnostics, folders and how to develop. The old release notes moved unchanged to docs/history. The app itself is unchanged from 2.7.1. Nothing was compiled or run before the GitHub Actions build."),
         ("2.7.1", "Build 132: Fix for the app freezing and being closed by the system on iPad. In 2.7.0 the Translate screen measured its own scrolling area to choose one or two columns; that width depended on the columns themselves, so the layout switched back and forth without end and the app stopped responding (iPad crash logs: watchdog 0x8BADF00D in the Translate screen layout). The width is now measured on the whole page and the two-column switch has a 60 point gap. Translation, OCR, confirmation and the models are unchanged. Nothing was compiled or run before the GitHub Actions build; the fix is UNVERIFIED until it runs on the iPad."),
         ("2.7.0", "Build 131: iPhone and iPad interface update. Translation, OCR, confirmation, the models and every translation default are unchanged. iPad: the app turns to any orientation on every screen and works in Split View, Stage Manager and windows (it was locked to portrait); the tab bar can become a sidebar; Library and Settings show the list and the page side by side; Translate uses two columns when the screen is wide (also large iPhones in landscape); Diagnostics charts get a wider column; Focus mode, the reading area editor and Test runs open as large pages; the reading area picture has the shape of the real screen; pointer hover on buttons. Hardware keyboard: Command 1 to 4 switch tabs, Command L opens languages, Option Command L swaps them, Shift Command F Focus mode, Shift Command P floating window, Option Command P pause, Shift Command H hold, Shift Command C copy, Shift Command R read aloud, Command Return sends typed text; in Focus mode Escape closes, Space holds and Command plus or minus changes the text size. Fixes: Return on the keyboard now sends typed text (it only added a new line); Undo in a notice closes it, so it cannot undo twice; Recent lines on Translate open in the Library and no longer tick every second; Settings and the Timing page no longer redraw on every caption while capture runs; Pause translating and Restart session timer are off when there is no session; the setup Start button has its real size. New: drop a picture or text on the compose bar; long press a Library row for Save, Copy, Listen, Share and Delete. Nothing was compiled or run before the GitHub Actions build; the layouts are UNVERIFIED until the build is installed on an iPhone and an iPad. No speed claims."),
@@ -193,6 +194,8 @@ struct Packet: Codable {
     /// 2.5.0 (item C), whole-broadcast totals: extra OCR reads of an unconfirmed caption by cause, in the order of
     /// `V250Names.extraReadCounters`. Fixed codes only.
     var extraReadReasons: [Int]? = nil
+    /// 2.8.0, heartbeat pings only: how long the OCR read now running has taken, in milliseconds (nil: no read running).
+    var readBusyMs: Double? = nil
 }
 
 /// App → extension (sent back over the same localhost link)
@@ -246,6 +249,8 @@ struct Config: Codable, Equatable {
     var dropDuplicateLines: Bool? = nil
     /// 2.5.4 (nil from an older app means off): the pixel check covers up to 24 lines, not 8.
     var pixelManyLines: Bool? = nil
+    /// 2.8.0 (nil: unknown or switch off): ScreenLingo's own window as screen fractions [x, y, width, height], top left.
+    var ownWindow: [Double]? = nil
 }
 
 /// Keeps the old memory context exactly unchanged unless a genuinely

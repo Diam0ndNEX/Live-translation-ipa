@@ -1,13 +1,13 @@
 # ScreenLingo structure guidelines
 
-Status: rewritten for 2.3.9 (build 116), re-read against the code for 2.4.0 (build 117) and again for 2.5.0 (build 118, two modes) 2.6.0 (build 125, re-read against the code: layout, rules and checklist still hold) and 2.7.0 (build 131: re-read against the code; layout and checklist still hold, rule 7 added for iPad). Reviewed for: 2.7 (see section 9). The big files were split in 2.3.3 to 2.3.9 (see `docs/structure-migration-plan.md` for the log). Swift was never compiled in chat; the GitHub Actions run is the first test of any change. This file says where code, tests and docs go, and how to split safely.
+Status: rewritten for 2.3.9 (build 116), re-read against the code for 2.4.0 (build 117) and again for 2.5.0 (build 118, two modes) 2.6.0 (build 125, re-read against the code: layout, rules and checklist still hold) and 2.7.0 (build 131: re-read against the code; layout and checklist still hold, rule 7 added for iPad) and 2.8.0 (build 134: re-read; section 7 now names main as the base). Reviewed for: 2.8 (see section 9). The big files were split in 2.3.3 to 2.3.9 (see `docs/structure-migration-plan.md` for the log). Swift was never compiled in chat; the GitHub Actions run is the first test of any change. This file says where code, tests and docs go, and how to split safely.
 
 ## 1. Current state (2.7.0)
 <!-- sizes:start -->
 | Main file | Lines (rounded to 50) | Part files |
 |---|---|---|
-| App/TranslatorEngine.swift | 1350 | 31 |
-| App/Diagnostics.swift | 700 | 10 |
+| App/TranslatorEngine.swift | 1350 | 32 |
+| App/Diagnostics.swift | 750 | 10 |
 | BroadcastExtension/SampleHandler.swift | 650 | 5 |
 | App/TranslationMemoryStore.swift | 450 | 10 |
 | App/DiagnosticArchive.swift | 400 | 11 |
@@ -15,7 +15,7 @@ Status: rewritten for 2.3.9 (build 116), re-read against the code for 2.4.0 (bui
 | App/DiagnosticsDashboard.swift | 350 | 5 |
 | App/ModeTranslationService.swift | 300 | 3 |
 | App/TestRunViews.swift | 250 | 2 |
-| Shared/TranslationSystem.swift | 200 | 13 |
+| Shared/TranslationSystem.swift | 200 | 14 |
 <!-- sizes:end -->
 Since 2.5.0 there are two translation modes, Legacy and Low Latency. Hybrid Recovery was removed; `Shared/TranslationSystem+Coordinator.swift` (`ModeCoordinator`) and `App/ModeTranslationService.swift` serve Low Latency only. Test folders and scripts keep their old names (`Tests/ThreeModes`, `scripts/test_three_modes.py`, `compare_three_modes.py`) because `build.yml` names them.
 Biggest remaining: TranslatorEngine (stored properties, `init`, test-pinned members) and `process` (391 lines, one function, left whole on purpose).
@@ -72,8 +72,8 @@ Main files stay where they are (`App/TranslatorEngine.swift` ...); only parts li
 - Diagnostics analyses of single test runs stay in the Claude Project, not in `docs/`. An audit written for an update (`docs/vX.Y.Z-audit.md`) is a doc and is listed in `docs/README.md`.
 
 ## 7. Branches and PRs
-- Work on `claude/screenlingo-v<version>` from the newest `claude/screenlingo-v*` branch. Open a draft PR into the branch you started from, never `main`. Old `codex/*` branches are history.
-- The chat session cannot delete branches or push workflow files.
+- (2.7.1) `main` is the current version. Work on `claude/screenlingo-v<version>` from `main` and open a draft PR into `main`. Old `codex/*` branches are history; keep `codex/screenlingo-v1.8.0-performance` (a test reads from it).
+- The chat session cannot delete branches or push tags; give the owner a workflow file to paste and run.
 
 ## 8. Checklist for every update
 - [ ] Read the contract tests that mention the files you edit.

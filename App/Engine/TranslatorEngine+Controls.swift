@@ -20,6 +20,7 @@ extension TranslatorEngine {
         stallWatchdogTick()
         evaluateSwitchGuards()
         publishCaptureStatus()
+        refreshOwnWindow() // 2.8.0
         let alive = Date().timeIntervalSince(lastPacketDate) < 5
         let thermalState = ProcessInfo.processInfo.thermalState
         if lastThermalSyncState != thermalState {
@@ -131,6 +132,7 @@ extension TranslatorEngine {
     func setAppInterfaceVisible(_ visible: Bool) {
         guard visible != appInterfaceVisible else { return }
         appInterfaceVisible = visible
+        sentOwnWindow = visible ? currentOwnWindow() : nil // 2.8.0: sent with the settings below
         rotRev += 1 // Reject packets produced before the visibility boundary.
         invalidatePending()
         diag.noteRuntimeState(visible ? "app_interface_visible" : "external_capture_period")
@@ -199,7 +201,8 @@ extension TranslatorEngine {
                                              speculationAllowed && flag("translateAhead", true)) ? true : nil,
                            extraReadReasons: TranslationHotPathAB.confirmationReadReasons ? true : nil,
                            dropDuplicateLines: TranslationHotPathAB.ocrDuplicateFilter ? true : nil,
-                           pixelManyLines: TranslationHotPathAB.pixelManyLines ? true : nil))
+                           pixelManyLines: TranslationHotPathAB.pixelManyLines ? true : nil,
+                           ownWindow: appInterfaceVisible ? sentOwnWindow : nil))
     }
 
     /// Invalidate suspended work before changing language, capture state, or settings.

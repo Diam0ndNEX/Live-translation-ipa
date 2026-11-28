@@ -251,7 +251,7 @@ final class TranslatorEngine: ObservableObject {
                 return TranslationActivity(title: "Waiting for source language", detail: "Read a caption or choose a source language before preparation can run.", phase: .waiting)
             }
             return TranslationBackendActivity.idle(capture: captureAlive,
-                ownInterfaceVisible: appInterfaceVisible && flag("suppressOwnInterface", true), modelObserved: modelReadiness.completedAt != nil)
+                ownInterfaceVisible: ownInterfaceBlocksCapture, modelObserved: modelReadiness.completedAt != nil)
         }
         if activeTranslationSystem == .legacy, isTranslating, modelReadiness.execution != .working {
             return TranslationActivity(title: "Processing current caption", detail: "Checking memory and scheduling complete translation units", phase: .working)
@@ -783,6 +783,9 @@ final class TranslatorEngine: ObservableObject {
     var displayStability = DisplayStability() // 2.6.4
     var specLearner = SpecConfidenceLearner() // 2.6.5
     var firstReadings = FirstReadingBook() // 2.6.5
+    var translationStability = TranslationStability() // 2.8.0
+    var sentOwnWindow: [Double]? // 2.8.0: ScreenLingo's window as last sent to the capture
+    var captureReadStuck = false // 2.8.0: the capture's OCR read has been running for long
     var specPacket: Packet?
     var currentSpeculativeText: String?
     var subtitleRegions = SubtitleRegions()
@@ -1131,6 +1134,18 @@ final class TranslatorEngine: ObservableObject {
                 return true
             }
         }
+        // 2.8.0 (switch stableTranslation): another reading of the shown subtitle whose translation says the same
+        // (OCR noise only: no number, negation or extra text changed) keeps the shown translation. It was translated
+        // anyway; only the redraw is skipped, so the viewer does not read the same sentence twice.
+        if TranslationHotPathAB.stableTranslation, showing, text != original, !(timing.packet?.candidateID?.hasPrefix("manual-") ?? (timing.packet == nil)),
+           translationStability.holds(source: text, translation: result, now: ProcessInfo.processInfo.systemUptime) {
+            lastShowReusedFrame = true
+            if diag.enabled { diag.s.translationHeld += 1 }
+            lastTextDate = Date()
+            if timing.packet?.candidateID == activeCandidateID { activeCandidatePresented = true }
+            replayDeferredConfirmedIfPossible()
+            return true
+        }
         let renderStart = Date()
         pip.style = proposedStyle
         guard pip.render(original: text, translated: result, showOriginal: showOriginal,
@@ -1148,6 +1163,7 @@ final class TranslatorEngine: ObservableObject {
         lastShowDate = Date()
         noteShownSignals(text, result)
         displayStability.shown(text, now: ProcessInfo.processInfo.systemUptime) // 2.6.4
+        translationStability.record(source: text, translation: result, now: ProcessInfo.processInfo.systemUptime) // 2.8.0
         let presented = Date()
         let packet = timing.packet
         let sent = packet?.ts ?? timing.queuedAt.timeIntervalSince1970

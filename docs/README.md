@@ -11,7 +11,8 @@ Older documents are records of what was true when they were written. They name b
 - history/README-release-notes-1.x.md: the old README release notes (1.2 to 1.9.3), moved unchanged in 2.7.2
 
 ## Current line (start here)
-- v2.7.2-specification.md: newest specification (new repository README; old README notes moved to docs/history; no app change)
+- v2.8.0-specification.md: newest specification (capture beside ScreenLingo on iPad, steady translation, growth sentence-end release, cost-aware early start; unverified)
+- v2.7.2-specification.md: specification (new repository README; old README notes moved to docs/history; no app change)
 - v2.7.1-specification.md: specification (iPad freeze fix: Translate column switch measured on the page, not its scroll area; unverified)
 - v2.7.0-specification.md: specification (iPhone and iPad interface: iPad orientation and split views, sidebar tabs, two-column Translate, keyboard shortcuts, UI fixes; layouts unverified)
 - v2.6.5-specification.md: previous specification (learned early start, sooner hang limit; effects unverified)

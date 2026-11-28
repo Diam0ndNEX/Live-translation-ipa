@@ -29,6 +29,8 @@ class SampleHandler: RPBroadcastSampleHandler {
     var heartbeatTimer: DispatchSourceTimer?
     var heartbeatConn: NWConnection?
     private var heartbeatFrames = 0
+    /// 2.8.0: when the OCR read now running began (behind `heartbeatLock`, never the OCR lock); nil between reads.
+    private var readBeganUptime: Double?
     private var lastSendUptime = ProcessInfo.processInfo.systemUptime
     private var candidateKey = ""
     private var sentKey = ""
@@ -179,13 +181,14 @@ class SampleHandler: RPBroadcastSampleHandler {
     /// 1.5 s (the normal case) nothing is sent, so with working frames this adds no traffic.
     private func sendHeartbeatIfQuiet() {
         heartbeatLock.lock()
-        let connection = heartbeatConn, framesSeen = heartbeatFrames, last = lastSendUptime
+        let connection = heartbeatConn, framesSeen = heartbeatFrames, last = lastSendUptime, began = readBeganUptime
         heartbeatLock.unlock()
         let now = ProcessInfo.processInfo.systemUptime
         guard let connection, now - last >= 1.5 else { return }
         let packet = Packet(kind: "ping", version: AppVersion.version, frames: framesSeen, lines: [],
                             memFreeMB: freeMB(), ts: Date().timeIntervalSince1970,
-                            captureSessionID: captureID, sentMonotonic: now)
+                            captureSessionID: captureID, sentMonotonic: now,
+                            readBusyMs: began.map { max(0, now - $0) * 1000 })
         guard let data = try? JSONEncoder().encode(packet) else { return }
         connection.send(content: data, completion: .contentProcessed { _ in })
     }
@@ -240,7 +243,10 @@ class SampleHandler: RPBroadcastSampleHandler {
         framePlannedInterval = plan.interval * idleFactor
         frameRapidText = rapidText
         framePressure = pressure
-        guard !cfg.paused && cfg.appInterfaceVisible != true else { pausedSkipped += 1; return }
+        // 2.8.0 (ownWindowCapture): ScreenLingo beside another app (iPad Split View, Stage Manager, Slide Over) no longer
+        // pauses the capture; only a window covering most of the screen does. The app sends no window when the switch is off.
+        guard !cfg.paused, !OwnWindowCapture.pausesAll(visible: cfg.appInterfaceVisible == true, window: cfg.ownWindow,
+                                                        rotated: (cfg.rot ?? 0) != 0) else { pausedSkipped += 1; return }
         // v2.0.0 G1: a pixel-identical frame after the confirmation dwell is
         // the second identical read; it replaces a second OCR pass.
         if cfg.pixelConfirmation == true, pendingPixelRead != nil,
@@ -353,6 +359,9 @@ class SampleHandler: RPBroadcastSampleHandler {
         defer { lastOCREndUptime = ProcessInfo.processInfo.systemUptime }
         let t0 = CFAbsoluteTimeGetCurrent()
         passes += 1
+        // 2.8.0: the heartbeat reports a read that has been running for long (a stuck reader).
+        heartbeatLock.lock(); readBeganUptime = ProcessInfo.processInfo.systemUptime; heartbeatLock.unlock()
+        defer { heartbeatLock.lock(); readBeganUptime = nil; heartbeatLock.unlock() }
 
         // Only read the chosen area, at reduced size: this is the big speed-up.
         let margin = 0.03
@@ -421,6 +430,10 @@ class SampleHandler: RPBroadcastSampleHandler {
                 retryCount += 1
                 lines = ocr(enhanced(img), cfg, y0, y1)
             }
+        }
+        // 2.8.0 (ownWindowCapture): text inside ScreenLingo's own window is never read.
+        if cfg.appInterfaceVisible == true, let own = OwnWindowCapture.valid(cfg.ownWindow) {
+            lines = lines.filter { !OwnWindowCapture.excludes(x: $0.x, yFromBottom: $0.y, window: own) }
         }
         // A successful contrast retry is a successful read too. Otherwise the
         // old empty streak could clear the caption after just one later miss.

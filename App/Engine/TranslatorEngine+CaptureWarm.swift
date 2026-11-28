@@ -36,7 +36,7 @@ extension TranslatorEngine {
     /// its own warm-up during quiet capture (`prewarm` from `tick`).
     func rewarmAfterQuietIfDue() {
         guard TranslationHotPathAB.quietRewarm, activeTranslationSystem == .lowLatency, captureAlive,
-              !appInterfaceVisible || !flag("suppressOwnInterface", true),
+              !ownInterfaceBlocksCapture, // 2.8.0
               Date().timeIntervalSince(lastTextDate) > 15,
               Date().timeIntervalSince(lastCaptureWarmAttempt) > 60 else { return }
         startCaptureWarm(counter: "quietRewarms", metric: "quietRewarmMs")
