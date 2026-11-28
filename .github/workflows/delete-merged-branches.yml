@@ -1,0 +1,114 @@
+# One-time cleanup (2026-11-28). Deletes branches whose commits are all in main.
+# Each branch is checked again before it is deleted; one that is not fully in main is skipped.
+# Delete this file after the run.
+name: Delete merged branches
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Delete branches already in main
+        run: |
+          for b in \
+            claude/screenlingo-v2.0.0 \
+            claude/screenlingo-v2.1.0 \
+            claude/screenlingo-v2.1.1 \
+            claude/screenlingo-v2.1.10 \
+            claude/screenlingo-v2.1.11 \
+            claude/screenlingo-v2.1.2 \
+            claude/screenlingo-v2.1.3 \
+            claude/screenlingo-v2.1.4 \
+            claude/screenlingo-v2.1.5 \
+            claude/screenlingo-v2.1.6 \
+            claude/screenlingo-v2.1.7 \
+            claude/screenlingo-v2.1.8 \
+            claude/screenlingo-v2.1.9 \
+            claude/screenlingo-v2.2.0 \
+            claude/screenlingo-v2.2.1 \
+            claude/screenlingo-v2.2.2 \
+            claude/screenlingo-v2.2.3 \
+            claude/screenlingo-v2.3.0 \
+            claude/screenlingo-v2.3.1 \
+            claude/screenlingo-v2.3.2 \
+            claude/screenlingo-v2.3.9 \
+            claude/screenlingo-v2.4.0 \
+            claude/screenlingo-v2.5.0 \
+            claude/screenlingo-v2.5.1 \
+            claude/screenlingo-v2.5.2 \
+            claude/screenlingo-v2.5.3 \
+            claude/screenlingo-v2.5.4 \
+            claude/screenlingo-v2.5.5 \
+            claude/screenlingo-v2.5.6 \
+            claude/screenlingo-v2.6.0 \
+            claude/screenlingo-v2.6.1 \
+            claude/screenlingo-v2.6.2 \
+            claude/screenlingo-v2.6.3 \
+            claude/screenlingo-v2.6.4 \
+            claude/screenlingo-v2.6.5 \
+            claude/screenlingo-v2.7.0 \
+            claude/screenlingo-v2.7.1 \
+            codex/memory2-baseline \
+            codex/memory2-checkpoint \
+            codex/memory2-management-transfer \
+            codex/memory2-simulator \
+            codex/screenlingo-redesign-v0.7.0 \
+            codex/screenlingo-v0.7.0 \
+            codex/screenlingo-v0.8.0 \
+            codex/screenlingo-v0.9.0 \
+            codex/screenlingo-v1.0.0 \
+            codex/screenlingo-v1.1.0 \
+            codex/screenlingo-v1.2.0 \
+            codex/screenlingo-v1.2.1 \
+            codex/screenlingo-v1.3.0 \
+            codex/screenlingo-v1.4.0 \
+            codex/screenlingo-v1.4.0-integration \
+            codex/screenlingo-v1.4.1 \
+            codex/screenlingo-v1.4.1-diagnostics \
+            codex/screenlingo-v1.4.1-static-overlay \
+            codex/screenlingo-v1.4.2 \
+            codex/screenlingo-v1.4.3-batch-memory \
+            codex/screenlingo-v1.4.4-performance \
+            codex/screenlingo-v1.4.5-latency \
+            codex/screenlingo-v1.4.6-validation \
+            codex/screenlingo-v1.4.7-intelligence \
+            codex/screenlingo-v1.5.0-refinement \
+            codex/screenlingo-v1.7.0-performance \
+            codex/screenlingo-v1.7.1-testing \
+            codex/screenlingo-v1.9.0-three-modes \
+            codex/screenlingo-v1.9.1-hybrid-performance \
+            codex/screenlingo-v1.9.2-hybrid-reliability \
+            codex/screenlingo-v1.9.3-prediction-diagnostics \
+            codex/screenlingo-v1.9.4-measured-reliability \
+            codex/screenlingo-v1.9.5-full-performance \
+            codex/screenlingo-v1.9.6-hybrid-contention \
+            codex/screenlingo-v1.9.7-safe-hotpath \
+            codex/screenlingo-v1.9.7-three-mode-gains \
+            codex/screenlingo-v1.9.8-three-mode-performance \
+            codex/screenlingo-v1.9.9-recovery-evidence \
+            codex/v1.4-diagnostic-bundle \
+            codex/v1.4-diagnostic-intelligence \
+            codex/v1.4-diagnostics-ui \
+            codex/v1.4-memory-regression \
+            codex/v1.4-privacy-gate \
+            codex/v1.4-trace-stage-audit \
+            codex/v1.4-zip-validation \
+            codex/v1.4.0-diagnostic-completion \
+            codex/v1.4.0-intelligent-memory \
+            codex/v1.4.0-release-integration \
+            vibe/dev \
+            vibe/fix-start-button
+          do
+            if ! git rev-parse -q --verify "origin/$b" >/dev/null; then echo "gone: $b"; continue; fi
+            if git merge-base --is-ancestor "origin/$b" origin/main; then
+              git push origin --delete "$b" && echo "deleted: $b"
+            else
+              echo "SKIPPED (has commits not in main): $b"
+            fi
+          done
+
