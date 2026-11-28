@@ -20,6 +20,8 @@ struct TranslateScreen: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @State private var focus = false
     @State private var width: CGFloat = 0
+    /// 2.7.1: two-column state, changed only by `measured(_:)` (with a 60 pt gap between switching on and off).
+    @State private var wide = false
     @State private var composing = false
     // 2.5.0: the question before Start when Low Latency has no language pack, and the one-time notice for people
     // whose saved mode was Hybrid Recovery.
@@ -42,7 +44,16 @@ struct TranslateScreen: View {
 
     /// 2.7.0: two columns when the screen is wide enough (iPad, large iPhones in landscape): the language pair, the
     /// live caption and its controls on the left, preparation, mode, scenes and recent lines on the right.
-    private var wide: Bool { width >= (typeSize.isAccessibilitySize ? 1000 : 760) }
+    /// 2.7.1: the width is measured on the NavigationStack, whose size comes from the tab container and never from
+    /// this page's content. In 2.7.0 it was measured on the ScrollView, whose size inside the compose-bar inset depends
+    /// on the content; the two layouts then flipped each other every pass and froze the app (watchdog 0x8BADF00D, iPad).
+    private func measured(_ value: CGFloat) {
+        let next = value.rounded()
+        if next != width { width = next }
+        let enter: CGFloat = typeSize.isAccessibilitySize ? 1000 : 760
+        let goWide = wide ? next >= enter - 60 : next >= enter
+        if goWide != wide { wide = goWide }
+    }
     private var sideWidth: CGFloat { min(440, max(340, width * 0.36)) }
 
     var body: some View {
@@ -85,7 +96,6 @@ struct TranslateScreen: View {
                 .modifier(ReadableColumn(maxWidth: wide ? 1240 : 640))
                 .animation(KitMotion.state(reduceMotion), value: snap.phase)
             }
-            .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
             .scrollBounceBehavior(.basedOnSize)
             .ambientGlow()
             .background(Color(.systemGroupedBackground))
@@ -123,6 +133,7 @@ struct TranslateScreen: View {
                 if new == .live, old == .starting { UINotificationFeedbackGenerator().notificationOccurred(.success) }
             }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { measured($0) }
     }
 
     /// The typed result, the live session or the Start button: the one big object of the screen.
