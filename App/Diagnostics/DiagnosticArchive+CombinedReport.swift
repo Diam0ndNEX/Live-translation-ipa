@@ -268,7 +268,7 @@ enum CombinedDiagnosticReport {
                           ("heartbeatAB", "independent capture heartbeat"), ("armedDeferAB", "deferred early start")]
                 .filter { s[$0.0] == "on" }.map { $0.1 }
             // 2.5.0: items A to F and the quiet re-warm (default on; a run saved before 2.5.0 has none).
-            let v250On = (TranslationHotPathAB.v250ReportLabels + TranslationHotPathAB.v251ReportLabels + TranslationHotPathAB.v254ReportLabels + TranslationHotPathAB.v255ReportLabels + TranslationHotPathAB.v256ReportLabels + TranslationHotPathAB.v260ReportLabels + TranslationHotPathAB.v261ReportLabels + TranslationHotPathAB.v263ReportLabels + TranslationHotPathAB.v264ReportLabels + TranslationHotPathAB.v265ReportLabels)
+            let v250On = (TranslationHotPathAB.v250ReportLabels + TranslationHotPathAB.v251ReportLabels + TranslationHotPathAB.v254ReportLabels + TranslationHotPathAB.v255ReportLabels + TranslationHotPathAB.v256ReportLabels + TranslationHotPathAB.v260ReportLabels + TranslationHotPathAB.v261ReportLabels + TranslationHotPathAB.v263ReportLabels + TranslationHotPathAB.v264ReportLabels + TranslationHotPathAB.v265ReportLabels + TranslationHotPathAB.v280ReportLabels)
                 .filter { s[$0.key] == "on" }.map { $0.label }
             let armsText = (armsOn + v250On).isEmpty ? "none" : (armsOn + v250On).joined(separator: ", ")
             out.append("| \(labels[i]) | \(s["hotPathAB"] ?? "?") | \(s["detailedCollection"] ?? "?")\(s["detailSuspended"] == "true" ? " (suspended: thermal)" : "") | \(s["thermalStart"] ?? "?")/\(s["thermalEnd"] ?? "?")/\(s["thermalMax"] ?? "?") | \(s["focusedCaptionOCR"] ?? "?")/\(s["strictCaptionIdentity"] ?? "?") | \(session.counters["identicalFrameHolds", default: 0]) | \(session.counters["manualTranslations", default: 0]) | \(ms(session.distributions["memoryLookupWaitMs"]?.p50))/\(ms(session.distributions["memoryLookupWaitMs"]?.p95)) | \(ms(session.distributions["memoryHealthMs"]?.p50))/\(ms(session.distributions["memoryHealthMs"]?.p95)) | \(memoryTimeoutShare(session)) | \(armsText) |")
@@ -360,6 +360,16 @@ enum CombinedDiagnosticReport {
             let compared = c["specLearnSamples", default: 0], same = c["specLearnMatches", default: 0], milli = c["specLearnedMilli", default: 0]
             let share = compared > 0 ? " (\(Int((Double(same) / Double(compared) * 100).rounded()))%)" : ""
             out.append("| \(labels[i]) | \(compared) | \(same)\(share) | \(milli > 0 ? String(format: "%.2f", Double(milli) / 1000) : "–") | \(c["earlyStartByLearning", default: 0]) |")
+        }
+        out.append("")
+        out.append("Capture beside ScreenLingo, steady translation, growth and early start (2.8.0; whole-session counts):")
+        out.append("")
+        out.append("| | s read beside ScreenLingo | s paused for ScreenLingo | stuck OCR reads (longest ms) | translations not drawn again | growing subtitles used at a sentence end | required share of final first readings |")
+        out.append("|---|---|---|---|---|---|---|")
+        for (i, session) in selected.enumerated() {
+            let c = session.counters
+            let target = c["specTargetMilli", default: 0]
+            out.append("| \(labels[i]) | \(c["ownWindowSharedSeconds", default: 0]) | \(c["ownWindowPausedSeconds", default: 0]) | \(c["captureReadStuck", default: 0]) (\(c["captureReadStuckMaxMs", default: 0])) | \(c["translationHeld", default: 0]) | \(c["growthSentenceReleases", default: 0]) | \(target > 0 ? "\(target / 10)%" : "–") |")
         }
         out.append("")
         out.append("Text blocks per confirmed reading (2.5.5; whole-session counts):")

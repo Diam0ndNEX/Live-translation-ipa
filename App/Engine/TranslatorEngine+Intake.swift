@@ -75,7 +75,7 @@ extension TranslatorEngine {
             }
             lastCaptureOrientation = orientation
         }
-        if p.kind == "ping" { syncConfig(); return }          // keeps the extension's settings fresh
+        if p.kind == "ping" { noteCaptureReadBusy(p.readBusyMs); syncConfig(); return }          // keeps the extension's settings fresh
         handleContent(p, receivedAt: now)
     }
 
@@ -94,7 +94,7 @@ extension TranslatorEngine {
             diag.notePipelineDecision(candidate: p.candidateID, frameIndex: p.frames,
                 stage: "stability", reason: "handoff_replayed")
         }
-        if paused || manualMode || (appInterfaceVisible && flag("suppressOwnInterface", true)) { return }
+        if paused || manualMode || ownInterfaceBlocksCapture { return } // 2.8.0: was any visible ScreenLingo window
         if let rev = p.rev, rev != rotRev { return }
         if p.kind == "clear" {
             deferredConfirmedPacket = nil
@@ -140,7 +140,7 @@ extension TranslatorEngine {
         // 2.5.6: a subtitle that is still growing waits until it stops, then only its last state is handled
         // (Legacy, switch growthSettle). A held reading is replayed once, so the replay skips this step.
         if !replayed, p.stable != false,
-           holdGrowingCaption(p, text: candidateText, receivedAt: receivedAt, now: now) { return }
+           holdGrowingCaption(p, text: candidateText, raw: candidateTexts.joined(separator: "\n"), receivedAt: receivedAt, now: now) { return }
         let equivalentActiveCaption = SubtitleAcquisitionPolicy.isSameUnpresentedCaption(
             activeConfirmed: activeCandidateConfirmed,
             activePresented: activeCandidatePresented,

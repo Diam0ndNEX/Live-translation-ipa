@@ -37,5 +37,6 @@ extension TranslatorEngine {
         shownHistory.removeAll()
         displayStability.forget() // 2.6.4: a cleared screen starts clean
         firstReadings.forget() // 2.6.5
+        translationStability.forget() // 2.8.0
     }
 }

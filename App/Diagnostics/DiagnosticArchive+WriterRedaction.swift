@@ -79,7 +79,7 @@ extension DiagnosticExportWriter {
             // 2.5.1
             "eagerSpeculationAB", "finishRunningAB", "duplicateLinesAB", "streamCallsAB",
             // 2.5.4
-            "manyLinesAB", "captionLinesAB", "captionJoinAB", "growthSettleAB", "stallWatchdogAB", "looseMemoryReuseAB", "memoryCareAB", "stableDisplayAB", "learnedEarlyStartAB", "quickHangLimitAB",
+            "manyLinesAB", "captionLinesAB", "captionJoinAB", "growthSettleAB", "stallWatchdogAB", "looseMemoryReuseAB", "memoryCareAB", "stableDisplayAB", "learnedEarlyStartAB", "quickHangLimitAB", "ownWindowCaptureAB", "stableTranslationAB", "growthPunctuationReleaseAB", "costAwareEarlyStartAB",
             // 2.2.1 (D4, E12)
             "idleMinutes", "sessionLimit", "autoOpenPiP", "winSize", "textSize", "pipFont", "theme", "showOriginal",
             "highlightNames", "pipScale", "pipWeight", "pipAlignment", "pipPadding",

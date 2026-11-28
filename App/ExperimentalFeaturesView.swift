@@ -58,6 +58,10 @@ struct ExperimentalFeaturesView: View {
     @AppStorage("stableDisplay") private var stableDisplay = true
     @AppStorage("learnedEarlyStart") private var learnedEarlyStart = true
     @AppStorage("quickHangLimit") private var quickHangLimit = true
+    @AppStorage("ownWindowCapture") private var ownWindowCapture = true
+    @AppStorage("stableTranslation") private var stableTranslation = true
+    @AppStorage("growthPunctuationRelease") private var growthPunctuationRelease = true
+    @AppStorage("costAwareEarlyStart") private var costAwareEarlyStart = true
     @AppStorage("flaggedCaptionText") private var flaggedCaptionText = true
     @AppStorage("independentCaptureHeartbeat") private var independentCaptureHeartbeat = true
 
@@ -231,6 +235,22 @@ struct ExperimentalFeaturesView: View {
                     explanation: "New in 2.6.5, default on. A translation call that never answers is given up on after about 3.5 s (four times the slow end of recent calls, never less than 3.5 s) instead of 6 s, so the next caption is not held up as long. A call that answers late widens the limit again by itself. Off, the 2.6.0 limit (6 s, six times the slow end) is used.",
                     enabled: $quickHangLimit)
                 ExperimentalOption(
+                    title: "Keep translating beside ScreenLingo",
+                    explanation: "New in 2.8.0, default on. On iPad, ScreenLingo can share the screen with the app you watch (Split View, Stage Manager, Slide Over). Translation used to stop completely while any part of ScreenLingo was visible. Now the capture keeps reading the rest of the screen and ignores the text inside ScreenLingo's own window. It still pauses when ScreenLingo fills almost the whole screen, so the app never translates itself. Off: any visible ScreenLingo window pauses translation, as before.",
+                    enabled: $ownWindowCapture)
+                ExperimentalOption(
+                    title: "Keep the translation steady",
+                    explanation: "New in 2.8.0, default on. When OCR reads the shown subtitle again slightly differently (a name read two ways, a stray letter), the new reading is still translated, but the line on screen is not drawn again if the new translation says the same. It always changes when a number or a word like not or never changes, or when the new reading has clearly more text. Off: every different reading is drawn, as in 2.7.",
+                    enabled: $stableTranslation)
+                ExperimentalOption(
+                    title: "Use a growing subtitle at its sentence end",
+                    explanation: "New in 2.8.0, default on. A subtitle that appears word by word is held until it stops growing. Now it is used at once when it ends a sentence (. ! ? or …), and it is never held longer than 0.6 s in total (was 0.9 s). Off: as in 2.7.",
+                    enabled: $growthPunctuationRelease)
+                ExperimentalOption(
+                    title: "Translate ahead more when it is cheap",
+                    explanation: "New in 2.8.0, default on. Early translations stay hidden until the subtitle is confirmed. The app starts them when the first reading is usually the final text. When a translation call is fast on this device (half of them under 0.15 s), it is enough that 70 % of first readings were final; otherwise 80 %. Off: 90 %, as in 2.6.5.",
+                    enabled: $costAwareEarlyStart)
+                ExperimentalOption(
                     title: "Include flagged captions' text in reports",
                     explanation: "New in 2.6.0, default on. ScreenLingo checks every shown caption by itself (the same sentence shown again, the same sentence rewritten, a translation equal to the source, a number that went missing, an unusual length, a repeated word). A caption with such a flag is saved on this device as text: at most 200, removed after 14 days, never saved in a private session. When you export a test report, the text of the flagged captions from those runs is added as the last section, so the wording can be judged. Nothing else in a report contains subtitle text. Off: nothing is saved and reports stay numbers only.",
                     enabled: $flaggedCaptionText)
@@ -296,7 +316,7 @@ struct ExperimentalFeaturesView: View {
                 "hotPathReuseLowLatencyPlan", "hotPathReuseLegacyUnits", "liveWarmupLegacy",
                 "backgroundAvailabilityRefresh", "legacyConfirmedOwnLane", "independentCaptureHeartbeat",
                 "deferArmedSpeculation", "legacyEagerSpeculation", "finishRunningCaption",
-                "ocrDuplicateFilter", "streamLegacyCalls", "pixelManyLines", "captionLineSpeculation", "captionJoin", "growthSettle", "stallWatchdog", "looseMemoryReuse", "memoryCare", "stableDisplay", "learnedEarlyStart", "quickHangLimit", "flaggedCaptionText",
+                "ocrDuplicateFilter", "streamLegacyCalls", "pixelManyLines", "captionLineSpeculation", "captionJoin", "growthSettle", "stallWatchdog", "looseMemoryReuse", "memoryCare", "stableDisplay", "learnedEarlyStart", "quickHangLimit", "ownWindowCapture", "stableTranslation", "growthPunctuationRelease", "costAwareEarlyStart", "flaggedCaptionText",
                 "warmAtCaptureStart", "reportStoredSessionTotals", "confirmationReadReasons", "modelLengthBuckets",
                 "trustedCaptionBand", "legacyHeadStart", "quietRewarm"
             ])

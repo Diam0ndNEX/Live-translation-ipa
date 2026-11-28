@@ -279,7 +279,11 @@ struct DiagnosticsBody: View {
                   (TranslationHotPathAB.memoryCare, "saved translations preloaded, defective reuses retranslated"),
                   (TranslationHotPathAB.stableDisplay, "stable display (no redraw for another reading or a flip back)"),
                   (TranslationHotPathAB.learnedEarlyStart, "early translation confidence learned from this run"),
-                  (TranslationHotPathAB.quickHangLimit, "hung translation calls given up on after about 3.5 s")].filter { $0.0 }.map { $0.1 }
+                  (TranslationHotPathAB.quickHangLimit, "hung translation calls given up on after about 3.5 s"),
+                  (TranslationHotPathAB.ownWindowCapture, "capture beside ScreenLingo"),
+                  (TranslationHotPathAB.stableTranslation, "steady translation (no redraw for the same meaning)"),
+                  (TranslationHotPathAB.growthPunctuationRelease, "growing subtitles used at a sentence end"),
+                  (TranslationHotPathAB.costAwareEarlyStart, "early translation adapted to call cost")].filter { $0.0 }.map { $0.1 }
         return on.isEmpty ? "Test switches on: none." : "Test switches on: " + on.joined(separator: ", ") + "."
     }
 
