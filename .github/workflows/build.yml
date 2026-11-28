@@ -1,7 +1,7 @@
 name: Build ScreenLingo IPA
 on:
   push:
-    branches: ["claude/**", codex/screenlingo-v1.9.9-recovery-evidence]
+    branches: [main, "claude/**"]
   workflow_dispatch:
     inputs:
       interface_preview:
