@@ -21,8 +21,8 @@ for flag in ("legacyConfirmedOwnLane", "refreshAvailabilityInBackground"):
     assert f"TranslationHotPathAB.{flag}" in dash, flag
 assert "Bypassed means" in dash
 
-assert 'static let version = "2.7.0"' in shared and "static let build = 131" in shared
-assert project.count('"2.7.0"') == 3 and project.count('"131"') == 3
+assert 'static let version = "2.7.1"' in shared and "static let build = 132" in shared
+assert project.count('"2.7.1"') == 3 and project.count('"132"') == 3
 for old in ('("2.3.9", "Build 116:', '("2.3.2", "Build 109:', '("2.3.1", "Build 108:', '("2.3.0", "Build 107:'):
     assert old in shared, old
 print("v2.3.2 source contracts passed: path card, supersession split, switches line, bypassed note, version")

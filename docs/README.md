@@ -9,7 +9,8 @@ Older documents are records of what was true when they were written. They name b
 - structure-migration-plan.md: which scripts depend on which files, and the order for moving and splitting existing files
 
 ## Current line (start here)
-- v2.7.0-specification.md: newest specification (iPhone and iPad interface: iPad orientation and split views, sidebar tabs, two-column Translate, keyboard shortcuts, UI fixes; layouts unverified)
+- v2.7.1-specification.md: newest specification (iPad freeze fix: Translate column switch measured on the page, not its scroll area; unverified)
+- v2.7.0-specification.md: specification (iPhone and iPad interface: iPad orientation and split views, sidebar tabs, two-column Translate, keyboard shortcuts, UI fixes; layouts unverified)
 - v2.6.5-specification.md: previous specification (learned early start, sooner hang limit; effects unverified)
 - v2.6.4-specification.md: previous specification (steady display, report fixes from the first 2.6.3 device report)
 - v2.6.3-specification.md: previous specification (memory warm-up and quarantine, slowest captions; effects unverified)
