@@ -27,10 +27,10 @@ archive = read("App/DiagnosticArchive.swift")
 memory = read_source("TranslationMemoryStore")
 workflow = read(".github/workflows/build.yml")
 
-assert 'static let version = "2.7.1"' in shared
-assert "static let build = 132" in shared
-assert project.count('"2.7.1"') == 3
-assert project.count('"132"') == 3
+assert 'static let version = "2.7.2"' in shared
+assert "static let build = 133" in shared
+assert project.count('"2.7.2"') == 3
+assert project.count('"133"') == 3
 
 assert "SCREENLINGO_REFERENCE_CAPTURE_CADENCE" in capture
 assert "SubtitleAcquisitionPolicy.allowsEarlyVisualWake" in capture
@@ -93,7 +93,7 @@ assert "earlyVisualWakes" in archive
 assert "hybrid_unsubmitted_hedge_ms" not in archive
 assert "legacyAdaptiveLowYieldSkips" in archive
 assert "CREATE TABLE" in memory
-assert "codex/screenlingo-v1.9.9-recovery-evidence" in workflow
+assert "branches: [main, \"claude/**\"]" in workflow  # 2.7.2: CI runs on main (was the old codex branch)
 assert "claude/**" in workflow
 assert "Verify v1.9.9 recovery and OCR regression contract" in workflow
 
